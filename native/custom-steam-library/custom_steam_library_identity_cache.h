@@ -61,11 +61,61 @@ inline bool verifiedSteamIdentityMatch(const nlohmann::json& match) {
     return number("matchedContentAppId")<=0 || (number("baseGameAppId")>0&&!text("contentRelation").empty()&&text("identityKind").find("with-explicit-content")!=std::string::npos);
 }
 
+// Compatibility with an explicit user choice is separate from verification.
+// Callers must still require the original official identity proof.
+inline bool steamIdentityMatchesManualSelection(const nlohmann::json& match, const nlohmann::json& manual) {
+    if (!manual.is_object()) return false;
+    if (manual.contains("idCleared") && (!manual["idCleared"].is_boolean() || manual["idCleared"].get<bool>())) return false;
+    auto selectedId = [&](const char* field, uint64_t limit, uint64_t& selected) {
+        selected = 0; const auto id = manual.find(field);
+        if (id == manual.end() || id->is_null()) return true;
+        if (id->is_number_unsigned()) selected = id->get<uint64_t>();
+        else if (id->is_number_integer()) { const auto value=id->get<int64_t>(); if(value<0)return false; selected=static_cast<uint64_t>(value); }
+        else if (id->is_string()) {
+            const auto& value=id->get_ref<const std::string&>(); if(value.empty())return false;
+            for(unsigned char c:value) {
+                if(c<'0'||c>'9')return false; const auto digit=static_cast<uint64_t>(c-'0');
+                if(selected>limit/10||(selected==limit/10&&digit>limit%10))return false;
+                selected=selected*10+digit;
+            }
+        } else return false;
+        return selected<=limit;
+    };
+    auto number = [&](const char* field, uint64_t limit) -> uint64_t {
+        if(!match.is_object())return 0;const auto id=match.find(field);
+        if(id==match.end()||!id->is_number_integer())return 0;
+        if(id->is_number_unsigned()){const auto value=id->get<uint64_t>();return value<=limit?value:0;}
+        const auto value=id->get<int64_t>();return value>0&&static_cast<uint64_t>(value)<=limit?static_cast<uint64_t>(value):0;
+    };
+    try {
+        uint64_t steam=0;if(!selectedId("steamId",2147483647ULL,steam))return false;
+        if(steam) {
+            if(number("appId",2147483647ULL)==steam)return true;
+            const auto kind=match.is_object()?match.find("identityKind"):match.end();
+            return number("matchedContentAppId",2147483647ULL)==steam&&number("baseGameAppId",2147483647ULL)==number("appId",2147483647ULL)&&
+                kind!=match.end()&&kind->is_string()&&kind->get<std::string>().find("with-explicit-content")!=std::string::npos;
+        }
+        // A saved IGDB-only choice also fences old official Steam metadata.
+        // Matching it is compatibility only, never Steam verification.
+        uint64_t igdb=0;constexpr auto limit=static_cast<uint64_t>((std::numeric_limits<int64_t>::max)());
+        if(!selectedId("igdbId",limit,igdb))return false;
+        return !igdb||number("igdbId",limit)==igdb;
+    } catch (...) { return false; }
+}
+
 namespace identity_cache {
 namespace fs = std::filesystem;
 using Json = nlohmann::json;
 inline constexpr uint64_t byteLimit = 16 * 1024 * 1024;
 inline void need(bool value, const char* reason) { if (!value) throw std::runtime_error(reason); }
+// Exact storage failures only; authority, format and path refusals stay unknown.
+inline bool storageFailure(const std::string& reason) {
+    for (const auto* io : {"identity-read-unavailable", "identity-read-stat-failed", "identity-read-incomplete",
+        "identity-directory-unavailable", "identity-stage-open-failed", "identity-stage-write-failed",
+        "identity-stage-flush-failed", "identity-preserve-failed", "identity-publish-failed"})
+        if (reason == io) return true;
+    return false;
+}
 struct Handle {
     HANDLE value = INVALID_HANDLE_VALUE;
     explicit Handle(HANDLE h) : value(h) {}
@@ -174,6 +224,26 @@ inline bool knownSchema(const Json& value) {
         (!value.contains("schemaVersion") || (value["schemaVersion"].is_number_integer() && value["schemaVersion"] == 1)) &&
         (!value.contains("schema") || (value["schema"].is_string() && value["schema"] == "ymcc.library-identity-cache.v1"));
 }
+// Optional diagnostic only. Neither a retry classification nor identity evidence.
+enum class SteamLookupStage { None, NoParsedCandidate, NoVerificationCandidate, CandidateNotVerified, CandidateNeedsReview };
+inline constexpr const char* steamLookupStageName(SteamLookupStage stage) {
+    switch (stage) {
+    case SteamLookupStage::NoParsedCandidate: return "no-parsed-candidate";
+    case SteamLookupStage::NoVerificationCandidate: return "no-verification-candidate";
+    case SteamLookupStage::CandidateNotVerified: return "candidate-not-verified";
+    case SteamLookupStage::CandidateNeedsReview: return "candidate-needs-review";
+    default: return nullptr;
+    }
+}
+inline void copySteamLookupStage(const Json& from, Json& to) {
+    const auto field = from.find("steamLookupStage");
+    if (field == from.end() || !field->is_string()) return;
+    for (const auto stage : {SteamLookupStage::NoParsedCandidate, SteamLookupStage::NoVerificationCandidate,
+                             SteamLookupStage::CandidateNotVerified, SteamLookupStage::CandidateNeedsReview}) {
+        const auto* name = steamLookupStageName(stage);
+        if (*field == name) { to["steamLookupStage"] = name; return; }
+    }
+}
 inline int64_t integer(const Json& object, const char* key, int64_t fallback = 0) {
     const auto it = object.find(key); if (it == object.end()) return fallback;
     need(it->is_number_integer(), "identity-integer-invalid");
@@ -198,7 +268,7 @@ inline std::wstring nonce() {
 inline void commit(const fs::path& file, const Snapshot& before, const Json& value, bool preserveCorrupt, const std::function<void()>& observationGuard) {
     ancestry(file); std::error_code error; fs::create_directories(ioPath(file.parent_path()), error); need(!error, "identity-directory-unavailable"); ancestry(file);
     const auto bytes = value.dump(2); need(bytes.size() <= byteLimit, "identity-write-too-large");
-    auto stage = file; stage += L".identity-next-" + nonce();
+    const auto stage = file.parent_path() / (L".identity-next-" + nonce());
     try {
         {
             Handle output(CreateFileW(ioPath(stage).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr));
@@ -211,7 +281,7 @@ inline void commit(const fs::path& file, const Snapshot& before, const Json& val
         observationGuard();
         need(sameSnapshot(before, readSnapshot(file)), "identity-concurrent-cache-change");
         if (preserveCorrupt && before.exists) {
-            auto backup = file; backup += L".identity-corrupt-" + nonce();
+            const auto backup = file.parent_path() / (L".identity-corrupt-" + nonce());
             need(MoveFileExW(ioPath(file).c_str(), ioPath(backup).c_str(), MOVEFILE_WRITE_THROUGH) != FALSE, "identity-preserve-failed");
             need(sameSnapshot(before, readSnapshot(backup)), "identity-preserve-readback-failed");
             need(!readSnapshot(file).exists, "identity-concurrent-cache-created");

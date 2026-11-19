@@ -1,0 +1,91 @@
+#define NOMINMAX
+#include <windows.h>
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <new>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <thread>
+@@FAILURE_EVIDENCE@@
+#define FIXTURE_HAS_COUNTER @@HAS_COUNTER@@
+#include "json.hpp"
+using json=nlohmann::json;
+static bool failNext=false,armPreparationFailure=false,sinkThrows=false,escaped=false;
+static unsigned allocationFaults=0,markerWrites=0,sinkCalls=0;
+static unsigned long long allocationCalls=0;
+void* operator new(std::size_t n){++allocationCalls;if(failNext){failNext=false;++allocationFaults;throw std::bad_alloc();}if(auto p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
+void operator delete(void* p)noexcept{std::free(p);}
+void operator delete(void* p,std::size_t)noexcept{std::free(p);}
+static std::wstring root;
+static std::string g_fanCurrentRunToken;
+static std::wstring yemancc_data_dir(){return root;}
+static std::vector<json> rows,checks;
+static void appendNativeLifecycleLog(const char* event,const json& row){++sinkCalls;if(sinkThrows)throw std::runtime_error("optional-log-sink-fault");auto value=row;value["event"]=event;rows.push_back(std::move(value));}
+@@PATH@@
+@@WRITE@@
+static bool sessionMarkerWrite(bool clean){++markerWrites;const bool result=fixtureOriginalSessionMarkerWrite(clean);if(armPreparationFailure){armPreparationFailure=false;failNext=true;}return result;}
+@@DIAGNOSTIC_EXPORT@@
+static void fixtureExport(json& availability){@@EXPORT_ASSIGNMENT@@}
+@@PRODUCER@@
+static void check(const char* name,bool ok){checks.push_back({{"name",name},{"pass",ok}});}
+static bool invoke(){try{return sessionMarkerMarkClean();}catch(...){escaped=true;return false;}}
+static bool marked(){std::ifstream f(sessionMarkerPath(),std::ios::binary);std::ostringstream s;s<<f.rdbuf();return s.str().find(",clean")!=std::string::npos;}
+int wmain(int argc,wchar_t** argv){
+    if(argc!=3)return 2;const std::wstring mode=argv[1];if(mode!=L"normal"&&mode!=L"marker-io-failure"&&mode!=L"prepare-failure"&&mode!=L"sink-failure"&&mode!=L"failed-marker-prepare"&&mode!=L"counter-contention"&&mode!=L"counter-limits")return 2;
+    const auto owned=std::filesystem::absolute(argv[2]);std::filesystem::create_directories(owned);root=owned.wstring();
+    if(mode==L"marker-io-failure"||mode==L"failed-marker-prepare")root=(owned/L"missing"/L"parent").wstring();
+    armPreparationFailure=mode==L"prepare-failure"||mode==L"failed-marker-prepare";sinkThrows=mode==L"sink-failure";
+    const auto originalFileEvidence=ymcc::logging::nativeLogFailureEvidence().snapshot();
+    bool accepted=false;
+#if FIXTURE_HAS_COUNTER
+    if(mode==L"counter-contention"){
+        auto& evidence=ymcc::logging::sessionMarkerDiagnosticExceptionEvidence();
+        const auto held=CreateEventW(nullptr,TRUE,FALSE,nullptr),release=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+        if(!held||!release)return 4;
+        std::thread locker([&]{std::lock_guard<std::mutex> lock(evidence.mutex);SetEvent(held);WaitForSingleObject(release,5000);});
+        const bool holding=WaitForSingleObject(held,5000)==WAIT_OBJECT_0;
+        armPreparationFailure=true;accepted=invoke();failNext=false;
+        const auto contended=evidence.snapshot();SetEvent(release);locker.join();
+        const bool closedHeld=CloseHandle(held)!=FALSE,closedRelease=CloseHandle(release)!=FALSE;
+        check("owned contention thread joined and two event handles closed",holding&&closedHeld&&closedRelease);
+        check("contended snapshot reports unknown without zero rows",contended.value("snapshotKnown",true)==false&&!contended.contains("rows"));
+    }else
+#endif
+    {accepted=invoke();failNext=false;}
+    const bool markerFailed=mode==L"marker-io-failure"||mode==L"failed-marker-prepare";
+    check("actual marker return survives optional diagnostic failure",!escaped&&accepted==!markerFailed);
+    check("one actual marker IO attempt",markerWrites==1);
+    if(!markerFailed)check("original file token and clean suffix persisted",marked()&&!g_fanCurrentRunToken.empty());
+    else check("failed marker path does not create marker",!std::filesystem::exists(sessionMarkerPath()));
+    if(mode==L"normal"||mode==L"marker-io-failure"||mode==L"counter-limits"){
+        check("one ordinary diagnostic row",rows.size()==1);
+        if(rows.size()==1){const auto& row=rows[0];check("explicit marker-only schema and scope",row.value("schemaVersion",0)==1&&row.value("scope","")=="session-marker-file-write-result;not-host-process-or-device-retirement");check("reported marker outcome agrees with actual IO",row.contains("sessionMarkerWriteSucceeded")&&row["sessionMarkerWriteSucceeded"]==!markerFailed);for(const char* key:{"nativeProcessExitProven","inputHostRetirementProven","deviceReturnProven"})check(key,row.contains(key)&&row[key].is_boolean()&&!row[key].get<bool>());}
+    }else check("failed optional diagnostic produces no fabricated success row",rows.empty()&&((mode==L"sink-failure"&&sinkCalls==1)||(mode!=L"sink-failure"&&allocationFaults==1)));
+    if(markerFailed){root=owned.wstring();sinkThrows=armPreparationFailure=false;check("original failed marker may retry later",invoke()&&!escaped&&marked()&&markerWrites==2);}
+    const auto writes=markerWrites,logs=sinkCalls;check("already-clean path remains silent without new marker IO",invoke()&&markerWrites==writes&&sinkCalls==logs);
+    json availability={{"nativeLogFailureEvidence",{{"writerPid",37},{"writerProcessCreation100ns","9007199254740993"}}}};
+    fixtureExport(availability);
+    check("original Native file failure buckets and recovery state unchanged",originalFileEvidence==ymcc::logging::nativeLogFailureEvidence().snapshot());
+    check("separate optional diagnostic receipt available",availability.contains("sessionMarkerDiagnosticExceptionEvidence"));
+#if FIXTURE_HAS_COUNTER
+    auto& evidence=ymcc::logging::sessionMarkerDiagnosticExceptionEvidence();
+    const auto receipt=availability.at("sessionMarkerDiagnosticExceptionEvidence");const auto& stats=receipt.at("stats");
+    const bool expectedClean=mode==L"prepare-failure"||mode==L"sink-failure",expectedFailed=mode==L"failed-marker-prepare";
+    check("two original caller catches have separate exact counts",stats.at("rows").size()==2&&stats["rows"][0]["observedExceptions"]==static_cast<unsigned>(expectedClean)&&stats["rows"][1]["observedExceptions"]==static_cast<unsigned>(expectedFailed));
+    check("record contention is an observation gap rather than fabricated count",stats["recordingContentionObserved"]==(mode==L"counter-contention"));
+    check("export borrows original writer context exactly",receipt["writerPid"]==availability["nativeLogFailureEvidence"]["writerPid"]&&receipt["writerProcessCreation100ns"]=="9007199254740993");
+    if(mode==L"counter-limits"){
+        evidence.counts[0]=~0ULL-1;const auto beforeCalls=allocationCalls;evidence.record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::cleanMarker);
+        evidence.record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::cleanMarker);evidence.record(static_cast<ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::Kind>(99));
+        const bool noHeap=allocationCalls==beforeCalls;const auto saturated=evidence.snapshot();
+        check("saturating and invalid-kind record perform no heap allocation",noHeap);
+        check("limit reached is retained without wrap or invalid-kind changes",saturated["rows"][0]["observedExceptions"]==~0ULL&&saturated["rows"][0]["counterLimitReached"]==true&&saturated["rows"][1]["observedExceptions"]==0);
+    }
+    auto unknown=json::object();fixtureExport(unknown);check("missing original writer context never invents identity",!unknown.contains("sessionMarkerDiagnosticExceptionEvidence"));
+#endif
+    unsigned failures=0;for(const auto& value:checks)failures+=!value["pass"].get<bool>();std::cout<<json({{"case",mode==L"normal"?"normal":mode==L"marker-io-failure"?"marker-io-failure":mode==L"prepare-failure"?"prepare-failure":mode==L"sink-failure"?"sink-failure":mode==L"failed-marker-prepare"?"failed-marker-prepare":mode==L"counter-contention"?"counter-contention":"counter-limits"},{"checks",checks},{"availability",availability},{"failures",failures},{"markerWrites",markerWrites},{"sinkCalls",sinkCalls},{"allocationFaults",allocationFaults},{"escaped",escaped},{"rows",rows},{"realMarkerIoOwnedDirectoryOnly",true},{"processOrDeviceRetirementProven",false}}).dump()<<'\n';return failures?3:0;
+}

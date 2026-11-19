@@ -1,5 +1,19 @@
 # SD触摸期间的光标可见性补偿（2026-10-21开始，2026-10-22收口）
 
+## 2026-11-15：SD 完全退出软件鼠标补画
+
+现场后继：用户随 ROG `20261115-115123` 日志明确确认成功。实际双侧 SD、策略19、处理事件计数448，光标查询／同步／显示／上传／强显／桥接均为0，观察器未启动且无离手保留。该项现场成功已记录于 `Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/sd-cursor-owner-20261115/field-success-20261115-115123/FIELD-SUCCESS.json`；三点菜单交互及虚拟手柄初始问题分别保留。下文“未部署”是源码交付时的历史状态，原件不倒改。
+
+ROG 091856 日志表明，策略18虽然关闭 flags=0 强显，仍通过 CURSOR_SUPPRESSED、触点形状桥接和离手后 retained 显示软件鼠标。当前策略19撤掉 SD 的所有这些显示许可：SD 按下、滑动和离手均不创建备用光标、不启动光标 WinEvent 观察、不请求 BUS 光标轮询。切回 SD 时撤下旧 Mouse 位图，迟到消息和图像准备期间的模式切换不能重新显示。
+
+软件光标只由明确配置的直接 Mouse 触点拥有；原 Mouse 抑制补偿、移动和80ms交接保持。Steam／Windows 自己的光标显隐保持原生决定，没有调用 ShowCursor／SetCursor／SetSystemCursor 强制隐藏，也不改 SD 触摸报告、方向、点击、震动或穿透。旧 Deck 计数保留为日志兼容，新增 cursorDeckSoftwareCursorEnabled=false 和 cursorDeckContactShapeBridgeEnabled=false，force版本3。
+
+既有生产头离线消费者53检查通过，单独旧头对照复现残留补画。当前只写源码，未部署；实机效果待下一自然原生构建。证据 Testing/YMCC/Evidence/Touchpad-Wake-Recovery-20261111/sd-cursor-owner-20261115。下文为历史行为，尤其“保留SD抑制补偿”已被本次要求取代。
+
+## 2026-11-13：取消覆盖原生隐藏状态
+
+用户反馈SD模式下不应出现的鼠标被强行显示。当前已撤下下文的active Deck隐藏状态覆盖：Windows返回flags=0时隐藏YMCC备用光标，不再因手指按住而补箭头；SHOWING但缺少形状时也不创建新光标。原CURSOR_SUPPRESSED触摸抑制补偿、移动/点击/虚拟报告、鼠标穿透及24/48ms预算保持。日志cursorPolicyVersion=18、cursorDeckForceVisibleVersion=2，并明确cursorDeckForceVisibleEnabled=false；旧强制计数保留兼容但不再增长。下面是历史策略与历史验证，不能作为当前行为说明。
+
 用户在HIDMaestro/USBIP调查后明确要求继续，并询问能否强行可见。本轮仅调整屏幕SD触摸板的光标显示策略，不修改触摸报告、鼠标坐标、Steam消费设置、手势或虚拟目标生命周期。
 
 ## 触发依据与行为

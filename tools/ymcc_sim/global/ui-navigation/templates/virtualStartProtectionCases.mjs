@@ -1,4 +1,166 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+
+export function readVirtualStartFailedCommit(file,sha){
+ assert(typeof sha==='string'&&/^[a-f0-9]{64}$/.test(sha),'Native failed commit replay pin');
+ const bytes=fs.readFileSync(file);
+ assert(bytes.length>0&&bytes.length<=1048576,'Native failed commit replay size');
+ assert.equal(createHash('sha256').update(bytes).digest('hex'),sha,'Native failed commit identity');
+ const r=JSON.parse(bytes.toString('utf8'));
+ assert(r.status==='PASS'&&r.scope==='virtual-start-write-failure'&&r.cases===1&&Array.isArray(r.caseRecords)&&r.caseRecords.length===1&&r.caseRecords[0].name==='admitted-write-failure-and-explicit-retry'&&r.caseRecords[0].pass===true&&r.installedSettingsWritten===false&&r.hardwareValidated===false,'Native failed commit receipt scope');
+ const response=r.observations?.failedReceipt,write=r.observations?.failedWrite;
+ assert.deepEqual(response,{ok:false,content:''});
+ assert(Number.isSafeInteger(write?.ticket)&&write.ticket>0&&write.oldBytesPreserved===true&&write.mainAttempts===1&&write.phase==='verifying'&&write.candidate==='failure','Native failed commit receipt facts');
+ assert.deepEqual(write.effects,[]);
+ assert(Array.isArray(r.protectionEvents),'Native failed commit events required');
+ const ordered=r.protectionEvents;
+ const events=ordered.filter(e=>e.requestId===write.ticket);
+ const admissions=events.filter(e=>e.action==='accepted'&&e.origin==='settings-commit'&&e.phase==='pending');
+ assert.equal(admissions.length,1,'Native failed commit admission');
+ const verification=events.filter(e=>e.action==='verification-pending'&&e.origin==='settings-write-failed');
+ assert.equal(verification.length,1,'Native failed commit verification');
+ const admission=admissions[0];
+ assert(ordered[0]===admission&&ordered[1]===verification[0],'Native failed commit is not the first admitted click');
+ const {action,origin,...state}=verification[0];
+ assert(admission.persona===state.persona&&admission.locked===true&&admission.verificationPending===false,'Native failed commit admission state');
+ assert(state.locked===true&&state.phase==='verifying'&&state.verificationPending===true&&state.candidateOutcome==='failure'&&state.persona==='elite'&&state.fallbackAttempts===0&&state.verificationRemainingMs===10000&&Number.isSafeInteger(state.expiresAtUnixMs)&&state.remainingMs>=10000&&state.remainingMs<=30000,'Native failed commit verification facts');
+ return {response,state};
+}
+
+if(process.argv[1]&&pathToFileURL(process.argv[1]).href===import.meta.url){
+ assert(process.argv[2]==='--check-native-failed-commit'&&process.argv.length===5,'Native failed commit admission arguments');
+ const proof=readVirtualStartFailedCommit(process.argv[3],process.argv[4]);
+ console.log(JSON.stringify({status:'ADMITTED_REPLAY_INPUT_ONLY',requestId:proof.state.requestId,sha256:process.argv[4]}));
+}
+
+export const virtualClickStartNames=Object.freeze({
+ failure:'Virtual start: OFF click preserves pending and reports current backend failure',
+ success:'Virtual start: OFF click requires current backend confirmation before showing success',
+});
+export const virtualClickWriteFailureName='Virtual start: admitted OFF click with failed settings commit keeps the local target';
+
+export async function virtualClickWriteFailureCase({height,open,actionCase,nativeFailedCommit=null}) {
+ await actionCase(virtualClickWriteFailureName,height,async()=>{
+  const f=await open('/button-mapping',height,{virtualStartSeed:'off',...(nativeFailedCommit?{virtualStartInitialFeed:'hold'}:{})});
+  const status=f.locator('.controller-output-status');
+  const xbox=f.locator('.persona-actions .persona-btn').filter({hasText:/^Xbox$/});
+  const calls=()=>f.evaluate(()=>window.__previewCalls.filter(x=>['settings.write','input.shortcutRuntime.clear'].includes(x.cmd)).map(x=>x.cmd));
+  await f.locator('.controller-output-status[data-tone="off"]').waitFor({timeout:5000});
+  const initial=await f.evaluate(replay=>{
+   const h=window.__virtualStartFixture;
+   h.armed=true;h.failNextTargetCommit=true;
+   if(replay){
+    if(h.heldFeeds.length!==1||h.feeds.length!==0)throw Error('A synthetic initial request must not precede native replay');
+    h.heldFeeds.length=0;
+    h.state.requestId=replay.state.requestId-1;h.nativeFailedCommit=replay;
+   }
+   return {document:h.read(),requestId:h.state.requestId};
+  },nativeFailedCommit);
+  const before=await calls();
+  await xbox.click({timeout:5000});
+  await f.waitForFunction(()=>window.__virtualStartFixture.replies.some(r=>r.cmd==='settings.write'&&r.status==='fulfilled'),null,{timeout:5000});
+  const result=await f.evaluate(()=>{
+   const h=window.__virtualStartFixture;
+   return {document:h.read(),accepted:h.accepted,rejected:h.rejected,state:h.state,replies:h.replies,feeds:h.feeds.length};
+  });
+  assert.equal(result.accepted,1);
+  assert.equal(result.rejected,0,'admission and persistence are distinct');
+  assert.equal(result.replies.length,1);
+  assert.deepEqual(result.replies[0].response,{ok:false,content:''});
+  assert.equal(result.replies[0].requestId,initial.requestId+1);
+  assert.deepEqual(result.document,initial.document,'failed commit did not change persona, revision or gyro settings');
+  assert.equal(result.state.phase,'verifying');
+  assert.equal(result.state.candidateOutcome,'failure');
+  assert.equal(result.state.verificationRemainingMs,10000);
+  if(nativeFailedCommit){
+   assert.deepEqual(result.replies[0].response,nativeFailedCommit.response);
+   for(const [key,value] of Object.entries(nativeFailedCommit.state)){
+    // Rebase only the absolute timestamp onto the local browser clock.
+    if(key==='expiresAtUnixMs')assert(result.state.expiresAtUnixMs>Date.now());
+    else assert.deepEqual(result.state[key],value,`native replay field: ${key}`);
+   }
+  }
+  assert.equal(result.feeds,0,'ACK did not carry a runtime update');
+  await f.evaluate(async()=>{
+   const h=window.__virtualStartFixture;h.deliverPayload(h.capturePayload());
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  });
+  assert.notEqual(await status.getAttribute('data-tone'),'on');
+  assert.equal(await xbox.evaluate(el=>el.classList.contains('active')),false);
+  assert.equal(await xbox.isDisabled(),true,'current verify feed preserves the admitted request lock');
+  assert.deepEqual((await calls()).slice(before.length),['settings.write'],'failed commit cannot clear shortcuts or replay the click');
+ });
+}
+
+export async function virtualClickStartCases({height,open,actionCase}) {
+ for(const [outcome,name] of Object.entries(virtualClickStartNames))await actionCase(name,height,async()=>{
+  const f=await open('/button-mapping',height,{virtualStartSeed:'off'});
+  const status=f.locator('.controller-output-status');
+  const persona=f.locator('.persona-actions .persona-btn');
+  const xbox=persona.filter({hasText:/^Xbox$/});
+  const tone=async(value)=>{
+   await f.locator(`.controller-output-status[data-tone="${value}"]`).waitFor({timeout:5000});
+   assert.equal(await status.getAttribute('data-tone'),value);
+  };
+  const calls=()=>f.evaluate(()=>window.__previewCalls.filter(x=>['settings.write','input.shortcutRuntime.clear'].includes(x.cmd)).map(x=>x.cmd));
+  await tone('off');
+  assert.match(await status.innerText(),/未开启/);
+  await f.evaluate(()=>{window.__virtualStartFixture.armed=true});
+  const before=await calls();
+  await xbox.click({timeout:5000});
+  await f.waitForFunction(()=>{
+   const h=window.__virtualStartFixture;
+   return h.replies.some(r=>r.cmd==='input.shortcutRuntime.clear'&&r.status==='fulfilled');
+  },null,{timeout:5000});
+  await tone('pending');
+  const saved=await f.evaluate(()=>{
+   const h=window.__virtualStartFixture;
+   return {config:h.read().input.outputTarget,accepted:h.accepted,rejected:h.rejected,
+    pending:h.state.phase,requestId:h.state.requestId,write:h.replies.find(r=>r.cmd==='settings.write')?.response};
+  });
+  assert.equal(saved.config.persona,'elite');
+  assert.equal(saved.config.buttonMappingEnabled,true);
+  assert.equal(saved.accepted,1);
+  assert.equal(saved.rejected,0);
+  assert.equal(saved.pending,'pending');
+  assert(saved.requestId>1&&saved.write?.ok===true);
+  const afterClick=await calls();
+  assert.deepEqual(afterClick.slice(before.length),['settings.write','input.shortcutRuntime.clear']);
+  const staleReady=await f.evaluate(({outcome,id})=>{
+   const host=window.__virtualStartFixture;
+   const ready={state:'active',requestedPersona:'elite',boundPersona:'elite',hostEpoch:9,hostAlive:true,
+    prepared:true,neutralized:true,frameAccepted:true,sourceLive:true,sourceCurrent:true};
+   if(outcome==='failure'){
+    host.produceState({locked:true,phase:'failure',elapsedMs:100,remainingMs:10000});
+    host.deliverPayload({...host.capturePayload(),backendFaultHold:true,virtualOutput:{
+     state:'suspected-failed',reason:'backend-fault-hold',requestedPersona:'elite',hostAlive:false,
+     prepared:false,frameAccepted:false,sourceLive:false,startProtection:{...host.state}}});
+   } else {
+    host.produceState({locked:true,phase:'success',elapsedMs:100,remainingMs:10000});
+    host.deliverPayload({...host.capturePayload(),virtualOutput:{...ready,startProtection:{...host.state}}});
+   }
+   return {...host.capturePayload(),virtualOutput:{...ready,startProtection:{...host.state,phase:'success',requestId:id-1}}};
+  },{outcome,id:saved.requestId});
+  if(outcome==='failure'){
+   await tone('warning');
+   assert.match(await status.innerText(),/失败/);
+   assert.match(await f.locator('.persona-block .fault-line').innerText(),/虚拟输出已停写/);
+   await f.evaluate(async(payload)=>{
+    window.__virtualStartFixture.deliverPayload(payload);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+   },staleReady);
+   assert.equal(await status.getAttribute('data-tone'),'warning','older ready must not replace the current failure');
+   assert.match(await status.innerText(),/失败/);
+  } else {
+   await tone('on');
+   assert.match(await status.innerText(),/已开启/);
+  }
+  assert.equal(await xbox.evaluate(el=>el.classList.contains('active')),true,'saved intent and runtime result remain distinct');
+  assert.deepEqual(await calls(),afterClick,'runtime feedback must not replay the user action');
+ });
+}
 
 // Exercise the real ButtonMappingView, gameInputEditor, settingsRepository and engine.
 // Memory IPC supplies explicit boundary facts, not native execution; native timing/token correctness is separate.

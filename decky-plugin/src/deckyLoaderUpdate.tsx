@@ -38,20 +38,35 @@ function updaterField(doc:Document,fieldClass:string,owned:HTMLElement|null){
 export function installLoaderUpdateRow({host,ui,reactDom,routerHook,client}:any){
   if(!client||!reactDom?.createPortal||!routerHook?.addGlobalComponent||!ui.gamepadDialogClasses?.Field||!ui.Field||!host.DeckyPluginLoader?.deckyState?.publicState)return ()=>{};
   const cache=new Map(),owners=new Set<()=>void>();let disposed=false;
+  // A stale Steam surface may reject one release. Attempt every owned release
+  // before reporting its first error to the plugin's existing cleanup logger.
+  const releaseAll=(actions:Array<()=>void>)=>{let failed=false,first:unknown;for(const release of actions){try{release();}catch(error){if(!failed){failed=true;first=error;}}}if(failed)throw first;};
   // Consumer UI adapter for the verified official 3.3 settings Field.
   // Preserve Decky versionInfo/updatable state; never change its updater capability.
   function Surface(){const anchor=React.useRef(null as HTMLElement|null),[target,setTarget]=React.useState(null as any);
-    React.useEffect(()=>{const doc=anchor.current?.ownerDocument,view=doc?.defaultView;if(!doc||!view)return;let field:HTMLElement|null=null,mount:HTMLElement|null=null,before='',restoreFocus:(()=>void)|null=null;
-      const release=()=>{if(field?.style.display==='none')field.style.display=before;restoreFocus?.();mount?.remove();field=null;mount=null;restoreFocus=null;};
-      const scan=()=>{if(disposed)return;const updating=host.DeckyPluginLoader.deckyState.publicState().isLoaderUpdating;const supported=supportsOfficialUpdaterConsumer(host.DeckyPluginLoader.deckyState.publicState().versionInfo?.current);const found=!updating&&supported&&host.location.pathname.startsWith('/routes/decky/settings')?updaterField(doc,ui.gamepadDialogClasses.Field,field):null;if(found?.field===field&&mount?.isConnected)return;release();if(found){field=found.field;watchVisibility(field);restoreFocus=suspendUpdaterFocus(found.node);before=field.style.display;mount=doc.createElement('div');mount.setAttribute('data-ymcc-loader-update','true');field.after(mount);field.style.display='none';setTarget({...found,mount});}else setTarget(null);};
+    React.useEffect(()=>{const doc=anchor.current?.ownerDocument,view=doc?.defaultView;if(disposed||!doc||!view)return;let released=false,field:HTMLElement|null=null,mount:HTMLElement|null=null,before='',restoreFocus:(()=>void)|null=null;
+      const release=()=>{
+        if(!field&&!mount&&!restoreFocus)return;
+        const oldField=field,oldMount=mount,oldFocus=restoreFocus,oldDisplay=before;field=null;mount=null;restoreFocus=null;
+        releaseAll([()=>{if(oldField?.style.display==='none')oldField.style.display=oldDisplay;},()=>oldFocus?.(),()=>oldMount?.remove()]);
+      };
+      const scan=()=>{if(disposed||released)return;const inSettings=host.location.pathname.startsWith('/routes/decky/settings');let found:ReturnType<typeof updaterField>=null;if(inSettings){const state=host.DeckyPluginLoader.deckyState.publicState();const updating=state.isLoaderUpdating;const supported=supportsOfficialUpdaterConsumer(state.versionInfo?.current);found=!updating&&supported&&host.location.pathname.startsWith('/routes/decky/settings')?updaterField(doc,ui.gamepadDialogClasses.Field,field):null;}if(found?.field===field&&mount?.isConnected)return;release();if(found){field=found.field;watchVisibility(field);restoreFocus=suspendUpdaterFocus(found.node);before=field.style.display;mount=doc.createElement('div');mount.setAttribute('data-ymcc-loader-update','true');field.after(mount);field.style.display='none';setTarget({...found,mount});}else setTarget(null);};
       // Steam retains settings pages and changes ancestor classes during route/size transitions.
       // Observe only those ancestors; no document-wide style observer or idle polling.
       const visibilityObserver=new view.MutationObserver(scan);
       const watchVisibility=(element:HTMLElement)=>{visibilityObserver.disconnect();for(let e=element.parentElement,depth=0;e&&depth<20;depth++,e=e.parentElement)visibilityObserver.observe(e,{attributes:true,attributeFilter:['class','style','hidden','aria-hidden']});};
-      const observer=new view.MutationObserver(scan);observer.observe(doc.body,{childList:true,subtree:true});owners.add(release);scan();return()=>{observer.disconnect();visibilityObserver.disconnect();owners.delete(release);release();};
+      const observer=new view.MutationObserver(scan);
+      // The plugin owns complete surface disposal even if Steam delays or fails
+      // its React unmount. A retired callback cannot recreate the removed row.
+      const disposeSurface=()=>{if(released)return;released=true;owners.delete(disposeSurface);releaseAll([()=>observer.disconnect(),()=>visibilityObserver.disconnect(),release]);};
+      owners.add(disposeSurface);
+      try{observer.observe(doc.body,{childList:true,subtree:true});scan();}catch(error){try{disposeSurface();}catch{}throw error;}
+      return disposeSurface;
     },[]);
     const ParentProvider=target?.provider;return <><span ref={anchor} style={{display:'none'}}/>{target&&reactDom.createPortal(<ParentProvider value={target.parent}><LoaderUpdateRow key="ymcc-loader-update" host={host} ui={ui} cache={cache} client={client}/></ParentProvider>,target.mount)}</>;
   }
-  routerHook.addGlobalComponent('YMCC.DeckyLoaderUpdate',Surface);
-  return()=>{if(disposed)return;disposed=true;routerHook.removeGlobalComponent('YMCC.DeckyLoaderUpdate');for(const release of owners)release();owners.clear();cache.clear();};
+  const dispose=()=>{if(disposed)return;disposed=true;const releases=[...owners];owners.clear();cache.clear();releaseAll([...releases,()=>routerHook.removeGlobalComponent('YMCC.DeckyLoaderUpdate')]);};
+  // Failed registration has no caller-owned disposer; undo partial setup here.
+  try{routerHook.addGlobalComponent('YMCC.DeckyLoaderUpdate',Surface);return dispose;}
+  catch(error){try{dispose();}catch{}throw error;}
 }

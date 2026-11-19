@@ -3,9 +3,16 @@
 #include <iostream>
 #include <functional>
 #include <vector>
+#include <fstream>
 using nlohmann::json;
 static void expect(bool value) { if (!value) throw std::runtime_error("assertion-failed"); }
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 5 && std::string(argv[1]) == "--restart-document") {
+        std::ifstream stream(argv[2]); if (!stream) return 2;
+        json document; stream >> document; json decision;
+        const auto next = ymcc::initializeBootModeInputStartup(document, argv[3], argv[4], &decision);
+        std::cout << json{{"document",next},{"decision",decision}}.dump() << std::endl; return 0;
+    }
     std::vector<std::string> cases;
     auto check = [&](const char* label, std::function<void()> fn) { fn(); cases.emplace_back(label); };
     const json saved = {{"revision", 15}, {"schemaVersion", 1}, {"unknownRoot", {{"keep", true}}},
@@ -251,6 +258,260 @@ int main() {
         expect(next == ymcc::initializeBootModeInputStartup(doc, "unknown-boot-process", ""));
         expect(facts["configured"] == true && facts["action"] == "preserve-current-input");
         expect(facts["selectionBootMatchesObserved"] == false && facts["inputBootMatchesObserved"] == false);
+    });
+    // 2026-11-11 supersedes only bootEnabled=false => forced disabled/off.
+    // A disabled mode selection now consumes GLOBAL input on the next boot.
+    // Explicit global/scene OFF, and missing-document startupDesired OFF (the
+    // original Win5 case above), remain authoritative. All original cases stay.
+    // These additions call the production JSON policy only; synthetic boot and
+    // process strings never query boot_mode_identity::current or start a Host.
+    const char* modeIds[] = {"global", "xbox", "steam", "xbox-steam"};
+    const char* padIds[] = {"disabled", "steamdeck", "dualsense-edge", "elite"};
+    const char* gyroIds[] = {"off", "fps", "racing", "custom", "steam"};
+    const auto expectedPreferences = [](const char* pad, const char* gyro) {
+        return json{{"virtualGamepadPersona", pad},
+            {"gyroPreset", std::string(pad) == "disabled" ? "off" : gyro}};
+    };
+    const auto expectAppliedPreferences = [](const json& document, const char* pad, const char* gyro) {
+        const auto& input = document.at("input");
+        const bool padEnabled = std::string(pad) != "disabled";
+        const bool gyroEnabled = padEnabled && std::string(gyro) != "off";
+        expect(input.at("outputTarget").at("persona") == pad);
+        expect(input.at("outputTarget").at("buttonMappingEnabled") == padEnabled);
+        expect(input.at("outputTarget").at("gyroEnabled") == gyroEnabled);
+        expect(input.at("gyroMotion").at("enabled") == gyroEnabled);
+        if (gyroEnabled) {
+            expect(input.at("gyroMotion").at("preset") == gyro);
+            expect(input.at("gyroMotion").at("activePreset") == gyro);
+            expect(input.at("gyroMotion").at("outputMode") == "virtual-stick");
+        }
+    };
+    const auto globalDocument = [&](const char* mode, bool enabled, const char* pad, const char* gyro) {
+        auto document = bootDocument();
+        const char* rememberedPreset = std::string(gyro) == "off" ? "custom" : gyro;
+        document["extensions"]["bootModes"] = {{"schema", 1}, {"current", "global"},
+            {"boot", mode}, {"bootEnabled", enabled}, {"revision", 12}, {"controllerDefaultsVersion", 2},
+            {"global", {{"input", {{"persona", pad}, {"unknownGlobalInput", "keep"}}},
+                {"gyro", {{"motion", {{"enabled", std::string(gyro) != "off"},
+                    {"preset", rememberedPreset}, {"activePreset", rememberedPreset}, {"unknownGlobalMotion", "keep"}}}}}}},
+            {"scenes", json::object()}, {"unknownModes", "keep"}};
+        document["extensions"]["bootModesAppliedBoot"] = "windows-boot-1";
+        // Deliberately contradict global so a stale materialized cache cannot
+        // accidentally satisfy the global-inheritance assertions.
+        document["startupDesired"] = {{"virtualGamepadPersona", std::string(pad) == "elite" ? "steamdeck" : "elite"},
+            {"gyroPreset", std::string(gyro) == "fps" ? "racing" : "fps"},
+            {"fanControl", true}, {"unknownStartup", "keep"}};
+        return document;
+    };
+    // 4 modes x 2 selection states x 4 global personas x 5 gyro choices.
+    // Every row also covers a same-process repeat, a manual runtime change,
+    // a different native process in the same boot, and the following real boot.
+    for (const char* mode : modeIds) for (bool enabled : {false, true})
+        for (const char* pad : padIds) for (const char* gyro : gyroIds) {
+            const std::string label = std::string("global inheritance and reopen matrix: ") + mode +
+                (enabled ? "/enabled/" : "/disabled/") + pad + "/" + gyro;
+            check(label.c_str(), [&] {
+                auto document = globalDocument(mode, enabled, pad, gyro);
+                for (const char* scene : {"xbox", "steam", "xbox-steam"})
+                    document["extensions"]["bootModes"]["scenes"][scene] = {{"name", "partial-scene"},
+                        {"overrides", {{"input", {{"mouse", "joyxoff"}}},
+                            {"gyro", {{"motion", {{"unknownSceneMotion", "keep"}}}}}}}};
+                if (!enabled || std::string(mode) == "global") {
+                    const char* ignoredScene = std::string(mode) == "global" ? "steam" : mode;
+                    document["extensions"]["bootModes"]["scenes"][ignoredScene]["overrides"] = {
+                        {"input", {{"persona", std::string(pad) == "steamdeck" ? "elite" : "steamdeck"}}},
+                        {"gyro", {{"motion", {{"enabled", std::string(gyro) == "off"},
+                            {"preset", "fps"}, {"activePreset", "fps"}}}}}};
+                }
+                const auto preferences = expectedPreferences(pad, gyro);
+                expect(ymcc::bootModeInputStartupPreferences(document["extensions"]["bootModes"], document["startupDesired"]) == preferences);
+                json facts;
+                const auto next = ymcc::initializeBootModeInputStartup(document, "matrix-first-process", "windows-boot-2", &facts);
+                expectAppliedPreferences(next, pad, gyro);
+                expect(facts["configured"] == true && facts["source"] == "four-mode-startup");
+                expect(facts["selectedMode"] == mode && facts["effectiveMode"] == (enabled ? mode : "global"));
+                expect(facts["bootEnabled"] == enabled && facts["revision"] == 12);
+                expect(facts["requestedPersona"] == preferences["virtualGamepadPersona"] && facts["requestedGyroPreset"] == preferences["gyroPreset"]);
+                expect(facts["action"] == "apply-startup-preferences");
+                expect(facts["selectionBootMatchesObserved"] == false && facts["inputBootMatchesObserved"] == false);
+                expect(next["extensions"] == document["extensions"] && next["gameProfiles"] == document["gameProfiles"]);
+                expect(next["startupDesired"]["virtualGamepadPersona"] == preferences["virtualGamepadPersona"]);
+                expect(next["startupDesired"]["gyroPreset"] == preferences["gyroPreset"]);
+                expect(next["startupDesired"]["fanControl"] == true && next["startupDesired"]["unknownStartup"] == "keep");
+                expect(next["input"]["buttonMapping"] == saved["buttonMapping"] && next["input"]["unknownRoot"] == saved["unknownRoot"]);
+                expect(next["input"]["outputTarget"]["oemRearMap"] == saved["outputTarget"]["oemRearMap"]);
+                expect(next["input"]["gyroMotion"]["calibrationId"] == "keep-calibration");
+                expect(next["input"]["gyroMotion"]["presets"] == saved["gyroMotion"]["presets"]);
+                expect(next["input"]["revision"] == 16 && next["input"]["gameOverride"].is_null());
+                expect(next["input"]["startupAppliedBoot"] == "windows-boot-2" && next["input"]["startupObservedBoot"] == "windows-boot-2");
+                expect(next["input"]["applyStatus"] == "unknown");
+                for (const char* field : {"appliedRevision", "appliedConfigHash", "pendingConfigHash", "hostAcknowledgedRevision", "hostAcknowledgedConfigHash"})
+                    expect(next["input"][field].is_null());
+                json repeatFacts;
+                expect(ymcc::initializeBootModeInputStartup(next, "matrix-first-process", "windows-boot-2", &repeatFacts) == next);
+                expect(repeatFacts["action"] == "preserve-same-process");
+
+                auto manual = next;
+                manual["input"]["outputTarget"].update(json{{"persona", std::string(pad) == "elite" ? "steamdeck" : "elite"},
+                    {"buttonMappingEnabled", true}, {"gyroEnabled", false}});
+                manual["input"]["gyroMotion"].update(json{{"enabled", false}, {"gyroMultiplier", 7.25}});
+                auto& draft = manual["extensions"]["bootModes"];
+                draft["boot"] = std::string(mode) == "global" ? "xbox" : "global";
+                draft["bootEnabled"] = !enabled;
+                draft["revision"] = 13;
+                draft["scenes"] = json::object();
+                json reopenFacts;
+                const auto reopened = ymcc::initializeBootModeInputStartup(manual, "matrix-reopen-process", "windows-boot-2", &reopenFacts);
+                expect(reopenFacts["action"] == "preserve-current-input" && reopenFacts["inputBootMatchesObserved"] == true);
+                expect(reopenFacts["selectedMode"] == draft["boot"]);
+                expect(reopenFacts["effectiveMode"] == (enabled ? json("global") : draft["boot"]));
+                expect(reopened["input"]["outputTarget"] == manual["input"]["outputTarget"]);
+                expect(reopened["input"]["gyroMotion"] == manual["input"]["gyroMotion"]);
+                expect(reopened["input"]["buttonMapping"] == manual["input"]["buttonMapping"]);
+                expect(reopened["input"]["startupAppliedSession"] == "matrix-reopen-process" && reopened["input"]["revision"] == 17);
+                expect(reopened["extensions"] == manual["extensions"] && reopened["gameProfiles"] == manual["gameProfiles"]);
+                expect(ymcc::initializeBootModeInputStartup(reopened, "matrix-reopen-process", "windows-boot-2") == reopened);
+                json rebootFacts;
+                const auto rebooted = ymcc::initializeBootModeInputStartup(reopened, "matrix-next-boot-process", "windows-boot-3", &rebootFacts);
+                expectAppliedPreferences(rebooted, pad, gyro);
+                expect(rebootFacts["action"] == "apply-startup-preferences" && rebooted["input"]["revision"] == 18);
+                expect(rebooted["extensions"] == manual["extensions"]);
+            });
+        }
+    for (int shape = 0; shape < 3; ++shape) {
+        const std::string label = std::string("missing mode configuration uses explicit startupDesired: ") +
+            (shape == 0 ? "absent" : shape == 1 ? "null" : "empty");
+        check(label.c_str(), [&] {
+            for (const char* pad : padIds) for (const char* gyro : gyroIds) {
+                auto document = bootDocument();
+                if (shape == 0) document["extensions"].erase("bootModes");
+                else document["extensions"]["bootModes"] = shape == 1 ? json(nullptr) : json::object();
+                // A marker without a mode document is not a configured scene.
+                document["extensions"]["bootModesAppliedBoot"] = "windows-boot-2";
+                document["startupDesired"] = {{"virtualGamepadPersona", pad}, {"gyroPreset", gyro}, {"unknownStartup", "keep"}};
+                json facts;
+                const auto next = ymcc::initializeBootModeInputStartup(document, "fallback-process", "windows-boot-2", &facts);
+                expectAppliedPreferences(next, pad, gyro);
+                const auto preferences = expectedPreferences(pad, gyro);
+                expect(facts["configured"] == false && facts["selectedMode"].is_null() && facts["effectiveMode"] == "global");
+                expect(facts["source"] == "legacy-startupDesired" && facts["bootEnabled"].is_null() && facts["revision"].is_null());
+                expect(facts["requestedPersona"] == preferences["virtualGamepadPersona"] && facts["requestedGyroPreset"] == preferences["gyroPreset"]);
+                expect(facts["action"] == "apply-startup-preferences");
+                expect(next["extensions"] == document["extensions"] && next["startupDesired"] == document["startupDesired"]);
+                expect(next["gameProfiles"] == document["gameProfiles"] && next["input"]["buttonMapping"] == document["input"]["buttonMapping"]);
+                json repeatedFacts;
+                expect(ymcc::initializeBootModeInputStartup(next, "fallback-process", "windows-boot-2", &repeatedFacts) == next);
+                expect(repeatedFacts["action"] == "preserve-same-process");
+                // Missing-document cross-process behavior remains the original
+                // legacy policy; do not claim configured-mode deduplication here.
+            }
+        });
+    }
+    for (const char* mode : modeIds) for (bool enabled : {false, true}) {
+        const std::string label = std::string("missing scene fields inherit known global: ") + mode + (enabled ? "/enabled" : "/disabled");
+        check(label.c_str(), [&] {
+            for (int shape = 0; shape < 6; ++shape) {
+                auto document = globalDocument(mode, enabled, "dualsense-edge", "racing");
+                auto& modes = document["extensions"]["bootModes"];
+                const char* scene = std::string(mode) == "global" ? "steam" : mode;
+                if (shape == 0) modes.erase("scenes");
+                if (shape == 1) modes["scenes"] = json::object();
+                if (shape == 2) modes["scenes"][scene] = {{"name", "no-overrides"}};
+                if (shape == 3) modes["scenes"][scene] = {{"overrides", json::object()}};
+                if (shape == 4) modes["scenes"][scene] = {{"overrides", {{"input", json::object()}, {"gyro", {{"motion", json::object()}}}}}};
+                if (shape == 5) modes["scenes"][scene] = {{"overrides", {{"input", {{"mouse", "off"}}},
+                    {"gyro", {{"motion", {{"gyroMultiplier", 1.25}}}}}}}};
+                const auto next = ymcc::initializeBootModeInputStartup(document, "inherit-process", "windows-boot-2");
+                expectAppliedPreferences(next, "dualsense-edge", "racing");
+                expect(next["extensions"] == document["extensions"]);
+            }
+        });
+        const std::string ownLabel = std::string("explicit scene OFF and partial own fields respect effective mode: ") + mode + (enabled ? "/enabled" : "/disabled");
+        check(ownLabel.c_str(), [&] {
+            for (int variant = 0; variant < 7; ++variant) {
+                auto document = globalDocument(mode, enabled, "elite", "racing");
+                auto& modes = document["extensions"]["bootModes"];
+                const char* scene = std::string(mode) == "global" ? "steam" : mode;
+                json own;
+                const char* expectedPad = "elite";
+                const char* expectedGyro = "racing";
+                const bool consumesScene = enabled && std::string(mode) != "global";
+                if (variant == 0) {
+                    own = {{"input", {{"persona", "disabled"}}}};
+                    if (consumesScene) { expectedPad = "disabled"; expectedGyro = "off"; }
+                } else if (variant == 1) {
+                    own = {{"gyro", {{"motion", {{"enabled", false}}}}}};
+                    if (consumesScene) expectedGyro = "off";
+                } else if (variant == 2) {
+                    own = {{"input", {{"persona", "steamdeck"}}}};
+                    if (consumesScene) expectedPad = "steamdeck";
+                } else if (variant == 3) {
+                    own = {{"gyro", {{"motion", {{"activePreset", "fps"}}}}}};
+                    if (consumesScene) expectedGyro = "fps";
+                } else if (variant == 4) {
+                    own = {{"input", {{"persona", "disabled"}}}, {"gyro", {{"motion", {{"enabled", false}}}}}};
+                    if (consumesScene) { expectedPad = "disabled"; expectedGyro = "off"; }
+                } else if (variant == 5) {
+                    modes["global"]["input"]["persona"] = "disabled";
+                    own = {{"input", {{"persona", "steamdeck"}}}};
+                    expectedPad = consumesScene ? "steamdeck" : "disabled";
+                    if (!consumesScene) expectedGyro = "off";
+                } else {
+                    modes["global"]["gyro"]["motion"]["enabled"] = false;
+                    own = {{"gyro", {{"motion", {{"enabled", true}, {"activePreset", "steam"}}}}}};
+                    expectedGyro = consumesScene ? "steam" : "off";
+                }
+                modes["scenes"][scene] = {{"name", "explicit-partial"}, {"overrides", own}};
+                json facts;
+                const auto next = ymcc::initializeBootModeInputStartup(document, "own-process", "windows-boot-2", &facts);
+                expectAppliedPreferences(next, expectedPad, expectedGyro);
+                expect(facts["effectiveMode"] == (enabled ? mode : "global") && facts["selectedMode"] == mode);
+                expect(next["extensions"] == document["extensions"]);
+            }
+        });
+    }
+    check("absent explicit startup input never adopts an ordinary runtime ON toggle", [&] {
+        auto document = bootDocument();
+        document["extensions"].erase("bootModes");
+        document.erase("startupDesired");
+        const auto next = ymcc::initializeBootModeInputStartup(document, "no-explicit-startup", "windows-boot-2");
+        expectAppliedPreferences(next, "disabled", "off");
+        expect(!next.contains("startupDesired") && next["input"]["buttonMapping"] == document["input"]["buttonMapping"]);
+    });
+    check("materialized global document gains same-boot ownership without replaying legacy startup input", [&] {
+        auto document = bootDocument();
+        document["extensions"].erase("bootModes");
+        auto next = ymcc::initializeBootModeInputStartup(document, "before-materialization", "windows-boot-2");
+        // Model an externally committed document, not native/frontend creation.
+        // The consumer must preserve a later manual OFF in this observed boot.
+        next["extensions"]["bootModes"] = globalDocument("steam", false, "steamdeck", "fps")["extensions"]["bootModes"];
+        next["extensions"]["bootModesAppliedBoot"] = "windows-boot-2";
+        next["input"]["outputTarget"].update(json{{"persona", "disabled"}, {"buttonMappingEnabled", false}, {"gyroEnabled", false}});
+        next["input"]["gyroMotion"]["enabled"] = false;
+        json facts;
+        const auto reopened = ymcc::initializeBootModeInputStartup(next, "after-materialization", "windows-boot-2", &facts);
+        expect(reopened["input"]["outputTarget"] == next["input"]["outputTarget"] && reopened["input"]["gyroMotion"] == next["input"]["gyroMotion"]);
+        expect(facts["configured"] == true && facts["selectedMode"] == "steam" && facts["effectiveMode"] == "global");
+        expect(facts["action"] == "preserve-current-input" && facts["selectionBootMatchesObserved"] == true);
+        const auto rebooted = ymcc::initializeBootModeInputStartup(reopened, "materialized-next-boot", "windows-boot-3");
+        expectAppliedPreferences(rebooted, "steamdeck", "fps");
+        expect(rebooted["extensions"] == next["extensions"]);
+    });
+    check("disabled-to-global fallback still rejects corrupt mode input instead of treating it as missing", [&] {
+        for (bool enabled : {false, true}) for (int corruption = 0; corruption < 6; ++corruption) {
+            auto document = globalDocument("steam", enabled, "elite", "racing");
+            auto& modes = document["extensions"]["bootModes"];
+            if (corruption == 0) modes["schema"] = 2;
+            if (corruption == 1) modes["bootEnabled"] = "false";
+            if (corruption == 2) modes["global"]["input"]["persona"] = "unknown";
+            if (corruption == 3) modes["global"]["gyro"]["motion"]["enabled"] = "true";
+            if (corruption == 4) modes["scenes"]["steam"] = {{"overrides", {{"input", {{"persona", true}}}}}};
+            if (corruption == 5) modes["boot"] = "unknown";
+            bool rejected = false;
+            try { ymcc::initializeBootModeInputStartup(document, "invalid-fallback", "windows-boot-2"); }
+            catch (...) { rejected = true; }
+            expect(rejected);
+        }
     });
     std::cout << json{{"suite", "Input startup native JSON policy"}, {"passed", cases.size()}, {"cases", cases}, {"hardwareOperations", 0}}.dump(2) << std::endl;
 }

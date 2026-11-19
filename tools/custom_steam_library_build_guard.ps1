@@ -32,18 +32,36 @@ function Get-CustomSteamLibrarySourceIndex {
     "tools/build-custom-steam-library-$Kind.ps1",
     'tools/custom_steam_library_build_guard.ps1',
     'CustomSteamLibrary/assets/custom-steam-library.ico',
+    'native/game_application_catalog.h',
+    'native/game_rule_literal.h',
     'native/game_detection_blacklist_entries.h',
+    'native/game_library_blacklist_entries.h',
     'native/process_efficiency.h',
+    'native/process_handle_inheritance.h',
+    'native/steam_installation_facts.h',
+    'native/steam_information_client.h',
+    'native/steam_startup_window_facts.h',
+    'native/steam_home_client_identity.h',
+    'native/steam_offline_mutation_gate.h',
     'deps/json/json.hpp'
   )
   $paths += @(Get-ChildItem -LiteralPath $native -Filter '*.h' -File | ForEach-Object { 'native/custom-steam-library/' + $_.Name })
   if ($Kind -eq 'host') {
-    $paths += @('native/opti_catalog_startup.h','native/webview_process_efficiency.h','native/shared_game_media.h','native/shared_game_media_capacity.h','native/shared_game_media_power.h','native/power_source_state.h','native/power_source_channel.h',
+    $paths += @('native/steam_client_action_channel.h','native/steam_account_facts.h','native/steam_session_observer.h','native/steam_session_registry_watch.h','native/steam_ui_epoch.h','native/steam_window_event_budget.h',
+      'native/worker_thread_name.h','native/steam_listener_executor.h','native/steam_source_owner.h','native/steam_startup_capture_diagnostic.h',
+      'native/steam_process_discovery.h','native/process_inventory.h','native/opti_catalog_startup.h','native/webview_process_efficiency.h','native/shared_game_media.h','native/shared_game_media_capacity.h','native/shared_game_media_power.h','native/power_source_state.h','native/power_source_channel.h',
       'native/shared_game_media_download_queue.h','native/shared_game_media_download_worker.h','native/shared_game_media_download_resources.h',
+      'native/sleep_power_native_task.h','native/sleep_power_remote_client.h','native/sleep_power_remote_contract.h',
+      'native/sleep_power_remote_provider.h','native/sleep_power_remote_transport.h','native/sleep_power_state.h',
+      'native/sleep_power_observation.h','native/sleep_power_revocation.h',
       'native/shared_game_media_shortcut.h','native/shared_game_media_identity_worker.h','native/shared_game_media_video_request.h',
+      'native/steam_source_lease_contract.h','native/steam_source_lease_transfer.h',
+      'native/steamdeck_mouse_vdf.h',
       'deps/webview2/build/native/include/WebView2.h',
       'deps/webview2/build/native/include/WebView2EnvironmentOptions.h',
       'deps/webview2/build/native/x64/WebView2LoaderStatic.lib')
+  } else {
+    $paths += @('native/game_rule_file_guard.h','native/steamdeck_mouse_vdf.h','native/shared_game_media.h','native/shared_game_media_capacity.h','native/shared_game_media_power.h','native/power_source_state.h')
   }
   foreach ($relative in @($paths | Sort-Object -Unique)) {
     $path = Join-Path $ProjectRoot $relative
@@ -95,7 +113,8 @@ function Assert-CustomSteamLibrarySourceFreshness {
   param([string]$ProjectRoot, [string]$PackageRoot)
   $manifestPath = Join-Path $PackageRoot 'package-manifest.json'
   $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-  if ([int]$manifest.backgroundMediaProtocol -ne 1 -or [int]$manifest.backgroundCatalogProtocol -ne 1 -or [int]$manifest.backgroundIdentityProtocol -ne 1 -or [int]$manifest.backgroundVideoQualityPolicy -lt 3 -or [int]$manifest.backgroundManualProtocol -ne 1 -or [int]$manifest.backgroundVideoSelectionProtocol -ne 1) { throw 'Child download/catalog/shortcut-identity capability is missing; rebuild the current library host before export' }
+  if ([int]$manifest.backgroundSteamSourceProtocol -ne 1 -or [int]$manifest.backgroundMediaProtocol -ne 1 -or [int]$manifest.backgroundCatalogProtocol -ne 1 -or [int]$manifest.backgroundIdentityProtocol -ne 1 -or [int]$manifest.backgroundVideoQualityPolicy -lt 3 -or [int]$manifest.backgroundManualProtocol -ne 1 -or [int]$manifest.backgroundVideoSelectionProtocol -ne 1) { throw 'Child download/catalog/shortcut-identity capability is missing; rebuild the current library host before export' }
+  if ([int]$manifest.backgroundSharedSleepProtocol -ne 1) { throw 'Child shared sleep capability is missing or incompatible; rebuild the current library host before export' }
   $version = Get-Content -LiteralPath (Join-Path $ProjectRoot 'version.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   if ([string]$manifest.packageVersion -ne [string]$version.version) { throw 'Child package version differs from current mainline' }
   foreach ($kind in @('host','worker')) {
@@ -198,14 +217,44 @@ function Reset-CslPriorPendingForNewBuild([string]$ProjectRoot,[string]$Workspac
   }finally{if($mutex){$mutex.Dispose()}}
 }
 
+function ConvertTo-CslCanonicalManifestValue($Value) {
+  if($null -eq $Value){return $null}
+  if($Value -is [Collections.IDictionary] -or $Value -is [Management.Automation.PSCustomObject]){
+    if($Value -is [Collections.IDictionary]){$names=[string[]]@(foreach($key in $Value.Keys){[string]$key})}
+    else{$names=[string[]]@(foreach($property in $Value.PSObject.Properties){[string]$property.Name})}
+    [Array]::Sort($names,[StringComparer]::Ordinal)
+    $result=[ordered]@{}
+    foreach($name in $names){
+      if($Value -is [Collections.IDictionary]){$child=$Value[$name]}else{$child=$Value.PSObject.Properties[$name].Value}
+      $result[$name]=ConvertTo-CslCanonicalManifestValue $child
+    }
+    return $result
+  }
+  if($Value -is [Collections.IEnumerable] -and $Value -isnot [string]){
+    $items=[Collections.Generic.List[object]]::new()
+    foreach($item in $Value){$items.Add((ConvertTo-CslCanonicalManifestValue $item))}
+    return ,$items.ToArray()
+  }
+  return $Value
+}
+function ConvertTo-CslCanonicalManifestJson($Value) {
+  $canonical=ConvertTo-CslCanonicalManifestValue $Value
+  $options=@{Depth=30;Compress=$true}
+  # Windows PowerShell's serializer already uses HTML escaping. Select that
+  # same representation explicitly on PowerShell versions offering the switch.
+  if((Get-Command ConvertTo-Json).Parameters.ContainsKey('EscapeHandling')){$options.EscapeHandling='EscapeHtml'}
+  return ConvertTo-Json -InputObject $canonical @options
+}
 function Get-CslWorkerManifestInvariant($Manifest) {
   $copy=$Manifest|ConvertTo-Json -Depth 30|ConvertFrom-Json
   $hostEntry=@($copy.fileIndex|Where-Object{$_.path -ceq 'CustomSteamLibrary.exe'})
   if($hostEntry.Count -ne 1 -or -not $copy.sourceBuild){throw 'CSL_STAGE_HOST_MANIFEST_INVALID'}
   $copy.PSObject.Properties.Remove('generatedAt')
+  # The fresh Host publishes this capability. Freshness checks its exact value.
+  $copy.PSObject.Properties.Remove('backgroundSharedSleepProtocol')
   $copy.sourceBuild.PSObject.Properties.Remove('host');$copy.sourceBuild.PSObject.Properties.Remove('hostSources')
   $hostEntry[0].PSObject.Properties.Remove('bytes');$hostEntry[0].PSObject.Properties.Remove('sha256')
-  return Get-ExportTextHash ($copy|ConvertTo-Json -Depth 30 -Compress)
+  return Get-ExportTextHash (ConvertTo-CslCanonicalManifestJson $copy)
 }
 function Assert-CslHostPublishTransition($Proof,[string]$ProjectRoot) {
   $path=Join-Path $ProjectRoot 'CustomSteamLibrary/package-manifest.json';$m=Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json

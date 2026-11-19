@@ -1,0 +1,1642 @@
+{
+  "schemaVersion": 1,
+  "updatedHongKong": "2026-11-07T00:45:58.490523+08:00",
+  "objective": "AYA family field-feedback reconciliation and capability-library repair",
+  "role": "Single-library source/consumer/field navigation; these rows do not allocate capabilities or authorize hardware",
+  "status": "LIBRARY_FIELD_AND_CONSUMER_CONTRACT_CORRECTED_CONSUMER_RELEASE_WORK_SEPARATE",
+  "sources": {
+    "frozenCatalog": {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\hc-device-catalog.json",
+      "bytes": 812472,
+      "sha256": "d75054dc0b8dbdda079514b8896ec72855692760f687d96b574dff8e82b3dd4a"
+    },
+    "runtimeBaseline": "HC-BINARY-BATCH12-20260831",
+    "reviewedHcCommit": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+    "sourceReview": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-098-AYA-FAMILY-FIELD-REPAIR\\agent-source-audit\\RESULT.json",
+      "bytes": 24120,
+      "sha256": "3c35f3fc1715302e829887a96637feab8be9f97ea3fe41d40c145441d6bf8709"
+    },
+    "parentSourceIdentityReview": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-098-AYA-FAMILY-FIELD-REPAIR\\SOURCE-PARENT-IDENTITY-VERIFICATION.json",
+      "bytes": 9799,
+      "sha256": "52553ffaad69cb28825f38e42275400218179359d422f3a7406fd6bbb7a5956d"
+    }
+  },
+  "counts": {
+    "frozenAyaClasses": 24,
+    "frozenAyaFactories": 20,
+    "additionalPerDomainAyaFactories": 6,
+    "totalFactories": 26,
+    "fanConsumers": 21,
+    "lightingConsumers": 15,
+    "batteryConsumers": 21,
+    "oldIDeviceFactoriesWithoutDeclaredThreeDomains": 5,
+    "sourceDisabledLightingFactories": 2,
+    "declaredLightingWithoutCurrentExactConsumer": 4
+  },
+  "fieldArchive": {
+    "path": "G:\\YeManCC-Work\\日志\\其他\\YeManCC-logs-20261106-200848-AYA.zip",
+    "bytes": 778240,
+    "sha256": "29de13be7f8fdfb16dddf27e1668b555d4fc74ed306ea05b006b21fd73688064",
+    "members": 108
+  },
+  "actualMachine": {
+    "manufacturer": "AYANEO",
+    "product": "AIR 1S",
+    "cpu": "AMD Ryzen 7 7840U",
+    "modelClass": "HandheldCompanion.Devices.AYANEOAIR1S",
+    "ymccPid": 7676,
+    "hostPid": 6312,
+    "hostRunId": "fan-host:6312:6148cb303ed349c7943977c02ddac4e3"
+  },
+  "exportDiskIdentity": {
+    "scope": "export-time-disk; not loaded-module proof and not atomic with logs",
+    "hostDllSha256": "5c235b39ffa6eb43346d7eb5d0e43aad5eccb96bd5c3f19530e9b39131e266df",
+    "backendDllSha256": "fb2f9396d81594bf573d158c5c9e216a1abc5e3820ba088297262da84d845d60",
+    "payloadSha256": "ee6c11e8bc3128a6351b86d9f52b0272cdeed24de717ab11d60e25ebec5b127b",
+    "loadedSourceEquivalenceProven": false
+  },
+  "currentConsumerContract": {
+    "id": "aya-current-inherited-ec-consumption-20261107",
+    "role": "Source/consumer evidence navigation, not a runtime registration or admission switch",
+    "binding": "HcDeviceCapabilityCatalog.Bind(\"fan\", FanRoutes) and existing exact type cache",
+    "eligibility": {
+      "routeKind": "GenericDuty",
+      "restoreStrategy": "GenericEcControl",
+      "controlSetterDeclaringType": "HandheldCompanion.Devices.IDevice",
+      "dutySetterDeclaringType": "HandheldCompanion.Devices.IDevice",
+      "profileCallbackDeclaringType": "HandheldCompanion.Devices.IDevice",
+      "exactCurrentTransportAndEcMetadataRequired": true,
+      "familyNameOrSetterShapeAloneInsufficient": true
+    },
+    "writeContract": {
+      "transport": "Current HC-owned ECRamDirectWriteByte; original ECDetails ports/registers and Convert.ToByte scaling",
+      "consumeBool": "false rejects operation; success is transport receipt only",
+      "currentOwnerEpochAndMetadataBeforeAndAfterWrite": true,
+      "extraDeviceOpenOrPoll": false
+    },
+    "profileAndLifecycle": {
+      "open": "Invoke actual selected virtual Open; keep CEc RGB hold and same transport identity",
+      "profile": "Original profile/temperature owner; generic control/duty replace only exact inherited setter pair, not vendor profile overrides",
+      "close": "Invoke actual selected virtual Close; CEc RGB release precedes base.Close and its SetFanControl(false)",
+      "cleanupReceipt": "Close returned/transport retired is lifecycle evidence, never substituted for a current control=false release-action receipt or physical OEM ownership",
+      "releaseStillUnknownIfNoCurrentScopedReceipt": true,
+      "falseUnknownOrSupersededNeverPromoted": true
+    },
+    "excludes": [
+      "AYANEODeviceCEii fan overrides and AyanEOCEiiModeRegister routes",
+      "pinned-source AYA routes",
+      "vendor profile override even if base setter signatures match",
+      "ROG/MSI/Lenovo/OneX protocol-specific consumers",
+      "nonfactory or unregistered identity"
+    ],
+    "source": {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Program.cs",
+      "bytes": 1495790,
+      "sha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+    },
+    "anchors": [
+      {
+        "symbol": "CapabilityRoutes",
+        "path": "FanLab/real-host/Program.cs",
+        "line": 2494,
+        "sourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+      },
+      {
+        "symbol": "OpenHcDevice",
+        "path": "FanLab/real-host/Program.cs",
+        "line": 4949,
+        "sourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+      },
+      {
+        "symbol": "OpenInheritedEcFanDevice",
+        "path": "FanLab/real-host/Program.cs",
+        "line": 5447,
+        "sourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+      },
+      {
+        "symbol": "CloseObservedInheritedEcFanDevice",
+        "path": "FanLab/real-host/Program.cs",
+        "line": 5469,
+        "sourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+      },
+      {
+        "symbol": "InheritedEcFanWriter",
+        "path": "FanLab/real-host/Program.cs",
+        "line": 5487,
+        "sourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+      },
+      {
+        "symbol": "InheritedRoot",
+        "path": "FanLab/real-host/Program.cs",
+        "line": 5540,
+        "sourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+      },
+      {
+        "symbol": "SupportsRoute",
+        "path": "FanLab/real-host/Program.cs",
+        "line": 5557,
+        "sourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+      },
+      {
+        "symbol": "GetInheritedEcFanWriter",
+        "path": "FanLab/real-host/Program.cs",
+        "line": 5605,
+        "sourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+      },
+      {
+        "symbol": "InheritedEcFanWriteCurrent",
+        "path": "FanLab/real-host/Program.cs",
+        "line": 5618,
+        "sourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+      },
+      {
+        "symbol": "RestoreOemCore",
+        "path": "FanLab/real-host/Program.cs",
+        "line": 6842,
+        "sourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+      },
+      {
+        "symbol": "CloseHcDevice",
+        "path": "FanLab/real-host/Program.cs",
+        "line": 8407,
+        "sourceSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+      }
+    ],
+    "testsReexecutedByLibrary": false,
+    "currentInstalledPayloadAcceptance": false,
+    "physicalAcceptance": false,
+    "sourceEpochScope": "Observed source snapshot before consumer release-exception accounting repair; a subsequent owner patch requires its own source/test identity receipt."
+  },
+  "models": [
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEO2",
+      "sourceGroup": "CEc",
+      "frozenCatalogIdentity": "hc.device.AYANEO2",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-generic-ec",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "GenericEcControl",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "IDevice",
+            "profileCallback": "IDevice"
+          }
+        },
+        "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107"
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEO2.cs",
+        "sourceSha256": "42b446db0f974034377481cc8a9f1f76106d2cb166c5d5a46995f6823d1759ee",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEO2"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEO2S",
+      "sourceGroup": "CEc",
+      "frozenCatalogIdentity": "hc.device.AYANEO2S",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-generic-ec",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "GenericEcControl",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "IDevice",
+            "profileCallback": "IDevice"
+          }
+        },
+        "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107"
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEO2S.cs",
+        "sourceSha256": "060909950e3d6b73899f241aaf222459d744d4aa665d65bc71571eb2f0242202",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEO2",
+          "AYANEO2S"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOAIR",
+      "sourceGroup": "CEc",
+      "frozenCatalogIdentity": "hc.device.AYANEOAIR",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-generic-ec",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "GenericEcControl",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "IDevice",
+            "profileCallback": "IDevice"
+          }
+        },
+        "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107"
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOAIR.cs",
+        "sourceSha256": "6325dee1f240cce27b73b3dcbf0a8e8615f6ced1e39ca32687f455ba7f5d9602",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEOAIR"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOAIR1S",
+      "sourceGroup": "CEc via AIR",
+      "frozenCatalogIdentity": "hc.device.AYANEOAIR1S",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-generic-ec",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "GenericEcControl",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "IDevice",
+            "profileCallback": "IDevice"
+          }
+        },
+        "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107"
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": "29de13be7f8fdfb16dddf27e1668b555d4fc74ed306ea05b006b21fd73688064",
+        "outcome": "CURRENT_HANDSHAKE_AND_LEASE_OBSERVED_RELEASE_AND_PHYSICAL_EFFECT_UNPROVEN"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOAIR1S.cs",
+        "sourceSha256": "36e9b2422c08f089fc13be74da5518e958867f335ecb70f7d3172dc69ce655a9",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEOAIR",
+          "AYANEOAIR1S"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOAIRLite",
+      "sourceGroup": "CEc via AIR",
+      "frozenCatalogIdentity": "hc.device.AYANEOAIRLite",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-generic-ec",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "GenericEcControl",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "IDevice",
+            "profileCallback": "IDevice"
+          }
+        },
+        "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107"
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOAIRLite.cs",
+        "sourceSha256": "d8225d8ffa92275b2559b6d6adac214e70ddc4d35aba8983e06d789ef7375e0f",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEOAIR",
+          "AYANEOAIRLite"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOAIRPro",
+      "sourceGroup": "CEc via AIR",
+      "frozenCatalogIdentity": "hc.device.AYANEOAIRPro",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-generic-ec",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "GenericEcControl",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "IDevice",
+            "profileCallback": "IDevice"
+          }
+        },
+        "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107"
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOAIRPro.cs",
+        "sourceSha256": "3cc4dc044cbe58edb4705fdaa4f84f8c26bbd9faff0d06295f8d71a902a9cf48",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEOAIR",
+          "AYANEOAIRPro"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOFlipKB",
+      "sourceGroup": "CEc",
+      "frozenCatalogIdentity": "hc.device.AYANEOFlipKB",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-generic-ec",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "GenericEcControl",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "IDevice",
+            "profileCallback": "IDevice"
+          }
+        },
+        "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107"
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOFlipKB.cs",
+        "sourceSha256": "0d90c00b3e2eed7073ac80d2e9caff2dc0195432c9627f6e7268ff8037dda16f",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEOFlipKB"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOFlip1SKB",
+      "sourceGroup": "CEc via FlipKB",
+      "frozenCatalogIdentity": "hc.device.AYANEOFlip1SKB",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-generic-ec",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "GenericEcControl",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "IDevice",
+            "profileCallback": "IDevice"
+          }
+        },
+        "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107"
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOFlip1SKB.cs",
+        "sourceSha256": "00780ec55849798c134d43ef0a6333f3bf4b714d11f9c112aba7f8c21809855f",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEOFlipKB",
+          "AYANEOFlip1SKB"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOFlipDS",
+      "sourceGroup": "CEc; lighting flags removed",
+      "frozenCatalogIdentity": "hc.device.AYANEOFlipDS",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-generic-ec",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "GenericEcControl",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEOFlipDS",
+            "setFanControl": "IDevice",
+            "profileCallback": "IDevice"
+          }
+        },
+        "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107"
+      },
+      "lighting": {
+        "sourceConsumerKind": "source-disabled",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED",
+        "disposition": "Source explicitly removed lighting flags; not a missed import."
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOFlipDS.cs",
+        "sourceSha256": "307fa78aac6f823ecb44ef8797dfcc8c19d9f451bb1a7707b6a70ed5dd69a5b6",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEOFlipKB",
+          "AYANEOFlipDS"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOFlip1SDS",
+      "sourceGroup": "CEc via FlipDS; lighting flags removed",
+      "frozenCatalogIdentity": "hc.device.AYANEOFlip1SDS",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-generic-ec",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "GenericEcControl",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEOFlipDS",
+            "setFanControl": "IDevice",
+            "profileCallback": "IDevice"
+          }
+        },
+        "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107"
+      },
+      "lighting": {
+        "sourceConsumerKind": "source-disabled",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED",
+        "disposition": "Source explicitly removed lighting flags; not a missed import."
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOFlip1SDS.cs",
+        "sourceSha256": "78068b98db582805b83ab9d134221e0edbfb0921e5b737fe416dd704aa3773d0",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEOFlipKB",
+          "AYANEOFlipDS",
+          "AYANEOFlip1SDS"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOKUN",
+      "sourceGroup": "CEc; zone/color override",
+      "frozenCatalogIdentity": "hc.device.AYANEOKUN",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-generic-ec",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "GenericEcControl",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "IDevice",
+            "profileCallback": "IDevice"
+          }
+        },
+        "conditionalCurrentContract": "aya-current-inherited-ec-consumption-20261107"
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOKUN.cs",
+        "sourceSha256": "6f46828e1c21b1ca641791b7d43273bd90ca7a63e60f4cce4523fa6bfa9e7496",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEOKUN"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOAIRPlusAMD",
+      "sourceGroup": "CEii",
+      "frozenCatalogIdentity": "hc.device.AYANEOAIRPlusAMD",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-ceii",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "AyanEOCEiiModeRegister",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "AYANEODeviceCEii",
+            "profileCallback": "IDevice"
+          }
+        }
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec-with-ceii-transport",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-ceii-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOAIRPlusAMD.cs",
+        "sourceSha256": "fe266b7a3602cd26893b81e2b33671d641d854f89f371c76befc787aec64e418",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEODeviceCEii",
+          "AYANEOAIRPlus",
+          "AYANEOAIRPlusAMD"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino",
+      "sourceGroup": "CEii; duty low byte 0x02",
+      "frozenCatalogIdentity": "hc.device.AYANEOAIRPlusAMDMendocino",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-ceii",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "AyanEOCEiiModeRegister",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "AYANEODeviceCEii",
+            "profileCallback": "IDevice"
+          }
+        }
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec-with-ceii-transport",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-ceii-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOAIRPlusAMDMendocino.cs",
+        "sourceSha256": "060e37b9cd57d5c0a753dd06561a6af03ccc53a55bc93e9c93573358a2305c24",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEODeviceCEii",
+          "AYANEOAIRPlus",
+          "AYANEOAIRPlusAMDMendocino"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOAIRPlusIntel",
+      "sourceGroup": "CEii; duty low byte 0x02",
+      "frozenCatalogIdentity": "hc.device.AYANEOAIRPlusIntel",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-ceii",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "AyanEOCEiiModeRegister",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "AYANEODeviceCEii",
+            "profileCallback": "IDevice"
+          }
+        }
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec-with-ceii-transport",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-ceii-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOAIRPlusIntel.cs",
+        "sourceSha256": "bf6001e9bbf0973cffa7e63d9dc4ccf6ab3c88c5404eab341cea46561bf27e59",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEODeviceCEii",
+          "AYANEOAIRPlus",
+          "AYANEOAIRPlusIntel"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOSlide",
+      "sourceGroup": "CEii",
+      "frozenCatalogIdentity": "hc.device.AYANEOSlide",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "existing-ceii",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "registeredRoute": {
+          "registryKind": "GenericDuty",
+          "restoreStrategy": "AyanEOCEiiModeRegister",
+          "registryEvidenceMode": "CompatCallbackNoScope",
+          "methodOwners": {
+            "close": "AYANEODeviceCEc",
+            "setFanControl": "AYANEODeviceCEii",
+            "profileCallback": "IDevice"
+          }
+        }
+      },
+      "lighting": {
+        "sourceConsumerKind": "frozen-cec-with-ceii-transport",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-ceii-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOSLIDE.cs",
+        "sourceSha256": "3b318c73d83889aa55d9076343111c86c0cbe842d10a1071a5490193f0a8941a",
+        "inheritance": [
+          "IDevice",
+          "AYANEODevice",
+          "AYANEODeviceCEc",
+          "AYANEODeviceCEii",
+          "AYANEOSlide"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEO2021",
+      "sourceGroup": "old IDevice; not CEc/CEii",
+      "frozenCatalogIdentity": "hc.device.AYANEO2021",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "not-declared-not-registered",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "disposition": "No fan declaration or consumer in audited source; family name does not enable it."
+      },
+      "lighting": {
+        "sourceConsumerKind": "not-declared-not-registered",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "not-declared-not-registered",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEO2021.cs",
+        "sourceSha256": "020774ea3b01b9438bfde81cb9fb956d5270301b4eadec5d2a142c1f719cf39f",
+        "inheritance": [
+          "IDevice",
+          "AYANEO2021"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEO2021Pro",
+      "sourceGroup": "old IDevice via AYANEO2021",
+      "frozenCatalogIdentity": "hc.device.AYANEO2021Pro",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "not-declared-not-registered",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "disposition": "No fan declaration or consumer in audited source; family name does not enable it."
+      },
+      "lighting": {
+        "sourceConsumerKind": "not-declared-not-registered",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "not-declared-not-registered",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEO2021Pro.cs",
+        "sourceSha256": "cf57f42cc209affe33da13da197f670ccfe6c9168bd2805b3dca4b45eb600283",
+        "inheritance": [
+          "IDevice",
+          "AYANEO2021",
+          "AYANEO2021Pro"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEONEXT",
+      "sourceGroup": "old IDevice; not NEXT2",
+      "frozenCatalogIdentity": "hc.device.AYANEONEXT",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "not-declared-not-registered",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "disposition": "No fan declaration or consumer in audited source; family name does not enable it."
+      },
+      "lighting": {
+        "sourceConsumerKind": "not-declared-not-registered",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "not-declared-not-registered",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEONEXT.cs",
+        "sourceSha256": "9133bd10fd7c9d6da796bf488fe06e64ab4103182d8a3c8d1f462467cfb82ad5",
+        "inheritance": [
+          "IDevice",
+          "AYANEONEXT"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEONEXTLite",
+      "sourceGroup": "old IDevice via NEXT",
+      "frozenCatalogIdentity": "hc.device.AYANEONEXTLite",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "not-declared-not-registered",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "disposition": "No fan declaration or consumer in audited source; family name does not enable it."
+      },
+      "lighting": {
+        "sourceConsumerKind": "not-declared-not-registered",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "not-declared-not-registered",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEONEXTLite.cs",
+        "sourceSha256": "34c1a424f1337f3d2b9b31ce22441bad2111ea91f75e52c7f4be99329fc7ec5b",
+        "inheritance": [
+          "IDevice",
+          "AYANEONEXT",
+          "AYANEONEXTLite"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEONEXTLite4500U",
+      "sourceGroup": "old IDevice via NEXTLite",
+      "frozenCatalogIdentity": "hc.device.AYANEONEXTLite4500U",
+      "sourceIdentityKind": "frozen-HC-identity",
+      "fan": {
+        "sourceConsumerKind": "not-declared-not-registered",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false,
+        "disposition": "No fan declaration or consumer in audited source; family name does not enable it."
+      },
+      "lighting": {
+        "sourceConsumerKind": "not-declared-not-registered",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "not-declared-not-registered",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      },
+      "source": {
+        "sourcePath": "deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEONEXTLite4500U.cs",
+        "sourceSha256": "fbe60925aa30e071696c13cae71c44ce95d326376c5682dc5a7446b93c6681ba",
+        "inheritance": [
+          "IDevice",
+          "AYANEONEXT",
+          "AYANEONEXTLite",
+          "AYANEONEXTLite4500U"
+        ],
+        "factoryInstantiable": true
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEO3",
+      "sourceGroup": "special CEc plus SuperJoy",
+      "frozenCatalogIdentity": null,
+      "sourceIdentityKind": "existing-reviewed-per-domain-extension",
+      "fan": {
+        "sourceConsumerKind": "pinned-source",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false
+      },
+      "lighting": {
+        "sourceConsumerKind": "superjoy-cec-v1",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEONEXT2",
+      "sourceGroup": "special CEc plus SuperJoy",
+      "frozenCatalogIdentity": null,
+      "sourceIdentityKind": "existing-reviewed-per-domain-extension",
+      "fan": {
+        "sourceConsumerKind": "pinned-source",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false
+      },
+      "lighting": {
+        "sourceConsumerKind": "superjoy-cec-v1",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOAIR2",
+      "sourceGroup": "special CEc; fan 0x02F1/0x1809 max184",
+      "frozenCatalogIdentity": null,
+      "sourceIdentityKind": "existing-reviewed-per-domain-extension",
+      "fan": {
+        "sourceConsumerKind": "pinned-source",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false
+      },
+      "lighting": {
+        "sourceConsumerKind": "source-declared-no-current-exact-consumer",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED",
+        "disposition": "Declaration only; no empty runtime registration. Existing consumer must be implemented and checked separately."
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOAIRPro1S",
+      "sourceGroup": "CEc via AIR1S",
+      "frozenCatalogIdentity": null,
+      "sourceIdentityKind": "existing-reviewed-per-domain-extension",
+      "fan": {
+        "sourceConsumerKind": "pinned-source",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false
+      },
+      "lighting": {
+        "sourceConsumerKind": "source-declared-no-current-exact-consumer",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED",
+        "disposition": "Declaration only; no empty runtime registration. Existing consumer must be implemented and checked separately."
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOFlip11",
+      "sourceGroup": "CEc via Flip1SKB",
+      "frozenCatalogIdentity": null,
+      "sourceIdentityKind": "existing-reviewed-per-domain-extension",
+      "fan": {
+        "sourceConsumerKind": "pinned-source",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false
+      },
+      "lighting": {
+        "sourceConsumerKind": "source-declared-no-current-exact-consumer",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED",
+        "disposition": "Declaration only; no empty runtime registration. Existing consumer must be implemented and checked separately."
+      },
+      "battery": {
+        "provider": "ayaneo-cec-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      }
+    },
+    {
+      "modelClass": "HandheldCompanion.Devices.AYANEOAIRPlusNxx",
+      "sourceGroup": "special CEii; duty low byte 0x02",
+      "frozenCatalogIdentity": null,
+      "sourceIdentityKind": "existing-reviewed-per-domain-extension",
+      "fan": {
+        "sourceConsumerKind": "pinned-source",
+        "sourceWiringOnly": true,
+        "runtimeReadyOrHardwarePass": false
+      },
+      "lighting": {
+        "sourceConsumerKind": "source-declared-no-current-exact-consumer",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED",
+        "disposition": "Declaration only; no empty runtime registration. Existing consumer must be implemented and checked separately."
+      },
+      "battery": {
+        "provider": "ayaneo-ceii-bypass",
+        "runtimeEvidenceInThisArchive": "NOT_OBSERVED"
+      },
+      "field": {
+        "archive": null,
+        "outcome": "NO_CURRENT_FIELD_EVIDENCE"
+      }
+    }
+  ],
+  "libraryRepair": {
+    "wrongAir1sClassMaskOrRouteConfirmed": false,
+    "newWriterOrWhitelistAdded": false,
+    "historicalCallbackSummaryQualified": true,
+    "protocolDeclarationsAndActivationChanged": false,
+    "runtimeAndSourceIdentitiesKeptSeparate": true,
+    "oldIdDeviceUndeclaredAndDsDisabledNotTreatedAsMissingImport": true,
+    "unconsumedLightingModels": [
+      "AYANEOAIR2",
+      "AYANEOAIRPro1S",
+      "AYANEOFlip11",
+      "AYANEOAIRPlusNxx"
+    ],
+    "unconsumedCapabilitiesNotRegistered": true
+  },
+  "consumerActionRequired": {
+    "threadId": "01a0d76e-de65-7cd2-8269-b7bd7de17ac7",
+    "reuseExistingTotalLibraryFanBinding": true,
+    "inspect": "Historical suspend/close release-unproven errors against current inherited EC path and original release settlement; no new AYA-specific transport",
+    "currentSourceAlreadyHasGenericWriterIsNotAReleaseFixAcceptance": true,
+    "currentSourceToPublishedPayloadAndLoadedSessionMustBeBound": true,
+    "physicalRpmOrOemReturnNotEstablishedByHttp200OrCallback": true,
+    "currentReleaseExceptionAccounting": {
+      "id": "AYA-HC098-RELEASE-EXCEPTION-ACCOUNTING",
+      "status": "RESOLVED_SELECTED_SOFTWARE_SCOPE_MAINLINE_COMPONENT_SELECTED",
+      "observedAtHongKong": "2026-11-07T00:53:31.015435+08:00",
+      "source": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Program.cs",
+        "bytes": 1496650,
+        "sha256": "197f073350242a27e94a0a211151a3c6c81bc886f1af1f1dd3eda9db1c9d7e12"
+      },
+      "symbol": "RealHcBackend.RestoreOemCore catch",
+      "line": 6924,
+      "observed": "Existing RestoreOemCore catch now classifies and records this operation verdict in the existing release action/evidence and write-evidence fields, then preserves the original throw.",
+      "evidenceExcerpt": {
+        "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-098-AYA-FAMILY-FIELD-REPAIR\\release-accounting-consumer-intake\\VERIFIED-PROGRAM-NET-CHANGE.patch",
+        "bytes": 2907,
+        "sha256": "32831d69985e3b73b01e0707e277a899bacc9350b7b3ad84c38b498e82e40393"
+      },
+      "requiredRepair": "Existing fan owner writes the current route/operation bound verdict through existing release classifier and existing OemReleaseActionKind/Evidence, keeps original exception/Close order/FaultLocked/physical unknown. No new interface or writer.",
+      "productOwnerThreadId": "01a0d76e-de65-7cd2-8269-b7bd7de17ac7",
+      "isLibraryRouteOrMaskError": false,
+      "oldArchiveRootCauseOrCurrentPayloadReproductionProven": false,
+      "consumerImplementedOrTestedAtThisObservation": true,
+      "completionCondition": "Owner supplies actual new source SHA and selected existing regression receipts; physical/published acceptance separate.",
+      "resolvedAtHongKong": "2026-11-07T01:51:09.178919+08:00",
+      "initialObservation": {
+        "id": "AYA-HC098-RELEASE-EXCEPTION-ACCOUNTING",
+        "status": "CONFIRMED_CURRENT_CONSUMER_SOURCE_GAP_OWNER_FIX_PENDING",
+        "observedAtHongKong": "2026-11-07T00:53:31.015435+08:00",
+        "source": {
+          "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Program.cs",
+          "bytes": 1495790,
+          "sha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4"
+        },
+        "symbol": "RealHcBackend.RestoreOemCore catch",
+        "line": 6922,
+        "observed": "SettleOperationEvidence(releaseScope,\"oem-restore\",callbackReturned:false) result is discarded then the original exception is rethrown; current OemReleaseActionKind/Evidence may retain not-attempted instead of reflecting this attempted failure/unknown.",
+        "evidenceExcerpt": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-098-AYA-FAMILY-FIELD-REPAIR\\release-accounting-supplement\\RestoreOemCore-before-catch.txt",
+          "bytes": 410,
+          "sha256": "8f5cdc99bd5ed11ca6dc6208459cab7658aba53f7d475c29d3156482975e995f"
+        },
+        "requiredRepair": "Existing fan owner writes the current route/operation bound verdict through existing release classifier and existing OemReleaseActionKind/Evidence, keeps original exception/Close order/FaultLocked/physical unknown. No new interface or writer.",
+        "productOwnerThreadId": "01a0d76e-de65-7cd2-8269-b7bd7de17ac7",
+        "isLibraryRouteOrMaskError": false,
+        "oldArchiveRootCauseOrCurrentPayloadReproductionProven": false,
+        "consumerImplementedOrTestedAtThisObservation": false,
+        "completionCondition": "Owner supplies actual new source SHA and selected existing regression receipts; physical/published acceptance separate."
+      },
+      "completionConditionMetForSelectedSoftwareScope": true,
+      "consumptionReceipt": {
+        "producerReport": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-AYA-Air1S-20261107\\REPORT.json",
+          "bytes": 3237,
+          "sha256": "0b864ba90eb477dda9c0fdd85df9b9474945c5d644c3b9ceda3a79db40f69228"
+        },
+        "producerText": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-AYA-Air1S-20261107\\REPORT.zh-CN.md",
+          "bytes": 4445,
+          "sha256": "cf64881ed16295b7c62755f61a0baf4531e25d94be6ee6bd268a2c9a2365cf3b"
+        },
+        "independentIntake": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-098-AYA-FAMILY-FIELD-REPAIR\\release-accounting-consumer-intake\\SOURCE-PAYLOAD-REGRESSION-VERIFICATION.json",
+          "bytes": 97356,
+          "sha256": "899e499d69aa7ce446636dead43aa49a4ab4f62377d9be285976426aabd71588"
+        },
+        "originalPositive": {
+          "canonicalId": "fan.unified-capability-roundtrip",
+          "cases": [
+            "legacy/initial-default-guard",
+            "asus/failure-cases"
+          ],
+          "checks": 574,
+          "receipt": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-AYA-Air1S-20261107\\green-accounting-final\\selected-roundtrip-results.json",
+            "bytes": 62920,
+            "sha256": "234e3509be8f70190ca20cf52a4bda6aadd25d545949a0731e737d4665e369ea"
+          },
+          "sourceInputsVerified": 28
+        },
+        "exactBeforeNegative": {
+          "programSha256": "9e91c59ef18e0f271b71404900c139c304e9cd7722ce7c23f55d6b8f9445b6c4",
+          "receipt": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-AYA-Air1S-20261107\\red-final-contract-exact\\selected-roundtrip-results.json",
+            "bytes": 3533,
+            "sha256": "03883a9adc661c6469b8812a59d966b5670545b6f1599f89430089cec396de3f"
+          },
+          "expectedFailure": "legacy-applied-attempted-release-failure-is-recorded:HandheldCompanion.Devices.AYANEO2",
+          "selectionVerifiedFalseBecauseBusinessAssertionExitedEarly": true
+        },
+        "packageSource": {
+          "pass": 25,
+          "fail": 0,
+          "receipt": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-AYA-Air1S-20261107\\package-source\\fan-package-source-20261107-013156-31c9f219563f4114bcd7ea5e9858a469\\fan-promotion-package-source-result.json",
+            "bytes": 4317276,
+            "sha256": "15578d9e2d49caac9a08b48fae955dd3e4f6a08775c31311d81810920c76beae"
+          }
+        },
+        "selectedComponent": {
+          "componentId": "candidate-aya-release-accounting-20261107",
+          "hostDllSha256": "7bd62d3f9d1aaaa7ea2141b34873848449735a63cd2f933fa8af95080dfc03d7",
+          "backendDllSha256": "d8a7bb5f792073c0d9ee69553051aa1eea09f4874e593d0b3b52fef8f3a905ec",
+          "payloadManifest": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\fan-host\\YeManFanHost.payload.json",
+            "bytes": 1478,
+            "sha256": "b42bf5dcaabbd880c1e1031e3fad136ae120e133b8cf3cba6e28001c6944c1e8"
+          },
+          "sourceBundleManifest": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\deps\\fan-host-source\\candidate-aya-release-accounting-20261107\\manifest.json",
+            "bytes": 122469,
+            "sha256": "9413636f346b3ef3d2fe16363cd51973c967e2fb6369fb1ed05f291357dcee27"
+          },
+          "sourceInputsVerified": 45,
+          "declaredRoles": {
+            "Compile": 41,
+            "project": 2,
+            "Content": 2
+          },
+          "payloadFilesVerified": 9,
+          "bundleFilesVerified": 57,
+          "promotion": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-AYA-Air1S-20261107\\PROMOTION-RESULT.json",
+            "bytes": 8153,
+            "sha256": "9bf5626210e6c96e063cd6d96cc42f5fdde24a4a3b02c552094de0594c0aad2a"
+          },
+          "originalPayloadVerifier": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-AYA-Air1S-20261107\\mainline-payload-verify.txt",
+            "bytes": 508,
+            "sha256": "5a8678b01bf9a10d5954d861d295ce6a95f12b0dc1eedeea98f59f6446bb3615"
+          },
+          "originalSourceBaselineVerifier": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-AYA-Air1S-20261107\\source-baseline-verify.txt",
+            "bytes": 77,
+            "sha256": "e21d7ce8a3b02f204cfa5a0a89fa9ad60be7829187e4019068bb0fb9c9742881"
+          },
+          "wholeProductExported": false,
+          "installedOrLoadedOnUserMachine": false
+        },
+        "retainedOriginalBudget": {
+          "record": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-AYA-Air1S-20261107\\EXECUTION-COST.json",
+            "bytes": 3584,
+            "sha256": "8e1150a40047149739131e290bf15c71500b5def5f8f8a63c9bcbc9cc35a61fa"
+          },
+          "observedTotalSeconds": 78.5668462,
+          "limitSeconds": 180,
+          "ledgerWrittenByReviewer": false
+        },
+        "testsRerunByLibrary": false
+      },
+      "historicalCloseRootCause": "UNKNOWN",
+      "physicalFanOrOemReturnAcceptance": false,
+      "fullOriginalSuiteAccepted": false,
+      "currentMainlineWholeTreeAcceptance": false,
+      "postPromotionUnrelatedSourceDriftRetained": [
+        {
+          "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+          "plannedAfterSha256": "b1e06a491ccaea7e91fd001f7f2316a6ff41147937cf1eb151fd0e6ff4f178b8",
+          "observedSha256": "b4c9b690635ce928803dbc0041b16cd65422073e19eab54122b86bd1e3ece425",
+          "matches": false
+        }
+      ]
+    }
+  },
+  "notProven": [
+    "Current-source sleep/close release action or complete fan lifecycle",
+    "New normal-package/current-source-to-payload mapping",
+    "Current installed binary contains current inherited EC changes",
+    "Physical fan RPM/firmware ownership",
+    "AYA lighting or charging hardware success from this archive",
+    "Other AYA models field acceptance"
+  ],
+  "fullAyaFamilyComplete": false,
+  "consumerProductCodeWrittenByLibrary": false,
+  "controllerFeedbackRepair20261107": {
+    "role": "Additive controller/feedback evidence navigation; does not alter fan contracts or runtime registration",
+    "date": "2026-11-07",
+    "status": "SOURCE_REPAIR_VERIFIED_SELECTED_CONSUMERS_HARDWARE_PENDING",
+    "matrix": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\AYA-FIVE-FEATURE-CONSUMER-MATRIX-final.json",
+      "bytes": 56935,
+      "sha256": "2d402fe6a6657bb8b7c8fcfe4e15146bc7de2a6c3262a215df3574f4addb122b"
+    },
+    "receipt": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\SOURCE-READY-RECEIPT.json",
+      "bytes": 8598,
+      "sha256": "318e2a3fa1a27abf859883cdd5c4295ba54d5fa5489d368517041feaea987a01"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\REPORT.zh-CN.md",
+      "bytes": 7573,
+      "sha256": "996511393baad252c164801dc37755b45b54a96c5676a2514d614b6920b66847"
+    },
+    "physicalAcceptance": false,
+    "remaining": [
+      "AYA3 physical rear/gesture attribution",
+      "actual configured AYA action consumption in ordinary mode",
+      "NEXT2 four-key game-output boundary",
+      "lighting lifecycle and OEM interference",
+      "physical vibration and charging-indicator protocol/readback"
+    ],
+    "actionConsumerEvidence": {
+      "status": "SELECTED_NATIVE_ACTION_CONSUMER_VERIFIED_HARDWARE_PENDING",
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\ACTION-CONSUMER-RECEIPT.json",
+        "bytes": 4241,
+        "sha256": "e38deb259df64b696cd88974cfc6f950ab9d21cf57de14ef23d9d78a460ba8a5"
+      },
+      "report": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\REPORT-ACTION-CONSUMER.zh-CN.md",
+        "bytes": 4346,
+        "sha256": "d5b2f5aaca62a0755a43631733e76197a0ad47c9d73af96ecc316939773352a1"
+      },
+      "nativeChecks": 3969,
+      "ayaCatalogAliasExtensionEntries": 35,
+      "operationEntries": 147,
+      "negativeRejectedChecks": 1470,
+      "hardwareAcceptance": false,
+      "editorSaveAndPhysicalSourceStillPending": true
+    },
+    "lightingLifecycleRepairEvidence": {
+      "role": "Additive source/consumer navigation; does not register hardware capability or modify fan contracts",
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\lighting-lifecycle\\SOURCE-READY-RECEIPT.json",
+        "bytes": 6933,
+        "sha256": "0966d60ac644eba44a9c28b6df4b9bd2cfa3a939da495ec2b4a9a22a78b32ec4"
+      },
+      "report": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\lighting-lifecycle\\REPORT.zh-CN.md",
+        "bytes": 4998,
+        "sha256": "cc032b7822ad5f01f998ac33d551b08d48a6b5f839b1c6dff0de5171271a483c"
+      },
+      "sourceStatus": "LIGHTING_LIFECYCLE_SOURCE_REPAIRED_SELECTED_CONSUMERS_VERIFIED",
+      "validation": {
+        "ayaCases": 19,
+        "ayaChecks": 148,
+        "admittedCatalogAliasEntries": 29,
+        "rejectedCatalogAliasEntries": 26,
+        "originalSelectorModels": 51,
+        "originalSelectorChecks": 339,
+        "semanticNegative": "EXPECTED_REJECTION",
+        "windowsBindings": "COMPILED_LINKED_NOT_EXECUTED",
+        "fullNativeTranslationUnit": "MSVC_ZS_PASS",
+        "actualSyntaxCompilerInputs": 1560,
+        "nativeBinaryLink": "NOT_RUN",
+        "formalRelease": "NOT_RUN",
+        "hardwareAcceptance": false
+      },
+      "chargingIndicator": {
+        "independentSetter": "UNKNOWN",
+        "readback": "UNKNOWN",
+        "familyWideSharedCircuitProven": false,
+        "sourceObservedRgbReapply": true,
+        "newIndependentCapabilityGranted": false
+      },
+      "goalStatus": "active",
+      "independentOwnerRearm": {
+        "status": "AYA_LIGHTING_LIFECYCLE_AND_INDEPENDENT_OWNER_SOURCE_READY",
+        "receipt": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\lighting-lifecycle\\owner-rearm\\SOURCE-READY-RECEIPT.json",
+          "bytes": 5019,
+          "sha256": "a0fa5c3ab957be26f8eaf26b7e07e0bc3c714a9506c244bb0a42155cb2a8b24e"
+        },
+        "report": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\lighting-lifecycle\\owner-rearm\\REPORT.zh-CN.md",
+          "bytes": 2312,
+          "sha256": "7df816071f58116d020228f76cd44b2cc66fce9a35672ccaac99f08c4988695f"
+        },
+        "validation": {
+          "ayaCases": 20,
+          "ayaChecks": 157,
+          "originalLightingModels": 51,
+          "originalSelectorChecks": 339,
+          "missingReadyNegative": "EXPECTED_REJECTION",
+          "missingOwnerNegative": "EXPECTED_REJECTION",
+          "fullNativeSyntax": "MSVC_ZS_PASS",
+          "actualCompilerInputs": 1560,
+          "windowsSessionApi": "COMPILED_LINKED_NOT_EXECUTED",
+          "nativeBinaryLink": "NOT_RUN",
+          "hardwareAcceptance": false
+        },
+        "sourceAdapterQuery": "existing public sourceAdapter(deviceClass), including extension metadata",
+        "inputCaptureStartedByLighting": false,
+        "goalStatus": "active"
+      }
+    },
+    "manualVibrationReceiptEvidence": {
+      "role": "AYA UI request/result evidence, not a motor capability or hardware acceptance switch",
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\manual-feedback\\SOURCE-READY-RECEIPT.json",
+        "bytes": 5450,
+        "sha256": "175c78d5c0026174070dfcbaeb988ff52c0f4df335f2154d7ebf2780c0c8bc0f"
+      },
+      "report": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\manual-feedback\\REPORT.zh-CN.md",
+        "bytes": 3473,
+        "sha256": "ad364bfb3995e52dec8831a489b13fcb9124c3828eceacc1e153188c2be3f44c"
+      },
+      "validation": {
+        "nativeMemoryChecks": 1311,
+        "nativeModelReceiptSets": 6,
+        "ayaModelReceiptSets": 3,
+        "ayaBrowserChecks": 58,
+        "oldCardNegativeRejectedChecks": 32,
+        "defaultBrowserChecks": 140,
+        "vueTsc": "observed exec_command exit 0; original text log retained",
+        "actualHardwareOperations": false
+      },
+      "actualMotorResponse": "UNVERIFIED",
+      "goalStatus": "active"
+    },
+    "editorSavedActionConsumerEvidence": {
+      "role": "Additive evidence/navigation only; no capability registration, default action or fan contract change",
+      "status": "AYA_EDITOR_MEMORY_SAVE_NATIVE_PARSE_DISPATCH_WORKER_VERIFIED_HARDWARE_PENDING",
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\editor-saved-actions\\SOURCE-READY-RECEIPT.json",
+        "bytes": 4903,
+        "sha256": "723eb6cd356b30c40917ec2c27c5bf926793f3817b8d849f08d3230b085d0e1b"
+      },
+      "report": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\editor-saved-actions\\REPORT.zh-CN.md",
+        "bytes": 5558,
+        "sha256": "d1fc9edfcd56c72c36c81d1045adceacf2e0d2a0b53f3341b84b3f2844a471cc"
+      },
+      "browserChecks": 221,
+      "nativeChecks": 440,
+      "savedSnapshots": 44,
+      "uniqueCatalogOperations": 22,
+      "selectedModels": 3,
+      "negativeExpectedFailures": 132,
+      "editorSaveMemoryCasVerified": true,
+      "actualNativeSettingsParserVerified": true,
+      "actualDispatcherAndKeyboardWorkerVerified": true,
+      "actualSettingsDiskCasVerified": false,
+      "physicalInputSourceVerified": false,
+      "hardwareAcceptance": false,
+      "virtualOutput": "disabled",
+      "productLogicModifiedThisTurn": false,
+      "completeExport": "NOT_RUN",
+      "goalStatus": "active"
+    },
+    "keyboardSourceWitnessAndNativeBuildEvidence": {
+      "role": "Read-only AYA diagnostics and primary-reference navigation; no new model registration, input authority or fan contract",
+      "status": "AYA_SOURCE_WITNESS_AND_COMPLETE_NATIVE_LINK_READY_PHYSICAL_ACCEPTANCE_PENDING",
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\keyboard-source-witness\\SOURCE-READY-RECEIPT.json",
+        "bytes": 7324,
+        "sha256": "26076e5775ddf32c188a65da813ceeec652db0f4361ce47b3dc0cb0a432c2198"
+      },
+      "report": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\keyboard-source-witness\\REPORT.zh-CN.md",
+        "bytes": 6657,
+        "sha256": "2e35b81b46fcdf60330c81cd3817d5a0d45acfadb5281e00c37cfb5b1d6f331d"
+      },
+      "checks": {
+        "directedBehavior": 16,
+        "sourceAnchors": 37,
+        "expectedNegativeFailures": 6,
+        "normalNativeBuild": "PASS",
+        "fullAcceptance": "NOT_RUN",
+        "hardwareAcceptance": false
+      },
+      "sourceScope": "current AYA profile F13-F24 only; low-level non-injected/injected and Raw Input remain separate; no absence or hardware-origin proof",
+      "nativeBuildMainSha256": "debbdbf3adf0fce0fa6214e8ac43b86c23ee921a40b4af8736e28d3f02e660dc",
+      "chargingIndicatorPrimaryReferences": {
+        "air": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\keyboard-source-witness\\primary\\air-manual.pdf",
+          "bytes": 532010,
+          "sha256": "27e478b1050ef46fe01e18e16a0574e0169a1c186a5bb75b9902cfa295bb2b4b"
+        },
+        "ayaneo2": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\keyboard-source-witness\\primary\\ayaneo2-manual.pdf",
+          "bytes": 435585,
+          "sha256": "6d903609c9c9f6e90ee634c11ae2d101e71802a6185efcd32ddfc6357a7efea8"
+        },
+        "scope": "model-specific indication/diagram evidence, not setter/readback or family-wide shared circuit",
+        "newCapabilityGranted": false
+      },
+      "virtualControllerLogicChanged": false,
+      "firmwareExecuted": false,
+      "newHcDlls": false,
+      "deployed": false,
+      "goalStatus": "active"
+    },
+    "currentLightingPayloadSourceEvidence": {
+      "role": "Current LightSetter source/payload identity and charging-light boundary; no capability registration or deployment",
+      "status": "AYA_LIGHTSETTER_CURRENT_SOURCE_PUBLISHED_HARDWARE_PENDING",
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\lighting-payload-current-v2\\SOURCE-READY-RECEIPT.json",
+        "bytes": 1506,
+        "sha256": "440ddc800a5a2e2137dca9540f89c0606df16631f8c592d96ab0d49890654bc1"
+      },
+      "report": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\lighting-payload-current-v2\\REPORT.zh-CN.md",
+        "bytes": 1476,
+        "sha256": "adcba32a5776e949fe46486cc25d6a5ddb420d1a94cede717b89a9d00c71ac87"
+      },
+      "msbuildPublish": "PASS",
+      "sourceInputs": 24,
+      "sourceInputsCurrent": true,
+      "existingPayloadPdbPair": true,
+      "existingPayloadSourceDocumentsMatchCurrent": true,
+      "newDllMatchesExisting": false,
+      "newPdbMatchesExisting": false,
+      "productExecuted": false,
+      "hcLoaded": false,
+      "hardwareIo": false,
+      "deployed": false,
+      "completePackage": false,
+      "chargingIndicator": {
+        "independentSetter": "UNKNOWN",
+        "readback": "UNKNOWN",
+        "newCapabilityGranted": false
+      },
+      "goalStatus": "active"
+    },
+    "truthfulLightingReceiptUiEvidence": {
+      "role": "Common feedback semantics fix; preserves all lighting writers and family routes",
+      "status": "LIGHTING_REQUEST_RECEIPT_TRUTHFUL_PHYSICAL_EFFECT_PENDING",
+      "receipt": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\lighting-feedback-truthful-v2\\SOURCE-READY-RECEIPT.json",
+        "bytes": 1370,
+        "sha256": "22fb2040f2fa777f289455d5ee1c8c36fa9ab80a457324bb9885ffaeed3ccf2b"
+      },
+      "report": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\AyaFamily-20261107\\lighting-feedback-truthful-v2\\REPORT.zh-CN.md",
+        "bytes": 1336,
+        "sha256": "259d5b227e97cf8ae2640c41aab02222104ce8a55bee4fd7814f1b6517b2f3ff"
+      },
+      "changedFiles": [
+        "src/components/ControllerFeedbackCapabilitiesCard.vue",
+        "src/bridge/api.ts",
+        "tools/controller_lighting_operations_browser_selftest.mjs"
+      ],
+      "validation": {
+        "vueTsc": "PASS",
+        "feedbackCapabilitiesSelftest": "PASS",
+        "lightingBrowserChecks": 6,
+        "defaultFeedbackBrowserChecks": 140,
+        "ayaFeedbackBrowserChecks": 58,
+        "hardwareAcceptance": false
+      },
+      "writerLogicChanged": false,
+      "physicalEffectVerifiedFalseIsVisible": true,
+      "goalStatus": "active"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+# 触摸板输入同步与退役修正
+
+保留受控触摸/笔及鼠标穿透，继续使用现有事件驱动输入通道。原3修复/3故障周期/5秒预算、刷新率、自动隐藏、SD19光标与震动20/40/60不变。
+
+已复现两个具体缺口：单个ownedVisual实际Close后，source同步RO_E_CLOSED但窗口和worker仍正常，同配置手动选择跳过修复；清理时DesktopWindowTarget.Root(nullptr)实际E_INVALIDARG阻止后续controller.Close与target.Close，旧输入源长期保留。
+
+仅移除这一步额外Root解绑，仍按原顺序撤事件、释放capture并实际Close controller/target；其余异常继续失败，不能仅清指针冒充退役。正常UI Surface本来也是直接Close两个端点。
+
+原sync仅在同次invoke等待确认完成、非取消且当前Input未退场时标记该源失败；成功sync清该源标记。UI owner持弱引用，只在显式设置中进入已有完整释放/当前上下文校验/严格shutdown路径。旧consumerClosed源不能污染新设置；没有闲置轮询或额外健康probe。成功sync多一个原子写、故障有少量弱引用操作，不宣称零成本或实测CPU下降。
+
+真实隐藏桌面对照：旧同步场景手动/退出失败；只删Root解绑时退出恢复但手动仍失败；完整候选11项过，正式原manual17及首失败字段14项过。原自动恢复同场景旧9项中2失败，候选9项过，1repair/0runtime/0channelreset，两个原邮箱触点取消、原3轮openSources0。原私有夹具前置和编译失败保留。非OS触摸注入、Win5独占游戏、真实鼠标穿透或驱动端信号验收。
+
+最新112057 Win5日志writer9568/birth134393567007403986仍为b93e264b旧compiled marker，11:20:34恢复额度耗尽、11:20:39专用键输入/画面mask0。尚无本次修正实机反馈，不能认定该E_UNEXPECTED首因已完全解决。

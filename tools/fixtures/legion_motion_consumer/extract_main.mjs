@@ -45,13 +45,45 @@ function endBody(text, start) {
   }
   throw Error('Unclosed source body');
 }
+// A forward declaration may contain {} inside a default argument. Locate the
+// body only after the function's complete parameter list, ignoring literals and
+// comments; a default initializer is never a second function definition.
+function functionBodyOpen(text, parameterOpen) {
+  let depth = 0, mode = 'code', rawEnd = '', parametersEnded = false;
+  for (let i = parameterOpen; i < text.length; ++i) {
+    const c = text[i], next = text[i + 1];
+    if (mode === 'raw') { if (text.startsWith(rawEnd, i)) { i += rawEnd.length - 1; mode = 'code'; } continue; }
+    if (mode === 'line') { if (c === '\n') mode = 'code'; continue; }
+    if (mode === 'block') { if (c === '*' && next === '/') { ++i; mode = 'code'; } continue; }
+    if (mode === 'string' || mode === 'char') {
+      if (c === '\\') { ++i; continue; }
+      if (c === (mode === 'string' ? '"' : "'")) mode = 'code';
+      continue;
+    }
+    if (c === '/' && next === '/') { ++i; mode = 'line'; continue; }
+    if (c === '/' && next === '*') { ++i; mode = 'block'; continue; }
+    if (c === 'R' && next === '"') {
+      const open = text.indexOf('(', i + 2); assert(open >= 0 && open - i <= 18);
+      rawEnd = ')' + text.slice(i + 2, open) + '"'; mode = 'raw'; i = open; continue;
+    }
+    if (c === '"') { mode = 'string'; continue; }
+    if (c === "'") { mode = 'char'; continue; }
+    if (c === '(') ++depth;
+    if (c === ')') { --depth; if (depth === 0) parametersEnded = true; }
+    if (parametersEnded && depth === 0) {
+      if (c === ';') return -1;
+      if (c === '{') return i;
+    }
+  }
+  return -1;
+}
 export function extract(text, symbol, kind = 'function') {
   const regex = kind === 'function' ? new RegExp(`^static[^\\n;{]*\\b${symbol}\\s*\\(`, 'gm') :
     new RegExp(`^struct ${symbol}\\s*(?::[^\\n{;]+)?\\{`, 'gm');
   const found = [];
   for (const match of text.matchAll(regex)) {
-    const open = text.indexOf('{', match.index), semi = text.indexOf(';', match.index);
-    if (open < 0 || (semi >= 0 && semi < open)) continue;
+    const open = kind === 'function' ? functionBodyOpen(text,match.index+match[0].lastIndexOf('(')) : text.indexOf('{', match.index);
+    if (open < 0) continue;
     let end = endBody(text, open);
     if (kind === 'struct') { assert.equal(text[end], ';'); ++end; }
     const code = text.slice(match.index, end);
@@ -109,7 +141,8 @@ export function freeze(repo, out) {
     'hidHideObserveRawInputDevice', 'hidHideGetPhysicalIdentities', 'inputCaptureShutdown',
     'inputCaptureEmergencyCleanup', 'inputCaptureRetireResources', 'inputCaptureRefreshRealStickSettings', 'gamepadRecoverAfterResume',
     'hidHideResolveInterfaceIdentity', 'hidHideResolveRawInputIdentity', 'hidHideInvalidateRawInputIdentityCache',
-    'hidHideEvictOldestResolveEntryLocked', 'hidHideResolvePhysicalIdentities'].map(s => extract(text, s));
+    'hidHideEvictOldestResolveEntryLocked', 'hidHideResolvePhysicalIdentities',
+    ...(text.includes('static bool selectedIdentityMatchesCurrent(') ? ['selectedIdentityMatchesCurrent'] : [])].map(s => extract(text, s));
   anchors.push(extractWmInput(text));
   const get = name => [...entries, ...anchors].find(e => e.symbol === name).code;
   const compact = code => code.replace(/\s+/g, ' ');

@@ -1,9 +1,12 @@
 import { admitHudDragPlacement, type HudDragPlacement } from './monitorHudDrag';
 import { deckySidebar } from './deckySidebar';
-import { readSettingsSection, saveSettingsSection, updateSettings } from './settingsRepository';
+import { readSettingsSection, saveSettingsSection, updateSettings, loadSettings, cachedBootStartupReceiptOwner, type UnifiedSettings } from './settingsRepository';
+import { captureBootPreferenceWrite, assertBootPreferenceOwner, bootStartupReceiptOwner, projectBootPreferenceExtensions, type BootStartupReceiptOwner, type BootPreferenceWrite } from './bootModeGlobalPreferences';
+import { normalizeBootStartupResult } from './bootModeModel';
+import { equalSettingsDocuments } from './settingsBaseline';
 import { steamSettings, type SteamMonitorState } from './steamSettings';
 import { rtssRunning, toggleRtss, readOverlayLayout, setOverlayLayout, readRtssZoom } from './yeman';
-import { createMonitorOutputCoordinator, type AppliedMonitorOutput, type OutputAck } from './monitorOutputCoordinator';
+import { createMonitorOutputCoordinator, type AppliedMonitorOutput, type OutputAck, type MonitorOutputCurrent } from './monitorOutputCoordinator';
 import { normalizeMonitorOutput, switchMonitorHudTemplate, type HudTemplateId, selectableMonitorOutput, type RtssMonitorTemplate, type MonitorOutputPreferences } from './monitorHudModel';
 export interface YmccHudOutputAdapter {
   readonly global?:boolean;
@@ -11,20 +14,23 @@ export interface YmccHudOutputAdapter {
   available(preferences?: MonitorOutputPreferences): Promise<boolean>;
   visible(): Promise<boolean>;
   state?():Promise<'shown'|'armed'|'hidden'|'unknown'>;
-  setVisible(visible: boolean, preferences: MonitorOutputPreferences): Promise<OutputAck>;
+  setVisible(visible: boolean, preferences: MonitorOutputPreferences, current?:MonitorOutputCurrent): Promise<OutputAck>;
 }
 // Product relay can register ONE adapter after its game-bound carrier is ready.
 // The test-only __YMCC_STEAM_HUD_PROBE__ is intentionally never used as a product API.
 let adapter: YmccHudOutputAdapter | null = null;
-const preferenceListeners=new Set<(prefs:MonitorOutputPreferences)=>void>();
-const applyingListeners=new Set<(applying:boolean)=>void>();
+export interface MonitorOutputIntent {readonly id:number;readonly preferences:MonitorOutputPreferences;readonly write:BootPreferenceWrite;readonly recovery?:boolean;readonly startupReceiptOwner?:BootStartupReceiptOwner;}
+let nextIntentId=0;
+const copyMonitorIntent=(intent:MonitorOutputIntent):MonitorOutputIntent=>({id:intent.id,preferences:structuredClone(intent.preferences),write:captureBootPreferenceWrite(intent.write),...(intent.recovery?{recovery:true}:{}),...(intent.startupReceiptOwner?{startupReceiptOwner:{...intent.startupReceiptOwner}}:{})});
+const preferenceListeners=new Set<(prefs:MonitorOutputPreferences,write?:BootPreferenceWrite)=>void>();
+const applyingListeners=new Set<(applying:boolean,intent?:MonitorOutputIntent)=>void>();
 let outputApplyCount=0;
-export function onMonitorOutputApplying(listener:(applying:boolean)=>void):()=>void {
+export function onMonitorOutputApplying(listener:(applying:boolean,intent?:MonitorOutputIntent)=>void):()=>void {
   applyingListeners.add(listener);listener(outputApplyCount>0);return()=>{applyingListeners.delete(listener);};
 }
-function publishApplying(){for(const listener of applyingListeners){try{listener(outputApplyCount>0);}catch{}}}
-const applyListeners=new Set<(prefs:MonitorOutputPreferences,result:{ok:boolean;applied:AppliedMonitorOutput})=>void>();
-export function onMonitorOutputApplied(listener:(prefs:MonitorOutputPreferences,result:{ok:boolean;applied:AppliedMonitorOutput})=>void):()=>void {
+function publishApplying(intent?:MonitorOutputIntent){for(const listener of applyingListeners){try{listener(outputApplyCount>0,intent?copyMonitorIntent(intent):undefined);}catch{}}}
+const applyListeners=new Set<(prefs:MonitorOutputPreferences,result:{ok:boolean;applied:AppliedMonitorOutput},intent?:MonitorOutputIntent)=>void>();
+export function onMonitorOutputApplied(listener:(prefs:MonitorOutputPreferences,result:{ok:boolean;applied:AppliedMonitorOutput},intent?:MonitorOutputIntent)=>void):()=>void {
   applyListeners.add(listener);return()=>{applyListeners.delete(listener);};
 }
 let hudAvailable=false;
@@ -36,15 +42,17 @@ export function publishMonitorHudAvailability(available:boolean):void {
 export function onMonitorHudAvailability(listener:(available:boolean)=>void):()=>void {
   availabilityListeners.add(listener);listener(hudAvailable);return()=>{availabilityListeners.delete(listener);};
 }
-export function onMonitorOutputPreferencesChanged(listener:(prefs:MonitorOutputPreferences)=>void):()=>void {
+export function onMonitorOutputPreferencesChanged(listener:(prefs:MonitorOutputPreferences,write?:BootPreferenceWrite)=>void):()=>void {
   preferenceListeners.add(listener);return()=>{preferenceListeners.delete(listener);};
 }
 export function registerYmccHudOutputAdapter(next: YmccHudOutputAdapter): () => void {
   if (adapter) throw Error('YMCC HUD output already has an owner');
   adapter = next; return () => { if (adapter === next) adapter = null; };
 }
-export async function readMonitorOutputPreferences(): Promise<MonitorOutputPreferences> {
-  const section = await readSettingsSection('rtss'); return selectableMonitorOutput(section.monitorOutput);
+// Only the caller's current display transaction may share this read. Actions
+// omit it and obtain their original fresh preferences before applying.
+export async function readMonitorOutputPreferences(readRtss:()=>Promise<UnifiedSettings['rtss']>=()=>readSettingsSection('rtss')): Promise<MonitorOutputPreferences> {
+  const section = await readRtss(); return selectableMonitorOutput(section.monitorOutput);
 }
 function mergeMonitorPreferences(previous:unknown,next:MonitorOutputPreferences){
   const raw=previous&&typeof previous==='object'&&!Array.isArray(previous)?previous as Record<string,unknown>:{};
@@ -53,7 +61,8 @@ function mergeMonitorPreferences(previous:unknown,next:MonitorOutputPreferences)
   if(next.ymcc.dragX===undefined||next.ymcc.dragY===undefined){delete ymcc.dragX;delete ymcc.dragY;}
   return {...raw,...next,ymcc};
 }
-export async function saveMonitorOutputPreferences(prefs: MonitorOutputPreferences): Promise<void> {
+export async function saveMonitorOutputPreferences(prefs: MonitorOutputPreferences, options: BootPreferenceWrite = {}): Promise<void> {
+  const submitted=captureBootPreferenceWrite(options);
   // Existing repository merges this nested display-only section. Frame limits,
   // startup choices, RTSS files and Steam account settings are not overwritten.
   let normalized=normalizeMonitorOutput(prefs);
@@ -78,8 +87,9 @@ export async function saveMonitorOutputPreferences(prefs: MonitorOutputPreferenc
     }
     normalized=normalizeMonitorOutput(normalized);
     settings.rtss.monitorOutput=mergeMonitorPreferences(settings.rtss.monitorOutput,normalized);
-  });
-  for(const listener of preferenceListeners){try{listener(normalized);}catch{}}
+  }, submitted);
+  if(submitted.bootContext)assertBootPreferenceOwner(await loadSettings(),submitted);
+  for(const listener of preferenceListeners){try{listener(normalized,captureBootPreferenceWrite(submitted));}catch{}}
 }
 export async function saveMonitorHudPlacement(raw:HudDragPlacement):Promise<void>{
   const p=admitHudDragPlacement(raw);if(!p||!p.dragRevision)return;
@@ -89,7 +99,7 @@ export async function saveMonitorHudPlacement(raw:HudDragPlacement):Promise<void
     if(p.dragRevision<=(saved.ymcc.dragRevision??0))return;
     normalized={...saved,ymcc:{...saved.ymcc,...p}};settings.rtss.monitorOutput=mergeMonitorPreferences(settings.rtss.monitorOutput,normalized);
   });
-  if(normalized)for(const listener of preferenceListeners){try{listener(normalized);}catch{}}
+  if(normalized)for(const listener of preferenceListeners){try{listener(normalized,{origin:'ordinary'});}catch{}}
 }
 export async function saveMonitorHudTemplate(template:HudTemplateId,revision:number,admit?:(current:MonitorOutputPreferences)=>boolean):Promise<void>{
   if((template!=='A'&&template!=='B')||!Number.isSafeInteger(revision)||revision<1)return;
@@ -101,7 +111,7 @@ export async function saveMonitorHudTemplate(template:HudTemplateId,revision:num
     normalized=switchMonitorHudTemplate(saved,template,revision);
     settings.rtss.monitorOutput=mergeMonitorPreferences(settings.rtss.monitorOutput,normalized);
   });
-  if(normalized)for(const listener of preferenceListeners){try{listener(normalized);}catch{}}
+  if(normalized)for(const listener of preferenceListeners){try{listener(normalized,{origin:'ordinary'});}catch{}}
 }
 export async function readMonitorOutputRuntime(preferences?: MonitorOutputPreferences): Promise<{ applied: AppliedMonitorOutput; backend: boolean; ymccAvailable: boolean; rtssScale: number; rtssTemplate: RtssMonitorTemplate | null; steam: SteamMonitorState }> {
   const prefs=preferences ? normalizeMonitorOutput(preferences) : await readMonitorOutputPreferences();
@@ -121,6 +131,7 @@ export async function readMonitorOutputRuntime(preferences?: MonitorOutputPrefer
   if (visible || visibility === 'armed') outputs.push('ymcc');
   return { applied: outputs.length === 1 ? outputs[0] : outputs.length ? 'unknown' : 'off', backend, ymccAvailable, rtssScale: zoom * 20, rtssTemplate, steam };
 }
+async function requireMonitorCurrent(current?:MonitorOutputCurrent){if(current&&!await current())throw Error('MONITOR_OUTPUT_REQUEST_EXPIRED');}
 const outputCoordinator = createMonitorOutputCoordinator({
   ownsYmcc:()=>adapter!==null,
   async capabilities(prefs) {
@@ -129,21 +140,78 @@ const outputCoordinator = createMonitorOutputCoordinator({
     const steamAbsent=session?.steamKnown===true&&session.steamRunning===false;
     return { steamAbsent,ymccOwned:!!adapter,steam: state?.ok === true && state.available === true && state.via === 'live' && state.liveConfirmed === true, ymcc: await (adapter?.available(prefs) ?? false) };
   },
-  async ensureRtss() { if (!await rtssRunning()) await toggleRtss(true); if (!await rtssRunning()) throw Error('RTSS 后台未运行'); },
-  async setSteam(position) {
-    const state = await steamSettings.applyMonitor<SteamMonitorState>({ position });
+  async ensureRtss(current) {
+    const running=await rtssRunning();if(current)await requireMonitorCurrent(current);
+    if(!running){await toggleRtss(true,current);if(current)await requireMonitorCurrent(current);}
+    const confirmed=await rtssRunning();if(current)await requireMonitorCurrent(current);
+    if(!confirmed)throw Error('RTSS 后台未运行');
+  },
+  async setSteam(position,current) {
+    if(current)await requireMonitorCurrent(current);
+    const state = await steamSettings.applyMonitor<SteamMonitorState>({ position },current?.bootContext?{origin:'boot-mode',bootContext:current.bootContext}:{});
+    if(current)await requireMonitorCurrent(current);
     return { confirmed: state.ok === true && state.available === true && !state.pending && state.applicationConfirmed === true && state.via === 'live' && state.liveConfirmed === true && state.position === position,
       reason: state.pending ? 'Steam 设置仍排队，需先确认实时应用；未启用另一路。' : 'Steam 未回执实时目标位置。' };
   },
-  async setRtss(show, prefs) { const layout = show ? prefs.rtssTemplate : 'off'; const state = await setOverlayLayout(layout, show ? Math.round(prefs.rtssScale / 20) : undefined); const target = show ? ({ W: 'YeManOBS-W-1.ovl', L: 'YeManOBS-L-1.ovl', J: 'YeManOBS-JJ-1.ovl' })[prefs.rtssTemplate] : 'Empty.ovl';
-    return { confirmed: state.mode === 'live' && await readOverlayLayout() === target, reason: 'RTSS 模板加载/读回未确认；未继续开启目标。' }; },
-  async setYmcc(show, prefs) { return adapter ? adapter.setVisible(show, prefs) : { confirmed: false, reason: 'YMCC 常驻输出适配器不可用' }; },
+  async setRtss(show, prefs,current) {
+    if(current)await requireMonitorCurrent(current);
+    const layout = show ? prefs.rtssTemplate : 'off'; const state = await setOverlayLayout(layout, show ? Math.round(prefs.rtssScale / 20) : undefined,current);
+    if(current)await requireMonitorCurrent(current);
+    const target = show ? ({ W: 'YeManOBS-W-1.ovl', L: 'YeManOBS-L-1.ovl', J: 'YeManOBS-JJ-1.ovl' })[prefs.rtssTemplate] : 'Empty.ovl';
+    let confirmed=false;if(state.mode==='live'){const loaded=await readOverlayLayout();if(current)await requireMonitorCurrent(current);confirmed=loaded===target;}
+    return { confirmed, reason: 'RTSS 模板加载/读回未确认；未继续开启目标。' };
+  },
+  async setYmcc(show, prefs,current) {
+    if(current)await requireMonitorCurrent(current);
+    const result=adapter ? await adapter.setVisible(show, prefs,current) : { confirmed: false, reason: 'YMCC 常驻输出适配器不可用' };
+    if(current)await requireMonitorCurrent(current);return result;
+  },
 });
-export const monitorOutputCoordinator={async apply(prefs:MonitorOutputPreferences){
-  const value=normalizeMonitorOutput(prefs);++outputApplyCount;publishApplying();
+export const monitorOutputCoordinator={async apply(prefs:MonitorOutputPreferences,options:BootPreferenceWrite={},recoveryCurrent?:()=>boolean|Promise<boolean>){
+  let submitted=captureBootPreferenceWrite(options);
+  const originalBoot=submitted.bootContext;
+  const startupReceiptOwner=originalBoot?bootStartupReceiptOwner(originalBoot):cachedBootStartupReceiptOwner();
+  const value=normalizeMonitorOutput(prefs);
+  const bootHudRecovery=!!(originalBoot&&recoveryCurrent&&value.enabled&&value.output==='ymcc');
+  const savedMonitorMatches=(settings:UnifiedSettings)=>equalSettingsDocuments(normalizeMonitorOutput(settings.rtss.monitorOutput),value);
+  if(originalBoot&&recoveryCurrent&&bootHudRecovery){
+    if(!await recoveryCurrent())throw Error('MONITOR_OUTPUT_REQUEST_EXPIRED');
+    const settings=await loadSettings();
+    if(!savedMonitorMatches(settings))throw Error('MONITOR_OUTPUT_REQUEST_EXPIRED');
+    try{assertBootPreferenceOwner(settings,submitted);}
+    catch(error){
+      // The same startup publishes its completed snapshot and provisional
+      // receipt after the first attempt. Rebind only to that durable claim.
+      const boot=startupReceiptOwner?.boot,owner=bootStartupReceiptOwner(settings);
+      const prior=normalizeBootStartupResult(originalBoot.extensions.bootModesStartupResult,boot);
+      const receipt=normalizeBootStartupResult(settings.extensions?.bootModesStartupResult,boot);
+      const mode=settings.extensions?.bootModes as {schema?:number;revision?:number;current?:string}|undefined;
+      const monitor=receipt?.modules?.monitor;
+      if(!startupReceiptOwner?.writeId||!owner||owner.boot!==boot||owner.writeId!==startupReceiptOwner.writeId||
+         settings.extensions?.bootModesActiveBoot!==boot||!prior||prior.status==='failed'||!receipt||receipt.status==='failed'||
+         receipt.mode!==prior.mode||receipt.sourceRevision!==prior.sourceRevision||receipt.revision<prior.revision||
+         mode?.schema!==1||mode.current!==receipt.mode||!Number.isSafeInteger(mode.revision)||Number(mode.revision)<receipt.revision||
+         !monitor?.requested||!['waiting','requested','failed','active'].includes(monitor.state)||
+         !equalSettingsDocuments(normalizeMonitorOutput(monitor.requested),value))throw error;
+      submitted=captureBootPreferenceWrite({origin:'boot-mode',bootContext:{input:settings.input,extensions:projectBootPreferenceExtensions(settings.extensions)}});
+    }
+  }
+  const current:MonitorOutputCurrent|undefined=submitted.bootContext||recoveryCurrent?async()=>{
+    if(recoveryCurrent&&!await recoveryCurrent())return false;
+    if(submitted.bootContext){
+      const settings=await loadSettings();
+      assertBootPreferenceOwner(settings,submitted);
+      if(bootHudRecovery&&!savedMonitorMatches(settings))return false;
+    }
+    return !recoveryCurrent||await recoveryCurrent();
+  }:undefined;
+  if(current&&submitted.bootContext)Object.defineProperty(current,'bootContext',{value:submitted.bootContext,enumerable:false});
+  if(current)await requireMonitorCurrent(current);
+  const intent:MonitorOutputIntent={id:++nextIntentId,preferences:structuredClone(value),write:captureBootPreferenceWrite(submitted),...(recoveryCurrent?{recovery:true}:{}),...(startupReceiptOwner?{startupReceiptOwner}:{})};++outputApplyCount;publishApplying(intent);
   try{
-    const result=await outputCoordinator.apply(value);
-    for(const listener of applyListeners){try{listener(value,result);}catch{}}
+    const result=await outputCoordinator.apply(value,current);
+    if(current)await requireMonitorCurrent(current);
+    for(const listener of applyListeners){try{listener(value,result,copyMonitorIntent(intent));}catch{}}
     return result;
   }finally{--outputApplyCount;publishApplying();}
 }};
@@ -161,6 +229,6 @@ export async function updateMonitorOutputEnabled(operation: 'toggle' | 'show' | 
   });
   const value = selected as MonitorOutputPreferences | null;
   if (!value) throw new Error('SHORTCUT_SOURCE_CHANGED');
-  for (const listener of preferenceListeners) { try { listener(structuredClone(value)); } catch { /* observer isolation */ } }
+  for (const listener of preferenceListeners) { try { listener(structuredClone(value),{origin:'ordinary'}); } catch { /* observer isolation */ } }
   return value;
 }

@@ -1,21 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRevalidationPlan, checkBatchInputs, selectContributingReceipts } from './index.mjs';
 import { main, parseArgs } from './cli.mjs';
 import { RECEIPT_AUDIT_LIMITS } from '../receipt-audit.mjs';
+import { simulationCorePath } from '../release-host-environment.mjs';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
+const scratchPrefix = 'ymcc-revalidation-plan-';
+function directDirectory(dir) {
+  const identity = fs.lstatSync(dir, {bigint: true});
+  assert(identity.isDirectory() && !identity.isSymbolicLink() && path.relative(dir, fs.realpathSync.native(dir)) === '',
+    'Redirected revalidation fixture directory: ' + dir);
+  return identity;
+}
 function fixture(t, ids = ['fan.one', 'fan.two', 'lighting.three']) {
-  const base = fs.realpathSync(os.tmpdir());
-  const root = fs.mkdtempSync(path.join(base, 'ymcc-revalidation-plan-'));
+  const base = simulationCorePath('Workspace'), baseIdentity = directDirectory(base);
+  const root = fs.mkdtempSync(path.join(base, scratchPrefix)), rootIdentity = directDirectory(root);
   t.after(() => {
-    assert.equal(path.dirname(fs.realpathSync(root)), base);
-    assert(path.basename(root).startsWith('ymcc-revalidation-plan-'));
-    fs.rmSync(root, { recursive: true, force: true });
+    assert.equal(path.relative(base, path.dirname(root)), '');
+    assert(path.basename(root).startsWith(scratchPrefix));
+    for (const [dir, expected] of [[base, baseIdentity], [root, rootIdentity]]) {
+      const actual = directDirectory(dir);
+      assert(actual.dev === expected.dev && actual.ino === expected.ino, 'Fixture directory identity changed: ' + dir);
+    }
+    fs.rmSync(root, { recursive: true });
   });
   const repoRoot = path.join(root, 'repo');
   fs.mkdirSync(repoRoot);
@@ -130,9 +141,36 @@ test('explicit candidate identities separate batches even with the same source d
   const { plan } = f.plan([file], { domains: ['fan'] });
   assert.equal(plan.batches.length, 2);
   assert.notEqual(plan.batches[0].executionBinding.explicitArtifacts[0].path, plan.batches[1].executionBinding.explicitArtifacts[0].path);
+
+  const originalRead = fs.readFileSync, original = originalRead(file), alternate = JSON.parse(original);
+  alternate.results[0].candidateArtifacts = [candidates[1]];
+  const alternateBytes = Buffer.from(JSON.stringify(alternate));
+  assert.equal(alternateBytes.length, original.length);
+  let receiptReads = 0, alternateObserved = false;
+  fs.readFileSync = function(target, ...args) {
+    const bytes = originalRead.call(this, target, ...args);
+    if (target === file) {
+      // After the before snapshots and formal audit, change only the binding window.
+      if (++receiptReads === 5) fs.writeFileSync(file, alternateBytes);
+      else if (receiptReads === 6) {
+        alternateObserved = bytes.equals(alternateBytes);
+        fs.writeFileSync(file, original);
+      }
+    }
+    return bytes;
+  };
+  try {
+    const drift = f.plan([file], {domains: ['fan']}).plan;
+    assert(alternateObserved, 'the binding window must actually read the changed receipt');
+    assert.deepEqual(originalRead(file), original);
+    assert.equal(drift.status, 'BLOCKED');
+    assert(drift.diagnostics.some(row => row.code === 'RECEIPT_CHANGED_DURING_PLANNING'));
+    assert.equal(drift.summary.reusableAtAudit, 0);
+  } finally { fs.readFileSync = originalRead; }
 });
 test('replaced candidate bytes expire a receipt even without product source changes', t => {
   const f = fixture(t), candidate = path.join(f.root, 'candidate.dll'); fs.writeFileSync(candidate, 'approved');
+  f.adapters.find(row => row.id === 'fan.one').artifactInputs = [candidate];
   const file = f.write('candidate', [{ ...f.passed('fan.one'), candidateArtifacts: [{ path: candidate, sha256: sha('approved') }] }]);
   assert.equal(f.plan([file], { tests: ['fan.one'] }).plan.summary.reusableAtAudit, 1);
   fs.writeFileSync(candidate, 'changed');
@@ -218,12 +256,18 @@ test('dynamic imports recorded by execution are protected during the audit windo
 });
 test('a candidate changed after its audit cannot remain in the reuse list', t => {
   const f = fixture(t), candidate = path.join(f.root, 'late-candidate.dll'); fs.writeFileSync(candidate, 'approved');
+  f.adapters.find(row => row.id === 'fan.one').artifactInputs = [candidate];
   const file = f.write('candidate-run', [{ ...f.passed('fan.one'), candidateArtifacts: [{ path: candidate, sha256: sha('approved') }] }]);
   const originalRead = fs.readFileSync;
   let reads = 0;
   fs.readFileSync = function (target, ...args) {
-    if (String(target) === candidate && ++reads === 3) fs.writeFileSync(candidate, 'changed-after-audit');
-    return originalRead.call(this, target, ...args);
+    const bytes = originalRead.call(this, target, ...args);
+    // The registry snapshot and recorded-input snapshot read before the audit.
+    if (target === candidate && ++reads === 3) {
+      assert.equal(sha(bytes), sha('approved'));
+      fs.writeFileSync(candidate, 'changed-after-audit');
+    }
+    return bytes;
   };
   try {
     const { plan, audit } = f.plan([file], { tests: ['fan.one'] });
@@ -398,13 +442,10 @@ test('40 pending contributors still split into execution batches of 32 and 8', t
 });
 test('oversized originals are retained and blocked before any receipt payload read', t => {
   const f = fixture(t), file = f.write('oversized');
-  const originalStat = fs.statSync, originalRead = fs.readFileSync;
+  fs.truncateSync(file, RECEIPT_AUDIT_LIMITS.maxSingleBytes + 1);
+  assert.equal(fs.statSync(file).size, RECEIPT_AUDIT_LIMITS.maxSingleBytes + 1);
+  const originalRead = fs.readFileSync;
   let payloadReads = 0;
-  fs.statSync = function(target, ...args) {
-    const result = originalStat.call(this, target, ...args);
-    if (path.resolve(String(target)) === path.resolve(file)) result.size = RECEIPT_AUDIT_LIMITS.maxSingleBytes + 1;
-    return result;
-  };
   fs.readFileSync = function(target, ...args) {
     if (path.resolve(String(target)) === path.resolve(file)) payloadReads++;
     return originalRead.call(this, target, ...args);
@@ -415,11 +456,41 @@ test('oversized originals are retained and blocked before any receipt payload re
     const {plan} = f.plan([file]);
     assert.equal(plan.status, 'BLOCKED'); assert.equal(plan.summary.reusableAtAudit, 0);
     assert.equal(payloadReads, 0);
-  } finally {fs.statSync = originalStat; fs.readFileSync = originalRead;}
+  } finally {fs.readFileSync = originalRead;}
 });
+function padReceipt(file, size) {
+  const length = fs.statSync(file).size;
+  assert(length <= size);
+  const padding = Buffer.alloc(256 * 1024, 0x20);
+  const fd = fs.openSync(file, 'a');
+  try {
+    for (let left = size - length; left > 0;) {
+      const count = Math.min(left, padding.length);
+      fs.appendFileSync(fd, padding.subarray(0, count));
+      left -= count;
+    }
+  } finally { fs.closeSync(fd); }
+  assert.equal(fs.statSync(file).size, size);
+}
+// Repeat the same real stat-to-read race for each independent audit/read pass.
+function withGrowthAfterStat(file, size, run) {
+  const originalStat = fs.statSync;
+  let grows = 0;
+  fs.statSync = function(target, ...args) {
+    if (target !== file) return originalStat.call(this, target, ...args);
+    fs.truncateSync(file, size);
+    const observed = originalStat.call(this, target, ...args);
+    assert.equal(observed.size, size);
+    fs.appendFileSync(file, ' ');
+    grows++;
+    return observed;
+  };
+  try { run(); assert(grows > 0); }
+  finally { fs.statSync = originalStat; fs.truncateSync(file, size); }
+}
 test('real 32 MiB receipt bytes meet the 512 MiB boundary and an extra byte blocks reuse', t => {
   const f = fixture(t), file = f.write('byte-boundary', [f.passed('fan.one')]);
-  fs.appendFileSync(file, Buffer.alloc(RECEIPT_AUDIT_LIMITS.maxSingleBytes - fs.statSync(file).size, 0x20));
+  padReceipt(file, RECEIPT_AUDIT_LIMITS.maxSingleBytes);
   const copies = RECEIPT_AUDIT_LIMITS.maxTotalBytes / RECEIPT_AUDIT_LIMITS.maxSingleBytes;
   assert(Number.isInteger(copies));
   const atLimit = Array(copies).fill(file);
@@ -427,16 +498,8 @@ test('real 32 MiB receipt bytes meet the 512 MiB boundary and an extra byte bloc
   const current = f.plan(atLimit, {tests: ['fan.one']});
   assert.equal(current.plan.status, 'PLAN_ONLY'); assert.equal(current.plan.summary.reusableAtAudit, 1);
   assert.equal(current.audit.receiptBytesRead, RECEIPT_AUDIT_LIMITS.maxTotalBytes);
-  const extra = path.join(f.root, 'one-more-byte.json'); fs.writeFileSync(extra, ' ');
-  const originalStat = fs.statSync;
-  // Simulate growth after stat: actual read lengths must still enforce both limits.
-  fs.statSync = function(target, ...args) {
-    const result = originalStat.call(this, target, ...args), resolved = path.resolve(String(target));
-    if (resolved === path.resolve(extra)) result.size = 0;
-    if (resolved === path.resolve(file)) result.size = RECEIPT_AUDIT_LIMITS.maxSingleBytes;
-    return result;
-  };
-  try {
+  const extra = path.join(f.root, 'one-more-byte.json'); fs.writeFileSync(extra, '');
+  withGrowthAfterStat(extra, 0, () => {
     const over = [...atLimit, extra], selection = selectContributingReceipts(over);
     assert(selection.receiptFiles.includes(extra)); assert.equal(selection.withinFormalAuditReceiptLimit, false);
     assert.equal(selection.retained.find(row => row.file === extra).readError, 'RECEIPT_TOTAL_SIZE_LIMIT');
@@ -444,13 +507,14 @@ test('real 32 MiB receipt bytes meet the 512 MiB boundary and an extra byte bloc
     assert.equal(blocked.plan.status, 'BLOCKED'); assert.equal(blocked.plan.summary.reusableAtAudit, 0);
     assert(blocked.plan.diagnostics.some(row => row.code === 'RECEIPT_TOTAL_SIZE_LIMIT'));
     assert.equal(blocked.audit.receiptBytesRead, RECEIPT_AUDIT_LIMITS.maxTotalBytes);
-    fs.appendFileSync(file, ' ');
+  });
+  withGrowthAfterStat(file, RECEIPT_AUDIT_LIMITS.maxSingleBytes, () => {
     const grown = selectContributingReceipts([file]);
     assert.deepEqual(grown.receiptFiles, [file]); assert.equal(grown.withinFormalAuditReceiptLimit, false);
     assert.equal(grown.retained[0].readError, 'RECEIPT_SIZE_LIMIT');
     const oversized = f.plan([file]);
     assert.equal(oversized.plan.status, 'BLOCKED'); assert.equal(oversized.plan.summary.reusableAtAudit, 0);
-  } finally {fs.statSync = originalStat;}
+  });
 });
 test('receipt bytes changing during selection prevent dropping any original input', t => {
   const f = fixture(t), old = f.write('old'), latest = f.write('latest');
@@ -464,6 +528,7 @@ test('receipt bytes changing during selection prevent dropping any original inpu
     const selection = selectContributingReceipts([old, latest]);
     assert.equal(selection.status, 'BLOCKED_INPUT_CHANGED');
     assert.deepEqual(selection.receiptFiles, [old, latest]); assert.deepEqual(selection.omitted, []);
+    assert.equal(reads, 2, 'a parsed identity and an independent final observation');
   } finally { fs.readFileSync = originalRead; }
 });
 

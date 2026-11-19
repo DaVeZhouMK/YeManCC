@@ -69,9 +69,12 @@ export function gpuChildEnvironment(scope,base={}){
  env[fileKey]=proof.bindingManifestFile;env[shaKey]=proof.expectedBindingSha256;return env;
 }
 export function lockGpuTools(repo){return verificationRead(()=>captureGpuTools(repo));}
-function captureGpuTools(repo){
+function captureGpuTools(repo,{registration=false}={}){
  need(!process.env.NODE_OPTIONS&&!process.env.NODE_PATH&&!process.env.ESBUILD_BINARY_PATH,'AMBIENT_TOOL_OVERRIDE');
  const manifest=read(sourcePath(repo,GPU_MODULE+'/tool-inputs.json'));need(manifest.schemaVersion===1&&manifest.kind==='gpu-memory-reviewed-tools','MANIFEST');
+ // Reject absent or forwarded historical inputs before capturing the large live graph.
+ // This does not replace the original exactFile/hash and graph checks below.
+ if(registration){const file=manifest.nodeAuthority.bindingManifestFile;need(key(fs.realpathSync(file))===key(file),'TOOL_CHANGED_OR_ALIAS:'+file);}
  const authority=lockBundledNodeTools(repo),nodeGraph=currentGpuNodeGraph(repo,authority),historicalNode=historicalGpuNode(manifest.nodeAuthority,authority,nodeGraph);
  const selected=manifest.browserAuthority;need(hash(sourcePath(repo,selected.path))===selected.sha256&&hash(sourcePath(repo,selected.helper))===selected.helperSha256,'BROWSER_AUTHORITY_SOURCE_CHANGED');
  const uiDeclaration=loadUiToolDeclaration({repoRoot:repo,manifestPath:sourcePath(repo,selected.path)});need(uiDeclaration.files.length===2302&&uiDeclaration.directories.length===33,'BROWSER_AUTHORITY_MEMBERSHIP');const uiProof=verifyUiToolDeclaration(uiDeclaration);
@@ -81,7 +84,7 @@ function captureGpuTools(repo){
  need(key(authority.nodeExecutable)===key(process.execPath),'NODE_EXECUTABLE');
  return {manifest,authority,nodeGraph,historicalNode,historicalTools,tools,uiDeclaration,uiProof};
 }
-export function gpuToolDeclaration(repo){try{const locked=lockGpuTools(repo);return {artifactInputs:locked.tools.map(row=>row.path),...(locked.manifest.fullWorkflowBlockers.length?{blockedReason:locked.manifest.fullWorkflowBlockers.join('; ')}:{})};}catch(error){return {artifactInputs:[],blockedReason:error.message};}}
+export function gpuToolDeclaration(repo){try{const locked=verificationRead(()=>captureGpuTools(repo,{registration:true}));return {artifactInputs:locked.tools.map(row=>row.path),...(locked.manifest.fullWorkflowBlockers.length?{blockedReason:locked.manifest.fullWorkflowBlockers.join('; ')}:{})};}catch(error){return {artifactInputs:[],blockedReason:error.message};}}
 export function beginGpuScope(repo,out,sourceRows,{mode='full'}={}){
  const locked=lockGpuTools(repo),root=fs.realpathSync(out);need(key(root)===key(out)&&!inside(fs.realpathSync(repo),root),'OWNED_OUTPUT_ROOT');
  const scope={repo:fs.realpathSync(repo),out:root,...locked,sources:new Map(),observedTools:new Map(),outputs:new Map(),phases:[],bundles:[],native:[],mode};

@@ -87,3 +87,40 @@ export function verifyBundledNodeReceipt(item,repoRoot,caseDir,{limit=3072}={}){
  for(const relative of BUNDLED_AUTHORITY_SOURCES){const row=item.sourceInputs?.find(row=>row.path===relative);need(row?.sha256===hash(path.join(repoRoot,relative)),'IMPLEMENTATION_SOURCE_NOT_RECORDED');}
  return {schemaVersion:BUNDLED_TOOL_SCHEMA,mode:actual.mode,graphSha256:actual.graphSha256,packageCount:actual.packageCount,fileCount:actual.fileCount,artifactCount:expected.length,toolAuthorityVerified:true};
 }
+
+// Private candidate stage is mechanically derived from the frozen public body.
+function inspectPendingRunnerReceipt(item,repoRoot,caseDir,{limit=3072}={}){
+ const actual=verifyBundledToolScope(item.bundledToolAuthority,repoRoot,{limit});
+ const ownRoot=fs.realpathSync(caseDir),outputs=['entry.mjs','entry.mjs.map'].map(name=>{const file=path.resolve(caseDir,name),real=fs.realpathSync(file);need(inside(ownRoot,real)&&key(file)===key(real),'BUNDLE_OUTPUT_FORWARDING_REJECTED');return {path:file,sha256:hash(file),status:'OK'};});
+ need(item.bundle?.path===outputs[0].path&&item.bundle.sha256===outputs[0].sha256&&item.bundle.esbuildVersion===actual.compilerVersion,'BUNDLE_OUTPUT_CHANGED');
+ sameArtifactSet(item.bundledOutputs,outputs);
+ need(Array.isArray(item.explicitAdapterArtifacts)&&item.explicitAdapterArtifacts.length<=limit,'EXPLICIT_ADAPTER_ARTIFACT_SCHEMA');
+ const expected=bundledArtifacts(actual,item.explicitAdapterArtifacts,outputs,limit);sameArtifactSet(item.candidateArtifacts,expected);
+ const freshToolPins=new Map(actual.tools.map(row=>[key(row.path),row.sha256]));
+  for(const row of item.candidateArtifacts)need((freshToolPins.has(key(row.path))?freshToolPins.get(key(row.path)):hash(row.path))===row.sha256,'TOOL_OR_BUNDLE_CHANGED');
+ need(Array.isArray(item.toolDependencyInputs)&&item.toolDependencyInputs.every(row=>row.status==='OK'&&inside(actual.nodeModulesRealRoot,row.path)&&actual.tools.some(tool=>tool.path===row.path&&tool.sha256===row.sha256)),'OBSERVED_TOOL_NOT_IN_GRAPH');
+ need(new Set(item.toolDependencyInputs.map(row=>key(row.path))).size===item.toolDependencyInputs.length,'OBSERVED_TOOL_DUPLICATE');
+ for(const relative of BUNDLED_AUTHORITY_SOURCES){const row=item.sourceInputs?.find(row=>row.path===relative);need(row?.sha256===hash(path.join(repoRoot,relative)),'IMPLEMENTATION_SOURCE_NOT_RECORDED');}
+ return {schemaVersion:BUNDLED_TOOL_SCHEMA,mode:actual.mode,graphSha256:actual.graphSha256,packageCount:actual.packageCount,fileCount:actual.fileCount,artifactCount:expected.length,toolAuthorityVerified:true};
+}
+
+// Runner-only synchronous transaction. The public verifier above is unchanged.
+// Pending proof stays local until the independently fresh final disk scope succeeds.
+export function consumeRunnerBundledReceipt(item,repoRoot,caseDir,consume,{limit=3072}={}){
+ const state={status:'PENDING',proof:null,authorityAfter:null,receiptError:null,callbackError:null,closingError:null};
+ let pending,expectedAuthority;
+ const failure=error=>({message:String(error?.message??error)});
+ try{expectedAuthority=structuredClone(item.bundledToolAuthority);pending=inspectPendingRunnerReceipt(item,repoRoot,caseDir,{limit});}
+ catch(error){state.receiptError=failure(error);}
+ if(!state.receiptError){
+  try{need(typeof consume==='function','RUNNER_CALLBACK_REQUIRED');const returned=consume();need(!returned||typeof returned.then!=='function','RUNNER_CALLBACK_MUST_BE_SYNC');}
+  catch(error){state.callbackError=failure(error);}
+ }
+ try{
+  state.authorityAfter=verifyBundledToolScope(expectedAuthority??item.bundledToolAuthority,repoRoot,{limit});
+  need(JSON.stringify(item.bundledToolAuthority)===JSON.stringify(expectedAuthority),'RUNNER_AUTHORITY_CHANGED_DURING_CALLBACK');
+ }catch(error){state.closingError=failure(error);}
+ if(state.receiptError||state.callbackError||state.closingError)state.status='FAIL';
+ else {state.status='PASS';state.proof=pending;}
+ return state;
+}

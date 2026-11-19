@@ -11,12 +11,14 @@
 // MSI may await its exact source inside this HELLO-only epoch, before hide proof /
 // PREPARE / NEUTRAL. Execution inspection still proves current-source submission.
 
-// ROG212031: retire only a first-start hold that no longer protects any owner.
+// ROG212031 / GPD152301: retire only a first-start hold that protects no owner.
 // This is normal admission, before Start; it never recreates a target or renews
 // the player's period. A prior Host epoch or unresolved return always keeps it.
 static bool inputHostRetireUnownedRogWakeHoldForStart() {
     if(!g_wakeHoldPhysicalUnhide.load(std::memory_order_acquire) ||
-       !g_machineIdentity.resolved || !ymccIsRogFamily())return false;
+       !g_machineIdentity.resolved)return false;
+    const bool gpd=nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd;
+    if(!ymccIsRogFamily() && !gpd)return false;
     std::unique_lock<InputHostMutex> lock(g_inputHostMx,std::try_to_lock);
     if(!lock.owns_lock())return false;
     const auto now=inputHostStartProtectionNow();const auto view=g_virtualStartProtection.view(now);
@@ -33,13 +35,60 @@ static bool inputHostRetireUnownedRogWakeHoldForStart() {
        g_inputHostSwitchExecutionReturnPending || g_inputHostSwitchRecoveryPending ||
        g_inputHostRecoveryPending || g_inputHostTupleHealPending ||
        g_msiNativeForegroundCyclePending || g_physicalReleaseWindowDutyActive)return false;
+    // A GPD OFF wake can leave this hold after its native owner has returned.
+    // Only a current first ON with no native responsibility may retire it.
+    // Live native work keeps the existing serialized BeforeVirtualWork route.
+    std::unique_lock<std::mutex> nativeLock(g_msiNativeForegroundMx,std::defer_lock);
+    if(gpd) {
+        ymcc::sleeppower::SharedPowerV1 power;
+        if(!captureSharedPowerLifecycle(power) || power.generation!=currentPowerGeneration() ||
+           !sharedPowerLifecycleCurrent(power) || !nativeLock.try_lock())return false;
+        const auto& owner=g_msiNativeForegroundLease;
+        if(owner.active || owner.cycleProcess || owner.nativeRefreshWriter || owner.nativeVisibilitySession ||
+           owner.postHideCycle || owner.coldReturnCycle || owner.restorePending || !owner.deferredVirtualWork.empty() ||
+           g_postHideCycleOwned.load(std::memory_order_acquire) || g_coldReturnCycleOwned.load(std::memory_order_acquire) ||
+           g_msiNativeForegroundPowerHold.load(std::memory_order_acquire) ||
+           !sharedPowerLifecycleCurrent(power) || power.generation!=currentPowerGeneration())return false;
+    }
     if(!g_wakeHoldPhysicalUnhide.exchange(false,std::memory_order_acq_rel))return false;
+    if(nativeLock.owns_lock())nativeLock.unlock();
     try {appendNativeLifecycleLog("input-host-start-hold-retired",{
-        {"policy","VC-ROG-IDLE-WAKE-HOLD-20261024-R1"},{"origin","normal-start-admission"},
+        {"policy",gpd?"VC-GPD-IDLE-WAKE-HOLD-20261117-R1":"VC-ROG-IDLE-WAKE-HOLD-20261024-R1"},{"origin","normal-start-admission"},
         {"reason","unowned-first-start-hold-retired"},{"requestId",view.requestId},
         {"remainingMs",view.remainingMs},{"existingHoldCleared",true},{"newHoldArmed",false},
         {"deviceWrite",false},{"targetCreated",false}});}catch(...){}
     return true;
+}
+
+// A first GPD Start must reach the existing serial dispatcher even when a
+// wake hold predates that Start and the old native writer is still pending.
+// This grants QUEUEING only: native BeforeVirtualWork still owns the actual
+// defer/observation and every Start/return/power fence remains authoritative.
+// No hold is cleared, writer polled/replaced, target created or ticket renewed.
+static bool inputHostMayQueueGpdNativeWriterWait() {
+    if(!g_wakeHoldPhysicalUnhide.load(std::memory_order_acquire) ||
+        nativeForegroundProfile()!=ymcc::nativeForeground::Profile::Gpd ||
+        !g_msiNativeForegroundCyclePending.load(std::memory_order_acquire))return false;
+    std::unique_lock<InputHostMutex> hostLock(g_inputHostMx,std::try_to_lock);
+    if(!hostLock.owns_lock())return false;
+    const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
+    if(!view.requestId || !view.locked || !view.remainingMs || view.phase!="pending" ||
+        view.persona=="disabled" || view.persona!=inputHostConfiguredPersona() ||
+        !g_realStickTest.enabled || !g_realStickTest.virtualTargetEnabled ||
+        g_inputHostEpoch || g_inputHostProcess || !g_inputHostRunId.empty() || g_hidHideVisibilityJournal.active ||
+        g_inputHostReleaseQuarantined || g_inputHostStartBlocked || g_inputHostTransportFault || g_inputHostFaultHoldsStart ||
+        g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) ||
+        g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready || !g_inputReady ||
+        g_inputHostPowerAdmissionRevoked || inputHostExitFenceRaised() || g_exitRequested || g_inputCaptureStop ||
+        g_externalPriorityVirtualSuspended || g_shortcutRecordingActive || physicalReleaseWindowActive())return false;
+    std::unique_lock<std::mutex> leaseLock(g_msiNativeForegroundMx,std::try_to_lock);
+    if(!leaseLock.owns_lock())return false;
+    const auto& owner=g_msiNativeForegroundLease;
+    return owner.active && owner.profile==ymcc::nativeForeground::Profile::Gpd &&
+        owner.power==currentPowerGeneration() && !owner.postHideCycle && !owner.coldReturnCycle &&
+        !g_msiNativeForegroundPowerHold.load(std::memory_order_acquire) &&
+        g_msiNativeForegroundCyclePending.load(std::memory_order_acquire) &&
+        (owner.cycleProcess || owner.nativeRefreshWriter);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -208,6 +257,10 @@ static BOOL ymStartCreateProcessW(std::vector<wchar_t>& buf, const std::wstring&
         return (pi.hThread && pi.hProcess) ? TRUE : FALSE;
     }
 #endif
+    if(!t_inputHostRequestPower || !t_inputHostRequestPower->current()){
+        SetLastError(ERROR_OPERATION_ABORTED);
+        return FALSE;
+    }
     return ymcc::processEfficiency::createProcess(nullptr, buf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
                           nullptr, hostDir.c_str(), &si, &pi);
 }
@@ -215,22 +268,22 @@ static BOOL ymStartCreateProcessW(std::vector<wchar_t>& buf, const std::wstring&
 // A start can fail after taking physical mode/visibility ownership or creating
 // a Host. Unwinding must not depend on the UI still being in startup Waiting.
 // Run on the existing lifecycle owner while its Host transaction lock is held.
+static bool inputHostStartReadyLocked() noexcept {
+    return g_inputHostProcess && g_inputHostPrepared && g_inputHostNeutralized &&
+        !g_inputHostTransportFault && !g_inputHostReleaseQuarantined;
+}
+static bool inputHostStartIncompleteOwnedLocked() noexcept {
+    return (g_inputHostProcess || g_inputHostPrepared || g_hidHideVisibilityJournal.active ||
+        g_inputHostReleaseQuarantined || g_msiDinputRouteDinputArmed.load(std::memory_order_acquire)) &&
+        !inputHostStartReadyLocked();
+}
 struct InputHostStartExceptionCleanup {
     int exceptions = std::uncaught_exceptions();
     ~InputHostStartExceptionCleanup() noexcept {
         if (std::uncaught_exceptions() <= exceptions) return;
-        const auto ownsIncompleteStart = []() noexcept {
-            const bool owned = g_inputHostProcess || g_inputHostPrepared ||
-                g_hidHideVisibilityJournal.active || g_inputHostReleaseQuarantined ||
-                g_msiDinputRouteDinputArmed.load(std::memory_order_acquire);
-            const bool ready = g_inputHostProcess && g_inputHostPrepared &&
-                g_inputHostNeutralized && !g_inputHostTransportFault &&
-                !g_inputHostReleaseQuarantined;
-            return owned && !ready;
-        };
         // An optional final diagnostic failure must not tear down a target
         // whose prepare and neutral receipts were already accepted.
-        if (!ownsIncompleteStart()) return;
+        if (!inputHostStartIncompleteOwnedLocked()) return;
         g_inputHostFaultHoldsStart.store(true, std::memory_order_release);
         try {
             inputHostStopLocked("fault-stop:partial-start-exception");
@@ -239,12 +292,27 @@ struct InputHostStartExceptionCleanup {
             g_inputHostReleaseQuarantined = true;
             g_inputHostStartBlocked = true;
         }
-        if (ownsIncompleteStart()) {
-            try { inputHostQueueLifecycleWork("fault-stop:partial-start-exception"); }
+        if (inputHostStartIncompleteOwnedLocked()) {
+            try { const auto cleanupWork=ymcc::inputHost::partialStartCleanup::bind(g_inputHostEpoch,g_inputHostRunId);
+                inputHostQueueLifecycleWork(cleanupWork.c_str()); }
             catch (...) { /* retained ownership and start block remain authoritative */ }
         }
     }
 };
+
+// Startup Waiting is a presentation gate, not cleanup ownership. Reuse the
+// same accepted readiness and exact tuple as Start exception compensation.
+static void inputHostRecordStartupException(const std::string& reason) noexcept {
+    try {
+        std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+        recordStartupInputAttempt(inputHostStartReadyLocked());
+        if(g_startupInputState.load(std::memory_order_acquire)!=ymcc::StartupInputState::Waiting ||
+           !inputHostStartIncompleteOwnedLocked() || reason=="fault-stop:startup-exception" ||
+           reason.rfind(ymcc::inputHost::partialStartCleanup::prefix,0)==0)return;
+        const auto cleanup=ymcc::inputHost::partialStartCleanup::bind(g_inputHostEpoch,g_inputHostRunId);
+        inputHostQueueLifecycleWork(cleanup.c_str());
+    }catch(...) { /* owned state remains authoritative; never claim return or replay a new Start */ }
+}
 
 // Normal delayed return shares the central cycle; it does not consume fallback.
 #include "virtual_switch_execution_return_runtime.h"
@@ -256,6 +324,9 @@ struct InputHostStartExceptionCleanup {
 // mode2 ticket for this epoch may progress inside the wait; its normal strict
 // consumer rechecks every generation. No new writes, retries or deadlines.
 static bool ymStartAwaitMsiSource(std::uint64_t ticket, bool& admitted, std::unique_lock<InputHostMutex>& hostLock) {
+    // Retain Start's exact permission through every yielded wait. A later
+    // scalar Ready cannot replace or revive this one-way cancelled scope.
+    const auto requestPower=t_inputHostRequestPower;
     const auto began=inputHostStartProtectionNow();
     const auto epoch=g_inputHostEpoch;
     const auto process=g_inputHostProcess;
@@ -269,6 +340,7 @@ static bool ymStartAwaitMsiSource(std::uint64_t ticket, bool& admitted, std::uni
     for (;;) {
         const auto now=inputHostStartProtectionNow();
         const auto request=g_virtualStartProtection.view(now);
+        if(!requestPower || !requestPower->current()){reason="original-public-power-retired";break;}
         if (request.requestId!=ticket) break;
         // The original R3 also authorizes classified fallback while verifying.
         // A true wake may restore an already-completed player's target, but only
@@ -296,11 +368,15 @@ static bool ymStartAwaitMsiSource(std::uint64_t ticket, bool& admitted, std::uni
         if (!msiControllerRepairScope()) {reason="msi-route-retired";break;}
         ++checks;
         admitted=ymStartAdmitSource();
+        if(!requestPower->current()){admitted=false;reason="original-public-power-retired";break;}
         if (admitted) {reason="current-msi-source-admitted";break;}
         if(checks==1)appendNativeLifecycleLog("input-host-msi-source-before-target",{
             {"stage","waiting"},{"policy","VC-MSI-EXCLUSIVE-HANDOFF-20261024-R1"},
             {"requestId",ticket},{"epoch",epoch},{"remainingMs",remaining},{"playerExecution",playerExecution},
             {"targetPrepared",false},{"newModeIntent",false}});
+        // Optional diagnostics may yield/call back. Do not consume another
+        // queued mode ticket after this original Start permission retired.
+        if(!requestPower->current()){reason="original-public-power-retired";break;}
         std::string queuedMode;
         {
             std::lock_guard<std::mutex> queue(g_inputHostLifecycleWorkMx);
@@ -432,11 +508,78 @@ static int ymStartReadmitGpdPostHideSource(uint64_t ticket) {
 
 // This is a serialized substep of the admitted R3 Start, with
 // its existing deadline and capture owner. No independent retry or timeout.
+// A GPD HID-only target must not turn an initial missing source into a
+// permanent visibility exemption. HELLO owns no target: wait on the original
+// Start permission, then use the existing hide and post-hide cycle below.
+static bool ymStartAwaitGpdPreHideSource(uint64_t ticket,std::unique_lock<InputHostMutex>& hostLock) {
+    const auto requestPower=t_inputHostRequestPower;
+    const auto epoch=g_inputHostEpoch,power=currentPowerGeneration();
+    const auto runId=g_inputHostRunId,persona=inputHostConfiguredPersona();
+    const auto process=g_inputHostProcess;
+    const auto intent=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
+    const auto began=inputHostStartProtectionNow();
+    const auto initialRemaining=inputHostGpdStartRemaining(ticket,persona,began);
+    if(!initialRemaining)return false;
+    const auto playerDeadline=began+initialRemaining;
+    const auto inheritedDeadline=g_inputHostSwitchRecoveryStartDeadline;
+    const auto deadline=inheritedDeadline?(std::min)(playerDeadline,inheritedDeadline):playerDeadline;
+    unsigned checks=0;
+    auto current=[&](uint64_t now) {
+        const bool bound=requestPower && requestPower->current() && ticket &&
+            nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd &&
+            currentPowerGeneration()==power && g_inputHostBoundPowerGeneration==power &&
+            g_inputHostEpoch==epoch && g_inputHostRunId==runId && g_inputHostProcess==process &&
+            process && WaitForSingleObject(process,0)==WAIT_TIMEOUT &&
+            !g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) &&
+            intent==g_inputHostVirtualIntentRevision.load(std::memory_order_acquire) &&
+            inputHostConfiguredPersona()==persona && g_realStickTest.virtualTargetEnabled &&
+            g_inputHostHello && !g_inputHostPrepared && !g_inputHostPrepareMayHaveReachedHost &&
+            !g_inputHostActive && hardwareWriteAllowed() && g_inputReady && !g_inputCaptureStop &&
+            !inputHostExitFenceRaised() && !g_exitRequested &&
+            inputHostGpdStartRemaining(ticket,persona,now) &&
+            (!g_inputHostSwitchRecoveryStartDeadline || now<g_inputHostSwitchRecoveryStartDeadline);
+        // Potentially blocking proof readers cannot extend the original limit.
+        const auto fresh=inputHostStartProtectionNow();
+        return bound && fresh>=now && fresh<deadline && requestPower->current();
+    };
+    for(;;){
+        const auto now=inputHostStartProtectionNow();
+        if(!current(now))return false;
+        ++checks;
+        const bool admitted=ymStartAdmitSource();
+        const auto after=inputHostStartProtectionNow();
+        // Admission and optional observers can retire this exact request.
+        if(after<now || !current(after))return false;
+        if(admitted){
+            appendNativeLifecycleLog("input-host-gpd-source-before-hide",{
+                {"requestId",ticket},{"epoch",epoch},{"stage","admitted"},{"checks",checks},
+                {"elapsedMs",after-began},{"targetPrepared",false},{"originalDeadlineRetained",true}});
+            return current(inputHostStartProtectionNow());
+        }
+        auto remaining=inputHostGpdStartRemaining(ticket,persona,after);
+        if(g_inputHostSwitchRecoveryStartDeadline)
+            remaining=(std::min)(remaining,g_inputHostSwitchRecoveryStartDeadline-after);
+        if(!remaining)return false;
+        const auto delay=(std::min)(uint64_t(kInputCaptureGamepadPublishIntervalMs),remaining);
+        hostLock.unlock();
+        try{
+            Sleep(static_cast<DWORD>(delay));
+            if(g_inputCaptureOwnerDispatchesBus && !g_inputCaptureStop && !inputHostExitFenceRaised() && !g_exitRequested)
+                inputCaptureOwnerFallbackBusTick();
+        }catch(...){hostLock.lock();throw;}
+        hostLock.lock();
+    }
+}
+
 static bool ymStartAwaitGpdPostHideCycle(uint64_t ticket,std::unique_lock<InputHostMutex>& hostLock,bool* cycleCompleted=nullptr) {
+    const auto requestPower=t_inputHostRequestPower;
     if(cycleCompleted)*cycleCompleted=false;
     bool cycleEntered=false;
-    struct OwnerReturn {bool accepted=false;~OwnerReturn() noexcept {
-        if(!accepted)try{(void)msiPostHideCancelForStop("post-hide-start-aborted");}
+    struct OwnerReturn {
+        uint64_t epoch=g_inputHostEpoch;std::string run=g_inputHostRunId;HANDLE process=g_inputHostProcess;
+        bool accepted=false;~OwnerReturn() noexcept {
+        if(!accepted && g_inputHostEpoch==epoch && g_inputHostRunId==run && g_inputHostProcess==process)
+        try{(void)msiPostHideCancelForStop("post-hide-start-aborted");}
         catch(...){/* Retain exact owner/history; optional cleanup must not terminate unwinding. */}
     }} owner;
     const auto epoch=g_inputHostEpoch,power=currentPowerGeneration();
@@ -444,7 +587,9 @@ static bool ymStartAwaitGpdPostHideCycle(uint64_t ticket,std::unique_lock<InputH
     const auto process=g_inputHostProcess;
     for(;;){
         const auto now=inputHostStartProtectionNow();const auto view=g_virtualStartProtection.view(now);
-        if(!ticket || view.requestId!=ticket || !view.locked || !view.remainingMs || view.persona!=persona ||
+        const auto remaining=inputHostGpdStartRemaining(ticket,persona,now);
+        if(!requestPower || !requestPower->current() ||
+            !ticket || view.requestId!=ticket || !remaining || view.persona!=persona ||
             currentPowerGeneration()!=power || g_inputHostEpoch!=epoch || g_inputHostRunId!=runId ||
             g_inputHostProcess!=process || inputHostConfiguredPersona()!=persona ||
             g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready || !g_inputReady ||
@@ -452,13 +597,13 @@ static bool ymStartAwaitGpdPostHideCycle(uint64_t ticket,std::unique_lock<InputH
             (g_inputHostSwitchRecoveryStartDeadline && now>=g_inputHostSwitchRecoveryStartDeadline))return false;
         cycleEntered=cycleEntered || g_postHideCycleOwned.load(std::memory_order_acquire);
         const int reAdmit=ymStartReadmitGpdPostHideSource(ticket);
-        if(reAdmit==2)return false;
+        if(reAdmit==2 || !requestPower->current())return false;
         const int result=msiPostHideCycleStep(ticket);
-        if(result==2)return false;
+        if(result==2 || !requestPower->current())return false;
         if(result==0){owner.accepted=true;if(cycleCompleted)*cycleCompleted=cycleEntered;return true;}
         const auto after=inputHostStartProtectionNow();
-        if(after<now || after-now>=view.remainingMs)return false;
-        const auto delay=(std::min)(uint64_t(kInputCaptureGamepadPublishIntervalMs),view.remainingMs-(after-now));
+        if(after<now || after-now>=remaining)return false;
+        const auto delay=(std::min)(uint64_t(kInputCaptureGamepadPublishIntervalMs),remaining-(after-now));
         hostLock.unlock();
         try{
             Sleep(static_cast<DWORD>(delay));
@@ -470,6 +615,13 @@ static bool ymStartAwaitGpdPostHideCycle(uint64_t ticket,std::unique_lock<InputH
 }
 
 static bool inputHostStart() {
+    // Keep an outer request's exact scope; never recapture across its cancellation.
+    auto startPower=t_inputHostRequestPower;
+    if(!startPower)startPower=ymcc::inputHost::sharedPower::Scope::create(
+        &readSharedSystemPower,g_sharedPowerRevocations,sgShouldKeepInputDuringStandby(),
+        ymcc::inputHost::sharedPower::Use::Lifecycle);
+    InputHostRequestPowerScope startPowerScope(startPower);
+    ymcc::inputHost::diagnostics::Scope criticalDiagnosticScope;
     // Declared before every early return AND the Host lock: on unwind it runs
     // after that lock retires, then reacquires the original owner order. Even
     // a payload/persona/maintenance rejection must return an unconsumed donor.
@@ -486,6 +638,11 @@ static bool inputHostStart() {
             } catch(...) { /* original native owner retains every unproven debt */ }
         }
     } nativeHandoffReturn;
+    // The original donor-return guard must exist even when capture was refused.
+    if(!startPower || !startPower->current())return false;
+    // OEM-only collection is not permission to create a virtual target when
+    // optional runtime initialization has not succeeded. Owned returns run.
+    if (g_oemInputCaptureOnly.load(std::memory_order_acquire)) return false;
     if (g_inputHostSwitchRecoveryStartDeadline &&
             inputHostStartProtectionNow()>=g_inputHostSwitchRecoveryStartDeadline) return false;
     // Reject retired/unknown/disabled personas before observers, routes or Host creation.
@@ -522,6 +679,9 @@ static bool inputHostStart() {
     RecoveryStateBusyGuard recoveryBusyGuard("input-host-start");
     recoverySnapNotePhase("input-host-start");
     std::unique_lock<InputHostMutex> lock(g_inputHostMx);
+    // Lock acquisition may span a public revocation and a later Ready. Keep
+    // the original Start permission; never borrow that later observation.
+    if(!startPower->current())return false;
     if (requestedPersona != inputHostConfiguredPersona() || !g_realStickTest.virtualTargetEnabled) return false;
     if (g_inputHostSwitchRecoveryStartRequestId &&
             (g_virtualStartProtection.view(inputHostStartProtectionNow()).requestId!=g_inputHostSwitchRecoveryStartRequestId ||
@@ -606,6 +766,10 @@ static bool inputHostStart() {
         std::shared_ptr<ymcc::nativeRefreshWriter::Session> previous=g_postHideSharedWriterSession;
         ~PostHideWriterFenceScope(){g_postHideSharedWriterSession=std::move(previous);}
     } postHideWriterFenceScope;
+    if(nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd && !g_inputHostProcess && !g_hidHideVisibilityJournal.active){
+        std::lock_guard leaseLock(g_msiNativeForegroundMx);
+        if(!g_msiNativeForegroundLease.active && !inputHostNativeVisibilityColdReturnOrQueueLocked("start-before-writer-fence"))return false;
+    }
     const auto inheritedWriterPath=nativeRefreshWriterRecordPath();
     const auto inheritedWriterHistory=ymcc::nativeRefreshWriter::load(inheritedWriterPath,inputHostTargetReturnMachineBinding());
     // A healthy same-persona idempotent Start may have no player ticket and
@@ -614,8 +778,12 @@ static bool inputHostStart() {
         inheritedWriterHistory.state==ymcc::nativeRefreshWriter::LoadState::Valid)){
         const auto fencePower=currentPowerGeneration();std::string lastFenceFailure;
         for(;;){
+            // This wait retains the original Start permission across yields.
+            if(!startPower->current())return false;
             const auto now=inputHostStartProtectionNow();const auto pending=g_virtualStartProtection.view(now);
-            if(pending.requestId!=requestTicket || !pending.locked || !pending.remainingMs || pending.persona!=requestedPersona ||
+            const auto remaining=nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd?
+                inputHostGpdStartRemaining(requestTicket,requestedPersona,now):(pending.locked?pending.remainingMs:0);
+            if(pending.requestId!=requestTicket || !remaining || pending.persona!=requestedPersona ||
                 currentPowerGeneration()!=fencePower || inputHostConfiguredPersona()!=requestedPersona ||
                 g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready || g_inputHostPowerAdmissionRevoked ||
                 inputHostExitFenceRaised() || g_exitRequested || g_inputCaptureStop ||
@@ -623,21 +791,26 @@ static bool inputHostStart() {
             std::shared_ptr<ymcc::nativeRefreshWriter::Session> session;
             std::string failure;DWORD error=ERROR_SUCCESS;
             try{
-                session.reset(new ymcc::nativeRefreshWriter::Session(ymcc::nativeRefreshWriter::Session::open(
+                session=msiNativeForegroundHandoffWriterSession();
+                const bool currentDonor=static_cast<bool>(session);
+                if(!session)session.reset(new ymcc::nativeRefreshWriter::Session(ymcc::nativeRefreshWriter::Session::open(
                     inheritedWriterPath,inputHostTargetReturnMachineBinding())));
                 if(!session->ready()){failure=session->error().reason;error=session->error().win32Error;}
                 else if(!ymcc::nativeRefreshWriter::LaunchScope::reconcilePrevious(*session,error,failure)){}
-                else if(session->record()->nativeVisibility)failure="native-visibility-return-still-owned";
+                else if(nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd &&
+                        session->record()->nativeVisibility && !currentDonor)failure="native-visibility-return-still-owned";
                 else{
                     const auto readyNow=inputHostStartProtectionNow();const auto readyView=g_virtualStartProtection.view(readyNow);
-                    if(readyView.requestId!=requestTicket || !readyView.locked || !readyView.remainingMs ||
+                    const auto readyRemaining=nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd?
+                        inputHostGpdStartRemaining(requestTicket,requestedPersona,readyNow):(readyView.locked?readyView.remainingMs:0);
+                    if(!startPower->current() || readyView.requestId!=requestTicket || !readyRemaining ||
                         readyView.persona!=requestedPersona || currentPowerGeneration()!=fencePower ||
                         g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready ||
                         inputHostExitFenceRaised() || g_exitRequested || g_inputHostPowerAdmissionRevoked || g_inputCaptureStop ||
                         (g_inputHostSwitchRecoveryStartDeadline && readyNow>=g_inputHostSwitchRecoveryStartDeadline))return false;
                     g_postHideSharedWriterSession=std::move(session);
                     try{appendNativeLifecycleLog("input-host-native-writer-fence",{{"phase","held"},{"requestId",requestTicket},
-                        {"remainingMs",readyView.remainingMs},{"deviceOperationIssued",false},{"physicalReturnVerified",false}});}catch(...){}
+                        {"remainingMs",readyRemaining},{"deviceOperationIssued",false},{"physicalReturnVerified",false}});}catch(...){}
                     break;
                 }
             }catch(...){failure="native-writer-fence-read-unknown";}
@@ -645,12 +818,13 @@ static bool inputHostStart() {
             if(failure!=lastFenceFailure){
                 lastFenceFailure=failure;
                 try{appendNativeLifecycleLog("input-host-native-writer-fence",{{"phase","wait"},{"requestId",requestTicket},
-                    {"reason",failure},{"error",error},{"remainingMs",pending.remainingMs},{"deviceOperationIssued",false},
+                    {"reason",failure},{"error",error},{"remainingMs",remaining},{"deviceOperationIssued",false},
                     {"originalDeadlineRetained",true},{"physicalReturnVerified",false}});}catch(...){}
             }
+            if(!startPower->current())return false;
             const auto after=inputHostStartProtectionNow();
-            if(after<now || after-now>=pending.remainingMs)return false;
-            const auto delay=(std::min)(uint64_t{100},pending.remainingMs-(after-now));
+            if(after<now || after-now>=remaining)return false;
+            const auto delay=(std::min)(uint64_t{100},remaining-(after-now));
             lock.unlock();try{Sleep(static_cast<DWORD>(delay));}catch(...){lock.lock();throw;}lock.lock();
         }
     }
@@ -665,6 +839,7 @@ static bool inputHostStart() {
     InputHostStartExceptionCleanup exceptionCleanup;
     MsiPersonaModeStartScope msiPersonaScope;
     g_inputHostStartProtectionBoundTicket = requestTicket;
+    if(!startPower->current())return false;
     // P0（虚拟手柄机型库对齐评估 2026-09-15）：MSI Claw 物理手柄默认处于
     // MSI 私有模式（XInput 域不可见）。GP-MSIG3E-3（Layer B）起，启动顺序改为按能力表
     // 切/等 DInput（§3.B L43）：命令接口 → SwitchMode(2) → 等 PID_1902 主游戏接口
@@ -700,7 +875,9 @@ static bool inputHostStart() {
     // execution owner. Driver lists alone grant no ownership or cleanup rights.
     // Startup retains the existing service-health diagnostic below.
     // 服务健康诊断（只读，fail-closed 记录）。
+    if(!startPower->current())return false;
     hidHideServiceHealth("start");
+    if(!startPower->current())return false;
     if (g_inputHostReleaseQuarantined) {
         appendNativeLifecycleLog("input-host-start-blocked", {
             {"reason", "release-quarantine"},
@@ -801,8 +978,9 @@ static bool inputHostStart() {
             // GP-MSIG3E-6 LC-R1（M1）：同 persona 路径不经过任何 inputHostStopLocked，
             // 因此路线不会被 stop 撤销；仍补齐一次幂等 Ensure（已 armed 零成本早退），
             // 使本路径与主路径同序，且旧 Host 已退出等未走主路径时也能自愈。
+            if(!startPower->current())return false;
             ymStartEnsureRoute("idempotent");
-            return g_inputHostPrepared && g_inputHostNeutralized;
+            return startPower->current() && g_inputHostPrepared && g_inputHostNeutralized;
         }
     }
     // HC VirtualManager serializes persona changes as Disconnect -> Dispose
@@ -848,8 +1026,11 @@ static bool inputHostStart() {
     // visibility-transaction / explicit-rearm / capture-assets）均已通过，且后续不再有
     // stop 撤销路线。此刻建立 DInput 路线，使下面的物理源准入落在 PID_1902 主游戏接口上。
     // 幂等（已 armed 早退）；非 Claw/未授权板号由 msiClawEnsureDInputRoute 内部早退，零模式写。
+    if(!startPower->current())return false;
     msiForceGamepadBeforeVirtualStart();
+    if(!startPower->current())return false;
     ymStartEnsureRoute("main");
+    if(!startPower->current())return false;
     // Bind ControllerManager's one selected physical source before an
     // XInput-visible target is created.  HC's VirtualManager can nevertheless
     // construct a HID-only DS4 target while ControllerManager has no current
@@ -858,6 +1039,7 @@ static bool inputHostStart() {
     // XInput persona, where a late slot could be the virtual endpoint.
     const bool msiSourceRequiredBeforeTarget = msiClawKnownBoardAuthority();
     bool physicalSourceAdmittedAtStart = ymStartAdmitSource();
+    if(!startPower->current())return false;
     bool physicalSourcePending = !physicalSourceAdmittedAtStart;
     if (physicalSourcePending && !msiSourceRequiredBeforeTarget && !inputHostCanCreateTargetWithoutPhysicalSource()) {
         writeLog("WARN", "input-host start rejected: physical-xinput-source-missing");
@@ -870,12 +1052,14 @@ static bool inputHostStart() {
         writeLog("WARN", "input-host start rejected: executable-missing");
         return false;
     }
+    if(!startPower->current())return false;
     g_inputHostRunId = inputHostNewId();
     g_inputHostPipeName = L"YeManInputHost-" + std::wstring(g_inputHostRunId.begin(), g_inputHostRunId.end());
     g_inputHostStartupNonce = inputHostNewId();
     g_inputHostEpoch = g_inputHostEpochCounter.fetch_add(1, std::memory_order_acq_rel) + 1;
     g_inputHostEpochMirror.store(g_inputHostEpoch, std::memory_order_release);
     g_inputHostBoundPowerGeneration = g_powerGeneration.load(std::memory_order_acquire);
+    inputHostRuntimeRecoveryBindStartTupleLocked(requestTicket,g_inputHostBoundPowerGeneration,requestedPersona,true);
     if(!msiPersonaModeResumeOnNewTuple())return false;
     g_inputHostSequence = 0;
     g_inputHostConfigRevision = 1; // v1 canonical-frame adapter config; UI parameter apply is separately revisioned.
@@ -894,7 +1078,9 @@ static bool inputHostStart() {
     } buildPersonaScope;
     // Coordinator owns the local, owner-only server before Host starts. The
     // random nonce is checked in HELLO and echoed in every receipt.
-    g_inputHostServerPipe = inputHostCreateServerPipeLocked();
+    const bool pipeCreateCurrent=startPower->current();
+    if(!pipeCreateCurrent)SetLastError(ERROR_OPERATION_ABORTED);
+    g_inputHostServerPipe = pipeCreateCurrent ? inputHostCreateServerPipeLocked() : nullptr;
     if (!g_inputHostServerPipe) {
         writeLog("WARN", json({{"event", "input-host.start-failed"}, {"reason", "pipe-server-create-failed"},
             {"error", (unsigned long long)GetLastError()}}).dump());
@@ -928,8 +1114,9 @@ static bool inputHostStart() {
     json helloReceipt;
     g_inputHostCreatedIdentity = ymcc::inputHost::exitRetirement::identity(g_inputHostProcess);
     g_inputHostExitForceSpent = false;
-    // GP-XBOX-5：冷启动现场 3 s HELLO 到时后 Host 才写回，造成可避免的断管重开。
-    const DWORD helloBudget = inputHostBuildPersonaSnapshot() == "elite" ? 5000 : 3000;
+    // CPU-starved startup may take 5-10s before connecting. Keep one Host and
+    // the original absolute30s player/recovery ceiling across connect/write/read.
+    const DWORD helloBudget = 15000;
     const bool hello = inputHostRequestLocked("HELLO", json::object(), "host-hello", helloBudget, &helloReceipt);
     if (hello && domainLogEnabled("virtual")) {
         try {
@@ -966,7 +1153,7 @@ static bool inputHostStart() {
         } catch (...) { /* missing evidence never rejects HELLO or target preparation */ }
     }
 #endif
-    if(hello && physicalSourcePending && g_machineIdentity.family==YmccFamily::OneXPlayer){
+    if(hello && physicalSourcePending && inputHostOneXMachineEligible()){
         const auto waitingEpoch=g_inputHostEpoch;const auto waitingRun=g_inputHostRunId;
         const int observed=inputHostOneXAwaitPreHideSource(requestTicket,lock);
         if(observed<0){if(g_inputHostEpoch==waitingEpoch && g_inputHostRunId==waitingRun)inputHostStopLocked("onex-pre-hide-source-context-retired");return false;}
@@ -974,6 +1161,16 @@ static bool inputHostStart() {
     }
     if(hello && physicalSourcePending && !msiSourceRequiredBeforeTarget &&
        ymStartRecoverRogPendingIdentity(requestTicket)) {
+        physicalSourceAdmittedAtStart=true;physicalSourcePending=false;
+    }
+    if(hello && physicalSourcePending && nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd){
+        const auto pendingEpoch=g_inputHostEpoch;const auto pendingRun=g_inputHostRunId;
+        const auto pendingProcess=g_inputHostProcess;
+        if(!ymStartAwaitGpdPreHideSource(requestTicket,lock)){
+            if(g_inputHostEpoch==pendingEpoch && g_inputHostRunId==pendingRun && g_inputHostProcess==pendingProcess)
+                inputHostStopLocked("gpd-pre-hide-source-unproven");
+            return false;
+        }
         physicalSourceAdmittedAtStart=true;physicalSourcePending=false;
     }
     // MSI source readiness must precede visibility proof and PREPARE. The
@@ -1092,10 +1289,15 @@ static bool inputHostStart() {
         inputHostStopLocked("physical-hide-not-admitted");
         return false;
     }
-    if(hello && physicalSourceOnlineAtStart && nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd){
+    if(hello && (physicalSourceOnlineAtStart || nativeHandoffRequired) &&
+       nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd){
         const auto gpdCyclePower=currentPowerGeneration();bool gpdCycleCompleted=false;
+        const auto gpdCycleEpoch=g_inputHostEpoch;const auto gpdCycleRun=g_inputHostRunId;
+        const auto gpdCycleProcess=g_inputHostProcess;
         if(!ymStartAwaitGpdPostHideCycle(requestTicket,lock,&gpdCycleCompleted)){
-            inputHostStopLocked("gpd-post-hide-cycle-unproven");return false;
+            if(g_inputHostEpoch==gpdCycleEpoch && g_inputHostRunId==gpdCycleRun && g_inputHostProcess==gpdCycleProcess)
+                inputHostStopLocked("gpd-post-hide-cycle-unproven");
+            return false;
         }
         // An unavailable optional refresh keeps the original standard path.
         if(gpdCycleCompleted){
@@ -1105,7 +1307,7 @@ static bool inputHostStart() {
             const bool currentHide=physicalSourceAdmittedAtStart && hidHideRefreshPhysicalHide(g_inputHostRunId,"gpd-post-cycle-source-current");
             const auto afterCycleClock=inputHostStartProtectionNow();const auto afterCycleView=g_virtualStartProtection.view(afterCycleClock);
             if(physicalSourcePending || !currentHide || currentPowerGeneration()!=gpdCyclePower ||
-                afterCycleView.requestId!=requestTicket || !afterCycleView.locked || !afterCycleView.remainingMs ||
+                afterCycleView.requestId!=requestTicket || !inputHostGpdStartRemaining(requestTicket,requestedPersona,afterCycleClock) ||
                 g_inputHostPowerAdmissionRevoked || g_inputCaptureStop ||
                 (g_inputHostSwitchRecoveryStartDeadline && afterCycleClock>=g_inputHostSwitchRecoveryStartDeadline)){
                 inputHostStopLocked("gpd-post-cycle-source-unproven");return false;
@@ -1114,7 +1316,7 @@ static bool inputHostStart() {
     }
     // OneX capability adapter is independent of GPD/ROG native-OFF policies.
     // The optional specialized step cannot change the player's selected target.
-    if(hello && physicalSourceOnlineAtStart && g_machineIdentity.family==YmccFamily::OneXPlayer){
+    if(hello && physicalSourceOnlineAtStart && inputHostOneXMachineEligible()){
         const int oneXRefresh=inputHostOneXPostHideBeforeTarget(requestTicket,lock);
         if(oneXRefresh<0){inputHostStopLocked("onex-post-hide-refresh-unproven");return false;}
         if(oneXRefresh>0){physicalSourceAdmittedAtStart=ymStartAdmitSource();physicalSourcePending=!physicalSourceAdmittedAtStart;
@@ -1179,6 +1381,9 @@ static bool inputHostStart() {
     const bool neutralized = prepared && inputHostRequestLocked("SUBMIT_NEUTRAL", json::object(), "neutral-accepted", 2000);
     g_inputHostNeutralized = neutralized;
     if (neutralized) g_inputHostLifecycle = "neutralized";
+    // Completed remote ownership remains with its original lifecycle. A late
+    // cancellation cannot publish this Start as current or begin fallback work.
+    if(!startPower->current())return false;
     // GP-XBOX-5：只限定已建出的 Elite；PS/Deck 原准入与帧流程不进入此分支。
     if (prepared && inputHostBuildPersonaSnapshot() == "elite" &&
         (!neutralized || !inputHostXboxConfirmStartupLocked(prepareReceipt, prepareStartedTick, preparePowerGeneration))) {
@@ -1229,6 +1434,11 @@ static bool inputHostStart() {
             ? (physicalHidAdmitted ? "admitted" : "refused")
             : "not-required"},
         {"physicalVisibility", kVirtualTestKeepPhysicalVisible ? "kept-visible-test" : "hidhide-admitted"},
+        {"physicalVisibilitySchemaVersion",1},
+        {"physicalVisibilityScope","start-local-test-policy-and-hide-admission;not-physical-or-external-consumer-readback"},
+        {"physicalSourceOnlineAtHideGate",physicalSourceOnlineAtStart},
+        {"nativeHandoffRequiredAtHideGate",nativeHandoffRequired},
+        {"physicalVisibilityReadbackProven",false},{"externalControllerCountProven",false},
         {"transportFault", g_inputHostTransportFault},
         {"hostInstanceId", g_inputHostHostInstanceId}, {"runId", g_inputHostRunId},
         {"epoch", g_inputHostEpoch}
@@ -1290,6 +1500,7 @@ static bool inputHostStart() {
     // 批131（照挖掘回函 §C-③"开·呈递"拍）：呈递行带 targetLabel + vid/pid（与 CT `now presenting …` 对表）。
     const char* builtTargetLabel = nullptr; const char* builtVidPid = nullptr;
     inputHostSwitchAuditTargetIds(builtPersonaNow, &builtTargetLabel, &builtVidPid);
+    if(!startPower->current())return false;
     msiExplicitRearmStarted(msiStartSettingSequence);
     appendNativeLifecycleLog("input-host-started", {
         {"intentOrigin", inputHostIntentOriginForReason(g_inputHostReconcileReason.c_str())},
@@ -1308,6 +1519,7 @@ static bool inputHostStart() {
         {"transportUsable", true}
     });
     // 批129「落定拍」：五值同行（请求 / 入队 / 出队 / 下发 profile / 实物 persona）。
+    if(!startPower->current())return false;
     inputHostSwitchAuditSettled("started", builtPersonaNow, builtProfileNow, livePersonaNow,
                                 g_inputHostEpoch, g_inputHostHostInstanceId,
                                 g_inputHostProcess
@@ -1316,6 +1528,7 @@ static bool inputHostStart() {
                                 g_inputHostRunId);
     // 批131（照挖掘回函 §C-③"就绪"拍 = CT `[ClawReady]` 三条件断言）：塔已就绪一条行，
     // 并把 enabled / mounted 两个状态位分开落盘（照 CT `_viiperEnabled` / `_viiperMounted` 分离）。
+    if(!startPower->current())return false;
     inputHostSwitchAuditVirtualReady(kVirtualTestKeepPhysicalVisible || physicalVisibilitySkip,
                                      physicalHidAdmitted, physicalSourcePending,
                                      g_realStickTest.virtualTargetEnabled);
@@ -1333,8 +1546,9 @@ static bool inputHostStart() {
             {"pXinput", xinputPlane}
         });
     }
-    if(!msiPersonaModeFinish())return false;
+    if(!startPower->current() || !msiPersonaModeFinish())return false;
+    if(!startPower->current())return false;
     inputHostStampBuildSettle();   // 批125
-    return true;
+    return startPower->current();
 }
 

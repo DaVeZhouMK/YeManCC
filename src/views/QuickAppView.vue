@@ -39,7 +39,8 @@ import {
 } from '@/bridge/gameproc';
 import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
 import { fs, shell, dialog, display, registry, type DisplayMode, type DisplayTopology } from '@/bridge/api';
-import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
+import { launchSteamAddon } from '@/bridge/yeman';
+import { readSettingsSection, saveSettingsSection, getSettingsRecoveryState } from '@/bridge/settingsRepository';
 import {
   folder,
   baseUrl,
@@ -142,9 +143,11 @@ async function onOpenOptiConsole() {
       }
       return;
     }
+    statusMsg.value = '正在低速补齐游戏库，完成后打开 OPT 客户端…';
     const notice = await openOptiConsole();
     statusMsg.value = `已打开 OPT 客户端。${notice ? `\n${notice}` : ''}`;
   } catch (e) {
+    statusMsg.value = '';
     errMsg.value = 'OPT 客户端打开失败：' + (e as Error).message;
   } finally {
     focusFsrTrigger();
@@ -327,7 +330,7 @@ const displayResolutionOptions = computed(() => Array.from(displayModesByResolut
   }));
 const displayResolution = computed(() => {
   const current = currentDisplayMode.value;
-  return current ? displayResolutionKey(current) : displayResolutionOptions.value[0]?.value || '';
+  return current ? displayResolutionKey(current) : '';
 });
 const displayRefreshModes = computed(() => displayModesByResolution.value.get(displayResolution.value) || []);
 const displayRefreshOptions = computed(() => Array.from(new Map(
@@ -335,7 +338,7 @@ const displayRefreshOptions = computed(() => Array.from(new Map(
 ).entries())
   .map(([value]) => ({ value, label: `${value}Hz` }))
   .sort((a, b) => Number(a.value) - Number(b.value)));
-const displayRefresh = computed(() => currentDisplayMode.value?.refresh || displayRefreshOptions.value[0]?.value || '');
+const displayRefresh = computed(() => currentDisplayMode.value?.refresh || '');
 
 function chooseDisplayMode(modes: DisplayMode[], preferredRefresh: number, current: DisplayMode | null): DisplayMode | null {
   if (modes.length === 0) return null;
@@ -403,7 +406,7 @@ async function refreshDisplayModes() {
   try {
     const r = await display.getModes();
     displayModes.value = Array.isArray(r.modes) ? r.modes : [];
-    displayCurrent.value = r.current || displayModes.value[0]?.id || '';
+    displayCurrent.value = r.current || '';
   } catch (e) {
     errMsg.value = '读取当前显示器分辨率失败：' + (e as Error).message;
   } finally {
@@ -411,8 +414,8 @@ async function refreshDisplayModes() {
   }
 }
 
-async function applyDisplayMode(selected: DisplayMode | null) {
-  if (!selected || selected.id === displayCurrent.value) return;
+async function applyDisplayMode(selected: DisplayMode | null, fields: readonly ('resolution' | 'hz')[] = ['resolution', 'hz']) {
+  if (!selected) return;
   const current = currentDisplayMode.value;
   if (current && (selected.width >= selected.height) !== (current.width >= current.height)) {
     errMsg.value = '已拦截与当前桌面方向相反的分辨率';
@@ -421,9 +424,13 @@ async function applyDisplayMode(selected: DisplayMode | null) {
   displayBusy.value = true;
   errMsg.value = '';
   try {
-    const applied = await display.setMode(selected);
+    statusMsg.value = '';
+    const applied = await display.setMode(selected, { fields });
+    if (applied.ok !== true || applied.id !== selected.id || applied.width !== selected.width || applied.height !== selected.height || applied.refresh !== selected.refresh || applied.orientation !== selected.orientation)
+      throw new Error('当前显示器实际回读尚未确认');
     displayCurrent.value = applied.id;
     statusMsg.value = `已切换当前显示器：${applied.width} × ${applied.height} · ${applied.refresh}Hz`;
+    if (applied.preferenceSaved === false) errMsg.value = applied.preferenceReason || '显示模式已生效，但开机全局偏好未保存';
   } catch (e) {
     errMsg.value = '分辨率切换失败：' + (e as Error).message;
     await refreshDisplayModes();
@@ -433,13 +440,13 @@ async function applyDisplayMode(selected: DisplayMode | null) {
 }
 
 async function applyDisplayResolution(value: string | number) {
-  await applyDisplayMode(modeForResolution(String(value)));
+  await applyDisplayMode(modeForResolution(String(value)), ['resolution']);
 }
 
 async function applyDisplayRefresh(value: string | number) {
   const refresh = Number(value);
   if (!Number.isFinite(refresh)) return;
-  await applyDisplayMode(modeForRefresh(refresh));
+  await applyDisplayMode(modeForRefresh(refresh), ['hz']);
 }
 
 async function applyDisplayTopology(topology: DisplayTopology) {
@@ -679,7 +686,7 @@ async function onOptiScalerCurrent() {
       }
 
       statusMsg.value = `正在结束 ${gameName}…`;
-      const closed = await closeGame(gamePid, gameName, current.processCreated);
+      const closed = await closeGame(gamePid, gameName, current.processCreated, current);
       if (!closed.ok) {
         errMsg.value = '关闭游戏失败：' + (closed.msgs?.join('；') || '未知错误');
         await showFsrMessage('OptiScaler 操作失败', errMsg.value, 'error');
@@ -784,6 +791,7 @@ async function loadLaunchApps() {
   statusMsg.value = '';
   try {
     const quickApps = await readSettingsSection<any>('quickApps');
+    if (getSettingsRecoveryState().status !== 'ready') throw new Error('当前配置读取尚未确认，请保留原配置并重试');
     const parsed: unknown = quickApps.apps;
     const items = Array.isArray(parsed) ? parsed
       : parsed && typeof parsed === 'object' && Array.isArray((parsed as any).apps)
@@ -940,8 +948,8 @@ async function launchApp(index: number) {
   statusMsg.value = '';
   launchBusy.value = true;
   try {
-    await shell.execute(app.path, []);
-    statusMsg.value = `已启动：${app.name}`;
+    await launchSteamAddon(app.path, { userInitiated: true });
+    statusMsg.value = `已发送启动请求：${app.name}`;
   } catch (e) {
     errMsg.value = `启动失败：${(e as Error).message}`;
   } finally {

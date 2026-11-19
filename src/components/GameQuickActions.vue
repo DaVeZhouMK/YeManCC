@@ -48,6 +48,7 @@ import { dialog, proc, shell, windowApi } from '@/bridge/api';
 import { subscribePolicyGameStatus, getPolicyGame } from '@/bridge/gamePolicyTarget';
 import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
 import { readActivationEvidence } from '@/gamepad/activationEvidence';
+import { createTaskViewTouchActivation, readTaskViewSystemTouchEvidence } from '@/gamepad/taskViewTouchActivation';
 
 const props = defineProps<{ game: DetectedGame | null; open: boolean }>();
 const emit = defineEmits<{
@@ -71,6 +72,7 @@ const losslessState = ref<LosslessGameState | null>(null);
 const losslessReading = ref(false);
 let losslessReadEpoch = 0;
 let menuStateEpoch = 0;
+let taskViewSessionEpoch = 0;
 let controlStateEpoch = 0;
 let targetEpoch = 0;
 let disposed = false;
@@ -84,6 +86,7 @@ const losslessMenuTarget=ref<DetectedGame|null>(null);
 const losslessNext=computed(()=>losslessToggleValue(losslessState.value));
 
 let taskViewActionSequence = 0;
+const taskViewTouch = createTaskViewTouchActivation();
 const paused = ref(false);
 const statusMsg = ref('');
 const errMsg = ref('');
@@ -124,6 +127,7 @@ async function onOpenOptiConsole(): Promise<void> {
       }
       return;
     }
+    status('正在低速补齐游戏库，完成后打开 OPT 客户端…');
     const notice = await openOptiConsole();
     status(`已打开 OPT 客户端${notice ? `\n${notice}` : ''}`);
   } catch (error) {
@@ -150,7 +154,7 @@ const trainerButtonHint = computed(() => {
   if (state?.state === 'budget-limited') return '下载额度已用完 · 已有文件可启动';
   if (state?.state === 'failed') return '准备失败 · 点击重试';
   if (state?.state === 'unavailable') return '暂无匹配资源 · 点击重试';
-  return '等待游戏启动';
+  return targetGame.value ? '已识别游戏 · 点击准备并启动' : '等待游戏启动';
 });
 const targetName = computed(() => targetGame.value
   ? (detectedGameName(targetGame.value) || targetGame.value.name)
@@ -248,7 +252,7 @@ async function refreshControlState(target: DetectedGame | null): Promise<void> {
     return;
   }
   try {
-    const state = await hasSuspendedState(target.pid);
+    const state = await hasSuspendedState(target.pid, target.processCreated);
     if (epoch === controlStateEpoch && isTargetCurrent(target)) paused.value = state.suspended;
   } catch { /* Transport failure does not prove that this game resumed. */ }
 }
@@ -275,7 +279,7 @@ async function togglePause(): Promise<void> {
       paused.value = result.failCount > 0;
       status(result.okCount > 0 ? '已继续 ' + result.okCount + ' 个被冻结的进程' : (result.ok ? '游戏已继续' : '继续失败：' + (result.msgs.join('；') || '没有待恢复的进程')));
     } else {
-      const result = await suspendGame(target.pid, target.name || target.title || '当前游戏', target.processCreated);
+      const result = await suspendGame(target.pid, target.name || target.title || '当前游戏', target.processCreated, target);
       assertActionTarget(target);
       ++controlStateEpoch;
       paused.value = result.ok;
@@ -296,7 +300,7 @@ async function closeCurrentGame(): Promise<void> {
   try {
     target = await ensureTarget();
     assertActionTarget(target);
-    const result = await closeGame(target.pid, target.name, target.processCreated);
+    const result = await closeGame(target.pid, target.name, target.processCreated, target);
     if (!result.ok) throw new Error(result.msgs.join('；') || '关闭失败');
     if (isActionTargetCurrent(target)) status('已关闭 ' + target.name);
     releaseTarget(target);
@@ -312,8 +316,26 @@ async function closeCurrentGame(): Promise<void> {
 // 系统 Shell 切换请求有独立超时；只有请求被接受后才收起 YMCC。
 // 两次回执共享诊断关联号，不将 API 返回当成窗口已经切换完成。
 async function openTaskView(event?: MouseEvent): Promise<void> {
-  if (taskViewBusy.value) return;
+  if (taskViewBusy.value || disposed || !props.open) return;
+  // Menu lifetime is independent of game recognition and menu state refreshes.
+  const sessionEpoch = taskViewSessionEpoch;
+  const isSessionCurrent = () => !disposed && props.open && sessionEpoch === taskViewSessionEpoch;
   const activationEvidence = readActivationEvidence(event);
+  if (activationEvidence.diagnosticActivation === 'gamepad-engine') {
+    const target = event?.currentTarget;
+    if (!(target instanceof HTMLElement)) return;
+    try {
+      await taskViewTouch.request(target, {
+        diagnosticAction: 'game-recognition-switch-program',
+        diagnosticActionId: `switch-program:${Date.now().toString(36)}:${(++taskViewActionSequence).toString(36)}`,
+        requestedAtUnixMs: Date.now(), ...activationEvidence,
+      }, isSessionCurrent);
+    } catch (error) {
+      if (isSessionCurrent()) status('', `切换 Windows 任务视图失败：${(error as Error).message}`);
+    }
+    return;
+  }
+  const systemTouchEvidence = readTaskViewSystemTouchEvidence(event);
   const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const restoreControllerFocus = previousFocus?.matches('[data-gp-game-control="switch-program"]') &&
     previousFocus.classList.contains('focused');
@@ -324,29 +346,33 @@ async function openTaskView(event?: MouseEvent): Promise<void> {
       diagnosticAction: 'game-recognition-switch-program' as const,
       diagnosticActionId: `switch-program:${Date.now().toString(36)}:${(++taskViewActionSequence).toString(36)}`,
       requestedAtUnixMs: Date.now(),
+      ...systemTouchEvidence,
       ...activationEvidence,
+      ...(systemTouchEvidence ? { diagnosticActivation: systemTouchEvidence.diagnosticActivation, diagnosticInputRoute: 'system-touch' as const } : {}),
     };
     await shell.taskViewWithEvidence(evidence);
+    if (!isSessionCurrent()) return;
     // 系统只回执请求是否接受；收起窗口的回执失败需要单独提示。
     try {
       const minimized = await windowApi.minimizeWithEvidence(evidence);
+      if (!isSessionCurrent()) return;
       if (!minimized) throw new Error('窗口未接受收起请求');
       handoverAccepted = true;
     } catch (error) {
-      status('', `已请求切换程序，但 YMCC 未能收起：${(error as Error).message}`);
+      if (isSessionCurrent()) status('', `已请求切换程序，但 YMCC 未能收起：${(error as Error).message}`);
       return;
     }
     status('已请求切换程序');
   } catch (error) {
-    status('', `切换 Windows 任务视图失败：${(error as Error).message}`);
+    if (isSessionCurrent()) status('', `切换 Windows 任务视图失败：${(error as Error).message}`);
   } finally {
     taskViewBusy.value = false;
-    if (!handoverAccepted && restoreControllerFocus && previousFocus) {
+    if (isSessionCurrent() && !handoverAccepted && restoreControllerFocus && previousFocus) {
       // A disabled focused button can leave DOM focus on body while its gamepad
       // highlight survives. Restore only this failed action's empty DOM focus;
       // never reclaim a hidden page, another window, or a newly selected control.
       void nextTick(() => {
-        if (document.visibilityState !== 'visible' || !document.hasFocus() ||
+        if (!isSessionCurrent() || document.visibilityState !== 'visible' || !document.hasFocus() ||
           (document.activeElement !== document.body && document.activeElement !== document.documentElement) ||
           !previousFocus.isConnected || !previousFocus.classList.contains('focused')) return;
         focusGamepadElement(previousFocus);
@@ -467,6 +493,7 @@ async function runTrainer(): Promise<void> {
       if (progress.message && !trainerCancelRequested.value && isActionTargetCurrent(captured)) status(progress.message);
     }, target.path, {
       processTarget: { pid: target.pid, processCreated: target.processCreated },
+      interactiveShell: true,
       isCancelled: () => trainerCancelRequested.value || !isActionTargetCurrent(captured),
       isTargetCurrent: async () => {
         if (!isActionTargetCurrent(captured)) return false;
@@ -475,7 +502,7 @@ async function runTrainer(): Promise<void> {
       },
     });
     if (!trainerCancelRequested.value && isActionTargetCurrent(target)) {
-      status(result.action === 'opened' ? '已打开游戏修改器' : '修改器搜索已完成');
+      status(result.notice || (result.action === 'opened' ? '已打开游戏修改器' : '修改器搜索已完成'));
     }
   } catch (error) {
     if (epoch === targetEpoch && !disposed && !(error instanceof GameTrainerCancelledError) && !trainerCancelRequested.value && (!target || isActionTargetCurrent(target))) {
@@ -693,7 +720,7 @@ async function runFsr(): Promise<void> {
       // Ending this captured game is an expected A -> none transition. A new
       // game (including A selected in a newer identity generation) cancels it.
       fsrTargetGuard!.allowExit = true;
-      const closed = await closeGame(target.pid, target.name, target.processCreated);
+      const closed = await closeGame(target.pid, target.name, target.processCreated, target);
       assertFsrContext();
       if (!closed.ok) throw new Error(closed.msgs?.join('；') || '关闭游戏失败');
       if (!(await waitForProcessExit(target.pid, target.processCreated))) throw new Error('游戏进程仍未退出');
@@ -775,7 +802,7 @@ function onRulesChanged(value: { currentBlacklisted?: boolean }): void {
   }
 }
 
-watch(() => props.open, (open) => { ++menuStateEpoch; if (open) void refreshMenuState(); else { ++controlStateEpoch; trainerMenuOpen.value = false; closeLosslessMenu(); } });
+watch(() => props.open, (open) => { ++menuStateEpoch; ++taskViewSessionEpoch; taskViewTouch.cancel(); if (open) void refreshMenuState(); else { ++controlStateEpoch; trainerMenuOpen.value = false; closeLosslessMenu(); } });
 watch(() => [props.open, targetGame.value?.pid, targetGame.value?.processCreated, targetGame.value?.path, targetGame.value?.identityGeneration], () => { stopLosslessObservation?.();stopLosslessObservation=props.open?retainLosslessObservation():null;void refreshLosslessState(); });
 
 onMounted(() => {
@@ -795,6 +822,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposed = true;
   ++menuStateEpoch;
+  ++taskViewSessionEpoch;
+  taskViewTouch.cancel();
   ++controlStateEpoch;
   ++losslessReadEpoch;
   stopLosslessState?.();
@@ -860,10 +889,10 @@ onBeforeUnmount(() => {
         <img class="lossless-app-icon" :src="losslessAppIcon" alt="" aria-hidden="true" /><span class="quick-lossless-text"><strong>一键插帧-小黄鸭</strong><small role="status" title="仅表示程序运行状态"><span class="lossless-program-dot" :class="{ running:losslessProgram?.known && losslessProgram.running,unknown:!losslessProgram?.known }" aria-hidden="true"></span>{{ losslessHint }}</small></span>
       </button>
       <GameLosslessMenu v-if="losslessMenuTarget" :game-name="targetName" :removable="!!losslessState?.profile" :disabled="disabledForAction || losslessReading || !!losslessState?.pending || !losslessState?.controlAvailable" @close="closeLosslessMenu" @action="onLosslessMenuAction" />
-      <button type="button" class="quick-action" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="0" data-gp-game-control="trainer-menu" :disabled="disabledForAction" :aria-expanded="trainerMenuOpen" aria-haspopup="dialog" @click="trainerMenuOpen = true">
+      <button type="button" class="quick-action" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="0" data-gp-game-control="trainer-menu" :disabled="disabledForAction" :aria-expanded="trainerMenuOpen" aria-haspopup="dialog" @click="status(''); trainerMenuOpen = true">
         <AppIcon :name="trainerBusy ? 'close' : 'play'" /><span><strong>{{ trainerButtonLabel }}</strong><small>{{ trainerButtonHint }}</small></span>
       </button>
-      <GameTrainerMenu v-if="trainerMenuOpen" :game="targetGame" :game-name="targetName" :has-game="!!targetGame" :busy="trainerBusy" :hint="trainerButtonHint" @close="closeTrainerMenu" @launch="runTrainer" @status="onCustomStatus" />
+      <GameTrainerMenu v-if="trainerMenuOpen" :game="targetGame" :game-name="targetName" :has-game="!!targetGame" :busy="trainerBusy" :hint="trainerButtonHint" :message="statusMsg" :error="errMsg" @close="closeTrainerMenu" @launch="runTrainer" @status="onCustomStatus" />
       <div class="quick-speed" :class="{ 'is-disabled': disabledForAction || !targetGame }" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="1">
         <span class="quick-speed-title"><AppIcon name="speed" /> 游戏变速</span>
         <Dropdown :model-value="speedFactor" :options="speedOptions" placeholder="待确认" :disabled="disabledForAction || !targetGame" aria-label="游戏变速倍率" gp-row="2" gp-col="1" @change="(v) => runSpeed(Number(v))" />
@@ -918,8 +947,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.game-quick-menu { display: grid; gap: 8px; }
-.game-quick-header { display: grid; gap: 7px; }
+/* Bound grid tracks so a long title scrolls instead of widening every action row. */
+.game-quick-menu { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 8px; }
+.game-quick-header { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 7px; }
 .game-quick-target { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text); font-size: 12px; font-weight: 700; }
 .game-quick-target :deep(svg) { width: 15px; height: 15px; color: var(--accent); flex: 0 0 auto; }
 .game-quick-target span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

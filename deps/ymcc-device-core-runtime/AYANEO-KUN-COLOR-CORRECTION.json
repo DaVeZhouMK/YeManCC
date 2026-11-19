@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "method": "HandheldCompanion.Devices.AYANEOKUN::MapColorValues",
+  "upstreamCommit": "d79d1216892daad2233c7501b6c24e1b070017e7",
+  "inputSha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+  "outputSha256": "4cd3dea283e26db52e10f36e3de74b2514972d6b5e4e99e1ef952a0a277aa13c",
+  "bytes": 2774016,
+  "changedFileBytes": [
+    554710,
+    554730,
+    554747,
+    554757
+  ],
+  "outsideThoseBytesIdentical": true,
+  "runtimeDllAdded": false,
+  "generator": "tools/hc-devicecore-trim: kun-color-order",
+  "newZoneOrder": {
+    "1": "GRB",
+    "2": "GBR",
+    "3": "GRB",
+    "4": "GBR",
+    "default": "RGB"
+  },
+  "evidenceRoot": "G:/YeManCC-Work/Testing/YMCC/Evidence/AyaFamily-20261107/kun-color-correction",
+  "softwareEvidence": {
+    "actualPureMethodCases": 48,
+    "oldMethodRejectedCases": 6,
+    "originalFanConnectionPhases": 5,
+    "physicalEffectVerified": false
+  },
+  "historicalProofsRewritten": false,
+  "installedDeploymentPerformed": false
+}

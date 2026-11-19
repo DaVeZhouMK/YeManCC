@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace custom_steam_library {
 // Built-in excluded Steam tools are never library items.
@@ -61,4 +62,64 @@ nlohmann::json uniqueExecutableInventory(const nlohmann::json& rows, PathKey pat
     }
     return result;
 }
+// Static library membership only. A scanned launcher can name a unique selected
+// primary, but this relationship proves no live PID or native Steam association.
+template<class PathKey, class WithinDirectory>
+std::map<std::string, std::string> confirmedLauncherPrimaryLinks(
+    const nlohmann::json& scan, PathKey pathKey, WithinDirectory withinDirectory) {
+    using Json = nlohmann::json;
+    const auto text = [](const Json& row, const char* field) -> std::string {
+        if (!row.is_object()) return {};
+        const auto value = row.find(field);
+        return value != row.end() && value->is_string() ? value->template get<std::string>() : std::string{};
+    };
+    const auto flag = [](const Json& row, const char* field, bool expected) {
+        if (!row.is_object()) return false;
+        const auto value = row.find(field);
+        return value != row.end() && value->is_boolean() && value->template get<bool>() == expected;
+    };
+    std::map<std::string, std::string> result;
+    if (!scan.is_object() || !scan.contains("schemaVersion") || !scan["schemaVersion"].is_number_integer() ||
+        scan["schemaVersion"] != 1 || scan.contains("libraryScanRecovery") ||
+        !scan.contains("games") || !scan["games"].is_array()) return result;
+    std::map<std::string, size_t> owners;
+    for (const auto& game : scan["games"]) {
+        if (!game.is_object() || !game.contains("candidates") || !game["candidates"].is_array()) continue;
+        std::set<std::string> paths;
+        for (const auto& candidate : game["candidates"]) {
+            const auto key = pathKey(text(candidate, "path"));
+            if (!key.empty()) paths.insert(key);
+        }
+        for (const auto& key : paths) ++owners[key];
+    }
+    for (const auto& game : scan["games"]) {
+        if (!game.is_object() || text(game, "status") != "ready" || text(game, "primaryRole") != "main-game" ||
+            text(game, "contentType") != "game" || !flag(game, "scanComplete", true) ||
+            !flag(game, "candidateLimitReached", false) || !flag(game, "uniquePrimaryInvariant", true) ||
+            !flag(game, "unrecognizedTool", false) || builtinExcludedSteamTool(game) ||
+            !game.contains("candidates") || !game["candidates"].is_array()) continue;
+        const auto directory = text(game, "gameDirectory"), primary = text(game, "primaryExecutable");
+        const auto primaryKey = pathKey(primary);
+        if (primaryKey.empty() || !withinDirectory(primary, directory) || owners[primaryKey] != 1) continue;
+        bool valid = true, selectedPrimary = false;
+        size_t selectedCount = 0;
+        std::set<std::string> unique;
+        std::vector<std::string> launchers;
+        for (const auto& candidate : game["candidates"]) {
+            const auto executable = text(candidate, "path"), key = pathKey(executable);
+            if (key.empty() || !unique.insert(key).second || !withinDirectory(executable, directory) ||
+                (!flag(candidate, "selected", true) && !flag(candidate, "selected", false))) { valid = false; break; }
+            if (flag(candidate, "selected", true)) {
+                ++selectedCount;
+                selectedPrimary = key == primaryKey && text(candidate, "role") == "main-game";
+            }
+            if (key != primaryKey && text(candidate, "role") == "launcher" && flag(candidate, "selected", false) && owners[key] == 1)
+                launchers.push_back(key);
+        }
+        if (!valid || !selectedPrimary || selectedCount != 1) continue;
+        for (const auto& launcher : launchers) result.emplace(launcher, primary);
+    }
+    return result;
+}
+
 } // namespace custom_steam_library

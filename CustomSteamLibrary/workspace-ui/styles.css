@@ -886,6 +886,10 @@
 }
 #busy { z-index:100; }
 #confirm-modal { z-index:90; }
+#steam-add-notice-modal { z-index:100; }
+#steam-add-notice-modal .modal-card { width:min(640px,100%);max-height:calc(100dvh - 48px);overflow:auto; }
+#steam-add-notice-message { white-space:pre-line;overflow-wrap:anywhere;max-height:50vh;overflow:auto; }
+#steam-add-notice-modal button { min-height:44px; }
 .edit-form .modal-actions.edit-actions {
   display:grid;
   grid-template-columns:repeat(5,minmax(0,1fr));
@@ -1296,6 +1300,7 @@ body.library-sidebar-shell{margin:0;overflow:hidden;background:#0d131c;color:#ea
 .library-sidebar-shell .game-card .game-main{display:block;padding:0;margin:0;gap:0;grid-template-columns:none;overflow:visible;position:relative;z-index:auto}
 .library-sidebar-shell .game-card .cover-placeholder{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:auto;aspect-ratio:2/3;border-radius:7px;overflow:hidden;border:0;background:#24374a;color:#a5c7e3;font-size:24px;outline:1px solid #ffffff14;outline-offset:-1px}
 .library-sidebar-shell .game-card .cover-placeholder>img{width:100%;height:100%;position:absolute;inset:0;object-fit:cover;transition:filter .16s ease}
+.library-sidebar-shell .native-scan-unconfirmed{position:absolute;inset:8px auto auto 8px;padding:2px 5px;background:#162330;color:#f4d39e;border-radius:4px;font-size:11px;line-height:1.5;white-space:nowrap}
 .library-sidebar-shell .game-card .game-card-name{font-size:13px;font-weight:500;line-height:1.35;min-height:36px;margin:0;padding:10px 1px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-align:left;color:#e1edf8}
 .library-sidebar-shell .game-card.unselected-for-steam .cover-placeholder>img{filter:saturate(.62) brightness(.55)}.library-sidebar-shell .game-card.unselected-for-steam .game-card-name{color:#8da1b7}.library-sidebar-shell .game-card.unselected-for-steam:focus .cover-placeholder>img{filter:saturate(.85) brightness(.78)}
 .library-sidebar-shell .game-card.current-card .cover-placeholder,.library-sidebar-shell .game-card:focus .cover-placeholder{outline:3px solid #c2e8ff;outline-offset:3px;box-shadow:0 0 0 6px #66bfff2b}.library-sidebar-shell .game-card.selected-for-steam:not(:focus) .cover-placeholder{outline:2px solid #80c6ff;outline-offset:1px}
@@ -1332,3 +1337,55 @@ body.library-sidebar-shell{margin:0;overflow:hidden;background:#0d131c;color:#ea
 .shared-wallpaper-download-status[data-status="error"] { border-color:#a7444a; color:#ffc1c4; }
 .shared-wallpaper-download-status[data-status="done"] { border-color:#387a50; color:#a9e7bb; }
 .shared-wallpaper-download-status .button { align-self:flex-start; min-height:30px; padding:4px 10px; font-size:12px; }
+
+/* Sidebar focus follows the controller even after pointer interaction. */
+.library-sidebar-shell #library-sidebar :is(.page-tab,.menu-toggle,.button):focus {
+  outline:2px solid #c6edff;outline-offset:-2px;border-color:#9bd7ff;
+  background:#355775;color:#fff;box-shadow:inset 4px 0 #c6edff;
+}
+.library-sidebar-shell #library-sidebar .button { white-space:nowrap;flex-wrap:nowrap; }
+.library-sidebar-shell .steam-bar .button { gap:5px;font-size:12px;white-space:nowrap;flex-wrap:nowrap; }
+.library-sidebar-shell .steam-bar .count-label { flex:none;white-space:nowrap;font-size:10px; }
+.library-sidebar-shell .library-sidebar-search { flex:1 1 240px;max-width:660px;min-width:140px; }
+.library-sidebar-shell .library-sidebar-tools { justify-content:flex-start;gap:12px; }
+.library-sidebar-shell .library-sidebar-density { margin-left:auto; }
+.library-sidebar-shell .library-sidebar-tools>#refresh-artwork-button {
+  flex:0 0 auto;width:auto;max-width:200px;min-height:42px;padding:0 14px;
+  border:1px solid #39516a;background:#213246;color:#d4e4f3;white-space:nowrap;
+}
+.library-sidebar-shell .library-sidebar-tools>#refresh-artwork-button:focus {
+  outline:3px solid #c6edff;outline-offset:2px;background:#355775;
+}
+.library-sidebar-shell .game-card:not(.current-card):not(:focus) .cover-placeholder>img {
+  filter:saturate(.72) brightness(.58);
+}
+.library-sidebar-shell .game-card:not(.current-card):not(:focus) .cover-placeholder { color:#8199af;background-color:#192c3e; }
+.library-sidebar-shell .game-card.selected-for-steam:not(.current-card):not(:focus) .cover-placeholder {
+  outline:1px solid #547c9b;outline-offset:1px;
+}
+.library-sidebar-shell .game-card.current-card:focus .cover-placeholder>img,
+.library-sidebar-shell .game-card.current-card .cover-placeholder>img { filter:none; }
+.library-sidebar-shell .game-card.current-card .cover-placeholder,
+.library-sidebar-shell .game-card:focus .cover-placeholder {
+  outline:3px solid #edfaff;outline-offset:3px;box-shadow:0 0 0 7px #2ea6ff80;
+}
+.library-sidebar-shell .game-card.current-card .game-card-name { color:#fff;font-weight:650; }
+.library-sidebar-shell #library:has(.game-card:focus) .game-card:not(:focus) .cover-placeholder>img { filter:saturate(.72) brightness(.58); }
+.library-sidebar-shell #library:has(.game-card:focus) .game-card:not(:focus) .cover-placeholder { outline:1px solid #547c9b;outline-offset:1px;box-shadow:none; }
+.library-sidebar-shell #library:has(.game-card:focus) .game-card:not(:focus) .game-card-name { color:#8da1b7;font-weight:500; }
+.library-sidebar-shell #library .game-card:focus .cover-placeholder>img { filter:none; }
+.library-sidebar-shell #library .game-card:focus .game-card-name { color:#fff;font-weight:650; }
+.library-sidebar-shell .game-card .sidebar-card-edit {
+  right:6px;top:8px;min-width:max-content;height:25px;padding:0 5px;gap:4px;
+  z-index:4;font-size:10px;white-space:nowrap;flex-shrink:0;
+}
+.library-sidebar-shell .game-card .sidebar-card-edit>span { display:inline; }
+.library-sidebar-shell .game-card .sidebar-card-edit>.controller-key {
+  display:inline-grid;--controller-key-size:16px;margin:0;flex-shrink:0;
+}
+.library-sidebar-shell .small-library-cards .game-card .sidebar-card-edit { top:auto;bottom:6px;right:5px;gap:4px; }
+@media(max-width:760px) {
+  .library-sidebar-shell .library-sidebar-tools>#refresh-artwork-button { padding:0 9px;max-width:none;min-height:40px;font-size:11px; }
+  .library-sidebar-shell .steam-bar .button { font-size:10px;padding:0 5px;gap:3px; }
+  .library-sidebar-shell .steam-bar .count-label { font-size:9px; }
+}

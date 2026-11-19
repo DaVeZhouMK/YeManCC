@@ -8,6 +8,7 @@ export function getControllerMotionCatalogAdapters(repo=path.resolve(path.dirnam
  timeoutMs:240000,profiles:['desktop','full'],scope:'behavioral-mock',resultFiles:['controller-motion/result.json','controller-motion/activation/result.json'],
  completionContract:{schemaVersion:1,rules:[{line:'CONTROLLER_MOTION_BINDINGS_COMPLETED configurations=2 faults=9'},{line:'LEGION_ACTIVATION_MODELS_COMPLETED models=4 configurations=2 faults=2'}]},
  evidenceInputs:[...activationInputs,
+ 'tools/fixtures/input_frame_pipe_issue/request_cases.inc','native/input_host_shared_power.h','native/sleep_power_state.h','native/sleep_power_observation.h','native/sleep_power_revocation.h','native/msi_virtual_report_diagnostic.h','tools/fixtures/legion_motion_consumer/extract_main.mjs','tools/lib/hc_motion_matrix_guard.mjs',
  'tools/ymcc_sim/global/controller-motion-catalog/adapter.mjs','tools/ymcc_sim/global/controller-motion-catalog/Run-ControllerMotion.ps1',
  'tools/hc_controller_motion_consumer_selftest.mjs','tools/fixtures/unified_controller_motion/extra.cpp.inc',
  'tools/lib/hc_controller_motion_fixture.mjs','tools/lib/hc_controller_motion_catalog.mjs',

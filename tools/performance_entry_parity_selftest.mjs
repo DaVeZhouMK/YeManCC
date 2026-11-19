@@ -24,15 +24,16 @@ function vueEditor(f,scope) {
  const script=/<script setup[^>]*>([\s\S]*?)<\/script>/.exec(read('src/components/ContinuousPerformancePanel.vue'))[1];
  const ast=ts.createSourceFile('panel.ts',script,ts.ScriptTarget.Latest,true);
  const methods=ast.statements.filter(n=>ts.isFunctionDeclaration(n)&&['merge','change','commit','flushRefresh','sameEditContext'].includes(n.name?.text)).map(n=>n.getText(ast)).join('\n');
- return {async commit(patch){
+ let lastNotice='';
+ return {get notice(){return lastNotice;},async commit(patch){
   const snapshot={value:await f.schedule.getContinuousPerformanceSnapshot(scope)},note={value:''};
   const module=evaluate('let pending=null,draftRevision=0;const alive=true,epoch=0,contextInvalidated=false,editingInput=null,refreshPending=false;\n'+methods+'\nexport {commit};',{}, {
    props:{readonlyPreview:false},snapshot,powerScheme:{get value(){return snapshot.value?.powerScheme??'yeman'}},cpuManaged:{get value(){return snapshot.value.bank.mode!=='manual'||snapshot.value.powerScheme==='yeman'}},draft:{value:clone(snapshot.value.bank)},saving:{value:false},removalBusy:{value:false},note,
    frames:{value:clone(snapshot.value.frameRates)},frame:{value:clone(snapshot.value.frameRates[snapshot.value.side])},
-   patchContinuousBank:models.patchContinuousBank,updateContinuousPerformanceControls:f.schedule.updateContinuousPerformanceControls,
+   patchContinuousBank:models.patchContinuousBank,continuousPerformanceSaveNotice:models.continuousPerformanceSaveNotice,updateContinuousPerformanceControls:f.schedule.updateContinuousPerformanceControls,
    emit(){},load:async()=>{},
   });
-  await module.commit(patch);assert.equal(note.value,'设置已保存');return snapshot.value;
+  await module.commit(patch);lastNotice=note.value;assert(note.value.startsWith('设置已保存'),'actual save must retain its persistence notice');return snapshot.value;
  }};
 }
 function deckyEditor(f,beforeUpdate,sharedLock) {
@@ -56,7 +57,43 @@ function deckyEditor(f,beforeUpdate,sharedLock) {
  }};
 }
 const cases=[];
-async function check(name,run){if(process.argv.includes('--profile-actions-only')&&!name.startsWith('Decky全局')&&!name.startsWith('主线入口约定'))return;try{await run();cases.push({name,pass:true})}catch(e){cases.push({name,pass:false,error:e.stack})}}
+const filterAt=process.argv.indexOf('--filter'),filter=filterAt<0?null:process.argv[filterAt+1],notRun=[];
+assert(filterAt<0||filter,'--filter requires a case-name substring');
+async function check(name,run){if(filter&&!name.includes(filter)||process.argv.includes('--profile-actions-only')&&!name.startsWith('Decky全局')&&!name.startsWith('主线入口约定')){notRun.push(name);return;}try{await run();cases.push({name,pass:true})}catch(e){cases.push({name,pass:false,error:e.stack})}}
+await check('TDP consistency: actual Vue failed30W save distinguishes durable target from unconfirmed write',async()=>{
+ const ports={beforeTdpWrite:()=>{throw Error('fixture offline')}},f=createPerformanceMemoryFixture({mode:'auto',ports}),editor=vueEditor(f,'global');
+ const saved=await editor.commit({tdp:30});assert.equal(saved.bank.tdp,30);assert.equal(saved.tdpWriteReceipt.ok,false);
+ assert.match(editor.notice,/本次 TDP 写入未确认/);assert.doesNotMatch(editor.notice,/已生效|已确认写入/);
+ assert.equal(f.settings.performanceSchedule.controls.ac.tdp,30);assert.equal(f.hardwareWrites.filter(w=>w.kind==='tdp').length,0);
+ ports.beforeTdpWrite=undefined;assert.equal(await f.schedule.reconcilePerformanceScheduleTdp(),true);assert.equal(f.hardwareWrites.filter(w=>w.kind==='tdp').at(-1)?.watts,30);
+});
+await check('TDP consistency: invalid CPU in exported automatic bank is visibly paused while TDP30 remains independent',()=>{
+ const controls=models.normalizeContinuousControls(undefined);controls.ac.tdp=30;controls.ac.tdpCeiling=30;controls.ac.cpuValid=false;
+ const snapshot={bank:controls.ac,side:'ac',actualSide:'ac',configured:true};
+ const notice=models.continuousPerformanceDataNotice(snapshot,{mode:'ac',watts:30});
+ assert.match(notice,/TDP 目标 30 W/);assert.match(notice,/写入回执 30 W/);assert.match(notice,/CPU 参数未确认/);assert.match(notice,/浮动暂停/);
+ for(const runtime of [null,{mode:'dc',watts:30},{mode:'ac',watts:NaN},{mode:'ac',watts:0}])assert.match(models.continuousPerformanceDataNotice(snapshot,runtime),/写入未确认/);
+ assert.match(models.continuousPerformanceDataNotice(snapshot,{mode:'ac',watts:55}),/写入回执 55 W/,'old55 receipt must never be displayed as current30 proof');
+ controls.ac.tdpValid=false;const fallback=models.continuousPerformanceDataNotice(snapshot,{mode:'ac',watts:30});assert.match(fallback,/TDP 源数据异常/);assert.match(fallback,/界面目标 30 W 慢速校对/);assert.match(fallback,/自动浮动暂停/);
+});
+await check('TDP consistency: same-side pending, inactive-bank saves and range-limited ACK never claim chosen watts applied',()=>{
+ const bank=models.defaultContinuousBank('dc');const snapshot={bank,side:'dc',actualSide:'ac',configured:true};
+ assert.match(models.continuousPerformanceDataNotice(snapshot,{mode:'ac',watts:55}),/当前供电为 AC/);
+ assert.doesNotMatch(models.continuousPerformanceDataNotice(snapshot,{mode:'ac',watts:55}),/写入回执 30 W/);
+ assert.match(models.continuousPerformanceSaveNotice({tdpWriteReceipt:{ok:true,proof:'write-ack',requested:30,accepted:22}}),/本次 TDP 写入回执 22 W/);
+ for(const proof of [{ok:false,proof:'unconfirmed',requested:30,accepted:null},{ok:true,proof:'unconfirmed',requested:30,accepted:30},{ok:true,proof:'write-ack',requested:30,accepted:NaN}])assert.match(models.continuousPerformanceSaveNotice({tdpWriteReceipt:proof}),/本次 TDP 写入未确认/);
+ assert.equal(models.continuousPerformanceDataNotice({...snapshot,configured:false},null),'TDP 尚未配置，当前显示参考参数');
+});
+await check('TDP dropdown actual Vue expression and commit save and dispatch30 from invalid bank',async()=>{
+ const f=createPerformanceMemoryFixture({mode:'auto'}),s=f.settings.performanceSchedule.controls.ac;
+ s.tdpValid=false;s.cpuValid=false;const editor=vueEditor(f,'global');
+ const binding=read('src/components/ContinuousPerformancePanel.vue').match(/<Dropdown :model-value="draft\.tdpCeiling"[^>]*@update:model-value="([^"]+)"/);
+ assert(binding,'actual maximum TDP dropdown binding');
+ const handler=evaluate('export const choose='+binding[1],{},{commit:patch=>editor.commit(patch)});
+ const result=await handler.choose('30');assert.equal(result.bank.tdp,30);assert.equal(result.bank.tdpCeiling,30);assert.notEqual(result.bank.tdpValid,false);
+ assert.deepEqual(f.hardwareWrites.filter(w=>w.kind==='tdp'),[{kind:'tdp',side:'ac',watts:30}]);assert.equal(f.hardwareWrites.filter(w=>w.kind==='cpu').length,0);
+ assert.equal(f.settings.performanceSchedule.controls.ac.tdp,30);assert.notEqual(f.settings.performanceSchedule.controls.ac.tdpValid,false);
+});
 for(const route of ['global','global-game','dedicated'])for(const side of ['ac','dc'])for(const mode of ['auto','manual'])await check(route+'/'+side+'/'+mode+' Vue与Decky实际按钮→同配置、同CPU/TDP调用',async()=>{
  const options={side,mode:mode==='auto'?'manual':'auto',dedicated:route==='dedicated',gameActive:route==='global-game'};
  const ui=createPerformanceMemoryFixture(options),decky=createPerformanceMemoryFixture(options),editor=vueEditor(ui,route==='dedicated'?'dedicated':'effective'),mirror=deckyEditor(decky);
@@ -191,7 +228,7 @@ for(const boundary of ['pid','birth','supply','disconnect','resuming','power-gen
 });
 await check('Decky复杂切换 已发CPU完成后才交新归属，不再延续旧核心/浮动/成功回执',async()=>{
  const hit=deferred(),release=deferred(),committed=deferred(),resumeProfile=deferred();let hold=true;const applied=[];
- const f=createPerformanceMemoryFixture({mode:'auto',gameActive:true,ports:{beforeCpuWrite:async()=>{if(hold){hold=false;hit.resolve();await release.promise}}}});
+ const f=createPerformanceMemoryFixture({mode:'auto',gameActive:true,ports:{afterCpuWrite:async()=>{if(hold){hold=false;hit.resolve();await release.promise}}}});
  f.schedule.onContinuousPerformanceApplied(value=>applied.push(value));
  const old=f.schedule.restorePerformanceScheduleIfConfigured().catch(()=>{});await hit.promise;
  const profile=profileEditor(f,{afterCommit:async()=>{committed.resolve();await resumeProfile.promise}}),change=profile.select('dedicated');await committed.promise;
@@ -234,6 +271,6 @@ await check('主线入口约定：性能页跟随生效配置、顶部专属、D
  assert.match(read('decky-plugin/src/index.tsx'),/mutate\('performance\.setControls',\{patch:intent\.patch\}/);
  assert.doesNotMatch(read('src/bridge/deckyPerformanceActions.ts'),/from ['"].*(?:yeman|autofloat)['"]/);
 });
-const report={pass:cases.every(c=>c.pass),count:cases.length,failed:cases.filter(c=>!c.pass).length,cases,hardwareCalls:0,scope:process.argv.includes('--profile-actions-only')?'Selected cases only: actual Decky profile adapter -> shared performance store global/dedicated round trips in auto/manual, plus static entry wiring assertions. Vue commit and TSX event cases NOT_RUN; no installed app or device operations.':'Actual Vue commit methods and shipped Decky TSX controls -> mirror action -> shared performanceSchedule and memory hardware boundary; actual profile import/remove. No installed app or device operations.'};
+const report={pass:cases.length>0&&cases.every(c=>c.pass),count:cases.length,failed:cases.filter(c=>!c.pass).length,cases,selection:filter??'all',notRun,hardwareCalls:0,scope:filter?'Selected named actual consumer cases only; unselected cases NOT_RUN; no installed app or device operations.':process.argv.includes('--profile-actions-only')?'Selected cases only: actual Decky profile adapter -> shared performance store global/dedicated round trips in auto/manual, plus static entry wiring assertions. Vue commit and TSX event cases NOT_RUN; no installed app or device operations.':'Actual Vue commit methods and shipped Decky TSX controls -> mirror action -> shared performanceSchedule and memory hardware boundary; actual profile import/remove. No installed app or device operations.'};
 const outIndex=process.argv.indexOf('--out-dir');const out=outIndex>=0?process.argv[outIndex+1]:process.argv[2]?.startsWith('--')?undefined:process.argv[2];if(out){fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'performance-entry-parity.json'),JSON.stringify(report,null,2)+'\n')}
 console.log(JSON.stringify(report,null,2));if(!report.pass)process.exitCode=1;

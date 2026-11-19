@@ -34,9 +34,13 @@ public:
     // owner-death proof, target absence proof or permission to consume anything.
     const Record* record()const noexcept{return ready()?&*record_:nullptr;}
     LoadState openedFrom()const noexcept{return openedFrom_;}
+    bool historyBindingMatched()const noexcept{return historyBindingMatched_;}
 
     bool reservePath(std::uint64_t expectedRevision,const Origin& exactOrigin,const std::string& path,ReservationProof proof){
         return update([&](Record& candidate,std::string& error){return targetReturn::reservePath(*record_,expectedRevision,exactOrigin,path,proof,candidate,&error);});
+    }
+    bool markMayHaveIssued(std::uint64_t expectedRevision,const Origin& exactOrigin,const std::string& path){
+        return update([&](Record& candidate,std::string& error){return targetReturn::markMayHaveIssued(*record_,expectedRevision,exactOrigin,path,candidate,&error);});
     }
     bool reserveNativeOwnedSet(std::uint64_t expectedRevision,const Origin& exactOrigin,
             const std::vector<std::string>& paths,NativeOwnedSetProof proof){
@@ -62,10 +66,12 @@ private:
     std::optional<Record> record_;
     LoadState openedFrom_=LoadState::Invalid;
     SessionError error_;
+    bool historyBindingMatched_=true;
+    std::string expectedMachineBinding_;
 
     bool setError(SessionErrorCode code,const char* reason,DWORD win32Error=0){error_={code,win32Error,reason};return false;}
     bool clearError(){error_={};return true;}
-    Session(const std::wstring& absolutePath,const std::string& machineBinding){
+    Session(const std::wstring& absolutePath,const std::string& machineBinding):expectedMachineBinding_(machineBinding){
         std::wstring ownerPath;
         if(!fileDetail::normalize(absolutePath,recordPath_)||!fileDetail::normalize(recordPath_+L".owner",ownerPath)||!detail::text(machineBinding,4096)){
             setError(SessionErrorCode::Invalid,"invalid-explicit-path-or-machine");return;
@@ -92,8 +98,13 @@ private:
         if(before.nFileSizeHigh||before.nFileSizeLow!=0){setError(SessionErrorCode::Invalid,"owner-file-not-empty");return;}
         if(!fileDetail::info(h.value,after,e)||!fileDetail::sameInfo(before,after)){setError(SessionErrorCode::RetryableIo,"owner-snapshot-changed",e);return;}
         const auto loaded=targetReturn::load(recordPath_,machineBinding);openedFrom_=loaded.state;
-        if(loaded.state!=LoadState::Missing&&loaded.state!=LoadState::Valid){setError(loaded.state==LoadState::Invalid?SessionErrorCode::Invalid:SessionErrorCode::RetryableIo,loaded.reason.c_str(),loaded.win32Error);return;}
+        // A settled historical cache cannot veto current work merely because
+        // its binding misses. Preserve the exact old record; no reset, rebind,
+        // revision change or device/owner proof is manufactured by opening it.
+        const bool emptyHistoryHint=loaded.state==LoadState::Invalid&&loaded.unmatchedHistory_&&loaded.unmatchedHistory_->obligations.empty();
+        if(loaded.state!=LoadState::Missing&&loaded.state!=LoadState::Valid&&!emptyHistoryHint){setError(loaded.state==LoadState::Invalid?SessionErrorCode::Invalid:SessionErrorCode::RetryableIo,loaded.reason.c_str(),loaded.win32Error);return;}
         if(loaded.state==LoadState::Missing){Record initial;initial.machineBinding=machineBinding;record_=std::move(initial);}
+        else if(emptyHistoryHint){record_=loaded.unmatchedHistory_;historyBindingMatched_=false;}
         else record_=loaded.record;
         owner_.value=h.value;h.value=INVALID_HANDLE_VALUE;
     }
@@ -102,9 +113,15 @@ private:
         Record candidate;std::string reason;
         if(!transform(candidate,reason))return setError(SessionErrorCode::TransformRejected,reason.c_str());
         if(candidate.revision==record_->revision)return clearError();
+        // Reconcile only the settled cache at the existing write-ahead commit,
+        // together with the actual new obligation. Never write just to open.
+        if(!historyBindingMatched_){
+            if(!record_->obligations.empty())return setError(SessionErrorCode::Invalid,"unmatched-history-not-empty");
+            candidate.machineBinding=expectedMachineBinding_;
+        }
         const auto saved=targetReturn::store(recordPath_,candidate);
         if(!saved.committed())return setError(saved.state==StoreState::Invalid?SessionErrorCode::Invalid:SessionErrorCode::RetryableIo,saved.reason.c_str(),saved.win32Error);
-        record_=std::move(candidate);return clearError();
+        record_=std::move(candidate);historyBindingMatched_=true;return clearError();
     }
 };
 } // namespace ymcc::targetReturn

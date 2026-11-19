@@ -9,6 +9,7 @@
 
 namespace inherited_cancel_test {
 using J=nlohmann::json;
+inline bool observeOwnerMode=false;
 struct Event {
     HANDLE value=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     Event(){if(!value)throw std::runtime_error("fixture-event");}
@@ -21,6 +22,7 @@ std::shared_ptr<ymcc::deckymirror::CancelToken> token(HANDLE external){
     (void)external;
     return std::make_shared<ymcc::deckymirror::CancelToken>();
 #else
+    if(observeOwnerMode)return std::make_shared<ymcc::deckymirror::CancelToken>(external,ymcc::deckymirror::CancelToken::ObserveOwner{});
     return std::make_shared<ymcc::deckymirror::CancelToken>(external);
 #endif
 }
@@ -62,7 +64,8 @@ J silent(const std::string& kind){
 }
 int main(int argc,char** argv){
     using namespace inherited_cancel_test;using ymcc::deckymirror::CancelToken;
-    if(argc!=2)return 3;
+    observeOwnerMode=argc==3&&std::string_view(argv[2])=="--observe-owner";
+    if(argc!=2&&!observeOwnerMode)return 3;
     const auto output=std::filesystem::absolute(argv[1]);
     std::filesystem::create_directories(output.parent_path());
     WSADATA sockets{};if(WSAStartup(MAKEWORD(2,2),&sockets))return 3;
@@ -98,9 +101,21 @@ int main(int argc,char** argv){
     });
     record("real-http-read-canceled-by-owner-event",[]{return silent("http-silent");});
     record("real-websocket-read-canceled-by-owner-event",[]{return silent("ws-silent");});
+    if(observeOwnerMode)record("local-retirement-cannot-revoke-observed-owner",[]{
+        Event source;DWORD before=0,after=0;require(GetProcessHandleCount(GetCurrentProcess(),&before)!=FALSE,"fixture-handle-count");
+        bool isolated=true,readOnly=true;
+        for(unsigned i=0;i<100;++i){
+            CancelToken value(source.value,CancelToken::ObserveOwner{});value.cancel();
+            isolated=isolated&&value.canceled()&&WaitForSingleObject(source.value,0)==WAIT_TIMEOUT;
+            SetLastError(ERROR_SUCCESS);const bool modified=SetEvent(value.ownerEvent())!=FALSE;const auto error=GetLastError();
+            readOnly=readOnly&&!modified&&error==ERROR_ACCESS_DENIED&&WaitForSingleObject(source.value,0)==WAIT_TIMEOUT;
+        }
+        require(GetProcessHandleCount(GetCurrentProcess(),&after)!=FALSE,"fixture-handle-count");
+        return J{{"passed",isolated&&readOnly&&before==after},{"localCancelDoesNotSignalOwner",isolated},{"ownerDuplicateReadOnly",readOnly},{"before",before},{"after",after},{"iterations",100}};
+    });
     const auto passed=std::count_if(cases.begin(),cases.end(),[](const J& r){return r.at("passed").get<bool>();});
     const bool ok=static_cast<std::size_t>(passed)==cases.size();
-    const J result={{"schema","ymcc.inherited-binding-cancel-actual-consumer.v1"},{"passed",ok},{"cases",cases},{"tests",cases.size()},{"passedCount",passed},{"steamOrDeviceActions",0},{"realProductionCancelTokenAndAsyncRequest",true},{"actualLoopbackIO",true},{"parentRelayThreadsAddedToProduct",0},{"pollersAddedToProduct",0},{"originalUncooperativeCallbackGateResolved",false}};
+    const J result={{"selection",observeOwnerMode?"observe-owner":"default-shared"},{"schema","ymcc.inherited-binding-cancel-actual-consumer.v1"},{"passed",ok},{"cases",cases},{"tests",cases.size()},{"passedCount",passed},{"steamOrDeviceActions",0},{"realProductionCancelTokenAndAsyncRequest",true},{"actualLoopbackIO",true},{"parentRelayThreadsAddedToProduct",0},{"pollersAddedToProduct",0},{"originalUncooperativeCallbackGateResolved",false}};
     std::ofstream out(output,std::ios::binary);out<<result.dump(2)<<'\n';out.close();
     std::cout<<"INHERITED_CANCEL cases="<<cases.size()<<" passed="<<passed<<"\n";WSACleanup();return ok?0:2;
 }

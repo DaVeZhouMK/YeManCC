@@ -56,6 +56,7 @@ struct Config {
  HWND anchor=nullptr;bool noticeOnly=false;
  screeninput::Runtime* inputRuntime=nullptr;std::function<void(bool,bool)> haptic;
  std::function<void(int,int)> radialSummon;std::function<bool()> radialHoldEnabled;std::function<unsigned()> radialHoldDuration;
+ std::function<bool()> powerAllowed; // Pure shared sleep admission, no Windows query.
 };
 class Carrier {
 #if defined(YMCC_RADIAL_NATIVE_TEST) || defined(YMCC_MONITOR_NOTICE_NATIVE_TEST)
@@ -67,6 +68,7 @@ class Carrier {
  static constexpr UINT_PTR leaseTimer=0x5948;
  struct State {
    Carrier* owner=nullptr;int id=0;unsigned long long noticeLease=0;std::string nonce;std::shared_ptr<Target> target;bool global=false,notice=false;HMONITOR monitor=nullptr;
+   std::function<bool()> pendingOwner; // Released by the first valid prepared/painted receipt.
    HWND hwnd=nullptr;ComPtr<ICoreWebView2Controller> controller;ComPtr<ICoreWebView2> view;
    ComPtr<ICoreWebView2CompositionController> composition;ComPtr<IDCompositionDevice> device;ComPtr<IDCompositionTarget> visualTarget;ComPtr<IDCompositionVisual> visual;
    bool closed=false,ready=false,armed=false,layout=false,queued=false,queuedRaise=false,crosshair=false,failed=false,retiring=false,closing=false;
@@ -170,12 +172,23 @@ class Carrier {
  }
  // A renderer must leave its WebMessage callback before its controller dies.
  // Reuse the owned HWND update/lease lanes, without a worker or polling timer.
- void retireFromRenderer(std::shared_ptr<State> s){
+ void retireFromRenderer(std::shared_ptr<State> s,const std::string& reason="renderer-close"){
    if(!owns(s))return;
-   s->retiring=true;s->ready=false;s->armed=false;s->layout=false;s->reason="renderer-close";
+   s->retiring=true;s->ready=false;s->armed=false;s->layout=false;s->reason=reason;
    hideOutput(s.get());
    // The existing lease timer remains the fallback if posting is unavailable.
    PostMessageW(s->hwnd,updateMessage,0,0);
+ }
+ static bool requestCurrent(const std::function<bool()>& owner){try{return !owner||owner();}catch(...){return false;}}
+ bool pendingCurrent(const std::shared_ptr<State>& s){
+   if(!owns(s))return false;
+   const auto owner=s->pendingOwner;
+   const bool admitted=requestCurrent(owner);
+   if(!owns(s))return false;
+   if(admitted)return true;
+   // Cancellation is not a renderer failure. Reuse deferred teardown so a
+   // WebView callback never destroys its own COM controller synchronously.
+   retireFromRenderer(s,"boot_request_expired");return false;
  }
  static Json inputStateBeforeWithdrawal(const State& s){
    RECT rect{};if(s.inputWindow)GetWindowRect(s.inputWindow,&rect);POINT point{};const bool cursorKnown=GetPhysicalCursorPos(&point)!=FALSE;
@@ -201,7 +214,9 @@ class Carrier {
 
    config.notify(name,value);
  }
+ bool powerPermits()const{try{return !config.powerAllowed||config.powerAllowed();}catch(...){return false;}}
  bool policyPermits(const State& s,HWND foreground)const{
+   if(!powerPermits())return false;
    if(s.notice||!s.global||s.visibility==hudvisibility::Mode::Always)return true;
    const DWORD game=s.policyGamePid;
    DWORD focused=0;if(game&&s.visibility==hudvisibility::Mode::GameFocused&&foreground)GetWindowThreadProcessId(foreground,&focused);
@@ -283,6 +298,18 @@ class Carrier {
    // The shell may hide/cancel the bounded input HWND independently of the
    // display. Withdraw only that contact owner; never reset desktop input.
    if((m==WM_CANCELMODE||(m==WM_SHOWWINDOW&&!w))&&s&&s->owner&&s->owner->current.get()==s){s->owner->stopInteraction(s->owner->current);return 0;}
+   // NOACTIVATE prevents ordinary click activation, but a shell/programmatic
+   // activation can still select this HWND. It is never a keyboard owner:
+   // withdraw the bounded input before default processing can retain focus.
+   // The next normal refresh may show it again with the existing no-activate
+   // placement; do not activate/attach another process or synthesize input.
+   if((m==WM_SETFOCUS||(m==WM_ACTIVATE&&LOWORD(w)!=WA_INACTIVE))&&s&&s->owner&&s->owner->current.get()==s){
+     // Hiding/clearing during WM_SETFOCUS may precede Windows committing its
+     // new focus HWND. Retire this exact input HWND so that in-flight assignment
+     // cannot leave a hidden keyboard owner. The display/controller stay alive.
+     auto state=s->owner->current;state->owner->stopInteraction(state,true);
+     return 0;
+   }
    if(m==WM_DESTROY&&s&&s->inputWindow==h&&!s->inputSuspended&&s->owner&&s->owner->current.get()==s){
      auto* owner=s->owner;auto state=owner->current;s->inputWindow=nullptr;
      SetWindowLongPtrW(h,GWLP_USERDATA,0);
@@ -457,18 +484,20 @@ class Carrier {
    RECT finalRect{};if(!GetWindowRect(s->inputWindow,&finalRect)||!EqualRect(&finalRect,&s->panel))failInteraction(s,"drag-input-placement-failed");
  }
  void refresh(const std::shared_ptr<State>& s,bool raise=false){
-   if(!owns(s))return;
+   if(!pendingCurrent(s))return;
+   if(!powerPermits()){s->armed=false;s->reason="shared-power-held";hideOutput(s.get());return;}
    if(radialSuspended){stopInteraction(s);if(!radialHideAt||GetTickCount64()>=radialHideAt)hideOutput(s.get());return;}
    // Revalidate before showing/raising, including returning-game and data events.
    // Fail closed: an invalid display HWND may not become an input blocker.
-   if(!hudinput::ensure(s->hwnd)){s->armed=false;s->reason="input-transparency-lost";hideOutput(s.get());emit(s,"desktopHud.unavailable");return;}
+   if(!hudinput::ensureDisplayTree(s->hwnd)){s->armed=false;s->reason="input-transparency-lost";hideOutput(s.get());emit(s,"desktopHud.unavailable");return;}
    // Conditional denial owns all three surfaces even during layout warmup.
    // A hidden top-level HWND alone cannot prove its WebView/input tree is idle.
    const HWND foreground=GetForegroundWindow();
    if(!policyPermits(*s,foreground)){
      hideOutput(s.get());
      s->reason=s->visibility==hudvisibility::Mode::GameRunning?"waiting-game":"waiting-game-focus";
-     if(!s->policyWaiting){s->policyWaiting=true;++s->visibilityRevision;emit(s,"desktopHud.prepared");}
+     if(!pendingCurrent(s))return;
+     if(!s->policyWaiting&&(!s->pendingOwner||s->ready&&s->armed)){s->policyWaiting=true;++s->visibilityRevision;emit(s,"desktopHud.prepared");s->pendingOwner={};}
      return;
    }
    if(s->ready){
@@ -502,12 +531,15 @@ class Carrier {
    const bool geometryChanged=old.left!=p.x||old.top!=p.y||old.right-old.left!=outputWidth||old.bottom-old.top!=outputHeight||!IsWindowVisible(s->hwnd);
    if(s->crosshair&&!s->notice&&!s->drag.position.placed&&(panelChanged||geometryChanged))interaction(s);
    if(geometryChanged){
+     if(!pendingCurrent(s))return;
      SetWindowPos(s->hwnd,HWND_TOPMOST,p.x,p.y,outputWidth,outputHeight,SWP_NOACTIVATE|SWP_SHOWWINDOW);
+     if(!pendingCurrent(s))return;
      if(s->controller){s->controller->put_IsVisible(TRUE);s->controller->NotifyParentWindowPositionChanged();}if(s->device)s->device->Commit();
    }else if(hudplacement::needsRaise(s->global,raise,foregroundOccludes(*s,foreground))){
      // A returning borderless game can promote itself AFTER the foreground
      // event. Repair on that event or a confirmed overlap in the existing
      // data cadence; never raise an already-front HUD or steal game input.
+     if(!pendingCurrent(s))return;
      SetWindowPos(s->hwnd,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW);
    }
    // SetWindowRgn also synchronously sends WM_WINDOWPOSCHANGED. Update the
@@ -524,13 +556,15 @@ class Carrier {
    if(!displayPlacementMatches(*s)){
      s->reason="display-placement-failed";hideOutput(s.get());emit(s,"desktopHud.unavailable");return;
    }
+   if(!pendingCurrent(s))return;
    syncInteraction(s);
+   if(!pendingCurrent(s))return;
    if(resumed&&IsWindowVisible(s->hwnd)){++s->visibilityRevision;emit(s,"desktopHud.visibility");}
  }
- void send(const std::shared_ptr<State>& s,const Json& value){if(s->view&&!s->closed)s->view->PostWebMessageAsJson(wide(value.dump()).c_str());}
+ void send(const std::shared_ptr<State>& s,const Json& value){if((!s->pendingOwner||pendingCurrent(s))&&s->view&&!s->closed)s->view->PostWebMessageAsJson(wide(value.dump()).c_str());}
  bool admitted(const State& s,const Json& a){return a.is_object()&&a.value("hudId",0)==s.id&&a.value("nonce",std::string{})==s.nonce;}
  void receive(const std::shared_ptr<State>& s,ICoreWebView2WebMessageReceivedEventArgs* args){
-   if(!owns(s)||!args)return;LPWSTR raw=nullptr,source=nullptr;
+   if(!pendingCurrent(s)||!args)return;LPWSTR raw=nullptr,source=nullptr;
    if(FAILED(args->get_Source(&source))||!source)return;
    const bool same=std::wstring(source)==wide(s->url);CoTaskMemFree(source);if(!same)return;
    if(FAILED(args->get_WebMessageAsJson(&raw))||!raw)return;
@@ -539,6 +573,7 @@ class Carrier {
    try{
      const Json req=Json::parse(utf8(text));response["id"]=req.value("id",-1);const auto cmd=req.value("cmd",std::string{});const auto a=req.value("args",Json::object());
      if(!admitted(*s,a))throw std::runtime_error("HUD renderer ownership denied");
+     if(!pendingCurrent(s))return;
      if(cmd=="desktopHud.ready"){
        s->ready=true;s->reason="renderer-ready";RECT r{};clientArea(*s,r);if(s->notice){s->crosshair=true;KillTimer(s->hwnd,leaseTimer);}
        response["result"]=viewportInfo(*s);s->viewportKey=response["result"].dump();
@@ -553,7 +588,7 @@ class Carrier {
        if(layoutSeq<s->seq){response["result"]=true;send(s,response);return;}
        if(layoutSeq!=s->seq||!s->seq)throw std::runtime_error("Invalid layout receipt");
        s->width=(int)std::ceil(w);s->height=(int)std::ceil(h);s->position=p;s->layout=true;refresh(s);response["result"]=true;
-       if(IsWindowVisible(s->hwnd)&&s->paintedSeq!=s->seq){s->paintedSeq=s->seq;emit(s,"desktopHud.painted");}
+       if(pendingCurrent(s)&&IsWindowVisible(s->hwnd)&&s->paintedSeq!=s->seq){s->paintedSeq=s->seq;emit(s,"desktopHud.painted");s->pendingOwner={};}
      }else if(cmd=="desktopHud.close"){
        response["result"]=true;send(s,response);retireFromRenderer(s);return;
      }else throw std::runtime_error("Desktop HUD is display-only; command denied");
@@ -564,7 +599,7 @@ class Carrier {
    for(auto* owner:eventOwners){if(!owner||!owner->current)continue;auto s=owner->current;
    if(!s->hwnd||s->closed||!hwnd||object!=OBJID_WINDOW||child!=CHILDID_SELF)continue;
    const bool ownHud=hwnd==s->hwnd||IsChild(s->hwnd,hwnd)||hwnd==s->inputWindow||(s->inputWindow&&IsChild(s->inputWindow,hwnd));
-   const HWND foreground=GetForegroundWindow();const HWND root=foreground?GetAncestor(foreground,GA_ROOT):nullptr;
+   const HWND foreground=s->global&&!ownHud&&event!=EVENT_SYSTEM_FOREGROUND?GetForegroundWindow():nullptr;const HWND root=foreground?GetAncestor(foreground,GA_ROOT):nullptr;
    const bool related=s->global?(hwnd==foreground||hwnd==root):hwnd==s->target->window;
    if(!hudplacement::relevant(ownHud,event==EVENT_SYSTEM_FOREGROUND,related))continue;
    s->queuedRaise=s->queuedRaise||event==EVENT_SYSTEM_FOREGROUND||event==EVENT_OBJECT_SHOW||event==EVENT_OBJECT_REORDER||event==EVENT_SYSTEM_MINIMIZEEND;
@@ -575,6 +610,13 @@ class Carrier {
    auto* s=reinterpret_cast<State*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
    if(msg==WM_NCCREATE){s=reinterpret_cast<State*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(s));}
    if(s){
+     if(msg==WM_PARENTNOTIFY&&LOWORD(w)==WM_CREATE){
+       // WebView helper creation is independent of the sensor/frame cadence.
+       // Protect it before a resident display can expose another input HWND.
+       if(!hudinput::protectDisplayChild(hwnd,reinterpret_cast<HWND>(l))){
+         hideOutput(s);s->armed=false;s->reason="display-child-input-isolation-lost";
+       }
+     }
      if(msg==WM_TIMER&&w==holdTimer){KillTimer(hwnd,holdTimer);if(s->owner&&s->owner->current.get()==s){auto* owner=s->owner;
        if(s->radialContact&&owner->config.radialHoldEnabled&&owner->config.radialHoldEnabled()){
          const auto duration=owner->config.radialHoldDuration?owner->config.radialHoldDuration():650;
@@ -613,6 +655,16 @@ class Carrier {
      }return 0;}
      if(msg==WM_TIMER&&w==leaseTimer&&(s->failed||s->retiring)){if(s->owner&&s->owner->current.get()==s)s->owner->close(s->id,s->nonce,s->reason);return 0;}
      if(msg==WM_TIMER&&w==leaseTimer&&s->notice&&!s->ready){s->owner->close(s->id,s->nonce,"notice-renderer-ready-timeout");return 0;}
+     // A queued timer may belong to the lease replaced by a newer frame.
+     // Keep the replacement timer and current owner until its actual deadline.
+     if(msg==WM_TIMER&&w==leaseTimer){const auto now=wallNow();if(s->expires>now){
+       if(!SetTimer(hwnd,leaseTimer,(UINT)std::min(10000ULL,s->expires-now),nullptr)&&s->owner&&s->owner->current.get()==s){
+         auto* owner=s->owner;auto state=owner->current;
+         owner->fail(state,"parent-data-lease-timer-unavailable");
+         owner->close(state->id,state->nonce,state->reason);
+       }
+       return 0;
+     }}
      if(msg==WM_TIMER&&w==leaseTimer){KillTimer(hwnd,leaseTimer);s->armed=false;s->reason="parent-data-lease-expired";hideOutput(s);if(s->notice)s->owner->send(s->owner->current,{{"event","monitorNotice.hide"},{"data",Json::object()}});if(s->owner&&s->owner->current.get()==s)s->owner->emit(s->owner->current,"desktopHud.expired");return 0;}
      if(msg==WM_CLOSE){if(s->owner)s->owner->close(s->id,s->nonce,"window-close");return 0;}
      if(msg==WM_DESTROY){
@@ -633,6 +685,7 @@ class Carrier {
     if(!h){unhook();throw std::runtime_error("Desktop HUD foreground watcher failed");}sharedHooks.push_back(h);
  }}
 public:
+ void sharedPowerChanged(){if(current)refresh(current);}
  void suspendForRadial(bool value){
   if(radialSuspended==value)return;radialSuspended=value;radialHideAt=value?GetTickCount64()+240:0;
   if(current){auto s=current;KillTimer(s->hwnd,radialFadeTimer);
@@ -662,17 +715,20 @@ public:
    const bool destroyed=!current||close(current->id,current->nonce,"notice-owner-retired");
    return {{"leaseRetired",true},{"resourcesDestroyed",destroyed},{"ownedOnly",true},{"obsolete",false}};
  }
- Json create(DWORD pid,ULONGLONG birth,const std::string& nonce,bool global=false,unsigned long long lease=0){
+ Json create(DWORD pid,ULONGLONG birth,const std::string& nonce,bool global=false,unsigned long long lease=0,std::function<bool()> admission={}){
+   if(!requestCurrent(admission))throw std::runtime_error("MONITOR_OUTPUT_REQUEST_EXPIRED");
    if(config.noticeOnly&&(!lease||lease!=noticeLeaseSerial||nonce!=noticeLeaseNonce||noticeLeaseRetired))throw std::runtime_error("Notice owner lease retired or replaced");
    if(!available())throw std::runtime_error(recovery.available()?"Native HUD WebView2 environment unavailable":"Native HUD recovery stopped after repeated renderer failures");
    if(current)throw std::runtime_error("A desktop HUD is already owned");if(!tokenValid(nonce))throw std::runtime_error("Invalid HUD nonce");
    auto s=std::make_shared<State>();s->owner=this;s->id=nextId++;s->nonce=nonce;s->global=global;s->notice=config.noticeOnly;s->noticeLease=s->notice?lease:0;
+   s->pendingOwner=std::move(admission);
    if(global)s->monitor=MonitorFromWindow(config.anchor,MONITOR_DEFAULTTOPRIMARY);else s->target=bindTarget(pid,birth);
    s->url=std::string("https://app.localhost/")+(s->notice?"notice-output.html":"hud-output.html")+"?hudId="+std::to_string(s->id)+"&nonce="+nonce;
    WNDCLASSEXW cls{sizeof(cls)};cls.lpfnWndProc=proc;cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"YMCC_DesktopMonitorHUD";cls.hCursor=LoadCursorW(nullptr,IDC_ARROW);
    if(!RegisterClassExW(&cls)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)throw std::runtime_error("HUD class registration failed");
    // Deliberately NO Win32 owner: main YMCC minimization must not hide this HUD.
    RECT client{};clientArea(*s,client);const int width=std::max(1L,client.right-client.left),height=std::max(1L,client.bottom-client.top);
+   if(!requestCurrent(s->pendingOwner))throw std::runtime_error("MONITOR_OUTPUT_REQUEST_EXPIRED");
    s->hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_NOREDIRECTIONBITMAP|WS_EX_TRANSPARENT,cls.lpszClassName,L"YMCC Monitor HUD",WS_POPUP|WS_DISABLED,
       client.left,client.top,width,height,nullptr,nullptr,cls.hInstance,s.get());
    if(!s->hwnd)throw std::runtime_error("HUD HWND creation failed");
@@ -680,7 +736,11 @@ public:
    if(!hudinput::registerTouchPassthrough(s->hwnd)){DestroyWindow(s->hwnd);throw std::runtime_error("HUD touch hit testing unavailable");}current=s;
    try{hook();}catch(...){close(s->id,nonce,"hook-failed");throw;}
    // A create/renderer failure cannot leave an invisible orphan indefinitely.
-   SetTimer(s->hwnd,leaseTimer,12000,nullptr);
+   if(!SetTimer(s->hwnd,leaseTimer,12000,nullptr)){
+     close(s->id,nonce,"parent-data-lease-timer-unavailable");
+     throw std::runtime_error("HUD lease timer unavailable");
+   }
+   if(!pendingCurrent(s))throw std::runtime_error("MONITOR_OUTPUT_REQUEST_EXPIRED");
    ComPtr<ICoreWebView2Environment3> env3;
    if(FAILED(environment.As(&env3))){fail(s,"composition-environment-unavailable");throw std::runtime_error("Windowless WebView2 unsupported");}
    const HRESULT hr=env3->CreateCoreWebView2CompositionController(s->hwnd,Callback<ICoreWebView2CreateCoreWebView2CompositionControllerCompletedHandler>(
@@ -691,7 +751,10 @@ public:
      // before either attaching its visual or retiring a late callback.
      if(!s||!s->owner||!s->owner->owns(s)){if(controller)controller->Close();return S_OK;}
      auto* owner=s->owner;
-     if(controller&&FAILED(controller->put_IsVisible(FALSE))){controller->Close();owner->fail(s,"renderer-input-suspension-failed");return S_OK;}
+     if(!owner->pendingCurrent(s)){if(controller)controller->Close();return S_OK;}
+     const HRESULT hidden=controller?controller->put_IsVisible(FALSE):S_OK;
+     if(!owner->pendingCurrent(s)){if(controller)controller->Close();return S_OK;}
+     if(controller&&FAILED(hidden)){controller->Close();owner->fail(s,"renderer-input-suspension-failed");return S_OK;}
      if(FAILED(hr)||!controller){owner->fail(s,"webview-create-failed");return S_OK;}
      s->composition=composition;s->controller=controller;
      // A true GPU-composited transparent root, not a windowed renderer trapped
@@ -701,12 +764,15 @@ public:
        FAILED(s->visualTarget->SetRoot(s->visual.Get()))||FAILED(composition->put_RootVisualTarget(s->visual.Get()))||FAILED(s->device->Commit())){
        owner->fail(s,"composition-target-failed");return S_OK;
      }
+     if(!owner->pendingCurrent(s))return S_OK;
      if(FAILED(s->controller->get_CoreWebView2(&s->view))||!s->view){owner->fail(s,"webview-instance-unavailable");return S_OK;}RECT r{};GetClientRect(s->hwnd,&r);controller->put_Bounds(r);
+     if(!hudinput::ensureDisplayTree(s->hwnd)){owner->fail(s,"display-child-input-isolation-lost");return S_OK;}
      ComPtr<ICoreWebView2Controller2> c2;ComPtr<ICoreWebView2Controller3> c3;
      if(FAILED(controller->QueryInterface(IID_PPV_ARGS(&c2)))||FAILED(controller->QueryInterface(IID_PPV_ARGS(&c3)))||
        FAILED(c2->put_DefaultBackgroundColor(COREWEBVIEW2_COLOR{0,0,0,0}))||FAILED(c3->put_BoundsMode(COREWEBVIEW2_BOUNDS_MODE_USE_RAW_PIXELS))||FAILED(c3->put_ShouldDetectMonitorScaleChanges(FALSE))||FAILED(c3->put_RasterizationScale(1.0))||!owner->config.serve(s->view.Get())){
        owner->fail(s,"transparent-renderer-not-supported");return S_OK;
      }
+     if(!owner->pendingCurrent(s))return S_OK;
      ComPtr<ICoreWebView2Settings> settings;s->view->get_Settings(&settings);if(settings){settings->put_AreDefaultContextMenusEnabled(FALSE);settings->put_AreDevToolsEnabled(FALSE);ComPtr<ICoreWebView2Settings3> s3;if(SUCCEEDED(settings.As(&s3)))s3->put_AreBrowserAcceleratorKeysEnabled(FALSE);settings->put_IsZoomControlEnabled(FALSE);}controller->put_ZoomFactor(1.0);controller->put_IsVisible(FALSE);
      EventRegistrationToken token{};
      // Reuse the weak creation lease; event callbacks never retain State.
@@ -723,9 +789,11 @@ public:
      s->view->add_NavigationStarting(Callback<ICoreWebView2NavigationStartingEventHandler>([weak](ICoreWebView2*,ICoreWebView2NavigationStartingEventArgs* a)->HRESULT{const auto s=weak.lock();if(!s||!s->owner)return S_OK;LPWSTR uri=nullptr;if(SUCCEEDED(a->get_Uri(&uri))&&uri){if(std::wstring(uri)!=wide(s->url))a->put_Cancel(TRUE);CoTaskMemFree(uri);}return S_OK;}).Get(),&token);
      s->view->add_NewWindowRequested(Callback<ICoreWebView2NewWindowRequestedEventHandler>([](ICoreWebView2*,ICoreWebView2NewWindowRequestedEventArgs* a)->HRESULT{a->put_Handled(TRUE);return S_OK;}).Get(),&token);
      s->view->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>([weak](ICoreWebView2*,ICoreWebView2WebMessageReceivedEventArgs* a)->HRESULT{const auto s=weak.lock();if(s&&s->owner)s->owner->receive(s,a);return S_OK;}).Get(),&token);
+     if(!owner->pendingCurrent(s))return S_OK;
      if(FAILED(s->view->Navigate(wide(s->url).c_str())))owner->fail(s,"webview-navigation-rejected");return S_OK;
     }).Get());
    if(FAILED(hr)){fail(s,"webview-request-failed");throw std::runtime_error("WebView2 request rejected");}
+   if(!pendingCurrent(s))throw std::runtime_error("MONITOR_OUTPUT_REQUEST_EXPIRED");
    return {{"id",s->id},{"nonce",nonce},{"width",width},{"height",height},{"targetPid",pid},{"targetCreated",std::to_string(birth)},
      {"mode",global?"desktop-global":"desktop-window-or-borderless"},{"exclusiveFullscreenSupported",false},{"inputTransparent",true}};
  }
@@ -737,6 +805,7 @@ public:
    if(current->crosshair){rect=current->panel;}
    return Json::array({{{"x",rect.left-full.left},{"y",rect.top-full.top},{"width",rect.right-rect.left},{"height",rect.bottom-rect.top}}});
  }
+ bool ownsPresentationWindow(HWND h)const{return h&&current&&(h==current->hwnd||h==current->inputWindow);}
  bool hasPointerContact()const{return current&&(current->touchContact||current->mouseContact||current->drag.contact()||current->radialContact||current->radialArmed);}
  HMONITOR display()const{return current?current->monitor:MonitorFromWindow(config.anchor,MONITOR_DEFAULTTOPRIMARY);}
  bool noticeHide(int id,const std::string& nonce,unsigned long long sequence=0){auto s=current;if(!s||!s->notice||s->id!=id||s->nonce!=nonce||sequence<s->seq)return false;s->armed=false;KillTimer(s->hwnd,leaseTimer);hideOutput(s.get());send(s,{{"event","monitorNotice.hide"},{"data",Json::object()}});return true;}
@@ -749,27 +818,42 @@ public:
    // Resume only to measure this admitted frame. HWND stays hidden until its
    // matching layout receipt; stale geometry cannot flash during a new notice.
    if(s->controller&&FAILED(s->controller->put_IsVisible(TRUE))){s->armed=false;hideOutput(s.get());return false;}
-   KillTimer(s->hwnd,leaseTimer);SetTimer(s->hwnd,leaseTimer,(UINT)(expires-now),nullptr);send(s,{{"event","monitorNotice.frame"},{"data",payload}});refresh(s);return true;
+   KillTimer(s->hwnd,leaseTimer);
+   if(!SetTimer(s->hwnd,leaseTimer,(UINT)(expires-now),nullptr)){
+     fail(s,"parent-data-lease-timer-unavailable");close(s->id,s->nonce,s->reason);return false;
+   }
+   send(s,{{"event","monitorNotice.frame"},{"data",payload}});refresh(s);return true;
  }
  Json status()const{
    if(!current)return {{"leaseProtocol",config.noticeOnly?1:0},{"available",available()},{"rendererFailures",recovery.failures()},{"recoveryBlocked",!recovery.available()},{"id",0},{"ready",false},{"armed",false},{"visible",false},{"hiddenConfirmed",true}};
    auto s=current;RECT inputRect{};if(s->inputWindow)GetWindowRect(s->inputWindow,&inputRect);
+   // Read-only visibility evidence for the owner's 10-second check. A policy,
+   // radial or shared-sleep hold is intentional, not a failed display. No scan.
+   BOOL controllerVisible=FALSE;const bool controllerKnown=s->controller&&SUCCEEDED(s->controller->get_IsVisible(&controllerVisible));
+   const bool presentationAllowed=!radialSuspended&&policyPermits(*s,GetForegroundWindow());
    return {{"inputMode","native-panel-no-capture-v1"},{"inputBoundsPolicy","panel-point-v1"},{"dragInputVisible",s->inputWindow&&IsWindowVisible(s->inputWindow)},
      {"dragInputRect",{{"x",inputRect.left},{"y",inputRect.top},{"width",inputRect.right-inputRect.left},{"height",inputRect.bottom-inputRect.top}}},
      {"dragInputCapturesMouse",s->inputWindow&&GetCapture()==s->inputWindow},{"dragContact",s->drag.contact()},{"touchContact",s->touchContact},
      {"leaseProtocol",config.noticeOnly?1:0},{"leaseId",s->noticeLease},{"scope",s->global?"global":"game"},{"available",available()},{"rendererFailures",recovery.failures()},{"recoveryBlocked",!recovery.available()},{"id",s->id},{"nonce",s->nonce},{"ready",s->ready},{"armed",s->armed},{"visible",s->hwnd&&IsWindowVisible(s->hwnd)},
+     {"presentationAllowed",presentationAllowed},{"layoutReady",s->layout},{"controllerVisible",controllerKnown?Json(controllerVisible!=FALSE):Json(nullptr)},
      {"hiddenConfirmed",!s->hwnd||!IsWindowVisible(s->hwnd)},{"targetAlive",alive(*s)},{"targetPid",s->target?s->target->pid:0},{"targetCreated",std::to_string(s->target?s->target->created:0)},
      {"reason",s->reason},{"inputTransparent",hudinput::inert(s->hwnd)},{"inputEnabled",s->hwnd&&IsWindowEnabled(s->hwnd)},
      {"pointerStyles",s->hwnd?(unsigned long long)GetWindowLongPtrW(s->hwnd,GWL_EXSTYLE):0ULL}};
  }
- bool frame(int id,const std::string& nonce,const Json& payload){
+ bool frame(int id,const std::string& nonce,const Json& payload,const std::function<bool()>& owner={}){
    auto s=current;if(!s||s->notice||s->id!=id||s->nonce!=nonce||!owns(s)||!s->ready||!payload.is_object())return false;
+   if(!pendingCurrent(s)||!requestCurrent(owner))return false;
    const std::string body=payload.dump();if(body.size()>65536)return false;
    const auto now=wallNow(),expires=payload.value("expiresAt",0ULL),seq=payload.value("seq",0ULL);
    if(expires<=now||expires>now+7000||seq<=s->seq||payload.value("nonce",std::string{})!=nonce||payload.value("hudId",0)!=id||
       !payload.contains("data")||payload["data"].value("source",std::string{})!="ymcc-uniform")return false;
    if(!alive(*s)){s->armed=false;hideOutput(s.get());s->reason="target-exited";emit(s,"desktopHud.unavailable");return false;}
-   const auto appearance=payload.value("preferences",Json::object()).value("ymcc",Json::object());
+   const auto preferences=payload.value("preferences",Json::object());
+   // Borrow only from this frame's owned, immutable preferences snapshot.
+   const Json emptyAppearance=Json::object();
+   if(!preferences.is_object())(void)preferences.value("ymcc",emptyAppearance);
+   const auto appearanceIt=preferences.find("ymcc");
+   const Json& appearance=appearanceIt==preferences.end()?emptyAppearance:*appearanceIt;
    huddrag::Position drag;drag.locked=appearance.value("dragLocked",false);drag.revision=appearance.value("dragRevision",0ULL);
    if(appearance.contains("dragX")&&appearance.contains("dragY")&&appearance["dragX"].is_number()&&appearance["dragY"].is_number()){
      drag.x=appearance["dragX"].get<double>();drag.y=appearance["dragY"].get<double>();drag.placed=std::isfinite(drag.x)&&std::isfinite(drag.y)&&drag.x>=0&&drag.x<=1&&drag.y>=0&&drag.y<=1;
@@ -777,7 +861,6 @@ public:
    // An explicit lock from the settings page cancels any current contact.
    if(drag.locked&&drag.revision>s->drag.position.revision)stopInteraction(s);
    s->drag.adopt(drag);
-   const auto preferences=payload.value("preferences",Json::object());
    const auto templateRevision=preferences.value("ymccTemplateRevision",0ULL);
    if(templateRevision>=s->templateRevision){s->templateRevision=templateRevision;s->activeTemplate=preferences.value("ymccTemplate",std::string{"A"})=="B"?"B":"A";}
    s->visibility=hudvisibility::mode(appearance.value("visibility",std::string{"always"}));
@@ -787,8 +870,11 @@ public:
    const auto shape=Json{{"crosshair",s->crosshair},{"layout",appearance.value("layout",std::string{})},{"scale",appearance.value("scale",1.0)},{"gap",appearance.value("gap",8)},
      {"fields",appearance.value("fields",Json::object())}}.dump();
    if(shape!=s->layoutKey){s->layoutKey=shape;s->layout=false;hideOutput(s.get());RECT r{};if(clientArea(*s,r))SetWindowPos(s->hwnd,nullptr,r.left,r.top,r.right-r.left,r.bottom-r.top,SWP_NOACTIVATE|SWP_NOZORDER);}
+   if(!pendingCurrent(s)||!requestCurrent(owner))return false;
    s->seq=seq;s->expires=expires;s->armed=payload.value("show",false);s->reason=s->armed?"active":"hidden";
-   KillTimer(s->hwnd,leaseTimer);SetTimer(s->hwnd,leaseTimer,(UINT)std::max(1ULL,expires-now),nullptr);
+   if(!SetTimer(s->hwnd,leaseTimer,(UINT)std::max(1ULL,expires-now),nullptr)){
+     fail(s,"parent-data-lease-timer-unavailable");close(s->id,s->nonce,s->reason);return false;
+   }
    // Layout/data messages may still be processed by an invisible controller.
    // Only an admitted visibility policy may warm the renderer for measurement.
    // Recheck in refresh before showing native/input HWNDs after COM callbacks.
@@ -796,8 +882,9 @@ public:
      if(s->controller&&FAILED(s->controller->put_IsVisible(TRUE))){s->armed=false;hideOutput(s.get());return false;}
    }else hideOutput(s.get());
    // Identical JSON event bytes; serialize the body once, without a JSON-tree copy.
-   if(s->view&&!s->closed)s->view->PostWebMessageAsJson(wide(hudserialization::desktopFrameEvent(body)).c_str());
-   refresh(s);return true;
+   if(!pendingCurrent(s)||!requestCurrent(owner))return false;
+   if(s->view)s->view->PostWebMessageAsJson(wide(hudserialization::desktopFrameEvent(body)).c_str());
+   refresh(s);return pendingCurrent(s)&&requestCurrent(owner);
  }
  bool close(int id,const std::string& nonce,const std::string& reason="explicit-close"){
    auto s=current;if(!s)return true;if(s->id!=id||s->nonce!=nonce)return false;

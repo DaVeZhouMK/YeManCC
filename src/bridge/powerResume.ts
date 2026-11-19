@@ -30,6 +30,44 @@ export interface PowerResumeTransactionResult {
   reason?: string;
 }
 
+/** A notification may arrive while an older renderer task is still pending.
+ * Coalesce the current owner, but never chain a new generation behind it.
+ * This retires consumption only; the module that owns an in-flight operation
+ * still owns its cancellation, completion receipt and action budget.
+ */
+export function createPowerResumeQueue() {
+  type Owner = { generation: number; task: Promise<void>; again: boolean; continueWork?: () => boolean };
+  let owner: Owner | null = null;
+  let latestGeneration = 0;
+  return {
+    invalidate(): void { owner = null; },
+    run(generation: number, work: (isCurrent: () => boolean) => Promise<void>, continueWork?: () => boolean): Promise<void> {
+      if (!Number.isSafeInteger(generation) || generation <= 0 || generation < latestGeneration)
+        return Promise.resolve();
+      latestGeneration = generation;
+      if (owner?.generation === generation) {
+        if (owner.continueWork) owner.again = true;
+        return owner.task;
+      }
+      const next: Owner = { generation, task: Promise.resolve(), again: false, continueWork };
+      owner = next;
+      next.task = Promise.resolve().then(async () => {
+        try {
+          do {
+            next.again = false;
+            if (owner !== next) return;
+            await work(() => owner === next);
+          } while (owner === next && next.again && next.continueWork?.() === true);
+        } finally {
+          // Seal completion in this turn so a later notification sees a free slot.
+          if (owner === next) owner = null;
+        }
+      });
+      return next.task;
+    },
+  };
+}
+
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**

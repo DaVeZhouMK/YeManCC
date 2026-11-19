@@ -12,11 +12,18 @@
 // Atomic publication is NOT cross-process CAS, machine trust or recovery authority.
 namespace ymcc::targetReturn {
 enum class LoadState { Missing, Valid, RetryableIo, Invalid };
+class Session;
 struct LoadResult {
     LoadState state=LoadState::Invalid;
     std::optional<Record> record;
     DWORD win32Error=0;
     std::string reason;
+private:
+    // Strictly decoded history, never a public load/admission result. Only the
+    // Session holding the actual owner-file exclusion may inspect this hint.
+    std::optional<Record> unmatchedHistory_;
+    friend class Session;
+    friend LoadResult load(const std::wstring&,const std::string&);
 };
 enum class StoreState { Committed, RetryableIo, Invalid };
 struct StoreResult {
@@ -77,7 +84,8 @@ inline LoadResult load(const std::wstring&rawPath,const std::string&expectedMach
     if(before.nFileSizeHigh||before.nFileSizeLow==0||before.nFileSizeLow>maxRecordBytes){r.reason="record-file-size-invalid";return r;}
     std::string bytes(before.nFileSizeLow,'\0');DWORD got=0;if(!ReadFile(h.value,bytes.data(),before.nFileSizeLow,&got,nullptr)||got!=before.nFileSizeLow){r.state=LoadState::RetryableIo;r.win32Error=GetLastError();r.reason="record-read-incomplete";return r;}
     char extra=0;DWORD extraRead=0;if(!ReadFile(h.value,&extra,1,&extraRead,nullptr)||extraRead||!fileDetail::info(h.value,after,e)||!fileDetail::sameInfo(before,after)){r.state=LoadState::RetryableIo;r.win32Error=e;r.reason="record-read-snapshot-changed";return r;}
-    Record record;if(!decode(bytes,record,&r.reason)||record.machineBinding!=expectedMachineBinding){r.reason="record-invalid-or-foreign-machine";return r;}
+    Record record;if(!decode(bytes,record,&r.reason))return r;
+    if(record.machineBinding!=expectedMachineBinding){r.reason="record-machine-binding-mismatch";r.unmatchedHistory_=std::move(record);return r;}
     r.state=LoadState::Valid;r.record=std::move(record);r.reason="historical-provenance-only";return r;
 }
 inline StoreResult store(const std::wstring&rawPath,const Record&record){
@@ -89,7 +97,26 @@ inline StoreResult store(const std::wstring&rawPath,const Record&record){
     {fileDetail::Handle existing(CreateFileW(path.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr));
         if(existing.valid()){BY_HANDLE_FILE_INFORMATION info{};if(!fileDetail::info(existing.value,info,error)){r.win32Error=error;r.state=error==ERROR_INVALID_DATA?StoreState::Invalid:StoreState::RetryableIo;r.reason="destination-file-kind-invalid";return r;}}
         else{error=GetLastError();if(error!=ERROR_FILE_NOT_FOUND){r.state=StoreState::RetryableIo;r.win32Error=error;r.reason="destination-open-failed";return r;}}}
-    const auto prior=load(path,record.machineBinding);
+    auto prior=load(path,record.machineBinding);
+    std::string priorBinding=record.machineBinding;
+    // A first real write may replace an empty, safely decoded cache whose
+    // machine hint missed. The original source snapshot must still match the
+    // current empty file. Ordinary nonempty/unknown history is not rewritten.
+    if(prior.state==LoadState::Invalid&&prior.reason=="record-machine-binding-mismatch"&&!record.sourceRecord.empty()&&!record.obligations.empty()){
+        Record basis;
+        if(decode(record.sourceRecord,basis)&&basis.obligations.empty()&&basis.machineBinding!=record.machineBinding&&
+            basis.revision!=(std::numeric_limits<std::uint64_t>::max)()&&record.revision==basis.revision+1){
+            auto historical=load(path,basis.machineBinding);std::string historicalBytes;
+            if(historical.state==LoadState::RetryableIo){
+                r.state=StoreState::RetryableIo;r.win32Error=historical.win32Error;
+                r.reason="destination-record-unconfirmed:"+historical.reason;return r;
+            }
+            if(historical.state==LoadState::Valid&&historical.record->obligations.empty()&&
+                encode(*historical.record,historicalBytes)&&historicalBytes==record.sourceRecord){
+                priorBinding=basis.machineBinding;prior=std::move(historical);
+            }
+        }
+    }
     if(prior.state!=LoadState::Missing&&prior.state!=LoadState::Valid){
         r.state=prior.state==LoadState::RetryableIo?StoreState::RetryableIo:StoreState::Invalid;
         r.win32Error=prior.win32Error;r.reason="destination-record-unconfirmed:"+prior.reason;return r;
@@ -114,7 +141,7 @@ inline StoreResult store(const std::wstring&rawPath,const Record&record){
     if(!h.close())return fail("temporary-close-failed",GetLastError());
     // Recheck the serialized owner's snapshot at publication, under the
     // caller's existing exclusion. This does not turn rename into global CAS.
-    const auto latest=load(path,record.machineBinding);std::string latestBytes;
+    const auto latest=load(path,priorBinding);std::string latestBytes;
     if(latest.state!=prior.state||(latest.record&&(!encode(*latest.record,latestBytes)||latestBytes!=priorBytes)))
         return fail("destination-record-changed-or-unreadable",latest.win32Error);
     if(!MoveFileExW(tmp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return fail("atomic-replace-failed",GetLastError());

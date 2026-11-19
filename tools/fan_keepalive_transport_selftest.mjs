@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const root=process.argv[2],variant=process.argv[3]??'CONTROL',run=promisify(execFile);
+const sharedPowerOnly=process.argv[4]==='--shared-power-only';if(process.argv.length>5||(process.argv[4]&&!sharedPowerOnly))throw Error('Invalid explicit keepalive selection');
 const requests=[],sockets=new Set(),cases=[];const connectionIds=new WeakMap();let nextConnectionId=0;
 const receipt={ok:true,lease:{leaseId:'fixture-lease-0001',generation:1,expiresAtMonoMs:15000}};
 const server=createServer((req,res)=>{
@@ -17,7 +18,7 @@ const server=createServer((req,res)=>{
  if(kind==='malformed'){res.end(JSON.stringify({ok:'true',lease:receipt.lease}));return;}
  if(kind==='large'){res.end(JSON.stringify({...receipt,padding:'x'.repeat(65536)}));return;}
  if(kind==='partial'){const b=JSON.stringify(receipt);res.writeHead(200,{'Content-Length':Buffer.byteLength(b)+40});res.write(b);setTimeout(()=>res.destroy(),40).unref();return;}
- if(kind==='slow-body'||kind==='cancel-body'||kind==='exit-body'){
+ if(kind==='slow-body'||kind==='cancel-body'||kind==='exit-body'||kind==='shared-cancel-body'){
   res.writeHead(200);res.write('{');const timer=setInterval(()=>{if(res.destroyed){clearInterval(timer);return;}res.write(' ');},40);res.on('close',()=>clearInterval(timer));return;
  }
  if(kind==='cancel-headers'){setTimeout(()=>{if(!res.destroyed)res.end(JSON.stringify(receipt));},500).unref();return;}
@@ -34,6 +35,7 @@ async function test(kind,check){
  check(r,requests.length-before,requests.slice(before));
 }
 try{
+ if(!sharedPowerOnly){
  await test('normal',r=>{assert(r.ok);assert.equal(r.lease,receipt.lease.leaseId);assert.equal(r.status,200);});
  await test('wrong-lease',r=>{assert(!r.ok);assert.equal(r.lease,'');});
  await test('malformed',r=>{assert(!r.ok);assert.equal(r.lease,'');});
@@ -45,7 +47,13 @@ try{
  for(const kind of ['cancel-headers','cancel-body','exit-body'])await test(kind,r=>{assert(!r.ok);assert(r.elapsed<500,'shutdown interrupts pending network work before the 1s exit join bound');assert.equal(r.lease,'');assert.equal(r.displayObserved,0);});
  for(const kind of ['missing-token','wrong-identity'])await test(kind,(r,n)=>{assert(!r.ok);assert.equal(n,0);assert.equal(r.lease,'');});
  for(const kind of ['session-reuse','owner-replaced','retry-after-denial','idle-reset','missing-token-after-warm','identity-after-warm'])await test(kind,(r,n,sent)=>{const earlyLoss=kind.endsWith('-after-warm');assert.equal(n,earlyLoss?2:3);assert(r.lastCallOk);assert.equal(r.credentialReads,3);assert.equal(r.identityReads,kind==='missing-token-after-warm'?2:3);assert.equal(r.acceptedCalls,kind==='retry-after-denial'||earlyLoss?2:3);if(earlyLoss)assert(r.middleRefusalClearedLease,'early refusal retained an old success receipt');const setups=kind==='session-reuse'?1:2;assert.equal(r.sessionSetups,setups,'wrong WinHTTP session setup count');assert.equal(r.connectionSetups,setups,'wrong logical connection setup count');assert.equal(r.parentCloses,kind==='session-reuse'?0:2,'old parent handles not retired exactly once');if(kind==='retry-after-denial'){assert.equal(sent[1].kind,'denied');assert.equal(sent[2].kind,'normal');assert.equal(r.authRejected,1);}});
+ }
+ for(const kind of ['shared-pending','shared-unknown'])await test(kind,(r,n)=>{assert.equal(r.ok,false,'unadmitted public power renewed Fan lease');assert.equal(n,0);assert.equal(r.lease,'');assert.equal(r.code,'POWER_RESUMING');});
+ await test('shared-publication',(r,n)=>{assert.equal(r.ok,true);assert.equal(n,1);});
+ await test('shared-cancel-body',(r,n)=>{assert.equal(r.ok,false);assert(r.elapsed<500,'shared revocation did not interrupt original heartbeat transport');assert.equal(n,1);assert.equal(r.lease,'');assert.equal(r.displayObserved,0);});
+ await test('shared-unknown-then-current',(r,n)=>{assert.equal(r.ok,false);assert.equal(r.retryOk,true);assert.equal(n,1,'unknown request was sent or replayed');});
+ await test('normal',(r,n)=>{assert.equal(r.ok,true);assert.equal(n,1);});
 }catch(e){failure=e.stack??String(e);}
 finally{for(const s of sockets)s.destroy();await new Promise(r=>server.close(r));}
-const result={ok:!failure,variant,cases:cases.length,results:cases,requests,failure,scope:'exact production Fan keepalive + shared AsyncRequest/fan_response headers, real loopback WinHTTP; process/credential/display/mode fixtures; no FanHost/HC/device/CPU benchmark'};
+const result={ok:!failure,variant,selection:sharedPowerOnly?'shared-power-only':'all',cases:cases.length,results:cases,requests,failure,scope:'exact production Fan keepalive + shared AsyncRequest/fan_response headers, real loopback WinHTTP; process/credential/display/mode fixtures; no FanHost/HC/device/CPU benchmark'};
 fs.writeFileSync(path.join(root,variant+'.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));process.exitCode=failure?1:0;

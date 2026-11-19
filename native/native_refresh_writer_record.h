@@ -252,6 +252,20 @@ inline bool reserveVisibility(const Record& current,std::uint64_t expectedRevisi
     Record candidate=current;candidate.schemaVersion=kVisibilitySchemaVersion;candidate.nativeVisibility=allReserved;
     if(!detail::bump(candidate,error))return false;out=std::move(candidate);return true;
 }
+// Caller has independently proved an exact legacy before/after owned delta,
+// dead parent, same current physical location and quiescent target/writers.
+// Atomic migration only, not ordinary hide authority or a new API receipt.
+inline bool migrateLegacyVisibility(const Record& current,std::uint64_t expectedRevision,const Visibility& issued,Record& out,std::string* error=nullptr){
+    if(!validRecord(current,error))return false;
+    if(expectedRevision!=current.revision)return detail::fail(error,"stale-revision");
+    if(current.schemaVersion!=kSchemaVersion || current.active || current.nativeVisibility)
+        return detail::fail(error,"legacy-empty-schema1-required");
+    if(!detail::visibility(issued)||issued.paths.empty())return detail::fail(error,"legacy-visibility-invalid");
+    for(const auto& path:issued.paths)if(path.phase!=VisibilityPathPhase::MayHaveIssued)
+        return detail::fail(error,"legacy-all-issued-required");
+    Record candidate=current;candidate.schemaVersion=kVisibilitySchemaVersion;candidate.nativeVisibility=issued;
+    if(!detail::bump(candidate,error))return false;out=std::move(candidate);return true;
+}
 namespace detail {
 inline bool exactVisibility(const Record& current,std::uint64_t expectedRevision,const std::string& transactionId,std::string* error){
     if(!validRecord(current,error))return false;

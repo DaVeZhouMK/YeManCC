@@ -1,6 +1,13 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
+#include "steam_process_discovery.h"
 #include "steam_original_recovery_engine.h"
+#include "steam_original_recovery_handoff.h"
+#include "steam_native_read_scope.h"
+#include "steam_command_availability.h"
+#include "steam_game_group_lease.h"
+#include "steam_game_qualified_role_read.h"
+#include "steam_original_recovery_trace.h"
 #include "steam_original_recovery_wake_watch.h"
 #include "steam_original_recovery_file_hash.h"
 #include "steam_original_recovery_storage.h"
@@ -11,6 +18,7 @@
 #include <bcrypt.h>
 #pragma comment(lib,"bcrypt.lib")
 #include <array>
+#include <exception>
 #include <cstring>
 #include <atomic>
 #include <algorithm>
@@ -26,8 +34,10 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include "steam_diagnostic_read_views.h"
 #include "steam_original_recovery_engine/vendor/steam_native_app_state_win32.h"
 #include "steam_original_recovery_engine/running-publish-trial.h"
+#include "steam_original_recovery_engine/publication_event_export.h"
 #include "steam_original_recovery_engine/embedded_trial.h"
 static_assert(ymcc::steamOriginalRecovery::embedded::trialAbi==running_trial::abi,"embedded trial Packet ABI must match host");
 #include "steam_original_recovery_engine/threadname-policy.h"
@@ -47,10 +57,16 @@ constexpr const char* kModuleQualification="content-contract-and-loaded-image";
 enum class RecoveryRoute { LegacyDynamic, SemiStatic };
 thread_local RecoveryRoute gRecoveryRoute=RecoveryRoute::SemiStatic;
 bool legacyRoute(){return gRecoveryRoute==RecoveryRoute::LegacyDynamic;}
+// Recovery route remains independent from how the actual modules qualified.
+// Only this worker selects the mode after its real file observations.
+thread_local bool gDynamicContentQualification=false;
+bool publicContentQualification(){return !legacyRoute()||gDynamicContentQualification;}
 const char* routeName(){return legacyRoute()?"legacy-dynamic":"semi-static";}
-const char* routeQualification(){return legacyRoute()?"known-hash-pair-and-original-loaded-guards":kModuleQualification;}
+const char* routeQualification(){return legacyRoute()?(gDynamicContentQualification?"dynamic-public-content-and-original-execution":"known-hash-pair-and-original-loaded-guards"):kModuleQualification;}
 std::atomic<bool> gActive{false};std::mutex gStateMutex;J gState={{"status","idle"}};
-thread_local Emit gEmit;thread_local Current gCurrent,gObservationCurrent;thread_local WakeSignal gWakeSignal=0;thread_local std::wstring gTrialDirectory;
+thread_local std::shared_ptr<ymcc::steamnative::ReadScope> gPublicationScope;
+thread_local std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> gGroupRequestCancellation;
+thread_local Emit gEmit;thread_local Current gCurrent,gObservationCurrent;thread_local WakeSignal gWakeSignal=0;thread_local WakeSignal gCancelSignal=0;thread_local WakeSignal gIdentityCancelSignal=0;thread_local std::wstring gTrialDirectory;
 thread_local bool gCleanupMode=false;thread_local std::function<bool()> gOriginalSteam;
 #ifdef YMCC_STEAM_ORIGINAL_ENGINE_TESTING
 // Faults run before scope/process opening, only in this offline build.
@@ -63,6 +79,12 @@ struct DiagnosticFailure:std::runtime_error {
   J detail;
   DiagnosticFailure(const char* reason,J value):std::runtime_error(reason),detail(std::move(value)){}
 };
+using ProcessReadViews=::ymcc::steamdiagnostic::ReadViews;
+ProcessReadViews qualifiedProcessReadViews(const compat::Qualification& qualification,U64 base,U64 size,const compat::ReadRva& raw){
+  auto views=compat::makeProcessReadViews(qualification,base,size,raw);
+  need(bool(views.rawObject)&&bool(views.canonicalModule)&&bool(views.explicitModulePointerNormalizer),"native-process-read-views-unavailable");
+  return views;
+}
 // The typed diagnostics intentionally use small non-std rejection objects.
 // Route them through the engine/driver's existing std failure and cleanup
 // paths; a rejected read never grants retry or mutation authority.
@@ -78,18 +100,25 @@ decltype(auto) nativeFailureBoundary(Function&& operation,const char* unknownRea
       {{"stage","native-operation"},{"exceptionClass","unknown-cpp"}});}
 }
 
+rc::ProfileId recordProfileForLayout(compat::Layout layout){
+ switch(layout){case compat::Layout::Legacy:return rc::ProfileId::Legacy1791918634;case compat::Layout::Public:return rc::ProfileId::Public1792618285;case compat::Layout::OwnerScoped:return rc::ProfileId::OwnerScoped;}throw std::runtime_error("record-layout-unknown");
+}
+app::ProfileId uiProfileForLayout(compat::Layout layout){
+ switch(layout){case compat::Layout::Legacy:return app::ProfileId::Legacy1791918634;case compat::Layout::Public:return app::ProfileId::Public1792618285;case compat::Layout::OwnerScoped:return app::ProfileId::OwnerScoped;}throw std::runtime_error("ui-layout-unknown");
+}
+std::optional<app::ProfileId> uiProfileForKnownHash(std::string_view hash){
+ const auto layout=tr::knownUiLayout(hash);return layout?std::optional<app::ProfileId>(uiProfileForLayout(*layout)):std::nullopt;
+}
 // Independent legacy selector. Unknown or mixed pairs never gain offsets.
 tr::NativeProfile qualifiedProfile(std::string_view client,std::string_view ui){
   const auto profile=tr::profileForHashes(client,ui);
-  const auto record=rc::profileIdForSha256(client);const auto state=app::profileIdForSha256(ui);
+  const auto record=rc::profileIdForSha256(client);const auto state=uiProfileForKnownHash(ui);
   if(!profile||!record||!state)throw DiagnosticFailure("fixed-profile-hash",{
       {"stage","module-profile-before-memory-read"},{"clientSha256",client},{"uiSha256",ui},
       {"clientKnown",bool(record)},{"uiKnown",bool(state)},{"pairQualified",bool(profile)},
       {"beforeMemoryRead",true},{"automaticFallback",false}});
   return *profile;
 }
-rc::ProfileId recordProfileForLayout(compat::Layout layout){return layout==compat::Layout::Public ? rc::ProfileId::Public1792618285 : rc::ProfileId::Legacy1791918634;}
-app::ProfileId uiProfileForLayout(compat::Layout layout){return layout==compat::Layout::Public ? app::ProfileId::Public1792618285 : app::ProfileId::Legacy1791918634;}
 J compatibilityEvidence(const compat::Evidence& proof){return {{"matched",proof.matched},{"rangesChecked",proof.rangesChecked},
     {"bytesChecked",proof.bytesChecked},{"mutableRangesIgnored",proof.mutableRangesIgnored},{"failedRva",proof.failedRva},{"reason",proof.reason}};}
 J compatibilityEvidence(const compat::Evidence& proof,const compat::LoadedDiagnostic& detail){
@@ -162,6 +191,13 @@ struct ExecutionProbeScope {
 void noteContextDebugEvent(DWORD code) noexcept {if(auto* p=gExecutionProbe){if(code<p->debugEvents.size())++p->debugEvents[code];else ++p->otherDebugEvents;}}
 
 void requireCurrent(){need(current(),"native-current-guard-revoked");}
+void requirePublicationScope(){
+  requireCurrent();need(gPublicationScope&&gPublicationScope->current()&&
+      ymcc::sleeppower::powerAdmitted(gPublicationScope->power())&&gCancelSignal&&gIdentityCancelSignal&&
+      reinterpret_cast<std::uintptr_t>(gPublicationScope->powerCancellationEvent())==gCancelSignal&&
+      reinterpret_cast<std::uintptr_t>(gPublicationScope->identityCancellationEvent())==gIdentityCancelSignal&&
+      gPublicationScope->current(),"native-publication-scope-unavailable");
+}
 bool observationCurrent(){try{return gObservationCurrent?gObservationCurrent():current();}catch(...){return false;}}
 void requireCleanupOwnership(){need(gOriginalSteam&&gOriginalSteam(),"original-steam-cleanup-identity-unavailable");}
 void enterCleanup(){requireCleanupOwnership();gCleanupMode=true;}
@@ -185,7 +221,21 @@ void durableCreate(const fp::path& file,const std::string& text){ymcc::steamOrig
 if(gOfflineBeforeStateCreate)gOfflineBeforeStateCreate(file);
 #endif
 H h(CreateFileW(file.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr));need(h.good(),GetLastError()==ERROR_FILE_EXISTS?"event-already-consumed":"durable-create");DWORD written=0;need(text.size()<=MAXDWORD&&WriteFile(h.h,text.data(),static_cast<DWORD>(text.size()),&written,nullptr)&&written==text.size()&&FlushFileBuffers(h.h),"durable-flush-no-refund");}
-void atomicJson(const fp::path& file,const J& value){fp::create_directories(file.parent_path());auto temp=file;temp+=L".next-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetCurrentThreadId());{std::ofstream f(temp,std::ios::binary|std::ios::trunc);need(f.good(),"status-open");f<<value.dump(2)<<'\n';need(f.good(),"status-write");}need(MoveFileExW(temp.c_str(),file.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH),"status-atomic-replace");}
+void atomicJson(const fp::path& file,const J& value){
+  fp::create_directories(file.parent_path());
+  auto temp=file;temp+=L".next-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetCurrentThreadId());
+  // The temporary suffix can exceed MAX_PATH even when the status file fits.
+  // Keep the logical path and transaction unchanged; extend only Win32 IO paths.
+  const auto ioPath=[](const fp::path& path){
+    auto native=fp::absolute(path).native();
+    if(native.rfind(LR"(\\?\)",0)==0)return fp::path(native);
+    if(native.rfind(LR"(\\)",0)==0)return fp::path(LR"(\\?\UNC\)"+native.substr(2));
+    return fp::path(LR"(\\?\)"+native);
+  };
+  const auto tempIo=ioPath(temp),fileIo=ioPath(file);
+  {std::ofstream f(tempIo,std::ios::binary|std::ios::trunc);need(f.good(),"status-open");f<<value.dump(2)<<'\n';need(f.good(),"status-write");}
+  need(MoveFileExW(tempIo.c_str(),fileIo.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH),"status-atomic-replace");
+}
 
 struct LegacyFile {std::string sha256;};
 LegacyFile legacyFile(const std::wstring& path){return {fileHash(path)};}
@@ -200,7 +250,7 @@ compat::Evidence legacyLoadedGuard(const LegacyFile& file,compat::ModuleKind kin
     // rc::observe and selectUser on raw addresses, before capture or dispatch.
     return {true,1,code.size(),0,"legacy-original-getter-instruction-guard"};
   }
-  const auto profile=app::profileIdForSha256(file.sha256);need(bool(profile),"legacy-ui-profile-unknown");
+  const auto profile=uiProfileForKnownHash(file.sha256);need(bool(profile),"legacy-ui-profile-unknown");
   app::Query query{base,size,0,true,*profile};app::detail::Reader reader(raw);app::detail::checkAnchors(reader,query);
   return {true,reader.calls,reader.bytes,0,"legacy-original-typed-ui-code-and-vtable-guards"};
 }
@@ -246,12 +296,149 @@ void noteSnapshotCost(J& summary,const char* name,const J& profile) noexcept {
   try{summary["snapshotCosts"][name]=profile;}catch(...){}
 }
 struct BoundLive{DWORD pid=0,session=0;U64 born=0;std::wstring path;H handle;};
-BoundLive bindLive(const J& j,DWORD access){BoundLive p;p.pid=dword(j.at("pid"));p.session=dword(j.at("session"),true);p.born=decimal(j.at("birthFileTime"));p.path=utf16(j.at("path").get<std::string>());p.handle=H(OpenProcess(access,FALSE,p.pid));need(p.handle.good()&&rw::exactProcess(p.handle.h,p.pid,p.born,p.path,p.session),"exact-process-binding");return p;}
+BoundLive bindLive(const J& j,DWORD access,std::optional<H> held={}){
+  BoundLive p;p.pid=dword(j.at("pid"));p.session=dword(j.at("session"),true);
+  p.born=decimal(j.at("birthFileTime"));p.path=utf16(j.at("path").get<std::string>());
+  p.handle=held?std::move(*held):H(OpenProcess(access,FALSE,p.pid));
+  need(p.handle.good()&&rw::exactProcess(p.handle.h,p.pid,p.born,p.path,p.session),"exact-process-binding");return p;
+}
 J normalizedIdentity(const J& p){const auto birth=p.contains("birth")?p.at("birth"):p.at("birthFileTime");const auto birthValue=decimal(birth);const auto path=absolute(p.at("path"));return{{"pid",dword(p.at("pid"))},{"birthFileTime",std::to_string(birthValue)},{"path",utf8(rw::pathKey(path.wstring()))},{"session",dword(p.at("session"),true)}};}
-struct Scope{std::array<BoundLive,4> roles;J identities;U64 gameId=0;DWORD appid=0;bool owned()const{if(!current())return false;for(const auto& p:roles)if(!rw::exactProcess(p.handle.h,p.pid,p.born,p.path,p.session))return false;return true;}};
-J resolveCef(const J& steam){H snap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0));need(snap.good(),"cef-census");PROCESSENTRY32W p{};p.dwSize=sizeof p;need(Process32FirstW(snap.h,&p),"cef-census-first");std::vector<J> candidates;do{if(p.th32ParentProcessID==dword(steam.at("pid"))&&rw::pathKey(p.szExeFile)==L"steamwebhelper.exe"){H h(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,p.th32ProcessID));need(h.good(),"cef-query");FILETIME b{},e{},k{},u{};DWORD session=0;need(GetProcessTimes(h.h,&b,&e,&k,&u)&&ProcessIdToSessionId(p.th32ProcessID,&session),"cef-identity");const auto birth=(U64(b.dwHighDateTime)<<32)|b.dwLowDateTime;std::wstring path(32768,L'\0');DWORD n=static_cast<DWORD>(path.size());need(QueryFullProcessImageNameW(h.h,0,path.data(),&n),"cef-path");path.resize(n);if(session==dword(steam.at("session"),true)&&rw::pathKey(path)==rw::pathKey((fp::path(utf16(steam.at("path").get<std::string>())).parent_path()/L"bin"/L"cef"/L"cef.win64"/L"steamwebhelper.exe").wstring()))candidates.push_back({{"pid",p.th32ProcessID},{"birth",std::to_string(birth)},{"path",utf8(path)},{"session",session}});}}while(Process32NextW(snap.h,&p));need(GetLastError()==ERROR_NO_MORE_FILES&&candidates.size()==1,"cef-ambiguous-or-unavailable");return candidates[0];}
+enum class NativeRoleMode { Unclassified, StrictSingle, Group };
+struct NativeRoleChoice {
+  std::atomic<NativeRoleMode> mode;
+  explicit NativeRoleChoice(NativeRoleMode value):mode(value){}
+  bool group()const noexcept{return mode.load(std::memory_order_acquire)==NativeRoleMode::Group;}
+  bool pending()const noexcept{return mode.load(std::memory_order_acquire)==NativeRoleMode::Unclassified;}
+};
+struct Scope {
+  std::array<BoundLive,4> roles;J identities;U64 gameId=0;DWORD appid=0;
+  std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> processGroup;
+  // Written only by this worker after a qualified native read. No JSON input
+  // supplies the tuple, and later snapshots cannot silently select new roles.
+  std::optional<std::pair<DWORD,DWORD>> nativeRoleTuple;
+  std::shared_ptr<ymcc::steamgamefacts::GroupNativeRoleBinding> groupNativeRoleBinding;
+  J groupReferenceIdentity;
+  // Request-local admission only, set after read-only lost-reference validation.
+  mutable std::optional<std::string> continuedReferenceScope;
+  std::shared_ptr<NativeRoleChoice> nativeRoleChoice;
+  bool groupPath()const noexcept{return processGroup&&nativeRoleChoice&&nativeRoleChoice->group();}
+  bool groupPending()const noexcept{return processGroup&&nativeRoleChoice&&nativeRoleChoice->pending();}
+  bool owned()const{
+    if(!current())return false;
+    for(const auto& p:roles)if(!rw::exactProcess(p.handle.h,p.pid,p.born,p.path,p.session))return false;
+    return !processGroup||(groupPath()?processGroup->processCurrent():processGroup->originalProcessesCurrent());
+  }
+};
+// Uses only the immutable owner-minted graph/witnesses. It does not discover
+// processes, convert metadata into a lease, or confer native/account authority.
+void bindProcessGroup(Scope& s,std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> lease){
+  if(!lease)return;
+  need(lease->processCurrent(),"group-lease-not-current");
+  const auto& source=lease->source();const auto& graph=lease->graph();
+  need(source.fullGameId==s.gameId&&source.appid==s.appid&&source.selectedPid==s.roles[1].pid&&
+      graph.selectedPid==s.roles[1].pid&&graph.count&&graph.count<=ymcc::steamgameroles::kMaxMembers,
+      "group-lease-target-mismatch");
+  const auto matches=[](const BoundLive& bound,const ymcc::steamgamefacts::ProcessWitness& held){
+    return bound.pid==held.pid&&bound.born==held.created&&rw::pathKey(bound.path)==rw::pathKey(held.image);
+  };
+  need(matches(s.roles[0],lease->steam())&&matches(s.roles[1],lease->selectedGame()),"group-lease-process-mismatch");
+  std::vector<J> members;members.reserve(graph.count);bool selected=false;
+  for(std::uint32_t i=0;i<graph.count;++i){
+    const auto& member=graph.members[i];const auto* witness=lease->witness(member.pid);
+    need(member.pid&&member.birth&&member.session==s.roles[0].session&&witness&&
+        witness->pid==member.pid&&witness->created==member.birth&&!witness->image.empty(),"group-lease-member-mismatch");
+    // acquireGroup minted all members, selected and Steam in this one Windows
+    // session. Requiring every graph session also binds the held Steam session.
+    if(member.pid==s.roles[1].pid){
+      need(!selected&&member.birth==s.roles[1].born&&member.session==s.roles[1].session,
+          "group-lease-selected-mismatch");selected=true;
+    }
+    members.push_back({{"pid",member.pid},{"birthFileTime",std::to_string(member.birth)},
+        {"path",utf8(rw::pathKey(witness->image))},{"session",member.session},{"parentPid",member.parentPid}});
+  }
+  need(selected&&lease->processCurrent(),"group-lease-binding-revoked");
+  std::sort(members.begin(),members.end(),[](const J& a,const J& b){return a.at("pid").get<DWORD>()<b.at("pid").get<DWORD>();});
+  // Deliberately exclude per-request/source revisions so a new observation of
+  // the same objects cannot manufacture a new healthy identity.
+  s.groupReferenceIdentity={{"selected",s.identities.at("game")},{"members",members}};
+  s.processGroup=std::move(lease); // Retain even for non-two-member exact paths.
+  if(!s.nativeRoleChoice)s.nativeRoleChoice=std::make_shared<NativeRoleChoice>(
+      graph.count==2?NativeRoleMode::Unclassified:NativeRoleMode::StrictSingle);
+}
+// An offered topology is not the native role decision. Check its original
+// selected/Steam binding now; only a non-exact actual tuple needs all members.
+void offerProcessGroup(Scope& s,std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> lease){
+  if(!lease)return;
+  need(lease->originalProcessesCurrent(),"group-original-processes-not-current");
+  const auto& source=lease->source();const auto& graph=lease->graph();
+  need(source.fullGameId==s.gameId&&source.appid==s.appid&&source.selectedPid==s.roles[1].pid&&
+      graph.selectedPid==s.roles[1].pid&&graph.count&&graph.count<=ymcc::steamgameroles::kMaxMembers,
+      "group-lease-target-mismatch");
+  const auto matches=[](const BoundLive& bound,const ymcc::steamgamefacts::ProcessWitness& held){
+    return bound.pid==held.pid&&bound.born==held.created&&rw::pathKey(bound.path)==rw::pathKey(held.image);
+  };
+  need(matches(s.roles[0],lease->steam())&&matches(s.roles[1],lease->selectedGame()),"group-lease-process-mismatch");
+  unsigned selected=0;
+  for(std::uint32_t i=0;i<graph.count;++i)if(graph.members[i].pid==s.roles[1].pid){
+    const auto& member=graph.members[i];
+    need(member.birth==s.roles[1].born&&member.session==s.roles[1].session&&
+        member.session==s.roles[0].session,"group-lease-selected-mismatch");++selected;
+  }
+  need(selected==1&&lease->originalProcessesCurrent(),"group-original-binding-revoked");
+  if(!s.nativeRoleChoice)s.nativeRoleChoice=std::make_shared<NativeRoleChoice>(
+      graph.count==2?NativeRoleMode::Unclassified:NativeRoleMode::StrictSingle);
+  s.processGroup=std::move(lease);
+}
+struct ResolvedCef{J identity;H handle;};
+ResolvedCef resolveCef(const J& steam){
+  // Only the shared owner acquires topology; a failed/partial receipt grants no
+  // CEF or absence authority. The identity checks below still use live handles.
+  const auto topology=ymcc::steamprocess::candidates(0);
+  need(topology&&topology->status==ymcc::processInventory::Status::Complete,"cef-census");
+  std::optional<ResolvedCef> selected;
+  bool ambiguous=false;
+  std::wstring expectedPath;
+  for(const auto& p:topology->rows){
+    if(p.parentPid==dword(steam.at("pid"))&&rw::pathKey(p.name)==L"steamwebhelper.exe"){
+      H h(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,p.pid));need(h.good(),"cef-query");
+      FILETIME b{},e{},k{},u{};DWORD session=0;
+      need(GetProcessTimes(h.h,&b,&e,&k,&u)&&ProcessIdToSessionId(p.pid,&session),"cef-identity");
+      const auto birth=(U64(b.dwHighDateTime)<<32)|b.dwLowDateTime;
+      std::wstring path(32768,L'\0');DWORD n=static_cast<DWORD>(path.size());
+      need(QueryFullProcessImageNameW(h.h,0,path.data(),&n),"cef-path");path.resize(n);
+      if(session!=dword(steam.at("session"),true))continue;
+      if(expectedPath.empty())expectedPath=rw::pathKey((fp::path(utf16(steam.at("path").get<std::string>())).parent_path()/L"bin"/L"cef"/L"cef.win64"/L"steamwebhelper.exe").wstring());
+      if(rw::pathKey(path)!=expectedPath)continue;
+      if(selected)ambiguous=true;
+      else selected.emplace(ResolvedCef{{{"pid",p.pid},{"birth",std::to_string(birth)},{"path",utf8(path)},{"session",session}},std::move(h)});
+    }
+  }
+  need(selected&&!ambiguous,"cef-ambiguous-or-unavailable");return std::move(*selected);
+}
 std::pair<U64,DWORD> targetIdentity(const J& game){const auto id=decimal(game.at("gameId"));const auto appid=dword(game.at("appid"));need(((id>>24)&255)==2&&ymcc::steamappstatewin::gameIdMatches(id,appid),"exact-type2-gameid-required");return {id,appid};}
-Scope openScope(const J& event){Scope s;const auto& game=event.contains("game")?event.at("game"):event.at("target");const auto target=targetIdentity(game);s.gameId=target.first;s.appid=target.second;const auto cef=event.contains("cef")?event.at("cef"):resolveCef(event.at("steam"));const std::array<J,4> raw{event.at("steam"),game,event.at("parent"),cef};const std::array<const char*,4> names{"steam","game","ymcc","cef"};std::set<DWORD> ids;for(std::size_t i=0;i<raw.size();++i){auto n=normalizedIdentity(raw[i]);need(ids.insert(dword(n.at("pid"))).second,"distinct-binding-pids");s.identities[names[i]]=n;s.roles[i]=bindLive(n,PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE);need(s.roles[i].session==s.roles[0].session,"binding-session");}need(s.roles[2].pid==GetCurrentProcessId(),"parent-must-be-current-ymcc-process");need(rw::pathKey(fp::path(s.roles[2].path).filename().wstring())==L"yemancc.exe","parent-image-must-be-ymcc");need(rw::pathKey(fp::path(s.roles[0].path).filename().wstring())==L"steam.exe","steam-image-required");need(rw::pathKey(s.roles[3].path)==rw::pathKey((fp::path(s.roles[0].path).parent_path()/L"bin"/L"cef"/L"cef.win64"/L"steamwebhelper.exe").wstring()),"cef-path-not-in-bound-steam-root");need(s.owned(),"native-current-or-binding-changed");return s;}
+Scope openScope(const J& event,std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> lease={},std::shared_ptr<NativeRoleChoice> choice={}){
+  constexpr DWORD access=PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE;
+  Scope s;s.nativeRoleChoice=std::move(choice);
+  const auto& game=event.contains("game")?event.at("game"):event.at("target");
+  const auto target=targetIdentity(game);s.gameId=target.first;s.appid=target.second;
+  std::optional<ResolvedCef> discovered;
+  if(!event.contains("cef"))discovered.emplace(resolveCef(event.at("steam")));
+  const std::array<J,4> raw{event.at("steam"),game,event.at("parent"),discovered?std::move(discovered->identity):event.at("cef")};
+  const std::array<const char*,4> names{"steam","game","ymcc","cef"};
+  std::set<DWORD> ids;
+  for(std::size_t i=0;i<raw.size();++i){
+    auto n=normalizedIdentity(raw[i]);need(ids.insert(dword(n.at("pid"))).second,"distinct-binding-pids");
+    s.identities[names[i]]=n;
+    // Revalidate the acquired object; do not resolve its PID a second time.
+    s.roles[i]=i==3&&discovered?bindLive(n,access,std::move(discovered->handle)):bindLive(n,access);
+    need(s.roles[i].session==s.roles[0].session,"binding-session");
+  }
+  need(s.roles[2].pid==GetCurrentProcessId(),"parent-must-be-current-ymcc-process");
+  need(rw::pathKey(fp::path(s.roles[2].path).filename().wstring())==L"yemancc.exe","parent-image-must-be-ymcc");
+  need(rw::pathKey(fp::path(s.roles[0].path).filename().wstring())==L"steam.exe","steam-image-required");
+  need(rw::pathKey(s.roles[3].path)==rw::pathKey((fp::path(s.roles[0].path).parent_path()/L"bin"/L"cef"/L"cef.win64"/L"steamwebhelper.exe").wstring()),"cef-path-not-in-bound-steam-root");
+  offerProcessGroup(s,std::move(lease));need(s.owned(),"native-current-or-binding-changed");return s;
+}
 unsigned moduleCapacity(DWORD steam){H snap(CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,steam));need(snap.good(),"global-module-census");MODULEENTRY32W p{};p.dwSize=sizeof p;need(Module32FirstW(snap.h,&p),"global-module-first");unsigned count=0;do{const auto name=rw::pathKey(p.szModule);if(name.starts_with(L"wuxia-publish-")&&name.ends_with(L".dll"))++count;}while(Module32NextW(snap.h,&p));need(GetLastError()==ERROR_NO_MORE_FILES,"global-module-census-incomplete");return count;}
 // A snapshot requires both images from this one complete module census. No
 // process/module identity or hash acceptance is retained between invocations.
@@ -330,13 +517,196 @@ J observeSemiStaticSource(const rc::Read& read,U64 clientBase,U64 clientSize,
   }catch(...){return nullptr;}
 }
 struct Snapshot{U64 gameId=0;DWORD flags=0;U64 flagsAddress=0,self=0;rw::Module client,ui;rc::detail::Selection selected{};rc::detail::Header records{};rc::detail::Target target{};J nativeUi,record,executionProfile;
+  std::optional<ymcc::steamgamefacts::ProcessGroupLease::Inspection> roleInspection;
+  std::shared_ptr<ymcc::steamgamefacts::GroupNativeRoleBinding> groupNativeRoleBinding;
   std::string clientSha256=rc::kClientSha256,uiSha256=app::kUiSha256;
   rc::ProfileId clientProfile=rc::ProfileId::Legacy1791918634;
   app::ProfileId uiProfile=app::ProfileId::Legacy1791918634;
-  bool legacyDynamic=false;U64 getterRva=0xcfdc0,publisherRva=0x4e27e0;J compatibility;compat::Qualification clientCompatibility,uiCompatibility;
+  bool fixedOriginalQualification=false;U64 getterRva=0xcfdc0,publisherRva=0x4e27e0;J compatibility;compat::Qualification clientCompatibility,uiCompatibility;
 };
+} // anonymous namespace
+// This is the sole issuer. Its inputs are this Engine's already-qualified
+// module pair and actual snapshot ports, never a JSON qualification flag.
+class EngineQualifiedReadAdapter final {
+public:
+  static ymcc::steamgamefacts::BoundQualifiedRead open(const Scope& scope,const Snapshot& sample,
+      const rc::Query& query,const app::Query& uiQuery,const ProcessReadViews& views,Current localCurrent){
+    ymcc::steamgamefacts::QualifiedNativeReadSite site;
+    site.steam={scope.roles[0].pid,scope.roles[0].born,scope.roles[0].path};
+    site.selected={scope.roles[1].pid,scope.roles[1].born,scope.roles[1].path};
+    site.windowsSession=scope.roles[0].session;
+    site.client={sample.client.base,sample.client.size,query.moduleSize,sample.client.path,sample.clientSha256};
+    site.ui={sample.ui.base,sample.ui.size,uiQuery.moduleSize,sample.ui.path,sample.uiSha256};
+    site.uiProfile=static_cast<std::uint32_t>(sample.uiProfile);
+    site.getterRva=sample.getterRva;site.publisherRva=sample.publisherRva;
+    site.fixedOriginalQualification=sample.fixedOriginalQualification;site.legacyRoute=legacyRoute();
+    // Copy the safe original owning closure. Never copy owned(), Scope&, a
+    // worker cost reference, reader ports, or gOriginalSteam into the proof.
+    return ymcc::steamgamefacts::BoundQualifiedRead(views,std::move(localCurrent),query,std::move(site),
+        scope.processGroup,gPublicationScope,gGroupRequestCancellation,gCurrent,scope.groupNativeRoleBinding);
+  }
+  // The driver's independent qualification supplies these local module facts.
+  // Retain the original owner, while this synchronous frame borrows its reads.
+  static std::unique_ptr<ymcc::steamgamefacts::BoundQualifiedRead> openDriver(
+      const BoundLive& steam,const BoundLive& selected,const Snapshot& sample,
+      const rc::Query& query,const app::Query& uiQuery,const ProcessReadViews& views,Current localCurrent,
+      const std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease>& group,
+      const std::shared_ptr<ymcc::steamgamefacts::GroupNativeRoleBinding>& original){
+    need(original&&group&&original->processGroup()==group&&original->readScope()==gPublicationScope&&
+        original->businessCancellation()==gGroupRequestCancellation&&original->current(),
+        "driver-group-native-role-owner-mismatch");
+    ymcc::steamgamefacts::QualifiedNativeReadSite site;
+    site.steam={steam.pid,steam.born,steam.path};
+    site.selected={selected.pid,selected.born,selected.path};site.windowsSession=steam.session;
+    site.client={sample.client.base,sample.client.size,query.moduleSize,sample.client.path,sample.clientSha256};
+    site.ui={sample.ui.base,sample.ui.size,uiQuery.moduleSize,sample.ui.path,sample.uiSha256};
+    site.uiProfile=static_cast<std::uint32_t>(sample.uiProfile);
+    site.getterRva=sample.getterRva;site.publisherRva=sample.publisherRva;
+    site.fixedOriginalQualification=sample.fixedOriginalQualification;site.legacyRoute=legacyRoute();
+    return std::unique_ptr<ymcc::steamgamefacts::BoundQualifiedRead>(new ymcc::steamgamefacts::BoundQualifiedRead(
+        views,std::move(localCurrent),query,std::move(site),group,gPublicationScope,
+        gGroupRequestCancellation,gCurrent,original));
+  }
+};
+namespace {
+void requireOriginalAssociation(const J& nativeUi,const J& record){
+  const auto trueField=[](const J& value,const char* key){
+    if(!value.is_object())return false;
+    const auto field=value.find(key);
+    return field!=value.end()&&field->is_boolean()&&field->get<bool>();
+  };
+  if(trueField(nativeUi,"available")&&trueField(record,"available")&&trueField(record,"originalPrimaryMatched"))return;
+  const auto proof=[](const J& value,bool primary){
+    J result={{"available",nullptr},{"reason","unavailable"}};
+    if(!primary){result["nativeAppFlags"]=nullptr;result["runningBitSet"]=nullptr;}
+    if(primary){
+      result["originalPrimaryMatched"]=nullptr;
+      for(const auto* field:{"matchingTargetRecordCount","primaryLivenessPid","foregroundComparisonPid"})result[field]=nullptr;
+    }
+    if(!value.is_object())return result;
+    for(const auto* field:{"available","originalPrimaryMatched"}){
+      if(!primary&&std::string_view(field)=="originalPrimaryMatched")continue;
+      const auto found=value.find(field);
+      if(found!=value.end()&&found->is_boolean())result[field]=*found;
+    }
+    if(primary)for(const auto* field:{"matchingTargetRecordCount","primaryLivenessPid","foregroundComparisonPid"}){
+      const auto found=value.find(field);
+      // Preserve known scalar facts already returned by this typed read. A
+      // missing, signed-negative, oversized or nonnumeric field stays unknown.
+      const U64 limit=std::string_view(field)=="matchingTargetRecordCount"?256:MAXDWORD;
+      if(found!=value.end()&&((found->is_number_unsigned()&&found->get<U64>()<=limit)||
+          (found->is_number_integer()&&!found->is_number_unsigned()&&found->get<std::int64_t>()>=0&&static_cast<U64>(found->get<std::int64_t>())<=limit)))
+        result[field]=found->get<U64>();
+    }
+    if(!primary&&result["available"].is_boolean()&&result["available"].get<bool>()){
+      const auto flags=value.find("nativeAppFlags"),running=value.find("runningBitSet");
+      if(flags!=value.end()&&((flags->is_number_unsigned()&&flags->get<U64>()<=MAXDWORD)||
+          (flags->is_number_integer()&&!flags->is_number_unsigned()&&flags->get<std::int64_t>()>=0&&
+           static_cast<U64>(flags->get<std::int64_t>())<=MAXDWORD)))result["nativeAppFlags"]=flags->get<U64>();
+      if(running!=value.end()&&running->is_boolean())result["runningBitSet"]=*running;
+    }
+    if(primary){const auto state=value.find("recordState");
+      if(state!=value.end()&&state->is_string())result["recordState"]=state->get<std::string>().substr(0,80);}
+    const auto reason=value.find("reason");
+    if(reason!=value.end()&&reason->is_string())result["reason"]=reason->get<std::string>().substr(0,160);
+    return result;
+  };
+  throw DiagnosticFailure("original-native-association-unavailable",{{"stage","typed-native-association"},
+      {"component","original-association"},{"actionAuthority",false},
+      {"nativeUi",proof(nativeUi,false)},{"nativeRecord",proof(record,true)}});
+}
+void requireOriginalRoleTuple(const std::vector<rc::detail::Target>& targets,DWORD expectedPid){
+  if(targets.size()==1&&targets[0].primary==expectedPid&&targets[0].foreground==expectedPid)return;
+  // These are the existing qualified read's values, not another native read
+  // or a new role equivalence. Keep the original combined refusal reason.
+  J diagnostic={{"stage","typed-native-record-role-tuple"},{"component","original-association"},
+      {"expectedGamePid",expectedPid},{"matchingTargetRecordCount",targets.size()},
+      {"primaryLivenessPid",nullptr},{"foregroundComparisonPid",nullptr},
+      {"primaryMatchesSelected",nullptr},{"foregroundMatchesSelected",nullptr},
+      {"actionAuthority",false}};
+  if(targets.size()==1){
+    diagnostic["primaryLivenessPid"]=targets[0].primary;
+    diagnostic["foregroundComparisonPid"]=targets[0].foreground;
+    diagnostic["primaryMatchesSelected"]=targets[0].primary==expectedPid;
+    diagnostic["foregroundMatchesSelected"]=targets[0].foreground==expectedPid;
+  }
+  throw DiagnosticFailure("original-record-primary",std::move(diagnostic));
+}
+bool groupTrueField(const J& value,const char* name){
+  if(!value.is_object())return false;
+  const auto it=value.find(name);return it!=value.end()&&it->is_boolean()&&it->get<bool>();
+}
+std::optional<DWORD> groupScalar(const J& value,const char* name){
+  if(!value.is_object())return {};
+  const auto it=value.find(name);if(it==value.end())return {};
+  if(it->is_number_unsigned()){
+    const auto number=it->get<U64>();if(number<=MAXDWORD)return static_cast<DWORD>(number);
+  }else if(it->is_number_integer()){
+    const auto number=it->get<std::int64_t>();if(number>=0&&static_cast<U64>(number)<=MAXDWORD)return static_cast<DWORD>(number);
+  }
+  return {}; // null, float, bool, negative and overflow stay unknown.
+}
+void requireGroupAssociation(const J& nativeUi,const J& record){
+  const auto count=groupScalar(record,"matchingTargetRecordCount");
+  if(groupTrueField(nativeUi,"available")&&groupTrueField(record,"available")&&count&&*count==1)return;
+  throw DiagnosticFailure("group-native-association-unavailable",{{"stage","typed-native-association"},
+      {"nativeUiAvailable",groupTrueField(nativeUi,"available")},{"nativeRecordAvailable",groupTrueField(record,"available")},
+      {"matchingTargetRecordCount",count?J(*count):J(nullptr)},{"actionAuthority",false}});
+}
+ymcc::steamgamefacts::ProcessGroupLease::Inspection requireGroupRoleTuple(
+    Scope& scope,const J& record,const std::vector<rc::detail::Target>& targets,
+    const ymcc::steamgamefacts::BoundQualifiedRead* exactRead=nullptr){
+  need(scope.processGroup&&scope.processGroup->graph().count==2&&scope.nativeRoleChoice,"group-role-path-unavailable");
+  need(targets.size()==1,"group-native-record-not-unique");
+  const auto primary=groupScalar(record,"primaryLivenessPid"),foreground=groupScalar(record,"foregroundComparisonPid");
+  const auto& target=targets[0];
+  need(primary&&foreground&&*primary==target.primary&&*foreground==target.foreground,
+      "group-native-role-tuple-changed-since-typed-read");
+  if(!scope.nativeRoleChoice->group()&&target.primary==scope.roles[1].pid&&target.foreground==scope.roles[1].pid){
+    need(groupTrueField(record,"originalPrimaryMatched"),"original-native-association-unavailable");
+    need(scope.processGroup->originalProcessesCurrent(),"group-original-binding-revoked");
+    const auto exact=ymcc::steamgameroles::inspect(scope.processGroup->graph(),target.primary,target.foreground);
+    need(exact.state==ymcc::steamgameroles::State::ExactSelected,"original-exact-role-graph-inconsistent");
+    scope.groupReferenceIdentity=nullptr;
+    scope.nativeRoleChoice->mode.store(NativeRoleMode::StrictSingle,std::memory_order_release);
+    return exact; // No group-current assertion or native group reference/wire.
+  }
+  if(scope.nativeRoleChoice->mode.load(std::memory_order_acquire)==NativeRoleMode::StrictSingle){
+    requireOriginalRoleTuple(targets,scope.roles[1].pid);
+    throw std::runtime_error("native-role-mode-changed-during-request");
+  }
+  if(scope.groupPending()){
+    bindProcessGroup(scope,scope.processGroup);
+    scope.nativeRoleChoice->mode.store(NativeRoleMode::Group,std::memory_order_release);
+  }
+  const auto inspected=scope.processGroup->inspectNativeRoles(target.primary,target.foreground);
+  if(!inspected||(inspected->state!=ymcc::steamgameroles::State::ExactSelected&&
+      inspected->state!=ymcc::steamgameroles::State::VerifiedGroupRoles))
+    throw DiagnosticFailure("group-native-role-unverified",{{"stage","typed-native-record-role-tuple"},
+        {"expectedGamePid",scope.roles[1].pid},{"matchingTargetRecordCount",targets.size()},
+        {"primaryLivenessPid",target.primary},{"foregroundComparisonPid",target.foreground},
+        {"roleState",inspected?J(static_cast<std::uint32_t>(inspected->state)):J(nullptr)},
+        {"roleReason",inspected?J(static_cast<std::uint32_t>(inspected->reason)):J(nullptr)},{"actionAuthority",false}});
+  // Preserve the old root/root refusal unless this exact qualified reader
+  // frame owns the new composition object. No JSON/bool can supply it.
+  if(!inspected->nativePrimaryExact&&!inspected->nativeForegroundExact){
+    need(exactRead!=nullptr,"group-native-selected-role-required");
+    const auto& binding=exactRead->requireLauncherProof(*scope.processGroup);
+    need(binding.firstTuple()==std::pair<std::uint32_t,std::uint32_t>{target.primary,target.foreground},
+        "group-native-launcher-proof-tuple-mismatch");
+  }
+  const std::pair<DWORD,DWORD> tuple{target.primary,target.foreground};
+  need(!scope.nativeRoleTuple||*scope.nativeRoleTuple==tuple,"group-native-role-tuple-changed-during-request");
+  need(scope.processGroup->processCurrent(),"group-native-role-lease-revoked");
+  if(!scope.nativeRoleTuple)scope.nativeRoleTuple=tuple;
+  return *inspected;
+}
 Snapshot snapshot(Scope& s,U64 account){
   Snapshot result;const auto began=workerStamp();
+  struct FailedSnapshotRoleRead {
+    std::shared_ptr<ymcc::steamgamefacts::GroupNativeRoleBinding> prior;bool completed=false;
+    ~FailedSnapshotRoleRead(){if(!completed&&prior)prior->cancel();}
+  } failedRoleRead{s.groupNativeRoleBinding};
   enum Cost : std::size_t {ModulePair,ClientDisk,UiDisk,ClientLoaded,UiLoaded,TypedUi,TypedRecord,UiFlags,RecordBinding,FullGuard,CostCount};
   std::array<WorkerCost,CostCount> costs{};U64 readCalls=0,readBytes=0;
   const auto owned=[&]{WorkerTimer timer(costs[FullGuard]);return s.owned();};
@@ -344,19 +714,31 @@ Snapshot snapshot(Scope& s,U64 account){
   {WorkerTimer timer(costs[ModulePair]);
     need(originalImagePair(s.roles[0].pid,(fp::path(s.roles[0].path).parent_path()/L"steamclient64.dll").wstring(),
         (fp::path(s.roles[0].path).parent_path()/L"SteamUI.dll").wstring(),result.client,result.ui),"profile-module");}
-  result.legacyDynamic=legacyRoute();std::optional<LegacyFile> legacyClient,legacyUi;std::optional<CompatibleFiles> compatibility;
-  if(result.legacyDynamic){
+  std::optional<LegacyFile> legacyClient,legacyUi;std::optional<CompatibleFiles> compatibility;
+  std::optional<tr::NativeProfile> fixedProfile;
+  if(legacyRoute()){
     {WorkerTimer timer(costs[ClientDisk]);legacyClient=legacyFile(result.client.path);}
     {WorkerTimer timer(costs[UiDisk]);legacyUi=legacyFile(result.ui.path);}
-    const auto profile=qualifiedProfile(legacyClient->sha256,legacyUi->sha256);
+    // Keep exact historical and mixed-known-pair behavior unchanged. Unknown
+    // files can proceed only through the complete public qualification below.
+    if(tr::profileForHashes(legacyClient->sha256,legacyUi->sha256)||
+        (tr::knownClientLayout(legacyClient->sha256)&&tr::knownUiLayout(legacyUi->sha256)))
+      fixedProfile=qualifiedProfile(legacyClient->sha256,legacyUi->sha256);
+  }
+  result.fixedOriginalQualification=fixedProfile.has_value();
+  gDynamicContentQualification=legacyRoute()&&!result.fixedOriginalQualification;
+  if(result.fixedOriginalQualification){
+    const auto& profile=*fixedProfile;
     result.clientSha256=legacyClient->sha256;result.uiSha256=legacyUi->sha256;
-    result.clientProfile=*rc::profileIdForSha256(result.clientSha256);result.uiProfile=*app::profileIdForSha256(result.uiSha256);
+    result.clientProfile=*rc::profileIdForSha256(result.clientSha256);result.uiProfile=*uiProfileForKnownHash(result.uiSha256);
     result.getterRva=profile.getterRva;result.publisherRva=profile.publisherRva;
   }else{
   const auto qualify=[&](const rw::Module& module,compat::ModuleKind kind,Cost cost){
     WorkerTimer timer(costs[cost]);return compat::qualifyFile(module.path,kind);};
   auto qualifiedClient=qualify(result.client,compat::ModuleKind::Client,ClientDisk);
   auto qualifiedUi=qualify(result.ui,compat::ModuleKind::Ui,UiDisk);
+  if(legacyClient&&legacyUi)need(qualifiedClient.sha256==legacyClient->sha256&&qualifiedUi.sha256==legacyUi->sha256,
+      "dynamic-module-source-changed-before-public-qualification");
   compatibility=compatibleFiles(std::move(qualifiedClient),std::move(qualifiedUi));
   result.clientSha256=compatibility->client.sha256;result.uiSha256=compatibility->ui.sha256;
   result.clientProfile=recordProfileForLayout(*compatibility->client.layout);
@@ -372,8 +754,8 @@ Snapshot snapshot(Scope& s,U64 account){
         ReadProcessMemory(process.h,reinterpret_cast<void*>(a),p,n,&got)&&got==n;};
   const auto loaded=[&](const rw::Module& module){return compat::ReadRva([&,module](U64 rva,void* target,std::size_t bytes){
     return rva<module.size&&bytes<=module.size-rva&&read(module.base+rva,target,bytes);});};
-  rc::Read uiRead=read,recordRead=read;U64 uiSize=result.ui.size,clientSize=result.client.size;
-  if(result.legacyDynamic){
+  ProcessReadViews uiViews{read,{},{}},recordViews{read,{},{}};U64 uiSize=result.ui.size,clientSize=result.client.size;
+  if(result.fixedOriginalQualification){
     compat::Evidence loadedClient,loadedUi;
     {WorkerTimer timer(costs[ClientLoaded]);loadedClient=legacyLoadedGuard(*legacyClient,compat::ModuleKind::Client,loaded(result.client),result.client.base,result.client.size);}
     {WorkerTimer timer(costs[UiLoaded]);loadedUi=legacyLoadedGuard(*legacyUi,compat::ModuleKind::Ui,loaded(result.ui),result.ui.base,result.ui.size);}
@@ -396,20 +778,28 @@ Snapshot snapshot(Scope& s,U64 account){
       {"diagnosticDigestSource","same-qualified-file-buffer"},
       {"diskWork",{{"client",{{"fileBytesRead",compatibility->client.fileBytesRead},{"digestBytesHashed",compatibility->client.digestBytesHashed}}},
         {"ui",{{"fileBytesRead",compatibility->ui.fileBytesRead},{"digestBytesHashed",compatibility->ui.digestBytesHashed}}}}}};
-  uiRead=compat::adaptProcessRead(compatibility->ui,result.ui.base,result.ui.size,read);
-  recordRead=compat::adaptProcessRead(compatibility->client,result.client.base,result.client.size,read);
+  uiViews=qualifiedProcessReadViews(compatibility->ui,result.ui.base,result.ui.size,read);
+  recordViews=qualifiedProcessReadViews(compatibility->client,result.client.base,result.client.size,read);
     uiSize=compat::referenceImageSize(compatibility->ui,result.ui.size);clientSize=compat::referenceImageSize(compatibility->client,result.client.size);
   }
   app::Query aq{result.ui.base,uiSize,s.appid,true,result.uiProfile};
   rc::Query rq{result.client.base,clientSize,account,s.gameId,s.roles[1].pid,true,result.clientProfile};
-  {WorkerTimer timer(costs[TypedUi]);result.nativeUi=app::observe(aq,uiRead,owned);}
-  {WorkerTimer timer(costs[TypedRecord]);result.record=rc::observe(rq,recordRead,owned);}
-  need(result.nativeUi.value("available",false)&&result.record.value("originalPrimaryMatched",false),"original-native-association-unavailable");
-  {WorkerTimer timer(costs[UiFlags]);app::detail::Reader ar(uiRead);result.flags=app::detail::readFlags(ar,aq);
+  {WorkerTimer timer(costs[TypedUi]);result.nativeUi=app::observeWithReadViews(aq,uiViews,owned);}
+  auto qualifiedRead=EngineQualifiedReadAdapter::open(s,result,rq,aq,recordViews,owned);
+  {WorkerTimer timer(costs[TypedRecord]);result.record=qualifiedRead.begin();}
+  if(s.groupPath()||s.groupPending())requireGroupAssociation(result.nativeUi,result.record);
+  else requireOriginalAssociation(result.nativeUi,result.record);
+  {WorkerTimer timer(costs[UiFlags]);app::detail::Reader ar(uiViews);result.flags=app::detail::readFlags(ar,aq);
     need(!ar.fields.empty()&&(result.flags==4||result.flags==8196),"native-flags-not-qualified");result.flagsAddress=ar.fields.back().address;}
-  {WorkerTimer timer(costs[RecordBinding]);rc::detail::Reader rr(recordRead);result.selected=rc::detail::selectUser(rr,rq);
-    result.records=rc::detail::readHeader(rr,result.selected.user,result.clientProfile);const auto targets=rc::detail::readTargets(rr,rq,result.records);
-    need(targets.size()==1&&targets[0].primary==s.roles[1].pid&&targets[0].foreground==s.roles[1].pid,"original-record-primary");result.target=targets[0];
+  {WorkerTimer timer(costs[RecordBinding]);qualifiedRead.finish();result.selected=qualifiedRead.takeSelection();
+    result.records=qualifiedRead.header();const auto& targets=qualifiedRead.targets();
+    if(s.groupPath()||s.groupPending()){
+      const auto inspected=requireGroupRoleTuple(s,result.record,targets,&qualifiedRead);
+      if(s.groupPath())result.roleInspection=inspected;
+      else requireOriginalAssociation(result.nativeUi,result.record);
+    }
+    else requireOriginalRoleTuple(targets,s.roles[1].pid);
+    result.target=targets[0];
     try{result.record["suspendStateDiagnostic"]=observeSuspendDiagnostic(read,
         rc::detail::offset(result.records.records,0x330ULL*result.target.index),s.gameId);}catch(...){}
     try{result.record["postLogonSourceDiagnostic"]=observePostLogonSourceDiagnostic(read,
@@ -417,14 +807,16 @@ Snapshot snapshot(Scope& s,U64 account){
     try{result.record["semiStaticSource"]=observeSemiStaticSource(read,result.client.base,
         result.client.size,result.ui.base,result.ui.size,result.selected.user,result.clientSha256==rc::kClientSha256&&result.uiSha256==app::kUiSha256);}catch(...){}
   }
-  result.self=result.selected.user+0x1e70;need(owned(),"binding-after-native-read");
+  result.self=rc::detail::userInterfaceSelf(result.selected.user,result.clientProfile);
+  result.groupNativeRoleBinding=qualifiedRead.complete(); // original final owned() stays here
+  if(result.groupNativeRoleBinding)s.groupNativeRoleBinding=result.groupNativeRoleBinding;
   try{WorkerCost total;total.add(began,workerStamp());const std::array<const char*,CostCount> names{
         "modulePair","clientDiskQualification","uiDiskQualification","clientLoadedQualification","uiLoadedQualification","typedUiObserve","typedRecordObserve","uiFlagsRead","recordBindingRead","fullGuard"};
-    result.executionProfile={{"schema","ymcc.original-snapshot-cost.v2"},{"separateModuleFullFileHashes",result.legacyDynamic?2:0},{"total",workerCostJson(total)},{"readCalls",readCalls},{"requestedReadBytes",readBytes},
+    result.executionProfile={{"schema","ymcc.original-snapshot-cost.v2"},{"separateModuleFullFileHashes",(legacyClient&&legacyUi)?2:0},{"total",workerCostJson(total)},{"readCalls",readCalls},{"requestedReadBytes",readBytes},
         {"fullGuardIsNestedInTypedReads",true},{"instrumentationOverheadIncludedInEnclosingPhases",true},
         {"workerScope","calling snapshot worker only; excludes QueryActor and Steam remote threads"}};
     for(std::size_t i=0;i<CostCount;++i)result.executionProfile["stages"][names[i]]=workerCostJson(costs[i]);
-  }catch(...){}return result;
+  }catch(...){}failedRoleRead.completed=true;return result;
 }
 U64 nowFileTime(){FILETIME now{};GetSystemTimeAsFileTime(&now);return (U64(now.dwHighDateTime)<<32)|now.dwLowDateTime;}
 U64 wakeDeadlineTick(U64 eventFileTime,U64 utc,U64 tick){
@@ -434,6 +826,30 @@ U64 wakeDeadlineTick(U64 eventFileTime,U64 utc,U64 tick){
   need(remaining&&tick<=(std::numeric_limits<U64>::max)()-remaining,"wake-deadline-expired-or-overflow");
   return tick+remaining;
 }
+Current groupActionCurrent(Current prior,
+    std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> group,
+    std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> request,
+    std::shared_ptr<NativeRoleChoice> choice={}){
+  need(prior&&group&&request&&request->current(),"group-request-scope-unavailable");
+  return [prior=std::move(prior),group=std::move(group),request=std::move(request),choice=std::move(choice)]{
+    try{
+      if(!request->current())return false;
+      if(!prior()||!(choice&&!choice->group()?group->originalProcessesCurrent():group->processCurrent())){request->cancel();return false;}
+      return request->current();
+    }catch(...){request->cancel();return false;}
+  };
+}
+Current groupObservationCurrent(Current prior,
+    std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> group,
+    std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> request,
+    std::shared_ptr<NativeRoleChoice> choice={}){
+  need(prior&&group&&request,"group-observation-scope-unavailable");
+  return [prior=std::move(prior),group=std::move(group),request=std::move(request),choice=std::move(choice)]{
+    return request->current()&&prior()&&
+        (choice&&!choice->group()?group->originalProcessesCurrent():group->processCurrent())&&request->current();
+  };
+}
+
 struct WakeProbeReader {
   Scope& scope;H process;U64 calls=0,bytes=0;
   explicit WakeProbeReader(Scope& value):scope(value),process(OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ|SYNCHRONIZE,FALSE,value.roles[0].pid)){
@@ -444,22 +860,53 @@ struct WakeProbeReader {
   bool owned()const{
     if(!observationCurrent())return false;
     HANDLE handles[4]{};for(std::size_t i=0;i<scope.roles.size();++i)handles[i]=scope.roles[i].handle.h;
-    return WaitForMultipleObjects(4,handles,FALSE,0)==WAIT_TIMEOUT;
+    return WaitForMultipleObjects(4,handles,FALSE,0)==WAIT_TIMEOUT&&
+        (!scope.processGroup||(scope.groupPath()?scope.processGroup->processCurrent():scope.processGroup->originalProcessesCurrent()));
   }
   DWORD flags(const Snapshot& previous){
     need(owned(),"wake-probe-scope-changed");
     const app::Read read=[&](U64 address,void* target,std::size_t count){SIZE_T got=0;++calls;
       const bool ok=ReadProcessMemory(process.h,reinterpret_cast<void*>(address),target,count,&got)&&got==count;
       bytes+=got;return ok;};
-    const auto compatibleRead=previous.legacyDynamic?read:compat::adaptProcessRead(previous.uiCompatibility,previous.ui.base,previous.ui.size,read);
-    const auto uiSize=previous.legacyDynamic?previous.ui.size:compat::referenceImageSize(previous.uiCompatibility,previous.ui.size);
-    app::Query query{previous.ui.base,uiSize,scope.appid,true,previous.uiProfile};app::detail::Reader reader(compatibleRead);
+    const auto views=previous.fixedOriginalQualification?ProcessReadViews{read,{},{}}:qualifiedProcessReadViews(previous.uiCompatibility,previous.ui.base,previous.ui.size,read);
+    const auto uiSize=previous.fixedOriginalQualification?previous.ui.size:compat::referenceImageSize(previous.uiCompatibility,previous.ui.size);
+    app::Query query{previous.ui.base,uiSize,scope.appid,true,previous.uiProfile};app::detail::Reader reader(views);
     app::detail::checkAnchors(reader,query);const auto value=app::detail::readFlags(reader,query);
     need(!reader.fields.empty()&&reader.fields.back().address==previous.flagsAddress&&
         (value==4||value==8196)&&owned(),"wake-probe-object-or-flags-changed");
     return value; // Diagnostic detection only; full hashes, rules, registry and record pins precede every mutation.
   }
 };
+// Native cancellation is a borrowed manual-reset event held by the request
+// callbacks. It only cancels a wait; no signal grants Current or a write ticket.
+enum class WakeWait { Timeout, Process, Hint, Cancelled };
+WakeWait waitWakeObservation(const std::array<HANDLE,4>& processes,
+    WakeSignal hint,WakeSignal cancelled,WakeSignal identityCancelled,DWORD delayMs,WakeSignal businessCancelled=0,
+    std::span<const HANDLE> additionalProcesses={}){
+  need(additionalProcesses.size()<=MAXIMUM_WAIT_OBJECTS-8,"wake-event-extra-process-limit");
+  HANDLE handles[MAXIMUM_WAIT_OBJECTS]{};DWORD count=0;
+  // Both events are borrowed from the one public Native read scope.
+  // Cancellation takes priority over simultaneous process or hint signals.
+  if(cancelled)handles[count++]=reinterpret_cast<HANDLE>(cancelled);
+  if(identityCancelled)handles[count++]=reinterpret_cast<HANDLE>(identityCancelled);
+  if(businessCancelled)handles[count++]=reinterpret_cast<HANDLE>(businessCancelled);
+  const DWORD cancelCount=count,processIndex=count;
+  for(const auto process:processes)handles[count++]=process;
+  for(const auto process:additionalProcesses){
+    need(process&&process!=INVALID_HANDLE_VALUE,"wake-event-extra-process-invalid");
+    if(std::find(handles+processIndex,handles+count,process)==handles+count)handles[count++]=process;
+  }
+  const DWORD processCount=count-processIndex;
+  const DWORD hintIndex=count;
+  if(hint)handles[count++]=reinterpret_cast<HANDLE>(hint);
+  const auto waited=WaitForMultipleObjects(count,handles,FALSE,delayMs);
+  need(waited!=WAIT_FAILED,"wake-event-wait-failed");
+  if(waited==WAIT_TIMEOUT)return WakeWait::Timeout;
+  if(waited>=WAIT_OBJECT_0&&waited<WAIT_OBJECT_0+cancelCount)return WakeWait::Cancelled;
+  if(waited>=WAIT_OBJECT_0+processIndex&&waited<WAIT_OBJECT_0+processIndex+processCount)return WakeWait::Process;
+  if(hint&&waited==WAIT_OBJECT_0+hintIndex)return WakeWait::Hint;
+  need(false,"wake-event-wait-unexpected");return WakeWait::Cancelled;
+}
 U64 threadCpuTicks(){FILETIME create{},exit{},kernel{},user{};
   need(GetThreadTimes(GetCurrentThread(),&create,&exit,&kernel,&user),"wake-cpu-sample");
   return ((U64(kernel.dwHighDateTime)<<32)|kernel.dwLowDateTime)+((U64(user.dwHighDateTime)<<32)|user.dwLowDateTime);
@@ -468,7 +915,17 @@ U64 threadCpuTicks(){FILETIME create{},exit{},kernel{},user{};
 std::string pin(const std::string& nonce,std::initializer_list<U64> values){std::string bytes=nonce;for(const auto value:values)bytes.append(reinterpret_cast<const char*>(&value),sizeof value);return digest(bytes.data(),bytes.size());}
 J pins(const Snapshot& s,U64 birth,U64 account,const std::string& nonce){need(nonce.size()==36&&s.flagsAddress>=0x20,"baseline-pin-input");const auto record=s.records.records+0x330ULL*s.target.index;return{{"owner",pin(nonce,{s.client.base,birth,s.selected.engine,s.selected.user,account})},{"record",pin(nonce,{birth,s.selected.user,record,s.gameId})},{"uiObject",pin(nonce,{birth,s.ui.base,s.flagsAddress-0x20,s.gameId})}};}
 J life(const Scope& s){return{{"steam",s.identities.at("steam")},{"game",s.identities.at("game")},{"gameId",std::to_string(s.gameId)}};}
-J referenceScope(const Scope& s){return {{"steam",s.identities.at("steam")},{"game",s.identities.at("game")},{"cef",s.identities.at("cef")},{"gameId",std::to_string(s.gameId)},{"appid",s.appid}};}
+J referenceScope(const Scope& s){
+  need(!s.groupPending(),"group-reference-qualified-tuple-missing");
+  J value={{"steam",s.identities.at("steam")},{"game",s.identities.at("game")},{"cef",s.identities.at("cef")},{"gameId",std::to_string(s.gameId)},{"appid",s.appid}};
+  if(s.groupPath()){
+    need(s.nativeRoleTuple.has_value()&&s.groupReferenceIdentity.is_object(),"group-reference-qualified-tuple-missing");
+    value["processGroup"]=s.groupReferenceIdentity;
+    value["nativeRoles"]={{"primaryLivenessPid",s.nativeRoleTuple->first},{"foregroundComparisonPid",s.nativeRoleTuple->second}};
+  }
+  return value;
+}
+const char* referenceSchema(const Scope& s){return s.groupPath()?"ymcc.steam-native-original-reference.v2":"ymcc.steam-native-original-reference.v1";}
 std::string scopeKey(const Scope& s,U64 account){return textHash(J{{"scope",referenceScope(s)},{"accountFingerprint",textHash(std::to_string(account))}}.dump());}
 // One key derivation for read-only preflight and the durable reservation.
 // Source discovery can fail cleanly without spending a publication right.
@@ -532,7 +989,7 @@ std::optional<std::string> auditedLegacyTransfer(const J& event,const Scope& s,c
   return auditedPrepublicationSource(s,data);
 }
 void consume(const J& event,const Scope& s,const fp::path& data,bool reserve=true){
-  const auto& trigger=event.at("trigger");const auto kind=trigger.at("kind").get<std::string>();if(kind!="wake"&&kind!="startup")return;
+  const auto& trigger=event.at("trigger");const auto kind=trigger.at("kind").get<std::string>();if(kind!="wake"&&kind!="startup"&&kind!="running-lost")return;
   need(trigger.contains("generation")&&trigger.contains("id"),"event-ticket-required");const auto identity=life(s);
   const auto eventId=trigger.at("id").get<std::string>();need(!eventId.empty()&&eventId.size()<160,"event-id");
   const auto generation=trigger.at("generation");need(generation.is_number_integer()||generation.is_string(),"event-generation");
@@ -562,35 +1019,153 @@ void consume(const J& event,const Scope& s,const fp::path& data,bool reserve=tru
 }
 // QueryActor already publishes completion with this manual-reset event.
 // This wait is execution-only and grants no Current or recovery authority.
-void waitQueryReturn(const std::atomic<bool>& completed,HANDLE event,DWORD budgetMs=5000){
-  if(!completed.load())need(WaitForSingleObject(event,budgetMs)==WAIT_OBJECT_0&&completed.load(),"context-query-return-budget");
+enum class QueryCancellationState {Legacy,Current,Revoked,Unavailable};
+QueryCancellationState queryCancellationState(HANDLE power,HANDLE identity)noexcept{
+  if(!power&&!identity)return QueryCancellationState::Legacy;
+  if(!power||!identity||power==INVALID_HANDLE_VALUE||identity==INVALID_HANDLE_VALUE||power==identity)return QueryCancellationState::Unavailable;
+  const auto first=WaitForSingleObject(power,0),second=WaitForSingleObject(identity,0);
+  if(first==WAIT_FAILED||second==WAIT_FAILED)return QueryCancellationState::Unavailable;
+  if(first==WAIT_OBJECT_0||second==WAIT_OBJECT_0)return QueryCancellationState::Revoked;
+  return first==WAIT_TIMEOUT&&second==WAIT_TIMEOUT?QueryCancellationState::Current:QueryCancellationState::Unavailable;
+}
+void requireQueryCancellation(HANDLE power,HANDLE identity){
+  const auto state=queryCancellationState(power,identity);
+  need(state==QueryCancellationState::Legacy||state==QueryCancellationState::Current,
+      state==QueryCancellationState::Revoked?"normal-query-native-cancelled":"normal-query-cancellation-unavailable");
+}
+DWORD waitQuerySignal(HANDLE event,DWORD budgetMs,HANDLE power=nullptr,HANDLE identity=nullptr){
+  requireQueryCancellation(power,identity);
+  if(!power&&!identity)return WaitForSingleObject(event,budgetMs);
+  need(event&&event!=power&&event!=identity,"normal-query-completion-event-unavailable");
+  // Cancellation precedes completion when both are signalled. These are the
+  // original sticky manual-reset events, borrowed through the actor's join.
+  const HANDLE handles[]{power,identity,event};
+  const auto waited=WaitForMultipleObjects(3,handles,FALSE,budgetMs);
+  need(waited!=WAIT_OBJECT_0&&waited!=WAIT_OBJECT_0+1,"normal-query-native-cancelled");
+  if(waited==WAIT_OBJECT_0+2){requireQueryCancellation(power,identity);return WAIT_OBJECT_0;}
+  return waited;
+}
+void waitQueryReturn(const std::atomic<bool>& completed,HANDLE event,DWORD budgetMs=5000,HANDLE power=nullptr,HANDLE identity=nullptr){
+  requireQueryCancellation(power,identity);
+  if(!completed.load())need(waitQuerySignal(event,budgetMs,power,identity)==WAIT_OBJECT_0&&completed.load(),"context-query-return-budget");
+  requireQueryCancellation(power,identity);
 }
 class QueryActor {
   H ready{CreateEventW(nullptr,TRUE,FALSE,nullptr)},command{CreateEventW(nullptr,FALSE,FALSE,nullptr)},doneEvent{CreateEventW(nullptr,TRUE,FALSE,nullptr)};
-  std::thread thread;std::atomic<bool> quit{false},readyOk{false},completedFlag{false};std::atomic<U64> result{0};std::mutex errorMutex;std::string error;U64 expected=0;std::wstring clientPath;Current currentFn;const RecoveryRoute queryRoute;const std::string qualifiedClientSha256;
-  void run(){ISteamClient* client=nullptr;HSteamPipe pipe=0;HSteamUser user=0;try{
-    // Capture route/hash on the caller before starting this new OS thread.
-    // gRecoveryRoute is TLS and must never choose this worker's qualification.
-    if(queryRoute==RecoveryRoute::LegacyDynamic){
-      need(bool(rc::profileIdForSha256(qualifiedClientSha256)),"normal-query-legacy-client-profile");
-      need(fileHash(clientPath)==qualifiedClientSha256,"normal-query-legacy-client-changed");
-    }else{
-      need(queryRoute==RecoveryRoute::SemiStatic,"normal-query-route-unsupported");
-      need(bool(compat::qualifyFile(clientPath,compat::ModuleKind::Client).layout),"normal-query-client-compatibility");
+  std::thread thread;std::atomic<bool> quit{false},readyOk{false},completedFlag{false};std::atomic<U64> result{0};std::mutex errorMutex;std::string error;U64 expected=0;std::wstring clientPath;Current currentFn;const RecoveryRoute queryRoute;const std::string qualifiedClientSha256;const bool fixedOriginalQualification;
+  const HANDLE powerCancellation,identityCancellation;const std::shared_ptr<ymcc::steamnative::ReadScope> nativeReadScope;
+  J* const cleanupSummary;
+  std::atomic<bool> cleanupCompleted{false},resourcesReturned{false},moduleRetained{false};
+  std::atomic<const char*> cleanupFailure{nullptr},errorFallback{nullptr};
+  // One fail-closed debt slot for this process's serialized recovery actor.
+  // Unknown SDK state is never reused, unloaded, retried or treated as returned.
+  struct SdkDebt {
+    std::atomic<bool> quarantined{false};
+    HMODULE module=nullptr;ISteamClient* client=nullptr;HSteamPipe pipe=0;HSteamUser user=0;
+    std::shared_ptr<ymcc::steamnative::ReadScope> scope;
+  };
+  static SdkDebt& sdkDebt(){static SdkDebt value;return value;}
+  void rememberFailure(const char* reason)noexcept {
+    try{std::lock_guard<std::mutex> lock(errorMutex);error=reason;}
+    catch(...){errorFallback.store("normal-query-error-record-unavailable",std::memory_order_release);}
+  }
+  void retainUnknown(HMODULE module,ISteamClient* client,HSteamPipe pipe,HSteamUser user,const char* reason)noexcept {
+    auto& debt=sdkDebt();
+    if(!debt.quarantined.exchange(true,std::memory_order_acq_rel)){
+      debt.module=module;debt.client=client;debt.pipe=pipe;debt.user=user;debt.scope=nativeReadScope;
     }
-    HMODULE module=LoadLibraryExW(clientPath.c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);need(module!=nullptr,"normal-query-load-client");using Factory=void*(__cdecl*)(const char*,int*);auto factory=reinterpret_cast<Factory>(GetProcAddress(module,"CreateInterface"));need(factory!=nullptr,"normal-query-factory");need(!currentFn||currentFn(),"normal-query-current-revoked");client=static_cast<ISteamClient*>(factory(STEAMCLIENT_INTERFACE_VERSION,nullptr));need(client!=nullptr,"normal-query-client");need(!currentFn||currentFn(),"normal-query-current-revoked");pipe=client->CreateSteamPipe();need(pipe!=0,"normal-query-owned-pipe");need(!currentFn||currentFn(),"normal-query-current-revoked");user=client->ConnectToGlobalUser(pipe);need(user!=0,"normal-query-global-user");auto* api=client->GetISteamUser(user,pipe,STEAMUSER_INTERFACE_VERSION);need(api!=nullptr,"normal-query-user-interface");readyOk=true;SetEvent(ready.h);for(;;){need(WaitForSingleObject(command.h,INFINITE)==WAIT_OBJECT_0,"normal-query-command");if(quit)break;need(!currentFn||currentFn(),"normal-query-current-revoked");result=api->GetSteamID().ConvertToUint64();need(result==expected,"normal-query-account-mismatch");completedFlag=true;SetEvent(doneEvent.h);}}catch(const std::exception& e){{std::lock_guard<std::mutex> lock(errorMutex);error=e.what();}SetEvent(ready.h);completedFlag=true;SetEvent(doneEvent.h);}catch(...){{std::lock_guard<std::mutex> lock(errorMutex);error="normal-query-unknown-exception";}SetEvent(ready.h);completedFlag=true;SetEvent(doneEvent.h);}if(client&&pipe){if(user)client->ReleaseUser(pipe,user);client->BReleaseSteamPipe(pipe);}}
+    moduleRetained.store(module!=nullptr,std::memory_order_release);
+    cleanupFailure.store(reason,std::memory_order_release);
+  }
+  void run()noexcept {
+    HMODULE module=nullptr;ISteamClient* client=nullptr;HSteamPipe pipe=0;HSteamUser user=0;
+    const char* pendingSdkCall=nullptr;
+    try{
+      need(!currentFn||currentFn(),"normal-query-current-revoked");requireQueryCancellation(powerCancellation,identityCancellation);
+      // Capture route/hash on the caller before starting this new OS thread.
+      // gRecoveryRoute is TLS and must never choose this worker's qualification.
+      if(queryRoute==RecoveryRoute::LegacyDynamic&&fixedOriginalQualification){
+        need(bool(rc::profileIdForSha256(qualifiedClientSha256)),"normal-query-legacy-client-profile");
+        need(fileHash(clientPath)==qualifiedClientSha256,"normal-query-legacy-client-changed");
+      }else{
+        need(queryRoute==RecoveryRoute::SemiStatic||queryRoute==RecoveryRoute::LegacyDynamic,"normal-query-route-unsupported");
+        if(queryRoute==RecoveryRoute::LegacyDynamic){
+          const auto source=compat::qualifyFile(clientPath,compat::ModuleKind::Client);
+          need(source.layout&&source.record.matched&&source.publisher.matched&&source.sha256==qualifiedClientSha256,
+              "normal-query-dynamic-qualified-client-changed");
+        }else need(bool(compat::qualifyFile(clientPath,compat::ModuleKind::Client).layout),"normal-query-client-compatibility");
+      }
+      need(!currentFn||currentFn(),"normal-query-current-revoked");
+      module=LoadLibraryExW(clientPath.c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+      need(module!=nullptr,"normal-query-load-client");
+      using Factory=void*(__cdecl*)(const char*,int*);auto factory=reinterpret_cast<Factory>(GetProcAddress(module,"CreateInterface"));
+      need(factory!=nullptr,"normal-query-factory");need(!currentFn||currentFn(),"normal-query-current-revoked");
+      pendingSdkCall="CreateInterface";client=static_cast<ISteamClient*>(factory(STEAMCLIENT_INTERFACE_VERSION,nullptr));pendingSdkCall=nullptr;
+      need(client!=nullptr,"normal-query-client");need(!currentFn||currentFn(),"normal-query-current-revoked");
+      pendingSdkCall="CreateSteamPipe";pipe=client->CreateSteamPipe();pendingSdkCall=nullptr;
+      need(pipe!=0,"normal-query-owned-pipe");need(!currentFn||currentFn(),"normal-query-current-revoked");
+      pendingSdkCall="ConnectToGlobalUser";user=client->ConnectToGlobalUser(pipe);pendingSdkCall=nullptr;
+      need(user!=0,"normal-query-global-user");need(!currentFn||currentFn(),"normal-query-current-revoked");
+      pendingSdkCall="GetISteamUser";auto* api=client->GetISteamUser(user,pipe,STEAMUSER_INTERFACE_VERSION);pendingSdkCall=nullptr;
+      need(api!=nullptr,"normal-query-user-interface");need(!currentFn||currentFn(),"normal-query-current-revoked");
+      readyOk=true;SetEvent(ready.h);
+      for(;;){
+        need(waitQuerySignal(command.h,INFINITE,powerCancellation,identityCancellation)==WAIT_OBJECT_0,"normal-query-command");
+        if(quit)break;need(!currentFn||currentFn(),"normal-query-current-revoked");
+        pendingSdkCall="GetSteamID";result=api->GetSteamID().ConvertToUint64();pendingSdkCall=nullptr;
+        need(!currentFn||currentFn(),"normal-query-current-revoked");need(result==expected,"normal-query-account-mismatch");
+        completedFlag=true;SetEvent(doneEvent.h);
+      }
+    }catch(const std::exception& e){rememberFailure(e.what());SetEvent(ready.h);completedFlag=true;SetEvent(doneEvent.h);}
+    catch(...){rememberFailure("normal-query-unknown-exception");SetEvent(ready.h);completedFlag=true;SetEvent(doneEvent.h);}
+    const char* unknown=pendingSdkCall?"normal-query-sdk-call-outcome-unknown":nullptr;
+    if(!unknown&&client&&pipe){
+      if(user){try{client->ReleaseUser(pipe,user);user=0;}catch(...){unknown="normal-query-release-user-outcome-unknown";}}
+      if(!unknown){try{if(client->BReleaseSteamPipe(pipe)){pipe=0;}else unknown="normal-query-release-pipe-refused";}
+        catch(...){unknown="normal-query-release-pipe-outcome-unknown";}}
+    }
+    // Pipe return alone is not the DLL's global shutdown receipt. This
+    // SDK lives in this YMCC process; it does not stop the Steam application.
+    if(!unknown&&client){
+      try{if(client->BShutdownIfAllPipesClosed())client=nullptr;else unknown="normal-query-sdk-shutdown-refused";}
+      catch(...){unknown="normal-query-sdk-shutdown-outcome-unknown";}
+    }
+    if(!unknown&&module){
+      if(FreeLibrary(module))module=nullptr;else unknown="normal-query-module-return-unknown";
+    }
+    if(unknown)retainUnknown(module,client,pipe,user,unknown);
+    else resourcesReturned.store(true,std::memory_order_release);
+    cleanupCompleted.store(true,std::memory_order_release);
+  }
+  void stopAndJoin(){quit=true;SetEvent(command.h);if(thread.joinable())thread.join();}
+  void noteCleanup()noexcept {
+    if(!cleanupSummary)return;
+    try{const auto reason=cleanupFailure.load(std::memory_order_acquire);
+      (*cleanupSummary)["normalQueryCleanup"]={{"cleanupCompleted",cleanupCompleted.load(std::memory_order_acquire)},
+        {"resourcesReturned",resourcesReturned.load(std::memory_order_acquire)},
+        {"moduleRetained",moduleRetained.load(std::memory_order_acquire)},
+        {"sdkQuarantined",sdkDebt().quarantined.load(std::memory_order_acquire)},
+        {"reason",reason?J(reason):J(nullptr)},
+        {"retention",reason?"process-lifetime-no-reuse-no-unload":"returned-after-owned-sdk-cleanup"}};
+    }catch(...){}
+  }
  public:
-  explicit QueryActor(U64 account,std::wstring path,RecoveryRoute route=RecoveryRoute::SemiStatic,std::string clientSha256={}):
-      expected(account),clientPath(std::move(path)),currentFn(gCurrent),queryRoute(route),qualifiedClientSha256(std::move(clientSha256)){requireCurrent();need(ready.good()&&command.good()&&doneEvent.good(),"normal-query-events");thread=std::thread([this]{run();});}
-  ~QueryActor(){quit=true;SetEvent(command.h);if(thread.joinable())thread.join();}
-  void waitReady(){const auto waited=WaitForSingleObject(ready.h,5000);
+  explicit QueryActor(U64 account,std::wstring path,RecoveryRoute route,std::string clientSha256,bool fixedOriginal,J* summary):
+      expected(account),clientPath(std::move(path)),currentFn(gCurrent),queryRoute(route),qualifiedClientSha256(std::move(clientSha256)),fixedOriginalQualification(fixedOriginal),powerCancellation(reinterpret_cast<HANDLE>(gCancelSignal)),identityCancellation(reinterpret_cast<HANDLE>(gIdentityCancelSignal)),nativeReadScope(gPublicationScope),cleanupSummary(summary){
+    requireCurrent();requireQueryCancellation(powerCancellation,identityCancellation);
+    need(!sdkDebt().quarantined.load(std::memory_order_acquire),"normal-query-sdk-quarantined");
+    need(ready.good()&&command.good()&&doneEvent.good(),"normal-query-events");thread=std::thread([this]{run();});
+  }
+  ~QueryActor(){stopAndJoin();noteCleanup();}
+  void finish(){stopAndJoin();noteCleanup();need(cleanupCompleted.load(std::memory_order_acquire)&&resourcesReturned.load(std::memory_order_acquire),"normal-query-cleanup-not-confirmed");}
+  void waitReady(){const auto waited=waitQuerySignal(ready.h,5000,powerCancellation,identityCancellation);
     {std::lock_guard<std::mutex> lock(errorMutex);need(error.empty(),error.empty()?"normal-query":error.c_str());}
-    need(waited==WAIT_OBJECT_0&&readyOk,"normal-query-readiness");}
-  void fire(){requireCurrent();completedFlag=false;result=0;ResetEvent(doneEvent.h);need(SetEvent(command.h),"normal-query-dispatch");}
+    const auto fallback=errorFallback.load(std::memory_order_acquire);need(!fallback,fallback?fallback:"normal-query");
+    need(waited==WAIT_OBJECT_0&&readyOk,"normal-query-readiness");requireQueryCancellation(powerCancellation,identityCancellation);}
+  void fire(){requireCurrent();requireQueryCancellation(powerCancellation,identityCancellation);completedFlag=false;result=0;ResetEvent(doneEvent.h);need(SetEvent(command.h),"normal-query-dispatch");}
   bool completed()const{return completedFlag.load();}
-  void waitComplete(){waitQueryReturn(completedFlag,doneEvent.h);check();}
-
-  void check(){std::lock_guard<std::mutex> lock(errorMutex);need(error.empty(),error.empty()?"normal-query":error.c_str());need(result==expected,"normal-query-result");}
+  void waitComplete(){waitQueryReturn(completedFlag,doneEvent.h,5000,powerCancellation,identityCancellation);check();}
+  void check(){std::lock_guard<std::mutex> lock(errorMutex);need(error.empty(),error.empty()?"normal-query":error.c_str());const auto fallback=errorFallback.load(std::memory_order_acquire);need(!fallback,fallback?fallback:"normal-query");need(result==expected,"normal-query-result");}
 };
 struct SavedThread{DWORD tid=0;H handle;CONTEXT old{};bool armed=false,restored=false;};
 U64 sourceEntryAddress=0;constexpr U64 debugMask=0xffff00ffULL;
@@ -601,7 +1176,17 @@ void continuation(const DEBUG_EVENT& e,DWORD status=DBG_CONTINUE){requireTargetM
 struct ImageLive{U64 base=0,size=0;std::string name;};
 std::vector<ImageLive> imagesLive(DWORD pid){H snap(CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,pid));need(snap.good(),"image-census");MODULEENTRY32W e{};e.dwSize=sizeof e;need(Module32FirstW(snap.h,&e),"image-first");std::vector<ImageLive> rows;do{rows.push_back({reinterpret_cast<U64>(e.modBaseAddr),e.modBaseSize,utf8(e.szModule)});}while(Module32NextW(snap.h,&e));need(GetLastError()==ERROR_NO_MORE_FILES,"image-census-complete");return rows;}
 J locationLive(U64 address,const std::vector<ImageLive>& images){for(const auto& m:images)if(address>=m.base&&address-m.base<m.size)return{{"module",m.name},{"rva",address-m.base}};return{{"module","unmapped-or-heap"}};}
-void ownerHeld(HANDLE process,const std::string& nonce,J& out,bool pending){out["recoveryRoute"]=routeName();out["fallbackAllowed"]=false;out["status"]="unsupported-owner-held";out["pendingDebugEventUnresolved"]=pending;out["automaticContinuationSuppressed"]=true;out["dllUnloadAttempted"]=false;publish({{"event","unsupported-owner-held"},{"nonce",nonce},{"result",out}});while(WaitForSingleObject(process,0)!=WAIT_OBJECT_0)Sleep(50);out["status"]="unsupported-target-exited";out["targetExitObserved"]=true;}
+void ownerHeld(HANDLE process,const std::string& nonce,J& out,bool pending) noexcept {
+  // Diagnostics must never unwind the debugger owner while the target lives.
+  // This also holds on WAIT_FAILED: unknown wait state is no exit receipt.
+  try{out["recoveryRoute"]=routeName();out["fallbackAllowed"]=false;
+    out["status"]="unsupported-owner-held";out["pendingDebugEventUnresolved"]=pending;
+    out["automaticContinuationSuppressed"]=true;out["dllUnloadAttempted"]=false;
+    publish({{"event","unsupported-owner-held"},{"nonce",nonce},{"result",out}});
+  }catch(...){}
+  while(WaitForSingleObject(process,0)!=WAIT_OBJECT_0)Sleep(50);
+  try{out["status"]="unsupported-target-exited";out["targetExitObserved"]=true;}catch(...){}
+}
 // Bind only the driver's qualification/read dependencies. Its publication,
 // original-instance guards, cleanup and asynchronous result logic stay shared.
 // The explicit namespace binding avoids duplicating the reviewed driver body.
@@ -616,45 +1201,48 @@ struct Qualification {
 };
 thread_local std::string clientHash,uiHash;
 Qualification qualifyFile(const std::wstring& path,ModuleKind kind,bool cache){
-  if(!legacyRoute()){auto content=compat::qualifyFile(path,kind,cache);return {content.layout,std::move(content),{}};}
+  if(publicContentQualification()){auto content=compat::qualifyFile(path,kind,cache);return {content.layout,std::move(content),{}};}
   auto file=legacyFile(path);std::optional<Layout> layout;
   if(kind==ModuleKind::Client){const auto profile=rc::profileIdForSha256(file.sha256);need(bool(profile),"legacy-driver-client-profile");
-    layout=*profile==rc::ProfileId::Public1792618285?Layout::Public:Layout::Legacy;clientHash=file.sha256;uiHash.clear();}
-  else{const auto profile=app::profileIdForSha256(file.sha256);need(bool(profile),"legacy-driver-ui-profile");
-    layout=*profile==app::ProfileId::Public1792618285?Layout::Public:Layout::Legacy;uiHash=file.sha256;}
+    layout=tr::knownClientLayout(file.sha256);clientHash=file.sha256;uiHash.clear();}
+  else{const auto profile=uiProfileForKnownHash(file.sha256);need(bool(profile),"legacy-driver-ui-profile");
+    layout=tr::knownUiLayout(file.sha256);uiHash=file.sha256;}
   return {layout,{},std::move(file)};
 }
 compat::Evidence qualifyLoaded(const Qualification& value,ModuleKind kind,const ReadRva& read,U64 base,U64 size,
     const std::function<bool(U64)>& importTarget={},const compat::NamedImportValidator& namedImportTarget={},compat::LoadedDiagnostic* diagnostic=nullptr){
-  if(legacyRoute()){
+  if(value.fixed){
     if(diagnostic)*diagnostic={};need(bool(value.fixed),"legacy-driver-fixed-profile-missing");
     return legacyLoadedGuard(*value.fixed,kind,read,base,size);
   }
   return compat::qualifyLoaded(value.content,kind,read,base,size,importTarget,namedImportTarget,diagnostic);
 }
 U64 resolvedRva(const Qualification& value,U64 reference){
-  if(legacyRoute()){need(bool(value.fixed),"legacy-driver-fixed-entry-missing");return reference;}
+  if(value.fixed){need(bool(value.fixed),"legacy-driver-fixed-entry-missing");return reference;}
   return compat::resolvedRva(value.content,reference);
 }
-U64 referenceImageSize(const Qualification& value,U64 size){return legacyRoute()?size:compat::referenceImageSize(value.content,size);}
-ReadRva adaptProcessRead(const Qualification& value,U64 base,U64 size,const ReadRva& raw){
-  return legacyRoute()?raw:compat::adaptProcessRead(value.content,base,size,raw);
+U64 referenceImageSize(const Qualification& value,U64 size){return value.fixed?size:compat::referenceImageSize(value.content,size);}
+ProcessReadViews makeProcessReadViews(const Qualification& value,U64 base,U64 size,const ReadRva& raw){
+  return value.fixed?ProcessReadViews{raw,{},{}}:qualifiedProcessReadViews(value.content,base,size,raw);
 }
 }
 namespace trial {
 using ::running_trial::QualificationRoute;using ::running_trial::validQualificationRoute;using ::running_trial::qualificationRouteName;
-using ::running_trial::abi;using ::running_trial::AuxiliaryIdentity;using ::running_trial::Op;using ::running_trial::Packet;
+using ::running_trial::PublicationEventExport;using ::running_trial::validPublicationRevocation;using ::running_trial::abi;using ::running_trial::AuxiliaryIdentity;using ::running_trial::Op;using ::running_trial::Packet;
 using ::running_trial::shortcutAppId;using ::running_trial::steamModulePath;using ::running_trial::validSteamPath;
+using ::running_trial::terminatedPath;using ::running_trial::validRoleGroupShape;using ::running_trial::validRoleGroupWire;
 std::optional<::running_trial::NativeProfile> profileForCompatibility(compat::Layout client,compat::Layout ui){
-  if(!legacyRoute())return ::running_trial::profileForCompatibility(client,ui);
+  if(publicContentQualification())return ::running_trial::profileForCompatibility(client,ui);
   const auto profile=qualifiedProfile(qualification::clientHash,qualification::uiHash);
   need(recordProfileForLayout(client)==*rc::profileIdForSha256(qualification::clientHash)&&
-      uiProfileForLayout(ui)==*app::profileIdForSha256(qualification::uiHash),"legacy-driver-known-pair-layout");return profile;
+      uiProfileForLayout(ui)==*uiProfileForKnownHash(qualification::uiHash),"legacy-driver-known-pair-layout");return profile;
 }
 }
 namespace ymcc {
 namespace steamcompat=qualification;
 namespace steamrecord=::ymcc::steamrecord;
+namespace steamgamefacts=::ymcc::steamgamefacts;
+namespace steamgameroles=::ymcc::steamgameroles;
 namespace steamappstatewin=::ymcc::steamappstatewin;
 }
 namespace tr=trial;
@@ -704,14 +1292,56 @@ std::optional<SourceThreadCandidate> findSourceThreadCandidate(DWORD steam,J& de
   if(!currentSourceThread(*candidate,steam)){detail["fallbackReason"]="source-thread-changed-after-census";return {};}
   return candidate;
 }
+// Diagnostic edges only. No callback or allocation is introduced while our
+// debugger ownership is live. Existing owner-held cleanup diagnostics stay intact.
+std::atomic<U64> gSourceCaptureTraceSequence{0};
+U64 nextSourceCaptureTraceSequence() noexcept {
+  auto value=gSourceCaptureTraceSequence.load(std::memory_order_relaxed);
+  if(value==std::numeric_limits<U64>::max())return 0;
+  return gSourceCaptureTraceSequence.compare_exchange_strong(value,value+1,std::memory_order_relaxed)?value+1:0;
+}
+struct SourceCaptureTrace {
+  const bool& attached;
+  const DWORD steamPid,gamePid,hostPid;
+  const U64 steamBirth,gameBirth,hostBirth,gameId,traceBegan,captureSerial;
+  bool attachAttempted=false,attachSucceeded=false,detachAttempted=false;
+  bool detachReturned=false,detachConfirmed=false,captureReturned=false;
+  U64 attachAttemptTick=0,detachReturnTick=0;
+  SourceCaptureTrace(const Scope& scope,const bool& live) noexcept
+      : attached(live),steamPid(scope.roles[0].pid),gamePid(scope.roles[1].pid),hostPid(scope.roles[2].pid),
+        steamBirth(scope.roles[0].born),gameBirth(scope.roles[1].born),hostBirth(scope.roles[2].born),gameId(scope.gameId),traceBegan(GetTickCount64()),captureSerial(nextSourceCaptureTraceSequence()) {
+    emit("source-capture-begin");
+  }
+  ~SourceCaptureTrace() noexcept {if(!attached)emit("source-capture-end");}
+  void emit(const char* event) const noexcept {
+    if(attached)return; // Keep diagnostic callbacks out of the attached interval.
+    const auto savedError=GetLastError();
+    try{const auto now=GetTickCount64();publish({{"event",event},{"captureTraceVersion",1},
+      {"captureSerial",captureSerial},{"captureIdentityKnown",captureSerial!=0&&hostPid!=0&&hostBirth!=0},
+      {"captureHostPid",hostPid},{"captureHostBirthFileTime",std::to_string(hostBirth)},
+      {"recoveryRoute",routeName()},{"steamPid",steamPid},{"steamBirthFileTime",std::to_string(steamBirth)},
+      {"gamePid",gamePid},{"gameBirthFileTime",std::to_string(gameBirth)},{"gameId",std::to_string(gameId)},
+      {"traceBeganTick",traceBegan},{"observedTick",now},{"elapsedMs",now-traceBegan},
+      {"attachAttempted",attachAttempted},{"attachSucceeded",attachSucceeded},
+      {"detachAttempted",detachAttempted},{"detachReturned",detachReturned},
+      {"detachReadbackConfirmed",detachConfirmed},{"captureReturned",captureReturned},
+      {"attachAttemptTick",attachAttemptTick},{"detachReturnTick",detachReturnTick},
+      {"debugApiIntervalMs",attachAttempted&&detachReturned&&detachReturnTick>=attachAttemptTick?J(detachReturnTick-attachAttemptTick):J(nullptr)},
+      {"observationalOnly",true},{"grantsPublication",false}});}catch(...){}
+    SetLastError(savedError);
+  }
+};
 J captureGetterContext(Scope& scope,const Snapshot& snap,U64 account,QueryActor& query){
+  const auto sourceAccountAddress=rc::detail::accountAddressFromInterface(snap.self,snap.clientProfile);
+  need(snap.self==rc::detail::userInterfaceSelf(snap.selected.user,snap.clientProfile),"context-interface-owner-mismatch");
   H process(OpenProcess(PROCESS_ALL_ACCESS,FALSE,scope.roles[0].pid));need(process.good(),"context-steam-process");
   BOOL debugger=TRUE;need(CheckRemoteDebuggerPresent(process.h,&debugger)&&!debugger,"context-existing-debugger-refused");
   const DWORD steam=scope.roles[0].pid;std::vector<SavedThread> threads;DEBUG_EVENT pending{};bool pendingNow=false,attached=false,started=false,cleaning=false,initialBreakpointSeen=false;DWORD pendingStatus=DBG_CONTINUE;J result;
+  SourceCaptureTrace captureTrace(scope,attached); // Emit before the original capture budget starts.
   sourceEntryAddress=snap.client.base+snap.getterRva;const auto began=GetTickCount64();bool cancelling=false;U64 cancelBegan=0;
-  const auto detach=[&]{enterCleanup();reviewedSupportRestoreStopped(threads);continuation(pending,pendingStatus);pendingNow=false;need(DebugActiveProcessStop(steam),"context-detach");attached=false;BOOL after=TRUE;need(CheckRemoteDebuggerPresent(process.h,&after)&&!after,"context-detach-readback");gCleanupMode=false;};
+  const auto detach=[&]{enterCleanup();reviewedSupportRestoreStopped(threads);continuation(pending,pendingStatus);pendingNow=false;captureTrace.detachAttempted=true;need(DebugActiveProcessStop(steam),"context-detach");captureTrace.detachReturned=true;captureTrace.detachReturnTick=GetTickCount64();attached=false;BOOL after=TRUE;need(CheckRemoteDebuggerPresent(process.h,&after)&&!after,"context-detach-readback");captureTrace.detachConfirmed=true;gCleanupMode=false;};
   try{
-    requireCurrent();need(DebugActiveProcess(steam),"context-attach");attached=true;
+    requireCurrent();captureTrace.attachAttempted=true;captureTrace.attachAttemptTick=GetTickCount64();need(DebugActiveProcess(steam),"context-attach");attached=true;captureTrace.attachSucceeded=true;
     // Public Win32 API requires an existing debug object before this call.
     // The first attach -> FALSE interval is a documented remaining boundary.
     need(DebugSetProcessKillOnExit(FALSE),"context-debugger-kill-policy");
@@ -738,7 +1368,7 @@ J captureGetterContext(Scope& scope,const Snapshot& snap,U64 account,QueryActor&
           need(scope.owned(),"context-ownership-at-stop");H census(CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD,0));THREADENTRY32 row{};row.dwSize=sizeof row;need(census.good()&&Thread32First(census.h,&row),"context-thread-census");unsigned count=0;do{if(row.th32OwnerProcessID==steam){++count;if(gExecutionProbe)++gExecutionProbe->censusThreads;need(std::any_of(threads.begin(),threads.end(),[&](const auto& t){return t.tid==row.th32ThreadID&&t.armed&&!t.restored;}),"context-all-threads-covered");}}while(Thread32Next(census.h,&row));need(GetLastError()==ERROR_NO_MORE_FILES&&count>0,"context-thread-census-complete");started=true;pendingStatus=DBG_CONTINUE;query.fire();
         }else if(code==EXCEPTION_SINGLE_STEP&&started){
           const auto it=std::find_if(threads.begin(),threads.end(),[&](const auto& t){return t.tid==pending.dwThreadId&&t.armed&&!t.restored;});need(it!=threads.end(),"context-watch-thread");CONTEXT c{};c.ContextFlags=CONTEXT_FULL|CONTEXT_DEBUG_REGISTERS;need(GetThreadContext(it->handle.h,&c)&&c.Dr0==snap.flagsAddress&&c.Dr1==sourceEntryAddress,"context-owned-debug-registers");const auto causes=c.Dr6&0xf;
-          if(causes==2){if(gExecutionProbe)++gExecutionProbe->getterEvents;need(c.Rip==sourceEntryAddress,"context-getter-entry");if(c.Rcx==snap.self){if(gExecutionProbe)++gExecutionProbe->matchingGetterEvents;U64 observed=0;need(c.Rcx>=0x1c66,"context-self-bound");readExact(process.h,c.Rcx-0x1c66,&observed,sizeof observed);need(observed==account,"context-account");FILETIME b{},e{},k{},u{};need(GetThreadTimes(it->handle.h,&b,&e,&k,&u),"context-thread-birth");PWSTR name=nullptr;const auto hr=GetThreadDescription(it->handle.h,&name);const bool named=hr>=0&&name&&std::wstring(name)==L"IPC:CSteamEngine";if(name)LocalFree(name);need(named,"context-ipc-thread-name");result={{"tid",pending.dwThreadId},{"threadBirthFileTime",std::to_string((U64(b.dwHighDateTime)<<32)|b.dwLowDateTime)},{"threadDescription","IPC:CSteamEngine"},{"expectedAccountMatched",true},{"originalInterfaceOwnerMatched",true}};pendingStatus=DBG_CONTINUE;cleaning=true;detach();break;}c.EFlags|=0x10000u;
+          if(causes==2){if(gExecutionProbe)++gExecutionProbe->getterEvents;need(c.Rip==sourceEntryAddress,"context-getter-entry");if(c.Rcx==snap.self){if(gExecutionProbe)++gExecutionProbe->matchingGetterEvents;U64 observed=0;readExact(process.h,sourceAccountAddress,&observed,sizeof observed);need(observed==account,"context-account");FILETIME b{},e{},k{},u{};need(GetThreadTimes(it->handle.h,&b,&e,&k,&u),"context-thread-birth");PWSTR name=nullptr;const auto hr=GetThreadDescription(it->handle.h,&name);const bool named=hr>=0&&name&&std::wstring(name)==L"IPC:CSteamEngine";if(name)LocalFree(name);need(named,"context-ipc-thread-name");result={{"tid",pending.dwThreadId},{"threadBirthFileTime",std::to_string((U64(b.dwHighDateTime)<<32)|b.dwLowDateTime)},{"threadDescription","IPC:CSteamEngine"},{"expectedAccountMatched",true},{"originalInterfaceOwnerMatched",true}};pendingStatus=DBG_CONTINUE;cleaning=true;detach();break;}c.EFlags|=0x10000u;
           }else {need(causes==1,"context-owned-watch-event");if(gExecutionProbe)++gExecutionProbe->flagEvents;}
           c.Dr6&=~0xfULL;requireCurrent();need(SetThreadContext(it->handle.h,&c),"context-resume-owned-instruction");pendingStatus=DBG_CONTINUE;
         }else if(threadname_policy::classify(threadname_policy::Architecture::x64,code,ex.dwFirstChance,ex.ExceptionRecord.ExceptionFlags,ex.ExceptionRecord.NumberParameters,ex.ExceptionRecord.ExceptionInformation).recognized())pendingStatus=DBG_EXCEPTION_NOT_HANDLED;
@@ -746,9 +1376,10 @@ J captureGetterContext(Scope& scope,const Snapshot& snap,U64 account,QueryActor&
       }
       continuation(pending,pendingStatus);pendingNow=false;
     }
-    query.waitComplete();requireCurrent();return result;
+    query.waitComplete();requireCurrent();captureTrace.captureReturned=true;return result;
   }catch(const std::exception& e){
-    if(attached){J held={{"reason",e.what()},{"phase","normal-getter-context"}};
+    if(attached){J held;
+      try{held={{"reason",e.what()},{"phase","normal-getter-context"}};}catch(...){}
       if(pendingNow&&!cleaning){try{cleaning=true;enterCleanup();if(pending.dwDebugEventCode==EXCEPTION_DEBUG_EVENT&&pending.u.Exception.ExceptionRecord.ExceptionCode==EXCEPTION_BREAKPOINT&&pending.u.Exception.dwFirstChance)pendingStatus=DBG_CONTINUE;
           if(pending.dwDebugEventCode==EXCEPTION_DEBUG_EVENT&&pending.u.Exception.ExceptionRecord.ExceptionCode==EXCEPTION_SINGLE_STEP){const auto it=std::find_if(threads.begin(),threads.end(),[&](const auto& t){return t.tid==pending.dwThreadId&&t.armed;});if(it!=threads.end()){CONTEXT c{};c.ContextFlags=CONTEXT_DEBUG_REGISTERS|CONTEXT_CONTROL;if(GetThreadContext(it->handle.h,&c)&&c.Dr0==snap.flagsAddress&&c.Dr1==sourceEntryAddress&&((c.Dr6&0xf)==1||((c.Dr6&0xf)==2&&c.Rip==sourceEntryAddress)))pendingStatus=DBG_CONTINUE;}}
           if(!initialBreakpointSeen){
@@ -805,6 +1436,7 @@ J sourceGetterContext(Scope& scope,const Snapshot& snap,U64 account,QueryActor& 
 }
 bool referenceNonceValid(const std::string& nonce);
 J importReference(const J& seed,const Scope& s,U64 account){
+  need(!s.groupPath(),"group-reference-seed-import-forbidden");
   need(seed.is_object(),"seed-object");const auto& b=seed.contains("baseline")?seed.at("baseline"):seed;
   need(b.is_object()&&(!seed.contains("baseline")||(!seed.contains("schema")&&!seed.contains("schemaVersion")))&&
       !b.contains("schemaVersion")&&(!b.contains("schema")||(b.at("schema").is_string()&&b.at("schema")=="steam.wuxia.manual-sleep-observation.v1")),"seed-schema-unknown");
@@ -825,6 +1457,7 @@ J importReference(const J& seed,const Scope& s,U64 account){
   return{{"schema","ymcc.steam-native-original-reference.v1"},{"scope",referenceScope(s)},{"captureParent",s.identities.at("ymcc")},{"accountFingerprint",textHash(std::to_string(account))},{"bindingNonce",nonce},{"pins",p},{"healthyFlags",8196},{"compatibilityContract","original-running-code-data-v2"},{"clientSha256",clientSha},{"uiSha256",uiSha},{"importedSeedSha256",textHash(b.dump())}};
 }
 J referenceFromSeed(const J& seed,const Scope& scope,const Snapshot& sample,U64 account){
+    if(scope.groupPath())return {}; // Old single-PID health never upgrades a group.
     need(seed.is_object(),"seed-object");const auto& baseline=seed.contains("baseline")?seed.at("baseline"):seed;
     bool sameSeedScope=true;for(const auto* role:{"steam","game","cef"})
         sameSeedScope=sameSeedScope&&normalizedIdentity(baseline.at("before").at("roles").at(role))==scope.identities.at(role);
@@ -832,9 +1465,38 @@ J referenceFromSeed(const J& seed,const Scope& scope,const Snapshot& sample,U64 
     return importReference(seed,scope,account);
 }
 
-void matchReference(const J& ref,const Scope& scope,const Snapshot& sample,U64 account){
-  need(ref.is_object()&&ref.at("schema")=="ymcc.steam-native-original-reference.v1"&&ref.at("healthyFlags").is_number_integer()&&ref.at("healthyFlags")==8196&&
-      ref.at("scope").dump()==referenceScope(scope).dump(),"healthy-reference-scope");
+void matchReferenceIdentity(const J& ref,const Scope& scope,const Snapshot& sample,U64 account,
+    bool admitRoleContinuation=false){
+  need(ref.is_object()&&ref.at("schema")==referenceSchema(scope)&&ref.at("healthyFlags").is_number_integer()&&
+      ref.at("healthyFlags")==8196,"healthy-reference-scope");
+  const auto expected=referenceScope(scope);const auto& captured=ref.at("scope");
+  if(captured.dump()!=expected.dump()){
+    need(scope.groupPath()&&scope.processGroup->graph().count==2&&
+        ((admitRoleContinuation&&sample.flags==4)||
+         (scope.continuedReferenceScope&&*scope.continuedReferenceScope==captured.dump())),
+        "healthy-reference-scope");
+    auto stable=captured,stableExpected=expected;
+    need(stable.is_object()&&stable.contains("nativeRoles"),"healthy-reference-scope");
+    stable.erase("nativeRoles");stableExpected.erase("nativeRoles");
+    need(stable.dump()==stableExpected.dump(),"healthy-reference-scope");
+    const auto& roles=captured.at("nativeRoles");
+    const auto primary=groupScalar(roles,"primaryLivenessPid"),foreground=groupScalar(roles,"foregroundComparisonPid");
+    need(primary&&foreground&&roles.dump()==J{{"primaryLivenessPid",*primary},
+        {"foregroundComparisonPid",*foreground}}.dump(),"healthy-reference-role-shape");
+    const auto old=scope.processGroup->inspectNativeRoles(*primary,*foreground);
+    need(old&&(old->state==ymcc::steamgameroles::State::ExactSelected||
+        old->state==ymcc::steamgameroles::State::VerifiedGroupRoles)&&scope.processGroup->processCurrent(),
+        "healthy-reference-prior-group-lease-revoked");
+  }
+  if(scope.groupPath()){
+    need(scope.nativeRoleTuple&&sample.gameId==scope.gameId&&
+        sample.target.primary==scope.nativeRoleTuple->first&&sample.target.foreground==scope.nativeRoleTuple->second,
+        "healthy-reference-group-tuple");
+    const auto inspected=scope.processGroup->inspectNativeRoles(sample.target.primary,sample.target.foreground);
+    need(inspected&&(inspected->state==ymcc::steamgameroles::State::ExactSelected||
+        inspected->state==ymcc::steamgameroles::State::VerifiedGroupRoles)&&scope.processGroup->processCurrent(),
+        "healthy-reference-group-lease-revoked");
+  }
   // The current snapshot independently qualified disk+loaded contracts. File
   // digests remain diagnostic history; the same original instance is bound by
   // its Steam/game/CEF birth, complete GameID, account and exact heap pins.
@@ -845,7 +1507,78 @@ void matchReference(const J& ref,const Scope& scope,const Snapshot& sample,U64 a
   need((!ref.contains("compatibilityContract")||modern)&&referenceNonceValid(ref.at("bindingNonce").get<std::string>())&&
       digestShape(priorClient)&&digestShape(priorUi)&&(modern||historical)&&
       ref.at("accountFingerprint")==textHash(std::to_string(account)),"healthy-reference-profile-or-account");
-  need(ref.at("pins")==pins(sample,scope.roles[0].born,account,ref.at("bindingNonce").get<std::string>()),"saved-healthy-pins-changed");
+}
+J referencePinComparison(const J& ref,const Scope& scope,const Snapshot& sample,U64 account){
+  const auto observed=pins(sample,scope.roles[0].born,account,ref.at("bindingNonce").get<std::string>());
+  const auto& saved=ref.at("pins");
+  need(saved.is_object()&&saved.size()==3,"healthy-reference-pin-shape");
+  J comparison=J::object();
+  for(const auto* name:{"owner","record","uiObject"}){
+    need(saved.contains(name)&&saved.at(name).is_string(),"healthy-reference-pin-shape");
+    const auto value=saved.at(name).get<std::string>();
+    need(value.size()==64&&value.find_first_not_of("0123456789abcdef")==std::string::npos,"healthy-reference-pin-shape");
+    comparison[name]=saved.at(name)==observed.at(name);
+  }
+  return comparison;
+}
+void matchReference(const J& ref,const Scope& scope,const Snapshot& sample,U64 account,
+    bool admitRoleContinuation=false){
+  matchReferenceIdentity(ref,scope,sample,account,admitRoleContinuation);
+  const auto comparison=referencePinComparison(ref,scope,sample,account);
+  if(comparison!=J{{"owner",true},{"record",true},{"uiObject",true}})
+    throw DiagnosticFailure("saved-healthy-pins-changed",{{"stage","healthy-reference-pin-comparison"},
+        {"nativeFlags",sample.flags},{"sameNonceDomains",comparison},{"extraNativeReads",0}});
+}
+
+// This updates observation metadata only, while the original instance is
+// independently healthy. The old bytes remain immutable evidence. A lost or
+// unknown snapshot can never reach this writer or replace its original pins.
+void commitHealthyReferenceFile(const fp::path& target,const std::string& text,bool replace,
+    const std::function<void()>& beforeCommit={}){
+  const auto temporary=target.parent_path()/(L"healthy.next."+utf16(freshUuid())+L".json");
+  ymcc::steamOriginalStorage::detail::directory(target.parent_path());
+#ifdef YMCC_STEAM_ORIGINAL_ENGINE_TESTING
+  if(gOfflineBeforeStateCreate)gOfflineBeforeStateCreate(temporary);
+#endif
+  H owned(CreateFileW(temporary.c_str(),GENERIC_READ|GENERIC_WRITE|DELETE,FILE_SHARE_READ|FILE_SHARE_DELETE,
+      nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr));
+  if(!owned.good())throw DiagnosticFailure("healthy-reference-temporary-create",{{"win32Error",GetLastError()},
+      {"temporary",utf8(temporary.wstring())},{"baseCommitted",false}});
+  bool committed=false;
+  try{
+    DWORD written=0;
+    need(text.size()<=MAXDWORD&&WriteFile(owned.h,text.data(),static_cast<DWORD>(text.size()),&written,nullptr)&&
+        written==text.size()&&FlushFileBuffers(owned.h),"healthy-reference-temporary-flush");
+    LARGE_INTEGER zero{};
+    need(SetFilePointerEx(owned.h,zero,nullptr,FILE_BEGIN),"healthy-reference-temporary-seek");
+    std::string readback(text.size(),'\0');DWORD read=0;
+    need(ReadFile(owned.h,readback.data(),static_cast<DWORD>(readback.size()),&read,nullptr)&&
+        read==readback.size()&&readback==text,"healthy-reference-temporary-readback");
+    if(beforeCommit)beforeCommit();
+    requireCurrent(); // The final CAS read cannot hide a cancellation.
+    need(MoveFileExW(temporary.c_str(),target.c_str(),MOVEFILE_WRITE_THROUGH|(replace?MOVEFILE_REPLACE_EXISTING:0)),
+        "healthy-reference-atomic-replace");
+    committed=true;
+  }catch(...){
+    const auto failure=std::current_exception();
+    FILE_DISPOSITION_INFO disposition{TRUE};
+    if(!committed&&!SetFileInformationByHandle(owned.h,FileDispositionInfo,&disposition,sizeof disposition))
+      throw DiagnosticFailure("healthy-reference-temporary-cleanup-debt",{{"temporary",utf8(temporary.wstring())},
+          {"win32Error",GetLastError()},{"baseCommitted",false},{"mutationBudgetReset",false}});
+    std::rethrow_exception(failure);
+  }
+}
+void replaceHealthyReference(const fp::path& file,const std::string& before,const J& next){
+  requireCurrent();
+  need(ymcc::steamOriginalStorage::detail::read(file)==before,"healthy-reference-changed-before-refresh");
+  const auto history=file.parent_path()/(utf16(textHash(before))+L".previous.json");
+  if(statePresent(history))need(ymcc::steamOriginalStorage::detail::read(history)==before,"healthy-reference-history-conflict");
+  else commitHealthyReferenceFile(history,before,false);
+  requireCurrent();
+  commitHealthyReferenceFile(file,next.dump(2),true,[&]{
+    need(ymcc::steamOriginalStorage::detail::read(file)==before,"healthy-reference-changed-before-commit");
+  });
+  need(readJson(file)==next,"healthy-reference-refresh-readback");
 }
 
 // Legacy references predate full GameID/appid in referenceScope. Only this
@@ -874,10 +1607,59 @@ bool referenceNonceValid(const std::string& nonce){
     else if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F')))return false;
   }return true;
 }
-J loadCompatibleReference(const fp::path& data,const Scope& scope,const Snapshot& sample,U64 account){
+J loadCompatibleReference(const fp::path& data,const Scope& scope,const Snapshot& sample,U64 account,
+    const std::function<Snapshot()>& healthyRead={},J* refreshDiagnostic=nullptr){
   const auto referencePath=data/L"references"/utf16(scopeKey(scope,account)+".json");
-  if(statePresent(referencePath)){auto reference=readJson(referencePath);
-    matchReference(reference,scope,sample,account);return reference;}
+  if(statePresent(referencePath)){
+    const auto before=ymcc::steamOriginalStorage::detail::read(referencePath);
+    auto reference=ymcc::steamOriginalStorage::detail::parseStateBytes(before);
+    matchReferenceIdentity(reference,scope,sample,account);
+    const auto comparison=referencePinComparison(reference,scope,sample,account);
+    if(comparison==J{{"owner",true},{"record",true},{"uiObject",true}})return reference;
+    if(sample.flags!=8196||!healthyRead){matchReference(reference,scope,sample,account);return reference;}
+    requireCurrent();
+    auto next=reference;
+    const auto nonce=freshUuid();
+    next["captureParent"]=scope.identities.at("ymcc");next["bindingNonce"]=nonce;
+    next["pins"]=pins(sample,scope.roles[0].born,account,nonce);
+    next["compatibilityContract"]="original-running-code-data-v2";
+    next["clientSha256"]=sample.clientSha256;next["uiSha256"]=sample.uiSha256;
+    next["healthyRequalification"]={{"schema",1},{"previousReferenceSha256",textHash(before)},
+        {"sameNonceDomains",comparison},{"qualifiedHealthySnapshots",2},{"mutationBudgetReset",false}};
+    const auto after=healthyRead();
+    need(after.flags==8196,"healthy-reference-refresh-lost-during-observation");
+    matchReference(next,scope,after,account);requireCurrent();
+    replaceHealthyReference(referencePath,before,next);
+    if(refreshDiagnostic)*refreshDiagnostic=next.at("healthyRequalification");
+    return next;
+  }
+  if(scope.groupPath()){
+    if(sample.flags!=4||scope.processGroup->graph().count!=2)return {};
+    requireCurrent();need(scope.processGroup->processCurrent(),"healthy-reference-group-lease-revoked");
+    const auto currentScope=referenceScope(scope);J found;
+    const auto& graph=scope.processGroup->graph();
+    // Exactly four tuples from two owner-held members; skip the current one.
+    // Derive file names only. Never enumerate a directory or write a reference.
+    for(std::uint32_t i=0;i<2;++i)for(std::uint32_t j=0;j<2;++j){
+      const auto primary=graph.members[i].pid,foreground=graph.members[j].pid;
+      if(scope.nativeRoleTuple&&*scope.nativeRoleTuple==std::pair<DWORD,DWORD>{primary,foreground})continue;
+      auto lookupScope=currentScope;
+      lookupScope["nativeRoles"]={{"primaryLivenessPid",primary},{"foregroundComparisonPid",foreground}};
+      const auto key=textHash(J{{"scope",lookupScope},{"accountFingerprint",textHash(std::to_string(account))}}.dump());
+      const auto path=data/L"references"/utf16(key+".json");
+      if(!statePresent(path))continue;
+      requireCurrent();
+      const auto candidate=ymcc::steamOriginalStorage::detail::parseStateBytes(
+          ymcc::steamOriginalStorage::detail::read(path));
+      need(candidate.at("scope").dump()==lookupScope.dump(),"healthy-reference-lookup-scope");
+      matchReference(candidate,scope,sample,account,true);
+      need(found.is_null(),"healthy-reference-role-continuation-ambiguous");
+      found=candidate;
+    }
+    requireCurrent();need(scope.processGroup->processCurrent(),"healthy-reference-group-lease-revoked");
+    if(!found.is_null())scope.continuedReferenceScope=found.at("scope").dump();
+    return found;
+  }
   const auto legacyKey=legacyReferenceKey(scope,account);
   const auto legacyPath=data/L"references"/utf16(legacyKey+".json");
   if(!statePresent(legacyPath))return {};
@@ -905,14 +1687,47 @@ J loadCompatibleReference(const fp::path& data,const Scope& scope,const Snapshot
   matchReference(reference,scope,sample,account);requireCurrent();
   durableCreate(referencePath,reference.dump(2));return reference;
 }
-J nativeState(const Scope& scope,const Snapshot& sample){return{{"flags",sample.flags},{"running",sample.flags==8196},{"originalPrimaryMatched",true},{"gamePid",scope.roles[1].pid},{"steamPid",scope.roles[0].pid},{"scope",scope.identities},{"profile",{{"clientSha256",sample.clientSha256},{"uiSha256",sample.uiSha256},{"recordProfileVersion",rc::profileVersion(sample.clientProfile)},{"uiProfileVersion",app::profileVersion(sample.uiProfile)},{"wholeImageHashIsVersionGate",sample.legacyDynamic}}},{"compatibility",sample.compatibility},{"gameDiscovery",false},{"gameId",std::to_string(scope.gameId)},{"appid",scope.appid},{"uiVerified",false},{"inputVerified",false},{"loginOrHeapLeaseProven",false},{"suspendStateDiagnostic",sample.record.value("suspendStateDiagnostic",J())},{"postLogonSourceDiagnostic",sample.record.value("postLogonSourceDiagnostic",J())},{"semiStaticSource",sample.record.value("semiStaticSource",J())}};}
+J nativeState(const Scope& scope,const Snapshot& sample){
+  J value={{"flags",sample.flags},{"running",sample.flags==8196},
+      {"originalPrimaryMatched",sample.target.primary==scope.roles[1].pid},
+      {"nativePrimaryExact",sample.target.primary==scope.roles[1].pid},
+      {"nativeForegroundExact",sample.target.foreground==scope.roles[1].pid},
+      {"primaryLivenessPid",sample.target.primary},{"foregroundComparisonPid",sample.target.foreground},
+      {"gamePid",scope.roles[1].pid},{"steamPid",scope.roles[0].pid},{"scope",scope.identities},
+      {"profile",{{"clientSha256",sample.clientSha256},{"uiSha256",sample.uiSha256},{"recordProfileVersion",rc::profileVersion(sample.clientProfile)},
+        {"uiProfileVersion",app::profileVersion(sample.uiProfile)},{"wholeImageHashIsVersionGate",sample.fixedOriginalQualification}}},
+      {"compatibility",sample.compatibility},{"gameDiscovery",false},{"gameId",std::to_string(scope.gameId)},{"appid",scope.appid},
+      {"uiVerified",false},{"inputVerified",false},{"loginOrHeapLeaseProven",false},
+      {"suspendStateDiagnostic",sample.record.value("suspendStateDiagnostic",J())},
+      {"postLogonSourceDiagnostic",sample.record.value("postLogonSourceDiagnostic",J())},{"semiStaticSource",sample.record.value("semiStaticSource",J())}};
+  if(scope.groupPath())value["processGroupRoles"]={{"memberCount",scope.processGroup->graph().count},
+      {"state",sample.roleInspection?J(static_cast<std::uint32_t>(sample.roleInspection->state)):J(nullptr)},
+      {"reason",sample.roleInspection?J(static_cast<std::uint32_t>(sample.roleInspection->reason)):J(nullptr)},
+      {"actionAuthority",false},{"currentNativeOwnerAuthority",false}};
+  return value;
+}
 }
 Json current_status(){std::lock_guard<std::mutex> lock(gStateMutex);auto value=gState;value["active"]=gActive.load();value["engineRevision"]=kEngineRevision;const auto& result=value.contains("result")&&value.at("result").is_object()?value.at("result"):value;value["moduleQualification"]=result.value("moduleQualification",std::string(kModuleQualification));value["wholeImageHashIsVersionGate"]=result.value("wholeImageHashIsVersionGate",false);value["recoveryRoute"]=result.value("recoveryRoute",std::string("semi-static"));return value;}
 bool active() noexcept{return gActive.load();}
-Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,WakeSignal wakeSignal){
+Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,WakeSignal wakeSignal,WakeSignal cancelSignal,WakeSignal identityCancelSignal,std::shared_ptr<ymcc::steamnative::ReadScope> publicationScope,std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> processGroup,std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> businessRequestCancellation,
+    std::shared_ptr<ymcc::steamcommand::Intent> mutationIntent,
+    std::shared_ptr<ymcc::steamcommand::AvailabilityEvent> mutationAvailability,
+    std::shared_ptr<const ymcc::steamgamefacts::StartupHandoffEvidence> startupHandoff,
+    Current startupHandoffCurrent,
+    std::shared_ptr<const ymcc::steamgamefacts::HistoricalStartupHandoffEvidence> historicalStartupHandoff,
+    Current historicalStartupHandoffCurrent){
   bool inactive=false;if(!gActive.compare_exchange_strong(inactive,true))return{{"status","refused"},{"reason","engine-job-already-active"},{"recoveryRoute",event.value("recoveryRoute",J("semi-static"))},{"publisherCalls",0},{"engineRevision",kEngineRevision},{"moduleQualification",kModuleQualification},{"wholeImageHashIsVersionGate",false}};
-  struct Finish{~Finish(){gActive=false;gEmit={};gCurrent={};gObservationCurrent={};gWakeSignal=0;gOriginalSteam={};gCleanupMode=false;gRecoveryRoute=RecoveryRoute::SemiStatic;}}finish;
-  gEmit=std::move(emit);gCurrent=std::move(guard);gObservationCurrent=std::move(observationGuard);gWakeSignal=wakeSignal;gCleanupMode=false;J summary={{"schema","ymcc.steam-original-recovery-summary.v1"},{"engineRevision",kEngineRevision},{"moduleQualification",kModuleQualification},{"wholeImageHashIsVersionGate",false},{"uiVerified",false},{"inputVerified",false},{"repairAccepted",false},{"spawnedHelperProcesses",0},{"firstAttachExitPolicyPreinitialized",false}};
+  // Declared before Finish so it is released after Finish's original cleanup,
+  // independently of the Scope and both global/cross-thread guard copies.
+  const auto groupUntilAfterFinish=processGroup;
+  const auto requestUntilAfterFinish=businessRequestCancellation;
+  const auto mutationUntilAfterFinish=mutationIntent;
+  const auto availabilityUntilAfterFinish=mutationAvailability;
+  const auto handoffUntilAfterFinish=startupHandoff;
+  const auto historicalHandoffUntilAfterFinish=historicalStartupHandoff;
+  std::shared_ptr<NativeRoleChoice> roleChoiceUntilAfterFinish;
+  struct Finish{~Finish(){gActive=false;gEmit={};gCurrent={};gObservationCurrent={};gWakeSignal=0;gCancelSignal=0;gIdentityCancelSignal=0;gPublicationScope.reset();gGroupRequestCancellation.reset();gOriginalSteam={};gCleanupMode=false;gRecoveryRoute=RecoveryRoute::SemiStatic;gDynamicContentQualification=false;}}finish;
+  gEmit=std::move(emit);gCurrent=std::move(guard);gObservationCurrent=std::move(observationGuard);gWakeSignal=wakeSignal;gCancelSignal=cancelSignal;gIdentityCancelSignal=identityCancelSignal;gPublicationScope=std::move(publicationScope);gGroupRequestCancellation=groupUntilAfterFinish?businessRequestCancellation:nullptr;gCleanupMode=false;J summary={{"schema","ymcc.steam-original-recovery-summary.v1"},{"engineRevision",kEngineRevision},{"moduleQualification",kModuleQualification},{"wholeImageHashIsVersionGate",false},{"uiVerified",false},{"inputVerified",false},{"repairAccepted",false},{"spawnedHelperProcesses",0},{"firstAttachExitPolicyPreinitialized",false}};
   summary["recoveryRoute"]=event.value("recoveryRoute",J("semi-static"));summary["route"]=summary["recoveryRoute"];
   summary["source"]="not-entered";summary["publisherCalls"]=0;summary["publisherCallsKnown"]=true;summary["consumed"]=false;summary["driverEntered"]=false;summary["mutationCommitAttempted"]=false;
   std::optional<fp::path> data,logs,evidence;
@@ -920,7 +1735,7 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
     nativeFailureBoundary([&]{
     const auto route=event.value("recoveryRoute",std::string("semi-static"));
     need(route=="legacy-dynamic"||route=="semi-static","recovery-route-unsupported");
-    gRecoveryRoute=route=="legacy-dynamic"?RecoveryRoute::LegacyDynamic:RecoveryRoute::SemiStatic;
+    gRecoveryRoute=route=="legacy-dynamic"?RecoveryRoute::LegacyDynamic:RecoveryRoute::SemiStatic;gDynamicContentQualification=false;
     summary["moduleQualification"]=routeQualification();summary["wholeImageHashIsVersionGate"]=legacyRoute();
     summary["qualification"]={{"mode",routeQualification()},{"passed",false},{"compatibilityContractRequired",!legacyRoute()},{"rawTypedReads",legacyRoute()}};
     data=absolute(event.at("dataRoot"));logs=absolute(event.at("logRoot"));
@@ -930,15 +1745,84 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
 #ifdef YMCC_STEAM_ORIGINAL_ENGINE_TESTING
     if(gOfflineTypedReadFault)gOfflineTypedReadFault(summary);
 #endif
-    const auto& trigger=event.at("trigger");const auto kind=trigger.at("kind").get<std::string>();need(kind=="startup"||kind=="wake"||kind=="suspend-capture"||kind=="target-changed"||kind=="steam-changed","trigger-kind");
+    const auto& trigger=event.at("trigger");const auto kind=trigger.at("kind").get<std::string>();need(kind=="startup"||kind=="running-lost"||kind=="wake"||kind=="suspend-capture"||kind=="target-changed"||kind=="steam-changed","trigger-kind");
     summary["trigger"]={{"kind",kind},{"generation",trigger.at("generation")},{"id",trigger.at("id")},{"rulesEpoch",trigger.at("rulesEpoch")}};
     const auto account=decimal(event.at("account64"));
+    need(!(handoffUntilAfterFinish&&historicalHandoffUntilAfterFinish),"ambiguous-startup-handoff-source");
+    if(historicalHandoffUntilAfterFinish||historicalStartupHandoffCurrent){
+      need(gCurrent&&historicalStartupHandoffOwnerCurrent(historicalHandoffUntilAfterFinish,historicalStartupHandoffCurrent),
+          "historical-startup-handoff-owner-not-current");
+      const auto prior=gCurrent;
+      const auto observe=gObservationCurrent?gObservationCurrent:prior;
+      gCurrent=[prior,handoff=historicalHandoffUntilAfterFinish,owner=historicalStartupHandoffCurrent]{
+        return prior&&prior()&&historicalStartupHandoffOwnerCurrent(handoff,owner);
+      };
+      gObservationCurrent=[observe,handoff=historicalHandoffUntilAfterFinish,owner=historicalStartupHandoffCurrent]{
+        return observe&&observe()&&historicalStartupHandoffOwnerCurrent(handoff,owner);
+      };
+    }
+    if(handoffUntilAfterFinish||startupHandoffCurrent){
+      need(gCurrent&&startupHandoffOwnerCurrent(handoffUntilAfterFinish,startupHandoffCurrent),
+          "startup-handoff-owner-not-current");
+      const auto prior=gCurrent;
+      const auto observe=gObservationCurrent?gObservationCurrent:prior;
+      gCurrent=[prior,handoff=handoffUntilAfterFinish,owner=startupHandoffCurrent]{
+        return prior&&prior()&&startupHandoffOwnerCurrent(handoff,owner);
+      };
+      gObservationCurrent=[observe,handoff=handoffUntilAfterFinish,owner=startupHandoffCurrent]{
+        return observe&&observe()&&startupHandoffOwnerCurrent(handoff,owner);
+      };
+    }
+    // Allocate after Finish is armed and inside the ordinary refusal boundary.
+    // A failed allocation must not leave the engine active for later requests.
+    if(groupUntilAfterFinish)roleChoiceUntilAfterFinish=std::make_shared<NativeRoleChoice>(
+        groupUntilAfterFinish->graph().count==2?NativeRoleMode::Unclassified:NativeRoleMode::StrictSingle);
+    if(groupUntilAfterFinish){
+      need(static_cast<bool>(gCurrent)&&requestUntilAfterFinish&&requestUntilAfterFinish->current(),
+          "group-request-scope-unavailable");
+      const auto prior=gCurrent;
+      gCurrent=groupActionCurrent(prior,groupUntilAfterFinish,requestUntilAfterFinish,roleChoiceUntilAfterFinish);
+      if(gObservationCurrent)gObservationCurrent=groupObservationCurrent(gObservationCurrent,groupUntilAfterFinish,requestUntilAfterFinish,roleChoiceUntilAfterFinish);
+    }
     if(kind=="wake"){
       const auto episode=decimal(trigger.at("powerEventFileTime"));const auto prior=gCurrent;
       gCurrent=[prior,episode]{const auto now=nowFileTime();return (!prior||prior())&&now>=episode&&
           now-episode<ymcc::steamOriginal::WakeWatch::budgetMs*10000ULL;};
     }
-    requireCurrent();auto scope=openScope(event);gOriginalSteam=[&scope]{const auto& p=scope.roles[0];return rw::exactProcess(p.handle.h,p.pid,p.born,p.path,p.session);};
+    // Keep the parameter's own reference through Finish; do not move it into
+    // Scope or cancel a shared lease on normal completion. Cleanup ownership
+    // remains the original Steam identity, independently of group revocation.
+    requireCurrent();auto scope=openScope(event,groupUntilAfterFinish,roleChoiceUntilAfterFinish);gOriginalSteam=[&scope]{const auto& p=scope.roles[0];return rw::exactProcess(p.handle.h,p.pid,p.born,p.path,p.session);};
+    if(handoffUntilAfterFinish){
+      need(startupHandoffMatches(handoffUntilAfterFinish,
+          {{scope.roles[0].pid,scope.roles[0].born,scope.roles[0].path},
+           {scope.roles[1].pid,scope.roles[1].born,scope.roles[1].path},
+           scope.roles[0].session,scope.gameId,scope.appid}),"startup-handoff-target-mismatch");
+      requireCurrent();
+      summary["identitySource"]="public-startup-handoff";
+      summary["startupHandoff"]={{"sourceRevision",handoffUntilAfterFinish->launch()->sourceRevision()},
+          {"freshSourceRevision",handoffUntilAfterFinish->freshSourceRevision()},
+          {"sourceLine",handoffUntilAfterFinish->launch()->sourceLine()},
+          {"launcherPid",handoffUntilAfterFinish->launch()->launcher()->witness().pid},
+          {"launcherBirth",std::to_string(handoffUntilAfterFinish->launch()->launcher()->witness().created)},
+          {"launcherRemoved",handoffUntilAfterFinish->launcherRemoved()},
+          {"suppliesNativeRoles",false},{"suppliesHealthyReference",false}};
+    }
+    if(historicalHandoffUntilAfterFinish){
+      need(historicalStartupHandoffMatches(historicalHandoffUntilAfterFinish,
+          {{scope.roles[0].pid,scope.roles[0].born,scope.roles[0].path},
+           {scope.roles[1].pid,scope.roles[1].born,scope.roles[1].path},
+           scope.roles[0].session,scope.gameId,scope.appid}),"historical-startup-handoff-target-mismatch");
+      requireCurrent();
+      const auto& parent=*historicalHandoffUntilAfterFinish->historicalParent();
+      summary["identitySource"]="public-historical-startup-handoff";
+      summary["historicalStartupHandoff"]={{"sourceRevision",historicalHandoffUntilAfterFinish->sourceRevision()},
+          {"sourceLine",historicalHandoffUntilAfterFinish->sourceLine()},
+          {"launcherPid",parent.parentPid()},{"launcherBirth",std::to_string(parent.parentCreated())},
+          {"launcherExit",std::to_string(parent.parentExitedAt())},
+          {"launcherRemoved",historicalHandoffUntilAfterFinish->launcherRemoved()},
+          {"suppliesNativeRoles",false},{"suppliesHealthyReference",false},{"actionAuthority",false}};
+    }
     summary["targetGameId"]=std::to_string(scope.gameId);summary["targetAppId"]=scope.appid;
     LifetimeMutex lifetime;lifetime.acquire(scope.roles[0].pid,scope.roles[0].born);
     const auto jobStarted=GetTickCount64();summary["consumed"]=false; // Healthy observations never consume mutation budget.
@@ -952,10 +1836,17 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
     const auto initialSnapshotStarted=GetTickCount64();const auto initialSnapshotCpu=workerStamp();auto sample=snapshot(scope,account);
     summary["timingsMs"]["initialSnapshot"]=GetTickCount64()-initialSnapshotStarted;
     noteWorkerPhase(summary,"initialSnapshot",initialSnapshotCpu);noteSnapshotCost(summary,"initialSnapshot",sample.executionProfile);
-    summary["qualification"]["passed"]=true;summary["before"]=nativeState(scope,sample);publish({{"event","observed"},{"result",summary.at("before")}});
+    summary["moduleQualification"]=routeQualification();summary["wholeImageHashIsVersionGate"]=sample.fixedOriginalQualification;
+    summary["qualification"]={{"mode",routeQualification()},{"passed",true},{"compatibilityContractRequired",!sample.fixedOriginalQualification},{"rawTypedReads",sample.fixedOriginalQualification}};
+    summary["before"]=nativeState(scope,sample);publish({{"event","observed"},{"result",summary.at("before")}});
     const auto referencePath=*data/L"references"/utf16(scopeKey(scope,account)+".json");
-    J reference=loadCompatibleReference(*data,scope,sample,account);
-    if(reference.is_null()&&(event.contains("seed")||statePresent(*data/L"seed.json"))){
+    J referenceRefresh;
+    J reference=loadCompatibleReference(*data,scope,sample,account,[&]{return snapshot(scope,account);},&referenceRefresh);
+    if(!referenceRefresh.is_null()){
+      summary["referenceRequalified"]=true;summary["healthyRequalification"]=referenceRefresh;
+      publish({{"event","healthy-reference-requalified"},{"result",referenceRefresh}});
+    }
+    if(!scope.groupPath()&&reference.is_null()&&(event.contains("seed")||statePresent(*data/L"seed.json"))){
       J candidate;
       try{
         const auto seed=event.contains("seed")?event.at("seed"):readJson(*data/L"seed.json");
@@ -971,7 +1862,7 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
       }
     }
     if(sample.flags==8196){
-      if(reference.is_null()){requireCurrent();const auto nonce=freshUuid();reference={{"schema","ymcc.steam-native-original-reference.v1"},{"scope",referenceScope(scope)},{"captureParent",scope.identities.at("ymcc")},{"accountFingerprint",textHash(std::to_string(account))},{"bindingNonce",nonce},{"pins",pins(sample,scope.roles[0].born,account,nonce)},{"healthyFlags",8196},{"compatibilityContract","original-running-code-data-v2"},{"clientSha256",sample.clientSha256},{"uiSha256",sample.uiSha256}};const auto after=snapshot(scope,account);need(after.flags==8196,"healthy-reference-changed-during-capture");matchReference(reference,scope,after,account);requireCurrent();durableCreate(referencePath,reference.dump(2));summary["referenceCaptured"]=true;}
+      if(reference.is_null()){requireCurrent();const auto nonce=freshUuid();reference={{"schema",referenceSchema(scope)},{"scope",referenceScope(scope)},{"captureParent",scope.identities.at("ymcc")},{"accountFingerprint",textHash(std::to_string(account))},{"bindingNonce",nonce},{"pins",pins(sample,scope.roles[0].born,account,nonce)},{"healthyFlags",8196},{"compatibilityContract","original-running-code-data-v2"},{"clientSha256",sample.clientSha256},{"uiSha256",sample.uiSha256}};const auto after=snapshot(scope,account);need(after.flags==8196,"healthy-reference-changed-during-capture");matchReference(reference,scope,after,account);requireCurrent();durableCreate(referencePath,reference.dump(2));summary["referenceCaptured"]=true;}
       else matchReference(reference,scope,sample,account);
       summary["status"]="healthy";summary["nativeRecovered"]=false;
     }
@@ -998,13 +1889,15 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
           {"settleWindowMs",watch.settleWindowMs},{"settlePollMs",watch.settlePollMs},
           {"targetGameId",std::to_string(scope.gameId)},{"mutationDispatched",false}});
       while(watch.observes(nowFileTime(),probe.owned())){
-        HANDLE handles[5]{};DWORD count=0;
-        for(const auto& role:scope.roles)handles[count++]=role.handle.h;
-        if(gWakeSignal)handles[count++]=reinterpret_cast<HANDLE>(gWakeSignal);
-        ++waits;const auto waited=WaitForMultipleObjects(count,handles,FALSE,static_cast<DWORD>(watch.delayMs(nowFileTime())));
-        need(waited!=WAIT_FAILED,"wake-event-wait-failed");
-        if(waited>=WAIT_OBJECT_0&&waited<WAIT_OBJECT_0+4){++processSignals;break;}
-        if(gWakeSignal&&waited==WAIT_OBJECT_0+4){++hintSignals;const auto hinted=nowFileTime();
+        std::array<HANDLE,4> handles{};std::size_t index=0;
+        for(const auto& role:scope.roles)handles[index++]=role.handle.h;
+        ++waits;const auto waited=waitWakeObservation(handles,gWakeSignal,gCancelSignal,gIdentityCancelSignal,
+            static_cast<DWORD>(watch.delayMs(nowFileTime())),
+            scope.processGroup&&gGroupRequestCancellation?reinterpret_cast<WakeSignal>(gGroupRequestCancellation->event()):0,
+            scope.groupPath()?scope.processGroup->additionalProcessLiveness():std::span<const HANDLE>{});
+        need(waited!=WakeWait::Cancelled,"native-power-request-revoked");
+        if(waited==WakeWait::Process){++processSignals;break;}
+        if(waited==WakeWait::Hint){++hintSignals;const auto hinted=nowFileTime();
           if(!firstHintFileTime)firstHintFileTime=hinted;lastHintFileTime=hinted;
           watch.noteHint(hinted,probe.owned());}
         if(!watch.observes(nowFileTime(),probe.owned()))break;
@@ -1049,12 +1942,66 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
       const auto recoveryCpuStarted=threadCpuTicks();const auto recoveryPhaseStarted=workerStamp();
       if(!summary.contains("lossConfirmedFileTime")){summary["lossConfirmedFileTime"]=std::to_string(nowFileTime());summary["lossNative"]=nativeState(scope,sample);}
       need(!reference.is_null(),"lost-without-matching-healthy-reference");matchReference(reference,scope,sample,account);
-      need((kind=="wake"||kind=="startup")&&event.value("recoveryAllowed",false),"event-observation-only");requireCurrent();need(moduleCapacity(scope.roles[0].pid)<16,"global-steam-lifetime-image-capacity");
+      need((kind=="wake"||kind=="startup"||kind=="running-lost")&&event.value("recoveryAllowed",false),"event-observation-only");requirePublicationScope();need(moduleCapacity(scope.roles[0].pid)<16,"global-steam-lifetime-image-capacity");
       summary["recoveryDispatchAfterMs"]=GetTickCount64()-jobStarted;
       if(kind=="wake"){const auto episode=decimal(trigger.at("powerEventFileTime"));need(nowFileTime()>=episode&&nowFileTime()-episode<ymcc::steamOriginal::WakeWatch::budgetMs*10000ULL,"wake-expired-before-consume");}
       consume(event,scope,*data,false);summary["consumptionPreflightPassed"]=true; // Read-only; duplicate rights rejected before source attach.
+      // No QueryActor, debugger attachment, stopped thread or remote write is
+      // created until this exact original job owns the public command slot.
+      need(mutationUntilAfterFinish!=nullptr,"public-steam-command-intent-unavailable");
+      const ymcc::steamcommand::Target commandTarget{static_cast<std::uint32_t>(scope.roles[0].pid),
+          scope.roles[0].born,fp::path(scope.roles[0].path).parent_path().wstring()};
+      need(mutationUntilAfterFinish->matches(commandTarget),"public-steam-command-target-mismatch");
+      unsigned commandWaits=0;
+      if(kind=="wake"){
+        need(availabilityUntilAfterFinish!=nullptr,"public-steam-command-signal-unavailable");
+        std::array<HANDLE,4> processes{};
+        for(std::size_t i=0;i<scope.roles.size();++i)processes[i]=scope.roles[i].handle.h;
+        for(;;){
+          requireCurrent();
+          need(availabilityUntilAfterFinish->reset(),"public-steam-command-signal-reset-failed");
+          const auto result=mutationUntilAfterFinish->promote(); // Reset-before-promote, never afterwards.
+          requireCurrent();
+          if(result==ymcc::steamcommand::IntentStatus::Ready)break;
+          need(result==ymcc::steamcommand::IntentStatus::Waiting,
+              result==ymcc::steamcommand::IntentStatus::Busy?"public-steam-command-pending-busy":"public-steam-command-revoked");
+          const auto tick=GetTickCount64();
+          const auto deadline=wakeDeadlineTick(decimal(trigger.at("powerEventFileTime")),nowFileTime(),tick);
+          const auto borrowed=availabilityUntilAfterFinish->event();
+          need(borrowed!=nullptr,"public-steam-command-signal-closed");
+          ++commandWaits;
+          const auto waited=waitWakeObservation(processes,reinterpret_cast<WakeSignal>(borrowed),gCancelSignal,
+              gIdentityCancelSignal,static_cast<DWORD>((std::min)(deadline-tick,U64(MAXDWORD-1))),
+              scope.processGroup&&gGroupRequestCancellation?reinterpret_cast<WakeSignal>(gGroupRequestCancellation->event()):0,
+            scope.groupPath()?scope.processGroup->additionalProcessLiveness():std::span<const HANDLE>{});
+          requireCurrent(); // Cancellation wins even when availability is also set.
+          need(waited==WakeWait::Hint,"public-steam-command-wait-ended");
+          // Dedicated availability never calls WakeWatch.noteHint or accelerates its probes.
+        }
+      }else need(mutationUntilAfterFinish->status()==ymcc::steamcommand::IntentStatus::Ready,
+          "startup-command-was-not-promoted-before-admit");
+      auto commandTicket=mutationUntilAfterFinish->ticket();
+      need(commandTicket.current(),"public-steam-command-ticket-revoked");
+      requirePublicationScope();requireCurrent();
+      // Use the same frozen native-role mode/reference/account and complete
+      // typed snapshot again after the wait. No new PID, nonce or healthy pin.
+      auto commandFresh=snapshot(scope,account);matchReference(reference,scope,commandFresh,account);
+      summary["commandCoordination"]={{"owner","public-steam-command-coordinator"},{"kernelWaits",commandWaits},
+          {"slotBeforeQueryActor",true},{"admissionRefunded",false},{"observationCadenceChanged",false}};
+      if(commandFresh.flags==8196){
+        summary["after"]=nativeState(scope,commandFresh);summary["status"]="healthy";
+        summary["nativeRecovered"]=false;summary["jobElapsedMs"]=GetTickCount64()-jobStarted;
+        return; // Another original Steam path recovered; no publisher is needed.
+      }
+      need(commandFresh.flags==4,"public-steam-command-native-flags-not-lost");
+      sample=std::move(commandFresh);
+      need(moduleCapacity(scope.roles[0].pid)<16,"global-steam-lifetime-image-capacity");
+      ymcc::steamcommand::Use commandUse(commandTicket);
+      ymcc::steamcommand::Dispatch commandDispatch(ymcc::steamcommand::Effect::Mutation);
+      need(bool(commandDispatch),"public-steam-command-dispatch-revoked");
+      requireCurrent();
       const auto queryStarted=GetTickCount64();const auto queryCpu=workerStamp();
-      QueryActor query(account,(fp::path(scope.roles[0].path).parent_path()/L"steamclient64.dll").wstring(),gRecoveryRoute,sample.clientSha256);query.waitReady();
+      QueryActor query(account,(fp::path(scope.roles[0].path).parent_path()/L"steamclient64.dll").wstring(),gRecoveryRoute,sample.clientSha256,sample.fixedOriginalQualification,&summary);query.waitReady();
       summary["timingsMs"]["normalQuerySetup"]=GetTickCount64()-queryStarted;
       noteWorkerPhase(summary,"normalQuerySetup",queryCpu);
       const auto contextStarted=GetTickCount64();const auto contextCpu=workerStamp();J context;{ExecutionProbeScope probe(summary,"sourceContext");context=sourceGetterContext(scope,sample,account,query,summary);}
@@ -1087,7 +2034,19 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
         summary["publisherCallsKnown"]=false;return true;
       };
       summary["driverEntered"]=true;
-      const auto driverStarted=GetTickCount64();const auto driverCpu=workerStamp();J result;{ExecutionProbeScope probe(summary,"driverAndCleanup");result=runTrial(request,query,beforeMutation);}
+      const auto driverStarted=GetTickCount64();const auto driverCpu=workerStamp();J result;{ExecutionProbeScope probe(summary,"driverAndCleanup");
+        if(scope.groupPath()){
+          need(scope.nativeRoleTuple.has_value(),"group-native-role-tuple-unavailable-before-driver");
+          // Requires the parent's matching typed driver_port and real ABI6
+          // assets. No role JSON substitutes for this object or fresh tuple.
+          result=runTrial(request,query,beforeMutation,scope.processGroup,
+              scope.nativeRoleTuple->first,scope.nativeRoleTuple->second,{},scope.groupNativeRoleBinding);
+        }else if(scope.processGroup){
+          // Exact native roles still retain their original process and business cancellation.
+          // No unused helper lifetime or group topology enters this strict path.
+          result=runTrial(request,query,beforeMutation,{},0,0,scope.processGroup);
+        }else result=runTrial(request,query,beforeMutation);
+      }
       summary["timingsMs"]["driverAndCleanup"]=GetTickCount64()-driverStarted;
       noteWorkerPhase(summary,"driverAndCleanup",driverCpu);
       request["account64"]=nullptr;summary["driverResult"]=result;
@@ -1099,6 +2058,7 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
       if(result.contains("mutationResult")&&result.at("mutationResult").is_object()){summary["publisherCalls"]=result.at("mutationResult").value("publisherCalls",0);summary["publisherCallsKnown"]=result.at("mutationResult").contains("publisherCalls");}
       need(result.value("entryRestored",false)&&result.value("debugRegistersRestored",false)&&result.value("debuggerDetached",false)&&result.value("disarmConfirmed",false),"recovery-cleanup-not-confirmed");
       need(result.at("mutationResult").at("publisherCalls")==1&&result.at("mutationResult").at("publisherReturned")==true&&result.at("mutationResult").at("guardBefore")==true&&result.at("mutationResult").at("guardAfter")==true,"native-callback-not-confirmed");
+      query.finish(); // Confirm this actor's owned SDK/module return before successful recovery.
       requireCurrent();const auto readbackStarted=GetTickCount64();const auto readbackCpu=workerStamp();const auto after=snapshot(scope,account);need(after.flags==8196,"post-native-running-not-restored");matchReference(reference,scope,after,account);
       summary["timingsMs"]["postRecoverySnapshot"]=GetTickCount64()-readbackStarted;
       noteWorkerPhase(summary,"postRecoverySnapshot",readbackCpu);noteSnapshotCost(summary,"postRecoverySnapshot",after.executionProfile);
@@ -1108,11 +2068,18 @@ Json handle(const Json& event,Emit emit,Current guard,Current observationGuard,W
         summary["executionCost"]["cycleClockFailures"]=total.clockFailures;}catch(...){}
       summary["nativeRecoveredFileTime"]=std::to_string(nowFileTime());
       summary["after"]=nativeState(scope,after);summary["status"]="recovered-native";summary["nativeRecovered"]=true;summary["jobElapsedMs"]=GetTickCount64()-jobStarted;
+      commandDispatch.complete(true); // After driver restoration, QueryActor finish and native readback.
     }
     },"native-engine-exception");
   }catch(const std::exception& e){gSourceContextInit={};summary["status"]="refused";summary["reason"]=e.what();summary["nativeRecovered"]=false;
     if(const auto* diagnostic=dynamic_cast<const DiagnosticFailure*>(&e))summary["failureDiagnostic"]=diagnostic->detail;
     if(data&&summary.value("consumed",false)&&summary.contains("lifeKey")){try{const auto disabled=*data/L"disabled"/utf16(summary.at("lifeKey").get<std::string>()+".v2.json");if(!statePresent(disabled))durableCreate(disabled,J{{"schema","ymcc.steam-original-mutation-disable.v2"},{"reason",e.what()},{"consumed",true},{"noAutomaticRetry",true}}.dump(2));}catch(...) {}}
+  }
+  if(summary.contains("qualification")){
+    summary["moduleQualification"]=routeQualification();summary["wholeImageHashIsVersionGate"]=!publicContentQualification();
+    summary["qualification"]["mode"]=routeQualification();
+    summary["qualification"]["compatibilityContractRequired"]=publicContentQualification();
+    summary["qualification"]["rawTypedReads"]=!publicContentQualification();
   }
   // Only sanitized summary leaves the worker. Raw account/seed/request never do.
   if(evidence){try{atomicJson(*evidence/L"last-recovery-summary.json",summary);atomicJson(*evidence/L"monitor"/L"status.json",summary);}catch(const std::exception& e){summary["persistenceError"]=e.what();}}
@@ -1188,13 +2155,46 @@ Json offlineModulePairMicro(){
       {"functionalBoundaries",8},{"checksum",checksum},{"scope","actual compiled module-pair consumer; fixture's own process only"},
       {"sceneProcessOpens",0},{"steamGameMemoryReads",0},{"fieldLatencyClaim",false},{"fullImageHashCallsRemoved",0}};
 }
-Json offline_self_test(const std::string& directory){
+#include "steam_original_recovery_engine/process_group_role_cases.inc"
+#include "steam_original_recovery_engine/process_group_observation_cases.inc"
+Json offline_self_test(const std::string& directory,const std::string& selectedCase){
+  Json associationEvidence=Json::array();
   Json cases=Json::array();const auto test=[&](const char* name,const auto& body){
+    if(!selectedCase.empty()&&selectedCase!=name&&selectedCase!="query-native-cancellation"&&
+       !(selectedCase=="query-completion"&&std::string_view(name).starts_with("query-completion-")))return;
     if(gOfflinePersistentConfigOnly){const std::string_view n=name;
       const bool selected=n.starts_with("config-storm-")||n.starts_with("legacy-reference-")||n=="reference-file-hash-change-does-not-break-original-qualified-instance"||n=="parent-restart-preserves-reference-key"||n=="account-changes-reference"||n=="steam-birth-changes-reference"||n=="game-birth-changes-reference"||n=="cef-birth-changes-reference"||n=="first-real-wake-durably-consumed"||n=="same-physical-wake-no-gen-reset-replay"||n=="new-physical-wake-allows-reset-process-counter"||n=="startup-actual-attempt-consumed-once"||n=="startup-no-new-event-id-refund"||n=="durable-files-retained-after-refusal"||n=="clearable-evidence-does-not-reset-persistent-consumption";
       if(!selected)return;
     }try{body();cases.push_back({{"name",name},{"passed",true}});}catch(const std::exception& e){cases.push_back({{"name",name},{"passed",false},{"reason",e.what()}});}};
   const auto rejected=[](const auto& body){bool refused=false;try{body();}catch(...){refused=true;}need(refused,"expected-refusal");};
+  const auto queryCompletionCases=[&]{
+  test("query-completion-already-done-skips-event",[&]{std::atomic<bool> done{true};waitQueryReturn(done,nullptr,0);});
+  test("query-completion-signaled-without-result-refused",[&]{std::atomic<bool> done{false};H event(CreateEventW(nullptr,TRUE,TRUE,nullptr));need(event.good(),"wait-fixture-event");
+    rejected([&]{waitQueryReturn(done,event.h,0);});});
+  test("query-completion-timeout-refused",[&]{std::atomic<bool> done{false};H event(CreateEventW(nullptr,TRUE,FALSE,nullptr));need(event.good(),"wait-fixture-event");
+    rejected([&]{waitQueryReturn(done,event.h,0);});});
+  test("query-completion-invalid-event-refused",[&]{std::atomic<bool> done{false};rejected([&]{waitQueryReturn(done,nullptr,0);});});
+  test("query-completion-real-event-wakes-for-owned-fixture",[&]{std::atomic<bool> done{false};H event(CreateEventW(nullptr,TRUE,FALSE,nullptr));need(event.good(),"wait-fixture-event");
+    std::thread worker([&]{done=true;SetEvent(event.h);});bool waited=false;
+    try{waitQueryReturn(done,event.h,1000);waited=true;}catch(...){}worker.join();need(waited&&done,"event-did-not-wake");});
+  test("query-completion-does-not-bypass-revoked-current",[&]{const auto previous=gCurrent;gCurrent=[]{return false;};std::atomic<bool> done{true};bool wrote=false,refused=false;
+    try{waitQueryReturn(done,nullptr,0);requireCurrent();wrote=true;}catch(const std::runtime_error&){refused=true;}gCurrent=previous;need(refused&&!wrote,"event-granted-current");});
+  };
+  if(selectedCase=="query-completion"){
+    queryCompletionCases();
+    const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& row){return row.at("passed")==true;});
+    return {{"schema","ymcc.steam-original-recovery-engine-offline.v1"},{"tests",cases.size()},{"passed",passed},
+        {"success",cases.size()==6&&passed==6},{"selectedCase",selectedCase},{"cases",cases},{"sceneProcessOpens",0},
+        {"debugAttaches",0},{"extraProductProcesses",0},{"liveRecoveryVerified",false}};
+  }
+  if(selectedCase=="query-native-cancellation"||std::string_view(selectedCase).starts_with("query-native-cancel-")){
+#include "steam_original_recovery_engine/query_native_cancellation_cases.inc"
+    const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& row){return row.at("passed")==true;});
+    return {{"schema","ymcc.steam-original-recovery-engine-offline.v1"},{"tests",cases.size()},{"passed",passed},
+        {"success",!cases.empty()&&static_cast<std::size_t>(passed)==cases.size()&&(selectedCase=="query-native-cancellation"||cases.size()==1)},
+        {"selectedCase",selectedCase},{"cases",cases},{"sceneProcessOpens",0},{"debugAttaches",0},{"extraProductProcesses",0},
+        {"sdkCallInterrupted",false},{"actorJoinBoundProven",false},{"liveRecoveryVerified",false}};
+  }
   test("profile-old-pair-keeps-original-getter",[&]{const auto v=qualifiedProfile(rc::kClientSha256,app::kUiSha256);
     need(v.getterRva==0xcfdc0&&v.publisherRva==0x4e27e0,"legacy-profile-drift");});
   const auto newClient=rc::profileSha256(rc::ProfileId::Public1792618285);
@@ -1283,6 +2283,116 @@ Json offline_self_test(const std::string& directory){
       {"pins",pins(sample,scope.roles[0].born,account,nonce)},{"accountFingerprint",textHash(std::to_string(account))},
       {"clientSha256",rc::kClientSha256},{"uiSha256",app::kUiSha256}};};
 
+  test("config-storm-healthy-reference-requalification",[&]{
+    struct Restore{Current previous=gCurrent;std::function<void(const fp::path&)> create=gOfflineBeforeStateCreate;
+      ~Restore(){gCurrent=previous;gOfflineBeforeStateCreate=create;}} restore;
+    gCurrent=[]{return true;};
+    unsigned scenario=0;
+    const auto run=[&](const char* name,const auto& body){
+      const auto data=root/utf16("healthy-refresh-"+std::to_string(scenario++));
+      auto old=legacySample();old.flags=8196;old.clientSha256=rc::kClientSha256;old.uiSha256=app::kUiSha256;
+      auto reference=legacyValue(old);reference["scope"]=referenceScope(scope);
+      reference["extension"]={{"keep",7}};
+      const auto file=data/L"references"/utf16(scopeKey(scope,account)+".json");
+      const auto bytes=reference.dump(2)+"\n";durableCreate(file,bytes);
+      const auto consumed=data/L"consumed"/L"unrelated-original.json";
+      const auto disabled=data/L"disabled"/L"unrelated-original.json";
+      durableCreate(consumed,"{\"keep\":1}\n");durableCreate(disabled,"{\"keep\":2}\n");
+      try{body(data,file,bytes,reference,old);}
+      catch(const std::exception& error){throw std::runtime_error(std::string(name)+":"+error.what());}
+      need(ymcc::steamOriginalStorage::detail::read(consumed)=="{\"keep\":1}\n"&&
+          ymcc::steamOriginalStorage::detail::read(disabled)=="{\"keep\":2}\n","healthy-refresh-ledger-changed");
+    };
+    run("unchanged",[&](const auto& data,const auto& file,const auto& bytes,const auto& reference,const auto& sample){
+      unsigned calls=0;J detail;const auto got=loadCompatibleReference(data,scope,sample,account,[&]{++calls;return sample;},&detail);
+      need(got==reference&&calls==0&&detail.is_null()&&ymcc::steamOriginalStorage::detail::read(file)==bytes,"unchanged-reference-added-work");
+    });
+    for(const auto* domain:{"owner","record","uiObject"})run(domain,[&](const auto& data,const auto& file,const auto& bytes,const auto& reference,const auto& old){
+      auto sample=old;
+      if(std::string_view(domain)=="owner")sample.selected.engine+=0x100;
+      else if(std::string_view(domain)=="record")sample.records.records+=0x1000;
+      else sample.flagsAddress+=0x1000;
+      unsigned calls=0;J detail;
+      const auto next=loadCompatibleReference(data,scope,sample,account,[&]{++calls;return sample;},&detail);
+      need(calls==1&&detail.at("sameNonceDomains").at(domain)==false&&detail.at("qualifiedHealthySnapshots")==2&&
+          detail.at("mutationBudgetReset")==false&&next.at("extension")==reference.at("extension")&&
+          next.at("bindingNonce")!=reference.at("bindingNonce"),"healthy-refresh-proof-missing");
+      matchReference(next,scope,sample,account);
+      const auto history=file.parent_path()/(utf16(textHash(bytes))+L".previous.json");
+      need(ymcc::steamOriginalStorage::detail::read(history)==bytes&&readJson(file)==next,"healthy-refresh-original-bytes-lost");
+      const auto stable=ymcc::steamOriginalStorage::detail::read(file);calls=0;
+      need(loadCompatibleReference(data,scope,sample,account,[&]{++calls;return sample;})==next&&calls==0&&
+          ymcc::steamOriginalStorage::detail::read(file)==stable,"healthy-refresh-repeated-or-rollback");
+      auto lost=sample;lost.flags=4;
+      need(loadCompatibleReference(data,scope,lost,account)==next,"healthy-refresh-not-usable-after-real-loss");
+      rejected([&]{loadCompatibleReference(data,scope,old,account);});
+    });
+    for(const DWORD flags:{4u,0u})run(flags==4?"lost":"unknown",[&](const auto& data,const auto& file,const auto& bytes,const auto&,const auto& old){
+      auto sample=old;sample.flags=flags;sample.records.records+=0x1000;unsigned calls=0;
+      rejected([&]{loadCompatibleReference(data,scope,sample,account,[&]{++calls;return sample;});});
+      need(calls==0&&ymcc::steamOriginalStorage::detail::read(file)==bytes,"lost-or-unknown-reference-refreshed");
+    });
+    for(unsigned mode=0;mode<5;++mode)run("tail-revocation",[&](const auto& data,const auto& file,const auto& bytes,const auto&,const auto& old){
+      auto sample=old;sample.flagsAddress+=0x1000;unsigned calls=0;
+      rejected([&]{loadCompatibleReference(data,scope,sample,account,[&]{++calls;auto tail=sample;
+        if(mode==0)tail.flags=4;else if(mode==1)tail.flags=0;else if(mode==2)tail.flagsAddress+=0x1000;
+        else if(mode==3)tail.selected.user+=0x100;else gCurrent=[]{return false;};return tail;});});
+      gCurrent=[]{return true;};
+      need(calls==1&&ymcc::steamOriginalStorage::detail::read(file)==bytes,"changed-tail-reference-committed");
+    });
+    run("identity",[&](const auto& data,const auto& file,const auto& bytes,const auto& reference,const auto& old){
+      auto sample=old;sample.records.records+=0x1000;unsigned calls=0;
+      Scope wrong;wrong.gameId=scope.gameId^0x100000000ULL;wrong.appid=scope.appid;wrong.identities=scope.identities;
+      rejected([&]{matchReferenceIdentity(reference,wrong,sample,account);});
+      rejected([&]{matchReferenceIdentity(reference,scope,sample,account+1);});
+      need(loadCompatibleReference(data,wrong,sample,account,[&]{++calls;return sample;}).is_null()&&
+          loadCompatibleReference(data,scope,sample,account+1,[&]{++calls;return sample;}).is_null(),"wrong-identity-reference-imported");
+      need(calls==0&&ymcc::steamOriginalStorage::detail::read(file)==bytes,"wrong-identity-reference-refreshed");
+    });
+    run("cancelled",[&](const auto& data,const auto& file,const auto& bytes,const auto&,const auto& old){
+      auto sample=old;sample.records.records+=0x1000;unsigned calls=0;gCurrent=[]{return false;};
+      rejected([&]{loadCompatibleReference(data,scope,sample,account,[&]{++calls;return sample;});});gCurrent=[]{return true;};
+      need(calls==0&&ymcc::steamOriginalStorage::detail::read(file)==bytes,"cancelled-reference-refreshed");
+    });
+    run("budget",[&](const auto& data,const auto&,const auto&,const auto&,const auto& old){
+      J event={{"trigger",{{"kind","startup"},{"generation",0},{"id","healthy-refresh-original"}}}};
+      consume(event,scope,data);auto sample=old;sample.records.records+=0x1000;
+      loadCompatibleReference(data,scope,sample,account,[&]{return sample;});
+      rejected([&]{consume(event,scope,data);});
+      event["trigger"]["id"]="healthy-refresh-new-id";rejected([&]{consume(event,scope,data);});
+    });
+    run("cancel-after-cas",[&](const auto&,const auto& file,const auto& bytes,const auto&,const auto&){
+      rejected([&]{commitHealthyReferenceFile(file,"{\"new\":true}",true,[&]{
+        need(ymcc::steamOriginalStorage::detail::read(file)==bytes,"fixture-original-changed");gCurrent=[]{return false;};
+      });});gCurrent=[]{return true;};
+      need(ymcc::steamOriginalStorage::detail::read(file)==bytes,"cancel-after-cas-committed");
+      for(const auto& entry:fp::directory_iterator(file.parent_path()))
+        need(entry.path().filename().wstring().find(L".next.")==std::wstring::npos,"cancel-after-cas-temporary-not-retired");
+    });
+    run("cancel-after-create",[&](const auto&,const auto& file,const auto& bytes,const auto&,const auto&){
+      gOfflineBeforeStateCreate=[&](const fp::path&){gCurrent=[]{return false;};};
+      rejected([&]{commitHealthyReferenceFile(file,"{\"new\":true}",true);});
+      gOfflineBeforeStateCreate={};gCurrent=[]{return true;};
+      need(ymcc::steamOriginalStorage::detail::read(file)==bytes,"cancel-after-create-committed");
+      for(const auto& entry:fp::directory_iterator(file.parent_path()))
+        need(entry.path().filename().wstring().find(L".next.")==std::wstring::npos,"cancel-after-create-temporary-not-retired");
+    });
+    run("archive-partial",[&](const auto& data,const auto& file,const auto& bytes,const auto&,const auto& old){
+      auto sample=old;sample.records.records+=0x1000;fp::path injected;
+      gOfflineBeforeStateCreate=[&](const fp::path& p){injected=p;
+        ymcc::steamOriginalStorage::detail::create(p,"partial-fixture-bytes");throw std::runtime_error("fixture-precreate-partial");};
+      rejected([&]{loadCompatibleReference(data,scope,sample,account,[&]{return sample;});});
+      gOfflineBeforeStateCreate={};
+      const auto history=file.parent_path()/(utf16(textHash(bytes))+L".previous.json");
+      need(!statePresent(history)&&ymcc::steamOriginalStorage::detail::read(file)==bytes&&
+          ymcc::steamOriginalStorage::detail::read(injected)=="partial-fixture-bytes","partial-archive-poisoned-canonical-key");
+      const auto next=loadCompatibleReference(data,scope,sample,account,[&]{return sample;});
+      need(readJson(file)==next&&ymcc::steamOriginalStorage::detail::read(history)==bytes&&
+          ymcc::steamOriginalStorage::detail::read(injected)=="partial-fixture-bytes","partial-archive-did-not-recover-or-evidence-lost");
+    });
+    need(scenario==17,"healthy-refresh-fixture-scenario-count");
+  });
+
   test("config-storm-current-reference-duplicate-refused",[&]{const auto data=root/L"storm-duplicate";const auto sample=legacySample();auto ref=legacyValue(sample);ref["scope"]=referenceScope(scope);const auto path=data/L"references"/utf16(scopeKey(scope,account)+".json");auto bytes=ref.dump();bytes.pop_back();bytes+=",\"accountFingerprint\":\""+ref.at("accountFingerprint").get<std::string>()+"\"}";durableCreate(path,bytes);rejected([&]{loadCompatibleReference(data,scope,sample,account);});need(readLegacyReferenceBytes(path)==bytes,"duplicate-original-lost");});
   test("config-storm-legacy-reference-duplicate-refused",[&]{const auto data=root/L"storm-legacy-duplicate";const auto sample=legacySample();auto ref=legacyValue(sample);auto bytes=ref.dump();bytes.pop_back();bytes+=",\"healthyFlags\":8196}";durableCreate(data/L"references"/utf16(legacyReferenceKey(scope,account)+".json"),bytes);rejected([&]{loadCompatibleReference(data,scope,sample,account);});need(!fp::exists(data/L"references"/utf16(scopeKey(scope,account)+".json")),"duplicate-legacy-upgraded");});
   test("config-storm-reader-bounded-before-parse",[&]{const auto path=root/L"storm-large.json";const auto bytes=J{{"unknown",std::string(2u*1024*1024,'x')}}.dump();durableCreate(path,bytes);rejected([&]{readJson(path);});need(fp::file_size(path)==bytes.size(),"large-original-lost");});
@@ -1307,10 +2417,10 @@ Json offline_self_test(const std::string& directory){
     auto sample=legacySample();auto seed=validSeed(owner,sample);body(owner,sample,seed);
   });};
   seedTest("config-storm-seed-valid-original-consumer",[&](const auto& owner,const auto& sample,auto& seed){seed["extension"]={{"keep",7}};const auto data=root/L"storm-valid-seed";const auto bytes=seed.dump();durableCreate(data/L"seed.json",bytes);const auto ref=importReference(readJson(data/L"seed.json"),owner,account);matchReference(ref,owner,sample,account);durableCreate(data/L"references"/utf16(scopeKey(owner,account)+".json"),ref.dump());need(loadCompatibleReference(data,owner,sample,account)==ref&&readJson(data/L"seed.json")==seed&&!fp::exists(data/L"consumed")&&!fp::exists(data/L"disabled"),"seed-roundtrip-or-budget-changed");need(ref.at("importedSeedSha256")==textHash(bytes),"seed-origin-hash-lost");});
-  seedTest("config-storm-seed-future-schema-unknown",[&](const auto& owner,const auto& sample,auto& seed){seed["schema"]="steam.wuxia.manual-sleep-observation.v99";rejected([&]{importReference(seed,owner,account);});});
-  seedTest("config-storm-seed-wrong-count-type-unknown",[&](const auto& owner,const auto& sample,auto& seed){seed["currentGameProcessCount"]=1.75;rejected([&]{importReference(seed,owner,account);});});
-  seedTest("config-storm-seed-wrong-flags-type-unknown",[&](const auto& owner,const auto& sample,auto& seed){seed["native"]["nativeUi"]["nativeAppFlags"]=8196.0;rejected([&]{importReference(seed,owner,account);});});
-  seedTest("config-storm-seed-wrong-target-type-unknown",[&](const auto& owner,const auto& sample,auto& seed){seed["target"]["appid"]=static_cast<double>(owner.appid);rejected([&]{importReference(seed,owner,account);});});
+  seedTest("config-storm-seed-future-schema-unknown",[&](const auto& owner,const auto&,auto& seed){seed["schema"]="steam.wuxia.manual-sleep-observation.v99";rejected([&]{importReference(seed,owner,account);});});
+  seedTest("config-storm-seed-wrong-count-type-unknown",[&](const auto& owner,const auto&,auto& seed){seed["currentGameProcessCount"]=1.75;rejected([&]{importReference(seed,owner,account);});});
+  seedTest("config-storm-seed-wrong-flags-type-unknown",[&](const auto& owner,const auto&,auto& seed){seed["native"]["nativeUi"]["nativeAppFlags"]=8196.0;rejected([&]{importReference(seed,owner,account);});});
+  seedTest("config-storm-seed-wrong-target-type-unknown",[&](const auto& owner,const auto&,auto& seed){seed["target"]["appid"]=static_cast<double>(owner.appid);rejected([&]{importReference(seed,owner,account);});});
   seedTest("config-storm-seed-old-owner-and-account-refused",[&](const auto& owner,const auto& sample,auto& seed){auto bad=seed;bad["before"]["roles"]["steam"]["birthFileTime"]="1";rejected([&]{importReference(bad,owner,account);});bad=seed;bad["accountFingerprint"]=textHash(std::to_string(account+1));rejected([&]{importReference(bad,owner,account);});bad=seed;bad["native"]["record"]["diskSha256"]="not-a-sha256";rejected([&]{importReference(bad,owner,account);});matchReference(importReference(seed,owner,account),owner,sample,account);});
   test("config-storm-current-reference-future-contract-unknown",[&]{const auto sample=legacySample();auto ref=legacyValue(sample);ref["scope"]=referenceScope(scope);ref["compatibilityContract"]="original-running-code-data-v99";rejected([&]{matchReference(ref,scope,sample,account);});});
   test("config-storm-current-reference-wrong-health-type",[&]{const auto sample=legacySample();auto ref=legacyValue(sample);ref["scope"]=referenceScope(scope);ref["healthyFlags"]=8196.0;rejected([&]{matchReference(ref,scope,sample,account);});});
@@ -1665,17 +2775,7 @@ Json offline_self_test(const std::string& directory){
     need(candidate&&!currentSourceThread(*candidate,GetCurrentProcessId()),"owned-thread-test-exit-rejected");
   });
   test("source-context-candidate-rejects-invalid-thread",[&]{SourceThreadCandidate c;c.tid=1;c.birth=1;need(!currentSourceThread(c,GetCurrentProcessId()),"invalid-thread-accepted");});
-  test("query-completion-already-done-skips-event",[&]{std::atomic<bool> done{true};waitQueryReturn(done,nullptr,0);});
-  test("query-completion-signaled-without-result-refused",[&]{std::atomic<bool> done{false};H event(CreateEventW(nullptr,TRUE,TRUE,nullptr));need(event.good(),"wait-fixture-event");
-    rejected([&]{waitQueryReturn(done,event.h,0);});});
-  test("query-completion-timeout-refused",[&]{std::atomic<bool> done{false};H event(CreateEventW(nullptr,TRUE,FALSE,nullptr));need(event.good(),"wait-fixture-event");
-    rejected([&]{waitQueryReturn(done,event.h,0);});});
-  test("query-completion-invalid-event-refused",[&]{std::atomic<bool> done{false};rejected([&]{waitQueryReturn(done,nullptr,0);});});
-  test("query-completion-real-event-wakes-for-owned-fixture",[&]{std::atomic<bool> done{false};H event(CreateEventW(nullptr,TRUE,FALSE,nullptr));need(event.good(),"wait-fixture-event");
-    std::thread worker([&]{done=true;SetEvent(event.h);});bool waited=false;
-    try{waitQueryReturn(done,event.h,1000);waited=true;}catch(...){}worker.join();need(waited&&done,"event-did-not-wake");});
-  test("query-completion-does-not-bypass-revoked-current",[&]{const auto previous=gCurrent;gCurrent=[]{return false;};std::atomic<bool> done{true};bool wrote=false,refused=false;
-    try{waitQueryReturn(done,nullptr,0);requireCurrent();wrote=true;}catch(const std::runtime_error&){refused=true;}gCurrent=previous;need(refused&&!wrote,"event-granted-current");});
+  queryCompletionCases();
   test("execution-probe-keeps-allow-reject-exception-semantics",[&]{
     const auto previous=gCurrent;J out;{ExecutionProbeScope probe(out,"test");
       gCurrent=[] {return true;};need(current(),"probe-allow");
@@ -1755,6 +2855,83 @@ Json offline_self_test(const std::string& directory){
         need(row.at("result")==receipt,"finished-event-differs-from-failure");finished=true;}
     need(finished,"failure-job-finished-not-emitted");
   };
+  test("typed-record-null-association-keeps-engine-summary",[&]{
+    const J ui={{"available",true},{"reason","observed"}};unsigned reads=0;J observed;
+    const auto result=injectedReadFailure("typed-record-association",[&](J&){
+      const rc::Query query{0x140000000ULL,0x2000000ULL,76561198000000001ULL,10307630032478011392ULL,12345,true};
+      observed=rc::observe(query,[&](U64,void*,std::size_t){++reads;return false;},[]{return true;});
+      need(reads>0&&observed.at("available")==false&&observed.at("originalPrimaryMatched").is_null(),"actual-record-null-proof-not-produced");
+      requireOriginalAssociation(ui,observed);
+    });
+    associationEvidence.push_back({{"boundary","actual-vendored-record-read-failure"},{"producer",observed},{"result",result}});
+    requireFailureReceipt(result,"original-native-association-unavailable");
+    const auto& diagnostic=result.at("receipt").at("failureDiagnostic");
+    need(diagnostic.at("stage")=="typed-native-association"&&diagnostic.at("nativeRecord").at("available")==false&&
+      diagnostic.at("nativeRecord").at("originalPrimaryMatched").is_null()&&
+      diagnostic.at("nativeRecord").at("reason")==observed.at("reason"),"record-null-reason-lost");
+    const auto zeroMutation=[&](const J& value){const auto& receipt=value.at("receipt");const auto runtime=absolute(value.at("runtime"));
+      need(receipt.at("driverEntered")==false&&receipt.at("mutationCommitAttempted")==false&&receipt.at("publisherCalls")==0&&
+        receipt.at("consumed")==false&&receipt.at("source")=="not-entered","nullable-proof-entered-mutation");
+      for(const auto* directory:{L"consumed",L"disabled",L"images",L"references"})
+        need(!fp::exists(runtime/directory),"nullable-proof-created-runtime-authority");
+    };
+    zeroMutation(result);
+    const std::array<J,8> records{{nullptr,J::object(),J{{"available",true},{"originalPrimaryMatched",nullptr}},
+      J{{"available",true},{"originalPrimaryMatched",false}},J{{"available",false},{"originalPrimaryMatched",true}},
+      J{{"available",true},{"originalPrimaryMatched",1}},J{{"available",true},{"originalPrimaryMatched","true"}},
+      J{{"available",nullptr},{"originalPrimaryMatched",true}}}};
+    unsigned index=0;
+    for(const auto& record:records){const auto label="association-record-"+std::to_string(index++);const J original=record;
+      const auto refused=injectedReadFailure(label.c_str(),[&](J&){requireOriginalAssociation(ui,record);});
+      associationEvidence.push_back({{"boundary",label},{"result",refused}});
+      requireFailureReceipt(refused,"original-native-association-unavailable");zeroMutation(refused);
+      need(record==original,"association-check-mutated-producer");
+    }
+    const J healthy={{"available",true},{"originalPrimaryMatched",true},{"reason","target-record-observed"}};
+    for(const auto& invalidUi:J::array({nullptr,J::object(),J{{"available",false}},J{{"available",nullptr}},J{{"available",1}}})){
+      const auto label="association-ui-"+std::to_string(index++);
+      const auto refused=injectedReadFailure(label.c_str(),[&](J&){requireOriginalAssociation(invalidUi,healthy);});
+      associationEvidence.push_back({{"boundary",label},{"result",refused}});
+      requireFailureReceipt(refused,"original-native-association-unavailable");zeroMutation(refused);
+    }
+    // A two-process launch must not disappear into a primary=false summary.
+    // This still rejects; it only retains the current typed reader's tuple.
+    const J twoPidRecord={{"available",true},{"originalPrimaryMatched",false},{"reason","target-record-observed"},
+        {"matchingTargetRecordCount",1},{"primaryLivenessPid",15324},{"foregroundComparisonPid",15348}};
+    const auto twoPid=injectedReadFailure("association-two-pid-tuple",[&](J&){requireOriginalAssociation(ui,twoPidRecord);});
+    requireFailureReceipt(twoPid,"original-native-association-unavailable");zeroMutation(twoPid);
+    const auto& tuple=twoPid.at("receipt").at("failureDiagnostic").at("nativeRecord");
+    need(tuple.at("matchingTargetRecordCount")==1&&tuple.at("primaryLivenessPid")==15324&&
+        tuple.at("foregroundComparisonPid")==15348&&tuple.at("originalPrimaryMatched")==false,"association-role-tuple-lost");
+    associationEvidence.push_back({{"boundary","association-two-pid-existing-read-tuple"},{"result",twoPid}});
+    J malformedRecord=twoPidRecord;malformedRecord["matchingTargetRecordCount"]=257;
+    malformedRecord["primaryLivenessPid"]=(std::numeric_limits<U64>::max)();malformedRecord["foregroundComparisonPid"]=-1;
+    const auto malformed=injectedReadFailure("association-invalid-tuple-scalars",[&](J&){requireOriginalAssociation(ui,malformedRecord);});
+    requireFailureReceipt(malformed,"original-native-association-unavailable");zeroMutation(malformed);
+    const auto& invalidTuple=malformed.at("receipt").at("failureDiagnostic").at("nativeRecord");
+    need(invalidTuple.at("matchingTargetRecordCount").is_null()&&invalidTuple.at("primaryLivenessPid").is_null()&&
+        invalidTuple.at("foregroundComparisonPid").is_null(),"invalid-role-scalar-was-promoted");
+    associationEvidence.push_back({{"boundary","association-invalid-role-scalars-stay-unknown"},{"result",malformed}});
+    struct TupleCase{const char* name;std::vector<rc::detail::Target> targets;};
+    for(const auto& sample:std::array<TupleCase,4>{{
+        {"no-target",{}},{"different-primary",{{0,15324,15348}}},
+        {"different-foreground",{{0,15348,15324}}},{"multiple-targets",{{0,15348,15348},{1,15348,15348}}}}}){
+      const auto refused=injectedReadFailure(sample.name,[&](J&){requireOriginalRoleTuple(sample.targets,15348);});
+      requireFailureReceipt(refused,"original-record-primary");zeroMutation(refused);
+      const auto& evidence=refused.at("receipt").at("failureDiagnostic");
+      need(evidence.at("stage")=="typed-native-record-role-tuple"&&evidence.at("expectedGamePid")==15348&&
+          evidence.at("matchingTargetRecordCount")==sample.targets.size()&&evidence.at("actionAuthority")==false,"native-role-refusal-context-lost");
+      if(sample.targets.size()==1)need(evidence.at("primaryLivenessPid")==sample.targets[0].primary&&
+          evidence.at("foregroundComparisonPid")==sample.targets[0].foreground&&
+          evidence.at("primaryMatchesSelected")== (sample.targets[0].primary==15348)&&
+          evidence.at("foregroundMatchesSelected")== (sample.targets[0].foreground==15348),"native-role-refusal-tuple-lost");
+      else need(evidence.at("primaryLivenessPid").is_null()&&evidence.at("foregroundComparisonPid").is_null(),"nonunique-target-was-elected");
+      associationEvidence.push_back({{"boundary",sample.name},{"result",refused}});
+    }
+    requireOriginalRoleTuple({{0,15348,15348}},15348);
+    requireOriginalAssociation(ui,healthy);
+    associationEvidence.push_back({{"boundary","strict-true-proof-preserved"},{"admitted",true},{"businessActionExecuted",false}});
+  });
   test("typed-ui-reader-rejection-keeps-engine-summary",[&]{
     unsigned calls=0;
     const auto result=injectedReadFailure("typed-ui",[&](J&){
@@ -1808,7 +2985,7 @@ Json offline_self_test(const std::string& directory){
   });
   J executionMicro;test("execution-module-pair-real-consumer-micro",[&]{executionMicro=offlineModulePairMicro();need(executionMicro.at("success")==true,"module-pair-micro-failed");});
   const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& c){return c.at("passed")==true;});
-  return{{"schema","ymcc.steam-original-recovery-engine-offline.v1"},{"executionModulePairMicro",executionMicro},{"tests",cases.size()},{"passed",passed},{"success",static_cast<std::size_t>(passed)==cases.size()},{"cases",cases},{"sceneProcessOpens",0},{"debugAttaches",0},{"extraProductProcesses",0},{"ledgerEvidence",utf8(root.wstring())},{"liveRecoveryVerified",false}};
+  return{{"schema","ymcc.steam-original-recovery-engine-offline.v1"},{"executionModulePairMicro",executionMicro},{"tests",cases.size()},{"passed",passed},{"success",!cases.empty()&&static_cast<std::size_t>(passed)==cases.size()&&(selectedCase.empty()||selectedCase=="query-completion"||cases.size()==1)},{"selectedCase",selectedCase},{"associationEvidence",associationEvidence},{"cases",cases},{"sceneProcessOpens",0},{"debugAttaches",0},{"extraProductProcesses",0},{"ledgerEvidence",utf8(root.wstring())},{"liveRecoveryVerified",false}};
 }
 Json readonly_file_hash_diagnostic(){
   J result={{"schema","ymcc.formal-file-hash-worker-cpu-diagnostic.v1"},{"authority","diagnostic-only-no-admission"},

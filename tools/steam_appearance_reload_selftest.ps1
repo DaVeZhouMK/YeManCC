@@ -3,6 +3,7 @@ $ErrorActionPreference='Stop'
 function Get-Process {param($Name,$Id) @()}
 function Get-NetTCPConnection {param($State,$LocalPort) @()}
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'PowerControl\steam-appearance.ps1') -Action Library
+function Get-AppearanceSteamSession {$null} # Explicit offline public Steam facts for this owned fixture.
 New-Item -ItemType Directory -Path $Out -Force|Out-Null
 $script:ThemeRoot=Join-Path $Out ('profile-'+[guid]::NewGuid().ToString('N'))
 $script:PresetStateBase=Join-Path $Out 'states'

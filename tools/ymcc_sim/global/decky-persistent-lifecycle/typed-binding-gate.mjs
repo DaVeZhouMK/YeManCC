@@ -151,9 +151,18 @@ export function verifyProductionWiring({root, out, tools, execute}) {
  const mainFile = path.join(root, 'native/main.cpp'), main = fs.readFileSync(mainFile, 'utf8');
  assert.doesNotMatch(main, /^\s*#\s*define\s+YMCC_DECKY_RUNTIME_LEGACY_FIXTURE\b/m);
  const initialize = blockAfter(main, 'static void deckySidebarInitialize()');
- assert.match(initialize, /config\.ownedBinding\s*=\s*std::make_shared\s*<\s*ymcc::deckybinding::Client\s*>\s*\(\s*\)/);
+ // The listener proxy adds Read/Post/WakeFactory arguments to the same owned Client.
+ if (fs.existsSync(path.join(root, 'native/decky_listener_proxy.h'))) {
+  assert.match(initialize, /config\.ownedBinding\s*=\s*std::make_shared\s*<\s*ymcc::deckybinding::Client\s*>\s*\(/);
+  assert.match(initialize, /\[view=g_steamSettingsObserver\.identityReadView\(\)\]/);
+  assert.match(initialize, /listenerproxy::readShared\(view,request\.steam,request\.windowsSession,end,current\)/);
+  assert.match(initialize, /postFactRead\(std::move\(read\),std::move\(done\)\)/);
+  assert.match(initialize, /listenerproxy::Wake\s*\{\s*\}\s*,\s*\[\]\s*\{\s*return\s+g_deckySidebarRuntime\.listenerFactsWake\(\)\s*;\s*\}\s*\)\s*;/);
+ } else {
+  assert.match(initialize, /config\.ownedBinding\s*=\s*std::make_shared\s*<\s*ymcc::deckybinding::Client\s*>\s*\(\s*\)/);
+ }
  assert.match(initialize, /config\.bindingPlan\s*=\s*deckySidebarOwnedBindingPlan\s*;/);
- assert.match(initialize, /config\.bindingDiagnostic\s*=\s*deckySidebarOwnedBindingDiagnostic\s*;/);
+ assert.match(initialize, /config\.bindingDiagnosticBorrowed\s*=\s*deckySidebarOwnedBindingDiagnostic\s*;/);
  assert.match(initialize, /g_deckySidebarRuntime\.initialize\s*\(/);
  assert.doesNotMatch(main, /config\s*\.\s*(refreshBinding|prepareBinding|retainedBinding|takeContextProcess|beginPending|cancelPending)\s*=/);
  const receipt = {schema: 'ymcc.decky.production-typed-binding-wiring.v1', passed: true,

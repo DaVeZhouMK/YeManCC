@@ -79,7 +79,17 @@ static void compare(const std::string& ev,const json& data,int targets,bool logg
  check(a.postCalls==b.postCalls,"delivery-attempt-count");check(data==before,"caller-payload-preserved");
  if((ev=="gamepad.state"||ev=="gyro.telemetry")&&postThrow<0&&wideFailure<0&&b.error.empty()){
   check(b.conversions==(b.posts.empty()?0u:1u),"one-conversion-per-event");check(b.dumps==(b.posts.empty()?0u:1u),"one-delivery-serialization-per-event");
- }else if(ev!="gamepad.state"&&ev!="gyro.telemetry")check(a.conversions==b.conversions&&a.dumps==b.dumps,"other-event-work-unchanged");
+ }else if(ev!="gamepad.state"&&ev!="gyro.telemetry"){
+#ifdef YMCC_GENERIC_EVENT_WIRE_REUSE
+  if(postThrow<0&&wideFailure<0&&a.error.empty()&&b.error.empty()&&a.diagnostics.empty()&&b.diagnostics.empty()){
+   const bool derived=ev=="power.suspending"||ev=="power.resuming"||ev=="power.resumed"||ev=="power.sourceChanged"||ev=="power.acChanged"||ev=="power.schemeChanged";
+   const unsigned envelopes=b.posts.empty()?0u:derived?2u:1u;
+   check(b.conversions==envelopes&&b.dumps==envelopes,"one-successful-conversion-per-generic-envelope");
+  }else check(b.conversions<=a.conversions&&b.dumps<=a.dumps,"failed-generic-conversions-retry-without-extra-work");
+#else
+  check(a.conversions==b.conversions&&a.dumps==b.dumps,"other-event-work-unchanged");
+#endif
+ }
 }
 static json payload(bool wide){
  json j=json::object();j["connected"]=true;j["sequence"]=7u;j["source"]="physical-current";j["axes"]={-0.0,0.125,-0.25,1.0};j["buttons"]=0x1000;
@@ -115,8 +125,24 @@ static json measure(const std::string& ev,const json& j,int targets,bool logging
  const bool timing=hot?(ratio<=.95&&faster>=9&&cycleRatios.size()==11&&median(cycleRatios)<=.95):((ratio<=1.05)||(b-a<=100));
  return {{"event",ev},{"targets",targets},{"logging",logging},{"baselineMedianNs",a},{"candidateMedianNs",b},{"pairedMedianRatio",ratio},{"pairedMedianCycleRatio",cycleRatios.empty()?json(nullptr):json(median(cycleRatios))},{"fasterPairs",faster},{"baselineRequests",requests[0]},{"candidateRequests",requests[1]},{"baselineBytes",bytes[0]},{"candidateBytes",bytes[1]},{"hotMultitarget",hot},{"accepted",alloc&&timing},{"pairs",pairs}};
 }
+static void rvalueParity(){
+ for(const auto& ev:{"other.snapshot","power.resumed","power.sourceChanged"})for(bool wide:{false,true})for(int targets:{1,4})for(bool logging:{false,true}){
+  const auto data=payload(wide);
+#define CHECK_RVALUE(NS) { \
+  NS::reset(targets,logging);NS::ipc_emit(ev,data); \
+  const auto expectedPosts=NS::posts;const auto expectedScopes=NS::scopeEvents; \
+  const auto expectedFeedback=NS::feedbackEvents;const auto expectedDiagnostics=NS::diagnosticEvents; \
+  NS::reset(targets,logging);NS::ipc_emit(ev,json(data)); \
+  check(NS::posts==expectedPosts&&NS::scopeEvents==expectedScopes&&NS::feedbackEvents==expectedFeedback&&NS::diagnosticEvents==expectedDiagnostics,"owned generic overload preserves borrowed wire and observers"); \
+ }
+  CHECK_RVALUE(baseline);CHECK_RVALUE(candidate);
+  CHECK_RVALUE(baseline_measured);CHECK_RVALUE(candidate_measured);
+#undef CHECK_RVALUE
+ }
+}
 int main(int argc,char** argv){
  if(argc<2)return 2;bool correctnessOnly=false,negative=false,negativeConversion=false;for(int i=2;i<argc;++i){controllerCopyElisionOnly|=std::string(argv[i])=="--copy-elision-only";correctnessOnly|=std::string(argv[i])=="--correctness-only";negative|=std::string(argv[i])=="--expect-negative";negativeConversion|=std::string(argv[i])=="--expect-conversion-negative";}
+ rvalueParity();
  std::vector<json> inputs{payload(false),payload(true),json::object(),nullptr,42,json::array({1,2}),json{{"invalid",std::string("\xC0\x80",2)}},json{{"float",std::numeric_limits<double>::infinity()}}};
  for(const auto& ev:{"gamepad.state","gyro.telemetry","other.snapshot","power.suspending","power.resumed","power.sourceChanged","gamepad.brightness","gamepad.mouse-toggle"})
   for(const auto& j:inputs)for(int targets:{0,1,2,4})for(bool log:{false,true})for(bool dead:{false,true})compare(ev,j,targets,log,dead);

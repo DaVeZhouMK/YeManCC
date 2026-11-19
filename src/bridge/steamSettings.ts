@@ -1,4 +1,5 @@
 import { invoke } from './ipc';
+import { captureBootPreferenceWrite, type BootPreferenceWrite } from './bootModeGlobalPreferences';
 export interface SteamMonitorValues { position:number;detail:number;scale:number;saturation:number;opacity:number; }
 export interface SteamMonitorState extends SteamMonitorValues {ok:boolean;available:boolean;pending:boolean;restartRequired?:boolean;reason?:string;via?:string;liveConfirmed?:boolean;applicationConfirmed?:boolean;}
 // One native entry for monitor + desktop mouse; the sleep Overlay-off strategy is retired. Native owns
@@ -8,7 +9,10 @@ export const steamSettings = {
   set<T>(patch:{monitor?:Partial<SteamMonitorValues>;mousePercent?:number}):Promise<T>{return invoke<T>('steam.settings.set',patch);},
   // Only explicit output switching waits on the existing native settings lane.
   // Native transport remains bounded even when the main WebView is backgrounded.
-  applyMonitor<T>(monitor:Partial<SteamMonitorValues>):Promise<T>{return invoke<T>('steam.settings.set',{monitor,awaitApplied:true},{timeoutMs:25000});},
+  applyMonitor<T>(monitor:Partial<SteamMonitorValues>,options:BootPreferenceWrite={}):Promise<T>{
+    const submitted=captureBootPreferenceWrite(options);
+    return invoke<T>('steam.settings.set',{monitor,awaitApplied:true,...(submitted.bootContext?{origin:submitted.origin,bootContext:submitted.bootContext}:{})},{timeoutMs:25000});
+  },
 };
 export const STEAM_MONITOR_POSITIONS = [
   {value:0,label:'关闭监控'},{value:1,label:'左上角'},{value:5,label:'顶部居中'},

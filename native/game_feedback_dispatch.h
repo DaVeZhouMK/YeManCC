@@ -70,11 +70,14 @@ public:
             state_.owner=receipt.pulseGeneration;applied_=work.command;
             if(receipt.ok)++state_.applied;
             const bool stillDesired=state_.desired&&sameMotors(desired_,work.command);
-            if(!receipt.ok||!stillDesired){stop_=true;if(!receipt.ok)retire();}
+            // The writer releases this mutex during I/O. A newer accepted
+            // command or OFF may already own desired_. Preserve that intent;
+            // an old failed pulse still owes its exact Stop before any Apply.
+            if(!receipt.ok||!stillDesired){stop_=true;if(!receipt.ok&&work.version==version_)retire();}
             else{state_.dirty=false;stop_=false;}
         }else if(receipt.pulseGeneration&&receipt.pulseGeneration<=manualGeneration_){
             state_.manualBlocked=manualActive_;state_.dirty=state_.desired;
-        }else if(!receipt.ok){retire();}
+        }else if(!receipt.ok&&work.version==version_){retire();}
     }
     void completeStop(const Work& work,bool settled)noexcept {
         state_.busy=false;

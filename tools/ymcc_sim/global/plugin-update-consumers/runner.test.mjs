@@ -9,9 +9,31 @@ import crypto from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 function report(id){const s=SPECS[id];return {status:'passed',cases:s.expectedNames.length,results:s.expectedNames.map(name=>({name,passed:true,status:'passed'})),productionService:true,productionClient:true,liveNativeInstallation:false,steamUIActions:0,actualInstallations:0,fixtures:true};}
 const id='plugins.updater-service-consumer',spec=SPECS[id];
-test('a positive verdict cannot hide a failed original assertion',()=>{const raw=report(id);raw.results[0].passed=false;raw.results[0].status='failed';assert.throws(()=>verifyOriginal(raw,spec),/ORIGINAL_ASSERTION_FAILED/);});
-test('removing or duplicating an original case cannot preserve acceptance',()=>{const missing=report(id);missing.results.pop();missing.cases--;assert.throws(()=>verifyOriginal(missing,spec),/ORIGINAL_CASE_REMOVED/);const duplicate=report(id);duplicate.results[0]=duplicate.results[1];assert.throws(()=>verifyOriginal(duplicate,spec),/ORIGINAL_CASE_REMOVED/);});
-test('a fault run must reach its named original business assertion',()=>{const raw=report(id);raw.status='failed';raw.results[0].passed=false;raw.results[0].status='failed';assert.notEqual(raw.results[0].name,spec.fault.expectedFailedCase);assert.throws(()=>verifyOriginal(raw,spec,{negative:true}),/EXPECTED_ASSERTION_NOT_REACHED/);});
+test('a positive verdict cannot hide a failed original assertion',()=>{
+ const raw=report(id);raw.results[0].status='failed';
+ assert.throws(()=>verifyOriginal(raw,spec),/ORIGINAL_ROW_VERDICT_INVALID/);
+ raw.results[0].passed=false;
+ assert.throws(()=>verifyOriginal(raw,spec),/ORIGINAL_ASSERTION_FAILED/);
+ raw.results[0].status='passed';
+ assert.throws(()=>verifyOriginal(raw,spec),/ORIGINAL_ROW_VERDICT_INVALID/);
+});
+test('the service accepts the exact set of original cases and no other selection',()=>{
+ const reordered=report(id);reordered.results.reverse();assert.equal(verifyOriginal(reordered,spec).checks,spec.expectedNames.length);
+ const missing=report(id);missing.results.pop();missing.cases--;assert.throws(()=>verifyOriginal(missing,spec),/ORIGINAL_CASE_REMOVED/);
+ const duplicate=report(id);duplicate.results[0]=duplicate.results[1];assert.throws(()=>verifyOriginal(duplicate,spec),/ORIGINAL_CASE_REMOVED/);
+ const extra=report(id);extra.results.push({name:'unexpected extra',status:'passed'});extra.cases++;assert.throws(()=>verifyOriginal(extra,spec),/ORIGINAL_CASE_REMOVED/);
+ for(const patch of [{onlyCase:spec.expectedNames[0]},{excludeCase:spec.expectedNames[0]},{ownerVariant:'other'},{omitted:[spec.expectedNames[0]]}])assert.throws(()=>verifyOriginal({...report(id),...patch},spec),/SERVICE_SELECTION_CHANGED/);
+});
+test('a fault run must fail only its named original business assertion, without source drift',()=>{
+ const raw=report(id);raw.status='failed';raw.results[0].passed=false;raw.results[0].status='failed';
+ const expected=raw.results.find(row=>row.name===spec.fault.expectedFailedCase);assert.notEqual(expected,raw.results[0]);
+ assert.throws(()=>verifyOriginal(raw,spec,{negative:true}),/EXPECTED_ASSERTION_NOT_REACHED/);
+ Object.assign(expected,{passed:false,status:'failed'});
+ assert.throws(()=>verifyOriginal(raw,spec,{negative:true}),/EXPECTED_ASSERTION_NOT_REACHED/);
+ Object.assign(raw.results[0],{passed:true,status:'passed'});
+ assert.deepEqual(verifyOriginal(raw,spec,{negative:true}).failedNames,[expected.name]);
+ raw.sourceDrift=[{path:'changed'}];assert.throws(()=>verifyOriginal(raw,spec,{negative:true}),/SERVICE_SOURCE_DRIFT/);
+});
 test('physical or installation claims invalidate otherwise passing fixture evidence',()=>{const raw=report(id);raw.liveNativeInstallation=true;assert.throws(()=>verifyOriginal(raw,spec),/SERVICE_BOUNDARY/);const other='plugins.dual-update-consumer',dual=report(other);dual.actualInstallations=1;assert.throws(()=>verifyOriginal(dual,SPECS[other]),/RETIRED_CONTRACT_CANNOT_PASS/);});
 test('CLI rejects extra modes before it can create evidence',()=>{const target='D:/Codex/plugin-update-no-write-'+process.pid;assert.equal(fs.existsSync(target),false);assert.throws(()=>parseArgs(['--case',id,'--evidence-dir',target,'--install']),/ARGUMENTS_INVALID/);assert.equal(fs.existsSync(target),false);});
 test('output paths cannot target product sources or the installed drive',()=>{assert.throws(()=>evidencePath(REPO),/SOURCE_REPO/);assert.throws(()=>evidencePath('C:/plugin-update-no-write-'+process.pid),/WORKSPACE/);assert.throws(()=>evidencePath('relative/path'),/ABSOLUTE/);});

@@ -1,0 +1,206 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <powrprof.h>
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <iostream>
+#include <optional>
+#include <string>
+#include <vector>
+#include "json.hpp"
+#include "sleep_power_dispatch.h"
+#include "sleep_power_observation.h"
+#include "sleep_request_fallback.h"
+using json=nlohmann::json;
+@@ENUMS@@
+static std::atomic<bool> g_exitRequested{false};
+static std::atomic<unsigned long long> fixtureGeneration{17};
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Suspended};
+static std::atomic<std::uint64_t> g_sharedPowerPublicationRevision{1},g_sharedPowerSuspendSerial{1};
+static ymcc::sleeppower::Dispatch g_sleepPowerDispatch;
+static bool readKnown=true,hardwareGate=false,g_guardEnabled=true;
+static std::atomic<ULONGLONG> g_sgLastPowerButtonWakeEventFileTime{0},g_sgLastKernel506EventFileTime{0},g_sgLastPowerButtonSleepIntentFileTime{1000000000ULL};
+static std::atomic<ULONGLONG> g_sgLatestUserSleepEntryFileTime{0},g_sgOriginalPowerButtonWakeFileTime{0},g_sgClosedSleepIntentFileTime{0};
+static bool g_sgRetryInProgress=true,g_sgRetryEntryFailure=true,g_sgResleepEnabled=true;
+static bool g_entryFailureExpanded=false,abnormalPermitted=true,timeoutPermitted=true,success=false;
+static ULONGLONG g_entryFailureQuickDeadline=0,g_entryFailureInterruptedAt=0,g_entryFailureNewOffFileTime=0;
+static struct {SgRetryKind retryKind=SgRetryKind::EntryFailure;ULONGLONG retryEntryFileTime=0;}g_sgTask;
+static ULONGLONG nowFile=2000000000ULL,originalIntent=1000000000ULL;
+static ymcc::sleeprequest::CompletionWitness g_sgRetryWindowsSuccessAtAdmission;
+static std::atomic<ULONGLONG> g_sgLatestSleepEntryFileTime{0};
+static ULONGLONG sgSleepTimeoutSuccessfulExitTime(){return success?nowFile:0;}
+static unsigned apiCalls=0,privilegeCalls=0,capabilityCalls=0;
+static std::string injectStage,injectAction;
+static bool injected=false,unsupportedFirst=false;
+static DWORD fixtureCapabilityError=ERROR_SUCCESS,privilegeError=ERROR_SUCCESS;
+static std::optional<DWORD> suspendError;
+struct ExpectedRoute {
+    DWORD error;
+    std::vector<std::optional<DWORD>> callErrors;
+};
+static std::vector<json> facts;
+static unsigned long long currentPowerGeneration(){return fixtureGeneration.load();}
+static bool hardwareWriteAllowed(){return hardwareGate&&!g_sleepPowerDispatch.pendingSuspend()&&!g_exitRequested.load();}
+static ULONGLONG sgNowFileTime(){return nowFile;}
+static ULONGLONG sgSleepTimeoutOriginalIntent(){return originalIntent;}
+static bool sgSleepTimeoutSuccessAfter(ULONGLONG){return success;}
+static bool sgSleepTimeoutDispatchPermitted(){return timeoutPermitted;}
+static bool sgAbnormalPermitted(){return abnormalPermitted;}
+static bool sgAbnormalDispatchReady(){return abnormalPermitted;}
+@@USER_VETO@@
+@@RESULT@@
+static std::atomic<ymcc::sleeprequest::Mode> g_sgAutomaticSleepTarget{ymcc::sleeprequest::Mode::None};
+static void ingress(ULONG code){g_sleepPowerDispatch.callback(code,1234,[](const auto&){return true;});}
+static void applyInjection(const char* where){
+    if(injected||injectStage!=where)return;injected=true;
+    if(injectAction=="pending")ingress(PBT_APMSUSPEND);
+    else if(injectAction=="resume")ingress(PBT_APMRESUMEAUTOMATIC);
+    else if(injectAction=="query-failed")ingress(PBT_APMQUERYSUSPENDFAILED);
+    else if(injectAction=="diagnostic")++g_sharedPowerPublicationRevision;
+    else if(injectAction=="serial")++g_sharedPowerSuspendSerial;
+    else if(injectAction=="unknown")readKnown=false;
+    else if(injectAction=="generation")++fixtureGeneration;
+    else if(injectAction=="human")g_sgLastPowerButtonWakeEventFileTime=originalIntent+1;
+    else if(injectAction=="off")g_guardEnabled=false;
+    else if(injectAction=="success")success=true;
+    else if(injectAction=="kind")g_sgTask.retryKind=SgRetryKind::UnexpectedWake;
+}
+static bool sgPrepareSleepPrivilege(SgSystemSleepRequestResult& value){++privilegeCalls;value.shutdownPrivilegeEnabled=privilegeError==ERROR_SUCCESS;value.shutdownPrivilegeError=privilegeError;value.privilegeRequired=true;applyInjection("privilege");return value.shutdownPrivilegeEnabled;}
+static void sgRecordFact(const char* name,const json& value){facts.push_back({{"event",name},{"details",value}});applyInjection(name);}
+static BOOL WINAPI fixtureCapabilities(PSYSTEM_POWER_CAPABILITIES caps){++capabilityCalls;*caps={};caps->AoAc=TRUE;caps->SystemS3=TRUE;applyInjection("capabilities");if(fixtureCapabilityError){SetLastError(fixtureCapabilityError);return FALSE;}return TRUE;}
+static BOOLEAN WINAPI fixtureSuspend(BOOLEAN hibernate,BOOLEAN force,BOOLEAN disableWake){
+    if(hibernate||force||disableWake)throw std::runtime_error("original suspend arguments changed");++apiCalls;applyInjection("api-return");
+    if(unsupportedFirst&&apiCalls==1){SetLastError(ERROR_NOT_SUPPORTED);return FALSE;}
+    if(suspendError){SetLastError(*suspendError);return FALSE;}
+    return TRUE;
+}
+// The actual Reader stays verbatim; only its scalar Native facts and original
+// Dispatch ingress are supplied by this isolated fixture, never Windows power.
+@@READER@@
+[[maybe_unused]] static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t bytes) noexcept {
+    if(!readKnown){if(out)*out={};return 0;}return productionReadSharedSystemPower(out,bytes);
+}
+#define GetPwrCapabilities fixtureCapabilities
+#define SetSuspendState fixtureSuspend
+@@SENDER@@
+#undef SetSuspendState
+#undef GetPwrCapabilities
+static unsigned assertions=0;
+static std::uint64_t lastCallSerial=0;
+static std::vector<std::string> failures;
+static json rows=json::array();
+static void expect(bool ok,const char* message){++assertions;if(!ok)failures.emplace_back(message);}
+static void reset(){
+    // Finish every outstanding real Dispatch receipt through its original
+    // owner protocol; no reset or replacement private notification authority.
+    ingress(PBT_APMQUERYSUSPENDFAILED);const auto old=g_sleepPowerDispatch.pendingReplay();
+    if(old){const auto owned=g_sleepPowerDispatch.forwarded(old.sequence,old.type,1250);g_sleepPowerDispatch.complete(owned,1251);}
+    fixtureGeneration=17;g_powerLifecycle=PowerLifecycle::Suspended;g_sharedPowerPublicationRevision=1;g_sharedPowerSuspendSerial=1;
+    g_exitRequested=false;readKnown=true;hardwareGate=false;g_guardEnabled=true;
+    g_sgLastPowerButtonWakeEventFileTime=g_sgLastKernel506EventFileTime=0;g_sgLastPowerButtonSleepIntentFileTime=originalIntent;
+    g_sgLatestUserSleepEntryFileTime=g_sgOriginalPowerButtonWakeFileTime=g_sgClosedSleepIntentFileTime=0;
+    g_sgRetryInProgress=g_sgRetryEntryFailure=g_sgResleepEnabled=true;g_sgTask.retryKind=SgRetryKind::EntryFailure;
+    g_entryFailureExpanded=false;abnormalPermitted=timeoutPermitted=true;success=false;
+    g_entryFailureQuickDeadline=g_entryFailureInterruptedAt=g_entryFailureNewOffFileTime=0;
+    g_sgAutomaticSleepTarget=ymcc::sleeprequest::Mode::None;apiCalls=privilegeCalls=capabilityCalls=0;
+    injectStage.clear();injectAction.clear();injected=unsupportedFirst=false;facts.clear();
+    fixtureCapabilityError=privilegeError=ERROR_SUCCESS;suspendError.reset();
+}
+static void run(const char* name,const std::function<void()>& prepare,bool allow,bool staged=false,unsigned expectedCalls=MAXDWORD,std::optional<ExpectedRoute> route={}){
+    reset();prepare();const auto oldAssertions=assertions;const auto oldFailures=failures.size();
+    const auto observed=g_sleepPowerDispatch.observedSequence();const auto gen=fixtureGeneration.load();
+    const auto result=sgRequestSystemSleep(ymcc::sleeprequest::Mode::ModernStandby,ymcc::sleeprequest::Mode::Sleep,staged);
+    expect(result.accepted==allow,"sender-result-respects-current-original-attempt");
+    expect(apiCalls==(expectedCalls==MAXDWORD?(allow?1u:0u):expectedCalls),"no-api-call-after-new-notification-or-original-veto");
+    if(route)expect(result.requestError==route->error,"explicit-request-result-error");
+    else if(!allow)expect(result.requestError==ERROR_CANCELLED,"cancelled-request-is-explicit-not-success");
+    expect(result.target!=ymcc::sleeprequest::Mode::Hibernate,"ordinary-route-never-hibernates");
+    const auto& emitted=facts.back().at("details");
+    const auto& emittedAttempts=emitted.at("attempts");
+    unsigned counted=0;
+    std::array<bool,4> seen{};
+    for(const auto& step:emittedAttempts){
+        const auto mode=step.at("target").get<std::string>();
+        const auto port=mode=="modern-standby"?1u:mode=="sleep"?2u:3u;
+        const auto& receipt=result.apiCalls.at(port);
+        const auto& logged=step.at("apiCall");
+        seen.at(port)=true;
+        expect(receipt.called==!logged.is_null(),"returned-typed-call-belongs-to-actual-api");
+        if(!receipt.called){expect(receipt.callSerial==0,"unissued-route-has-no-call-identity");continue;}
+        ++counted;
+        expect(receipt.callSerial==lastCallSerial+1,"one-unique-serial-per-actual-api-not-clock-or-route");
+        lastCallSerial=receipt.callSerial;
+        expect(receipt.generation==gen&&receipt.notificationSequence==observed,"identity-keeps-original-public-scope");
+        expect(logged.at("callSerial")==receipt.callSerial&&logged.at("generation")==receipt.generation&&logged.at("notificationSequence")==receipt.notificationSequence,"export-and-return-refer-to-same-call");
+        expect(logged.at("accepted")==receipt.accepted&&logged.at("win32Error")==receipt.win32Error,"typed-return-keeps-raw-api-result");
+        expect(logged.at("preflightFileTime")==receipt.preflightFileTime&&logged.at("returnedFileTime")==receipt.returnedFileTime,"identity-retains-existing-api-time-witness");
+    }
+    expect(counted==apiCalls,"returned-receipt-count-is-counted-windows-calls");
+    for(unsigned i=0;i<seen.size();++i)if(!seen[i])expect(!result.apiCalls.at(i).called&&result.apiCalls.at(i).callSerial==0,"unselected-target-remains-empty");
+    json outcome;
+    if(route){
+        expect(!facts.empty()&&facts.back()["event"]=="sleep-request-route-result","sender-emits-route-result");
+        outcome=facts.back().at("details");
+        expect(outcome.at("generation")==gen&&outcome.at("error")==route->error,"route-result-keeps-original-generation-and-error");
+        expect((outcome.at("outcome")=="accepted-pending-confirmation")==allow,"acceptance-means-pending-only");
+        const auto& attempts=outcome.at("attempts");
+        expect(attempts.size()==route->callErrors.size(),"route-result-lists-exact-attempts");
+        for(unsigned i=0;i<route->callErrors.size()&&i<attempts.size();++i){
+            const auto& step=attempts.at(i);
+            const auto& call=step.at("apiCall");
+            expect(step.at("invoked")==true,"adapter-was-invoked-for-supported-mode");
+            const auto expected=route->callErrors[i];
+            if(!expected){expect(call.is_null(),"adapter-preflight-is-not-an-api-call");continue;}
+            expect(call.at("accepted")==(*expected==ERROR_SUCCESS&&route->error!=ERROR_GEN_FAILURE),"api-return-acceptance-is-raw");
+            expect(call.at("win32Error")==*expected,"api-return-keeps-raw-error");
+            expect(call.at("preflightFileTime")==nowFile&&call.at("returnedFileTime")==nowFile,"api-receipt-has-request-local-times");
+        }
+    }
+    rows.push_back({{"name",name},{"assertions",assertions-oldAssertions},{"failures",failures.size()-oldFailures},{"apiCalls",apiCalls},{"privilegeCalls",privilegeCalls},{"generationBefore",gen},{"generationAfter",fixtureGeneration.load()},{"notificationBefore",observed},{"notificationAfter",g_sleepPowerDispatch.observedSequence()},{"accepted",result.accepted}});
+    if(route)rows.back()["routeResult"]=std::move(outcome);
+}
+int main(int argc,char** argv){
+    const std::string selected=argc==2?argv[1]:"";if(argc>2){std::cerr<<"too many selectors";return 2;}
+    bool reached=false;const bool suffix=selected.rfind("from:",0)==0;const auto exact=suffix?selected.substr(5):selected;
+    const auto test=[&](const char* name,const std::function<void()>& prepare,bool allow,bool staged=false,unsigned expectedCalls=MAXDWORD,std::optional<ExpectedRoute> route={}){if(exact==name)reached=true;if(selected.empty()||(suffix?reached:exact==name))run(name,prepare,allow,staged,expectedCalls,std::move(route));};
+    test("new-pbt-during-final-dispatch-log",[]{injectStage="sleep-request-dispatch";injectAction="pending";},false);
+    test("suspending-original-retry",[]{g_powerLifecycle=PowerLifecycle::Suspending;},true);
+    test("suspended-original-retry",[]{},true);
+    test("resuming-original-retry",[]{g_powerLifecycle=PowerLifecycle::Resuming;},true);
+    test("ready-original-retry",[]{g_powerLifecycle=PowerLifecycle::Ready;hardwareGate=true;},true);
+    test("pending-before-helper",[]{ingress(PBT_APMSUSPEND);},false);
+    test("pbt-during-capability-read",[]{injectStage="capabilities";injectAction="pending";},false);
+    test("pbt-during-privilege-read",[]{injectStage="privilege";injectAction="pending";},false);
+    test("resume-before-window-generation-changes",[]{injectStage="sleep-request-dispatch";injectAction="resume";},false);
+    test("query-failed-new-watermark",[]{injectStage="sleep-request-dispatch";injectAction="query-failed";},false);
+    test("same-generation-suspend-serial-changed",[]{injectStage="sleep-request-dispatch";injectAction="serial";},false);
+    test("diagnostic-publication-keeps-original-retry",[]{injectStage="sleep-request-dispatch";injectAction="diagnostic";},true);
+    test("unknown-reader-before-helper",[]{readKnown=false;},false);
+    test("unknown-reader-before-final-api",[]{injectStage="sleep-request-dispatch";injectAction="unknown";},false);
+    test("original-human-wake-veto",[]{injectStage="sleep-request-dispatch";injectAction="human";},false);
+    test("original-guard-off-veto",[]{injectStage="sleep-request-dispatch";injectAction="off";},false);
+    test("original-success-veto",[]{injectStage="sleep-request-dispatch";injectAction="success";},false);
+    test("original-generation-veto",[]{injectStage="sleep-request-dispatch";injectAction="generation";},false);
+    test("original-kind-veto",[]{injectStage="sleep-request-dispatch";injectAction="kind";},false);
+    test("timeout-nonready-retry",[]{g_sgTask.retryKind=SgRetryKind::SleepTimeout;},true);
+    test("unexpected-wake-nonready-retry",[]{g_sgTask.retryKind=SgRetryKind::UnexpectedWake;},true);
+    test("staged-nonready-retry",[]{},true,true);
+    test("new-notification-between-original-fallbacks",[]{unsupportedFirst=true;injectStage="api-return";injectAction="pending";},false,false,1);
+    test("diagnostic-between-original-fallbacks",[]{unsupportedFirst=true;injectStage="api-return";injectAction="diagnostic";},true,false,2);
+    test("staged-new-notification-before-final-api",[]{injectStage="sleep-request-dispatch";injectAction="pending";},false,true);
+    test("route-capabilities-failed",[]{fixtureCapabilityError=ERROR_ACCESS_DENIED;},false,false,0,ExpectedRoute{ERROR_ACCESS_DENIED,{}});
+    test("route-privilege-failed",[]{privilegeError=ERROR_ACCESS_DENIED;},false,false,0,ExpectedRoute{ERROR_ACCESS_DENIED,{std::nullopt}});
+    test("route-dispatch-log-without-call",[]{injectStage="sleep-request-dispatch";injectAction="pending";},false,false,0,ExpectedRoute{ERROR_CANCELLED,{std::nullopt}});
+    test("route-api-rejected",[]{suspendError=ERROR_ACCESS_DENIED;},false,false,1,ExpectedRoute{ERROR_ACCESS_DENIED,{ERROR_ACCESS_DENIED}});
+    test("route-api-rejected-with-cancel-code",[]{suspendError=ERROR_CANCELLED;},false,false,1,ExpectedRoute{ERROR_CANCELLED,{ERROR_CANCELLED}});
+    test("route-api-accepted-pending",[]{},true,false,1,ExpectedRoute{ERROR_SUCCESS,{ERROR_SUCCESS}});
+    test("route-fallback-rejected-then-accepted",[]{unsupportedFirst=true;},true,false,2,ExpectedRoute{ERROR_SUCCESS,{ERROR_NOT_SUPPORTED,ERROR_SUCCESS}});
+    test("route-fallback-rejected-then-cancelled-before-call",[]{unsupportedFirst=true;injectStage="api-return";injectAction="pending";},false,false,1,ExpectedRoute{ERROR_CANCELLED,{ERROR_NOT_SUPPORTED,std::nullopt}});
+    test("called-rejection-without-win32-code",[]{suspendError=ERROR_SUCCESS;},false,false,1,ExpectedRoute{ERROR_GEN_FAILURE,{ERROR_SUCCESS}});
+    test("api-return-after-public-generation-changed",[]{suspendError=ERROR_ACCESS_DENIED;injectStage="api-return";injectAction="generation";},false,false,1,ExpectedRoute{ERROR_ACCESS_DENIED,{ERROR_ACCESS_DENIED}});
+    if(rows.empty()){std::cerr<<"unknown or empty case";return 2;}
+    std::cout<<json{{"canonicalId","sleep.non-user-wake-consumer"},{"selection","sleep-request-notification-only"},{"cases",rows},{"assertions",assertions},{"failures",failures},{"pass",failures.empty()},{"actualOriginalSender",true},{"actualOriginalReader",true},{"actualDispatch",true},{"realSystemSleepCalls",0},{"tokenPrivilegesChanged",false},{"phaseIsNotActionAuthority",true}}.dump()<<'\n';return failures.empty()?0:1;
+}

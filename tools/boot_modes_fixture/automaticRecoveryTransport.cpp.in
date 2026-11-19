@@ -1,0 +1,170 @@
+#define NOMINMAX
+#include <windows.h>
+#include <winhttp.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstring>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
+#include "json.hpp"
+#include "sleep_recovery_diagnostics.h"
+#include "steam_native_return_evidence.h"
+#include "steam_endpoint_discovery.h"
+#include "steam_listener_source.h"
+#include "steam_session_observer.h"
+#include "steam_request_policy.h"
+#include "steam_command_coordinator.h"
+#include "sleep_steam_command_attempt.h"
+#include "steam_failure_diagnostics.h"
+#include "steam_native_record_identity.h"
+using json=nlohmann::json;
+enum class PowerLifecycle{Ready,Resuming,Suspending,Suspended};
+static std::atomic<bool> g_exitRequested{false},g_sleepRecoveryAutoEnabled{true};
+static std::atomic<unsigned long long> g_powerGeneration{7},g_sleepRecoveryAutoConfigEpoch{5};
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+// ORIGINAL_NATIVE_POWER
+static bool sleepSteamWakeOperationAllows(unsigned long long generation,unsigned long long epoch){return sleepSteamRecoveryAllows(generation,epoch)&&g_powerLifecycle==PowerLifecycle::Ready;}
+static bool sourceMutation=false;
+static std::string cancellation,position;
+static std::atomic<unsigned> sends{0},opens{0},closes{0},doubleCloses{0},watchdogsJoined{0};
+static bool blockReceive=false;
+static unsigned long long cancellationAt=0;
+static void need(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
+static void cancelScope(){
+ cancellationAt=GetTickCount64();
+ if(cancellation=="off"){g_sleepRecoveryAutoEnabled=false;++g_sleepRecoveryAutoConfigEpoch;}
+ else if(cancellation=="power-generation")g_powerGeneration=8;
+ else if(cancellation=="suspend")g_powerLifecycle=PowerLifecycle::Suspended;
+ else if(cancellation=="exit")g_exitRequested=true;
+}
+namespace Ports {
+struct State{std::string kind;bool closed=false,bodyRead=false;};
+static std::mutex mx;
+static std::condition_variable cv;
+static std::map<HINTERNET,std::shared_ptr<State>> handles;
+static std::uintptr_t next=16;
+static HINTERNET create(const char* kind){std::lock_guard<std::mutex> lock(mx);auto h=reinterpret_cast<HINTERNET>(next+=16);handles[h]=std::make_shared<State>(State{kind});++opens;return h;}
+static BOOL close(HINTERNET h){std::lock_guard<std::mutex> lock(mx);const auto it=handles.find(h);if(it==handles.end()){++doubleCloses;return FALSE;}it->second->closed=true;handles.erase(it);++closes;cv.notify_all();return TRUE;}
+static unsigned remaining(){std::lock_guard<std::mutex> lock(mx);return static_cast<unsigned>(handles.size());}
+static HINTERNET open(LPCWSTR,DWORD,LPCWSTR,LPCWSTR,DWORD){return create("session");}
+static HINTERNET connect(HINTERNET,LPCWSTR host,INTERNET_PORT port,DWORD){need(std::wstring(host)==L"127.0.0.1"&&port==8000,"unexpected endpoint");return create("connection");}
+static HINTERNET request(HINTERNET,LPCWSTR,LPCWSTR name,LPCWSTR,LPCWSTR,LPCWSTR*,DWORD){return create(std::wstring(name)==L"/json/list"?"targets":"upgrade");}
+static BOOL option(HINTERNET,DWORD,LPVOID,DWORD){return TRUE;}
+static BOOL timeouts(HINTERNET,int,int,int,int){return TRUE;}
+static BOOL sendRequest(HINTERNET,LPCWSTR,DWORD,LPVOID,DWORD,DWORD,DWORD_PTR){return TRUE;}
+static BOOL response(HINTERNET,LPVOID){return TRUE;}
+static BOOL headers(HINTERNET h,DWORD,LPCWSTR,LPVOID value,LPDWORD,LPDWORD){std::lock_guard<std::mutex> lock(mx);*static_cast<DWORD*>(value)=handles.at(h)->kind=="targets"?200:101;return TRUE;}
+static BOOL read(HINTERNET h,LPVOID buffer,DWORD size,LPDWORD count){
+ std::lock_guard<std::mutex> lock(mx);auto& s=*handles.at(h);if(s.bodyRead){*count=0;return TRUE;}s.bodyRead=true;
+ const std::string data=R"([{"type":"page","title":"SharedJSContext","url":"https://steamloopback.host/","webSocketDebuggerUrl":"ws://127.0.0.1:8000/devtools/page/fixture"}])";
+ need(data.size()<=size,"target buffer too small");std::memcpy(buffer,data.data(),data.size());*count=static_cast<DWORD>(data.size());return TRUE;
+}
+static HINTERNET upgrade(HINTERNET,DWORD_PTR){auto h=create("socket");if(position=="pre-send")cancelScope();return h;}
+static DWORD socketSend(HINTERNET,WINHTTP_WEB_SOCKET_BUFFER_TYPE,PVOID,DWORD){++sends;return NO_ERROR;}
+static DWORD queryCloseStatus(HINTERNET,USHORT*,PVOID,DWORD,DWORD*){need(false,"unexpected websocket close frame");return ERROR_INVALID_FUNCTION;}
+static DWORD socketReceive(HINTERNET h,PVOID buffer,DWORD size,LPDWORD count,WINHTTP_WEB_SOCKET_BUFFER_TYPE* kind){
+ if(position=="after-send"||blockReceive)cancelScope();
+ if(blockReceive){std::unique_lock<std::mutex> lock(mx);auto state=handles.at(h);cv.wait(lock,[&]{return state->closed;});return ERROR_WINHTTP_OPERATION_CANCELLED;}
+ const auto data=json{{"id",1},{"result",{{"result",{{"value",{{"ok",true},{"runtimeAccepted",true},{"mutated",true},{"actionAcknowledged",true},{"reason","owned-response"}}}}}}}}.dump();
+ need(data.size()<=size,"response buffer too small");std::memcpy(buffer,data.data(),data.size());*count=static_cast<DWORD>(data.size());*kind=WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE;return NO_ERROR;
+}
+}
+struct WatchdogWitness {
+ HANDLE handle=nullptr;
+ void bind(std::thread& thread){need(DuplicateHandle(GetCurrentProcess(),reinterpret_cast<HANDLE>(thread.native_handle()),GetCurrentProcess(),&handle,SYNCHRONIZE,FALSE,0)!=0,"watchdog handle duplicate failed");}
+ ~WatchdogWitness(){if(handle){if(WaitForSingleObject(handle,0)==WAIT_OBJECT_0)++watchdogsJoined;CloseHandle(handle);}}
+};
+#define WinHttpCloseHandle Ports::close
+#define WinHttpOpen Ports::open
+#define WinHttpConnect Ports::connect
+#define WinHttpOpenRequest Ports::request
+#define WinHttpSetOption Ports::option
+#define WinHttpSetTimeouts Ports::timeouts
+#define WinHttpSendRequest Ports::sendRequest
+#define WinHttpReceiveResponse Ports::response
+#define WinHttpQueryHeaders Ports::headers
+#define WinHttpReadData Ports::read
+#define WinHttpWebSocketCompleteUpgrade Ports::upgrade
+#define WinHttpWebSocketSend Ports::socketSend
+#define WinHttpWebSocketReceive Ports::socketReceive
+#define WinHttpWebSocketQueryCloseStatus Ports::queryCloseStatus
+namespace ymcc::steamlive {
+using Json=nlohmann::json;
+inline constexpr const char *kScript="ownedFixture",*kLightGamepadScript="ownedFixture",*kUiModeScript="ownedFixture";
+struct SteamProcessLease {
+ bool bound=false;
+ bool bind(const steamsession::Session& expected){return bound=expected.pid==501&&expected.created==502&&expected.root==L"owned-steam"&&expected.account==42;}
+ bool current()const{return bound;}
+};
+static std::vector<Endpoint> listeners(const std::wstring&,DWORD expected){listenersource::checkpoint();need(expected==501,"bound session pid was dropped");return {{601,8000,L"127.0.0.1"}};}
+static bool stillOwned(const std::wstring&,const Endpoint&,DWORD expected){return expected==501;}
+// ORIGINAL_TRANSPORT
+}
+static json steamLiveRequest(DWORD account,json request,const std::function<bool()>& admit={},const std::function<bool()>& current={},ymcc::steamcommand::Disposition* disposition=nullptr){
+ const auto proof=request.at("sleepSessionProcess");
+ ymcc::steamsession::Session expected;expected.account=account;expected.pid=proof.at("pid").get<DWORD>();expected.created=std::stoull(proof.at("created").get<std::string>());const auto root=proof.at("root").get<std::string>();expected.root.assign(root.begin(),root.end());
+ request["account"]=account;
+ const auto run=sourceMutation?ymcc::steamlive::runLeaky:ymcc::steamlive::run;
+ return run(expected.root,request,admit,0,current,&expected,disposition,ymcc::steamlive::ModeTransportWait::Immediate,nullptr);
+}
+static std::string W2U(const std::wstring& text){return std::string(text.begin(),text.end());}
+static bool focusQueryProcessIdentity(DWORD pid,std::wstring* path,ULONGLONG* created){if(path)*path=L"owned-game.exe";if(created)*created=5678;return pid==1234;}
+static void sgRecordFact(const char*,const json&){}
+namespace SleepSteamRecovery {
+using namespace ymcc::sleeprecovery;
+using ymcc::sleeprecovery::decimal;
+static bool unsignedDecimal(const std::string& value,std::uint64_t& out){unsigned long long n=0;const bool ok=decimal(value,n);out=n;return ok;}
+// ORIGINAL_GAME
+// ORIGINAL_SESSION
+// ORIGINAL_FOREGROUND
+struct Captured {unsigned long long generation=7;Game game{1234,5678,L"owned-game.exe"};Session client;json targetSelection=json::object();};
+static Captured capture;
+static Captured capturedFor(unsigned long long){return capture;}
+static Session session(){return capture.client;}
+static bool sameGame(const Game& game){return game.pid==1234&&game.created==5678;}
+static bool sameSession(const Session& value){return value.pid==501&&value.created==502;}
+static bool gameNotPaused(const Game&){return true;}
+static bool sameClientEvidence(const json& a,const json& b){return a==b;}
+static bool nativePrimaryAllowsOriginal(const Session&,const Game&,std::uint32_t,bool){return true;}
+static Foreground foreground(const Game&,const Session&){return {nullptr,1234,5678,"original-game"};}
+static bool sameForeground(const Foreground&,const Game&,const Session&){return true;}
+static bool allowedForeground(const Foreground&){return true;}
+static json returnOriginalPidWindow(const Captured&,unsigned long long,const json&,const Foreground&,const std::function<bool()>&,const std::function<bool()>&){need(false,"unexpected OS return fallback");return {};}
+static json inspect(unsigned long long gen,const char* = nullptr){return {{"generation",gen},{"game",{{"pid",1234},{"created","5678"}}},{"steamClient",{{"pid",501},{"created","502"}}},{"tracker",{{"appid",123}}},{"steamRecovery",{{"repairable",true}}},{"steamInputRecovery",{{"repairable",true}}}};}
+// ORIGINAL_NATIVE_CALLERS
+}
+static void reset(){
+ need(Ports::remaining()==0,"prior handles not returned");g_exitRequested=false;g_sleepRecoveryAutoEnabled=true;g_powerGeneration=7;g_sleepRecoveryAutoConfigEpoch=5;g_powerLifecycle=PowerLifecycle::Ready;
+ sends=opens=closes=doubleCloses=watchdogsJoined=0;position.clear();cancellation.clear();blockReceive=false;cancellationAt=0;
+ SleepSteamRecovery::capture={};auto& client=SleepSteamRecovery::capture.client;client.account=42;client.pid=501;client.created=502;client.root=L"owned-steam";
+}
+static json invoke(const std::string& op){const auto input=SleepSteamRecovery::inspect(7);const auto current=[]{return sleepSteamRecoveryAllows(7,5)&&g_powerLifecycle==PowerLifecycle::Ready;};return op=="sleep.reconcile"?SleepSteamRecovery::reconcile(input,7,5,current):SleepSteamRecovery::resumeInputContext(input,7,5,current);}
+static json observation(const std::string& mode,const std::string& op,const json& reply){return {{"mode",mode},{"operation",op},{"position",position},{"cancel",cancellation},{"reply",reply},{"sends",sends.load()},{"opened",opens.load()},{"closed",closes.load()},{"handlesRemaining",Ports::remaining()},{"doubleCloses",doubleCloses.load()},{"watchdogsJoined",watchdogsJoined.load()}};}
+int main(int argc,char** argv){json rows=json::array(),controls=json::array();
+ try{
+  need(argc==4,"wire selection raw required");json wire;std::ifstream(argv[1])>>wire;sourceMutation=std::string(argv[2])=="transport-negative";std::ofstream raw(argv[3],std::ios::app);
+  ymcc::steamcommand::Coordinator coordinator;ymcc::steamcommand::Provider provider(coordinator);need(bool(provider),"test command provider was not installed");
+  for(const auto& mode:wire.at("modes"))for(const auto& op:{"sleep.reconcile","sleep.input-resume"})for(const auto& at:{"pre-send","after-send"})for(const auto& kind:{"off","power-generation","suspend","exit"}){
+   if(sourceMutation&&(mode.at("mode")!="global"||std::string(op)!="sleep.reconcile"||std::string(at)!="after-send"||std::string(kind)!="off"))continue;
+   reset();position=at;cancellation=kind;const auto reply=invoke(op);const auto row=observation(mode.at("mode"),op,reply);raw<<row.dump()<<'\n';raw.flush();rows.push_back(row);
+   need(Ports::remaining()==0,"actual transport retained owned socket handle");need(opens==closes&&doubleCloses==0&&watchdogsJoined==1,"transport handles/watchdog were not exactly returned");need(!reply.value("accepted",true),"retired native operation reported accepted");need(sends==(std::string(at)=="pre-send"?0u:1u),"unexpected actual message dispatch count");need(reply.value("mutated",true)==(std::string(at)=="after-send"),"dispatched uncertainty was lost or fabricated");
+  }
+  if(!sourceMutation){
+   for(const auto& mode:wire.at("modes"))for(const auto& op:{"sleep.reconcile","sleep.input-resume"}){reset();const auto reply=invoke(op);need(reply.value("accepted",false)&&sends==1&&Ports::remaining()==0&&watchdogsJoined==1,"current native operation did not complete");controls.push_back(observation(mode.at("mode"),op,reply));}
+   reset();blockReceive=true;cancellation="off";const auto started=GetTickCount64();const auto reply=invoke("sleep.reconcile");const auto elapsed=GetTickCount64()-started;auto row=observation("global","sleep.reconcile",reply);row["name"]="actual-default-16s-blocking-receive-deadline";row["elapsedMs"]=elapsed;controls.push_back(row);raw<<json{{"control",row}}.dump()<<'\n';raw.flush();
+   need(elapsed>=15000&&elapsed<17500,"default real socket watchdog deadline was not observed");need(!reply.value("accepted",true)&&reply.value("mutated",false)&&sends==1&&Ports::remaining()==0&&watchdogsJoined==1,"default deadline did not return uncertain sent operation and owned resources");
+  }
+  std::cout<<json{{"status","PASS"},{"rows",rows},{"controls",controls}}.dump()<<'\n';return 0;
+ }catch(const std::exception& error){const auto beforeCleanup=Ports::remaining();{std::lock_guard<std::mutex> lock(Ports::mx);Ports::handles.clear();}std::cout<<json{{"status","FAIL"},{"error",error.what()},{"rows",rows},{"controls",controls},{"testPortHandlesBeforeFailureCleanup",beforeCleanup},{"testPortHandlesAfterFailureCleanup",Ports::remaining()}}.dump()<<'\n';return 1;}
+}

@@ -32,16 +32,22 @@ template<class Ops> Result transaction(Ops& ops,const Request& request){
         if(!ops.acquire(request.elevated?10000:0)){result.code=11;result.detail="recovery-busy";return result;}
         struct Release{Ops&ops;~Release(){ops.release();}} release{ops};
         checkpoint();
-        if((!request.restart||request.recoverOnly)&&ops.healthy()){
+        const auto reuseHealthy=[&](){
+            if(request.restart&&!request.recoverOnly)return false;
+            if(!ops.healthy())return false;
             checkpoint();
             result.dataReady=true; // Health was proven even if an explicit period change is deferred.
-            if(request.period){result.code=12;result.detail="period-deferred-until-restart";return result;}
+            if(request.period){result.code=12;result.detail="period-deferred-until-restart";return true;}
             if constexpr(requires{ops.healthySensorPolicy(request);})result.sensorPolicy=ops.healthySensorPolicy(request);
-            checkpoint();ops.applyAffinity();result.dataReady=true;result.code=result.sensorPolicy.rfind("unconfirmed",0)==0?16:0;result.detail=result.code==16?"producer-ready-configuration-unconfirmed":"already-healthy";return result;
-        }
+            checkpoint();ops.applyAffinity();result.dataReady=true;result.code=result.sensorPolicy.rfind("unconfirmed",0)==0?16:0;result.detail=result.code==16?"producer-ready-configuration-unconfirmed":"already-healthy";return true;
+        };
+        if(reuseHealthy())return result;
         const auto path=ops.resolve(request.executable);
         if(path.empty())throw Error(2,"HWiNFO64.exe was not found");
         ops.prepare(path,request); // Validate policy/config before stopping.
+        // Configuration validation may be delayed while a starved producer
+        // resumes on its own. Reuse the original healthy contract before stop.
+        checkpoint();if(reuseHealthy())return result;
         checkpoint();ops.stop();
         checkpoint();ops.configure(path,request); // Re-read/merge after producer exit.
         checkpoint();result.sensorPolicy=ops.sensorBudget(path);

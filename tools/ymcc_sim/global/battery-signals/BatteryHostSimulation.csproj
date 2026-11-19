@@ -14,5 +14,10 @@
     <Compile Include="../../../../native/BatteryHostTests/Program.cs" Link="OriginalTests.cs" />
     <Compile Include="../../../../native/BatteryHostTests/MsiFixture.cs" Link="OriginalMsiFixtures.cs" />
     <Compile Include="../../../../native/BatteryHostTests/InProcessFixture.cs" Link="OriginalInProcessFixtures.cs" />
+    <Compile Include="../../../../native/BatteryHostTests/SuperXUmaChargeReaderFixture.cs" Link="OriginalSuperXUmaChargeReaderFixture.cs" />
+    <Compile Include="../../../../native/BatteryHostTests/SuperXChargeTransportFixture.cs" Link="OriginalSuperXChargeTransportFixture.cs" />
+    <Compile Include="../../../../native/BatteryHostTests/SuperXChargeLifecycleFixture.cs" Link="OriginalSuperXChargeLifecycleFixture.cs" />
+    <Compile Include="../../../../native/BatteryHostTests/SuperXChargeIdentityFixture.cs" Link="OriginalSuperXChargeIdentityFixture.cs" />
+    <Compile Include="../../../../native/BatteryHostTests/OneXFieldFeedbackFixture.cs" Link="OriginalOneXFieldFeedbackFixture.cs" />
   </ItemGroup>
 </Project>

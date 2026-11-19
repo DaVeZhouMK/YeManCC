@@ -56,9 +56,9 @@ export async function executeOriginalBundle(bundlePath, scratch, { timeoutMs = 3
   fs.mkdirSync(scratch, { recursive: true });
   fs.mkdirSync(path.join(scratch,'tmp'));
   const boundary = createIoBoundary(scratch), logs = [], handles = new Map();
-  let exitResolve, processExitObserved = false;
+  let exitResolve, processExitObserved = false, lastConsoleErrorLine = null, terminalErrorLine = null;
   const originalExit = new Promise(resolve => { exitResolve = resolve; });
-  const fakeProcess = { exit(code) { processExitObserved = true; fakeProcess.exitCode = Number.isInteger(code) ? code : 2; exitResolve(); }, argv: [process.execPath, bundlePath, scratch], env: { NODE_ENV: 'production' },
+  const fakeProcess = { exit(code) { processExitObserved = true; fakeProcess.exitCode = Number.isInteger(code) ? code : 2; terminalErrorLine = lastConsoleErrorLine; exitResolve(); }, argv: [process.execPath, bundlePath, scratch], env: { NODE_ENV: 'production' },
     versions: { node: process.versions.node }, version: process.version, platform: process.platform,
     cwd: () => scratch, pid: process.pid, exitCode: 0, nextTick: queueMicrotask };
   const clear = handle => {
@@ -79,7 +79,11 @@ export async function executeOriginalBundle(bundlePath, scratch, { timeoutMs = 3
     setImmediate: (fn, ...args) => once('immediate', fn, 0, ...args), clearImmediate: clear,
     setTimeout: (fn, ms, ...args) => once('timeout', fn, ms, ...args), clearTimeout: clear,
     setInterval: (fn, ms, ...args) => { const handle = setInterval(fn, ms, ...args); handles.set(handle, 'interval'); return handle; }, clearInterval: clear,
-    console: Object.fromEntries(['log','warn','error'].map(name => [name, (...values) => logs.push(values.map(String).join(' '))])),
+    console: Object.fromEntries(['log','warn','error'].map(name => [name, (...values) => {
+      const text = values.map(String).join(' ');
+      lastConsoleErrorLine = name === 'error' ? text.split(/\r?\n/, 1)[0] : null;
+      return logs.push(text);
+    }])),
     fetch() { boundary.observation.networkAttempts++; throw Error('TDP_FIXTURE_NETWORK_FORBIDDEN'); },
   }, { codeGeneration: { strings: false, wasm: false } });
   context.global = context;
@@ -92,6 +96,6 @@ export async function executeOriginalBundle(bundlePath, scratch, { timeoutMs = 3
   const reportPath = path.join(scratch, 'report.json');
   let report = null;
   if (fs.existsSync(reportPath)) report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-  return { exitCode: fakeProcess.exitCode, processExitObserved, thrown, reportPath, report, boundary: boundary.observation, logs,
+  return { exitCode: fakeProcess.exitCode, processExitObserved, thrown, reportPath, report, boundary: boundary.observation, logs, terminalErrorLine,
     execution: 'Original unchanged void-main suite signaled its own process.exit after cleanup in the reviewed VM; product IPC is the original fixture, not an OS process.' };
 }

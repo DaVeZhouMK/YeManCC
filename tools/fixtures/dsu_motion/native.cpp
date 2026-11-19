@@ -1,3 +1,5 @@
+#include "sleep_power_state.h"
+#include "touch_haptic_dispatch.h"
 #define NOMINMAX
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -34,6 +36,8 @@ static bool msiControllerNeutralCleanupAllowed(bool){return false;}
 static bool msiDinputMainSourceEligible(){return true;}
 // @@SNAPSHOT_TYPE@@
 static const InputCaptureGamepadSnapshot* t_commonFrameSource=nullptr;
+static struct ControlledLegionBinding {bool known()const noexcept{return true;}std::uint64_t token()const noexcept{return 1;}} controlledLegionBinding;
+static auto legionMotionModelBinding()noexcept{return controlledLegionBinding;}
 // @@FUNCTIONS@@
 extern "C" {void dsu_publish(const ds::Frame&);void dsu_feed(bool,float,float,float,float,float,float,uint16_t,float,float,float,float,uint8_t,uint8_t);
 size_t dsu_encode_pad_data_for_test(uint8_t*,size_t,int,uint64_t);void dsu_fixture_init();
@@ -48,6 +52,9 @@ static constexpr int kTickCostPreHostDsu=0;
 static struct {uint64_t dsuUs=0;} g_tickPreHostSub;
 struct TickPreHostSubScope {TickPreHostSubScope(int,uint64_t*){}};
 static void dsuUiOutputNote(bool,bool){}
+// This codec and source oracle drives its own frame inputs. Actual registration,
+// epoch retirement and the first UDP frame are exercised by dsu_lifecycle.
+static bool publishOracleFrame(std::uint64_t,ds::Frame&& frame){dsu_publish(frame);return true;}
 struct FocusNeutralDsu {bool hasMotion=false;float gx=0,gy=0,gz=0,ax=0,ay=0,az=0;uint16_t buttons=0;float lx=32768,ly=32768,rx=32768,ry=32768;uint8_t lt=0,rt=0;};
 static FocusNeutralDsu focusIsolationNeutralDsu(){return {};}
 static unsigned checks=0,failures=0;
@@ -69,13 +76,17 @@ static void produce(const json& row){
     const bool live=true,gamepadMotionPlaneProven=row.at("motion"),dsuSubmitNeutral=row.at("neutral"),dsuUiNeutral=dsuSubmitNeutral;
     const bool frameSteeringYaw=row.at("yaw"),controllerMotionRoute=row.value("controller",false);
     const auto windowsMotionSensorOwner=owner;const uint64_t gyroBindingGeneration=11;
+    struct {ymcc::windows_motion::Stamp submission;}windowsSensorView;windowsSensorView.submission=ymcc::windows_motion::retain(owner,gyroBindingGeneration);
     std::optional<ymcc::legion_motion::Sample> controllerMotion;
-    if(controllerMotionRoute){controllerMotion.emplace();controllerMotion->context={1,5};controllerMotion->source={"fixture-controller",7,0};controllerMotion->capturedAt=GetTickCount64();}
+    if(controllerMotionRoute){controllerMotion.emplace();controllerMotion->context={1,5};controllerMotion->source={"fixture-controller",7,0};controllerMotion->source.capabilityToken=1;controllerMotion->capturedAt=GetTickCount64();}
     g_realStickTest.invertHorizontal=row.at("invertH");g_realStickTest.invertVertical=row.at("invertV");
     XINPUT_GAMEPAD canonicalPad{};canonicalPad.wButtons=row.at("buttons");const auto& sticks=row.at("sticks");
     canonicalPad.sThumbLX=sticks[0];canonicalPad.sThumbLY=sticks[1];canonicalPad.sThumbRX=sticks[2];canonicalPad.sThumbRY=sticks[3];canonicalPad.bLeftTrigger=row.at("lt");canonicalPad.bRightTrigger=row.at("rt");
     const auto focusMaskedButtons=canonicalPad.wButtons;
+    [[maybe_unused]] constexpr std::uint64_t dsuDemand=1;
+#define dsu_publish_for_demand publishOracleFrame
 // @@PRODUCER@@
+#undef dsu_publish_for_demand
     if(row.at("retirePhysical").get<bool>())power=2;
     if(row.at("retireMotion").get<bool>()){owner->activeBindingGeneration=12;g_legionMotionCaptureEpoch=8;}
     t_commonFrameSource=nullptr;

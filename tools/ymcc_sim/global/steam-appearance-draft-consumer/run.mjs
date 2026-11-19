@@ -59,7 +59,6 @@ export async function execute(outDir,{repoRoot=REPO,env=process.env}={}){
    const verification=fault?verifyNegative(trace,fault,proc.status):verifyPositive(read(rawFile),trace,proc.status);
    ownedSourceRows.push(...viewSources);stepResults.push({label,mutation,verification,rawOriginalReport:fs.existsSync(rawFile)?rawFile:null,observation:traceFile,producerSha256:hash(path.join(view,SPEC.producer)),productSha256:hash(path.join(view,SPEC.productSource)),transformInput:path.join(stepRoot,'transform-input.ts'),transformOutput:path.join(stepRoot,'transform-output.cjs')});
    write(path.join(stepRoot,'verification.json'),verification);
-   verifyBundledToolScope(context.authority,repoRoot);
   }
   const after=lockContext(repoRoot,{env});need(JSON.stringify(context)===JSON.stringify(after),'SOURCE_OR_TOOL_CHANGED_DURING_EXECUTION');
   write(path.join(root,'tool-scope-after.json'),after.authority);write(path.join(root,'source-after.json'),{selection:after.sourceSelection,sources:after.sources,helpers:after.helpers});

@@ -18,10 +18,12 @@ const production = [
   declarations,
   section('let steamRuntimeState =', '// Cached userdata'),
   section('let steamRuntimeLastCheck =', 'let selectedGameDirectories ='),
-  section('function applySteamRuntimeState(', 'function renderSteamTarget('),
+  section('function captureSteamClient(', 'function renderSteamTarget('),
   section('function isWorkspaceRecord(', 'function isBuiltinExcludedSteamTool('),
+  section('function normalizedUiPath(', '// These indexes belong'),
+  section('function captureSteamActionContext()', 'function closeSteamCommit()'),
   section('function steamAccounts()', 'function defaultSelectedDirectories()'),
-  section("let steamInstallPromptStatus = '';", 'function applySteamRuntimeState('),
+  section("let steamInstallPromptStatus = '';", 'function captureSteamClient('),
   section('function renderSteamTarget()', 'function renderArtworkRefreshControl()'),
   section('async function openLibraryView()', "$('#busy-cancel').addEventListener"),
   section("window.addEventListener('focus', () => {", '// Startup is a fast local snapshot refresh'),
@@ -33,7 +35,7 @@ function isStartupCall(expression) {
   if (!ts.isCallExpression(expression)) return false;
   if (ts.isPropertyAccessExpression(expression.expression)) return isStartupCall(expression.expression.expression);
   return ts.isIdentifier(expression.expression) && expression.expression.text === 'invoke' &&
-    expression.arguments.length === 1 && ts.isStringLiteral(expression.arguments[0]) &&
+    expression.arguments.length >= 1 && expression.arguments.length <= 2 && ts.isStringLiteral(expression.arguments[0]) &&
     expression.arguments[0].text === 'startup';
 }
 const startupStatements = syntax.statements.filter(statement =>
@@ -70,7 +72,13 @@ function harness(cached = negative(), accountReply = ready(), runtimeReply = () 
   const addEvent=(name,fn)=>{const previous=events.get(name);events.set(name,()=>{previous?.();fn();});};
   const schedule=fn=>timers.push(fn),cancel=id=>{if(id)timers[id-1]=null;};
   const context = vm.createContext({
-    snapshot: { steamAccounts: structuredClone(cached) },
+    snapshot: { dataRoot: 'G:\\LibraryA', steamAccounts: structuredClone(cached) },
+    silentRefreshClosed: false, silentRefreshEpoch: 0,
+    libraryOpenOwner: null, silentRenderPending: false,
+    libraryRenderAllowed: () => focused && !doc.hidden,
+    preserveNewerEditorMedia: snapshot => snapshot,
+    scheduleSilentRefresh() {},
+    reportUiError: (_name, error) => errors.push(error.message),
     selectedSteamTarget: { accountId: '', steamRoot: '' },
     $: selector => elements.get(selector),
     libraryNotice: elements.get('#in-steam-limitation'),
@@ -108,6 +116,16 @@ async function run(name, action) {
   try { await action(); cases.push({ name, passed: true }); }
   catch (error) { cases.push({ name, passed: false, error: error.stack }); }
 }
+await run('readonly-library-root-is-not-a-steam-account-result-error', async () => {
+  for (const reason of ['missing-root-record', 'unreadable-or-invalid-record']) {
+    const h = harness(ready(), {readOnly:true,dataRootReadiness:{status:'unknown',reason},steamAccounts:{accounts:[]}});
+    await h.context.refreshSteamAccountDiscovery(true);
+    assert.match(h.get('steamAccountDiscovery.error'), /游戏库数据目录/);
+    assert.match(h.get('steamAccountDiscovery.error'), /Steam 账户尚未检测/);
+    assert.doesNotMatch(h.get('steamAccountDiscovery.error'), /账户检测结果无效/);
+    assert.equal(h.prompts.length,0);
+  }
+});
 for (const status of ['installed-no-account', 'not-installed', 'error']) {
   await run(`startup-does-not-publish-cached-${status}`, () => {
     const h = harness(negative(status)); h.context.renderSteamTarget();
@@ -150,7 +168,7 @@ await run('concurrent-and-forced-queries-coalesce', async () => {
 });
 await run('older-game-snapshot-cannot-restore-false-negative', async () => {
   const h = harness(); await h.context.refreshSteamAccountDiscovery();
-  h.context.snapshot = { steamAccounts: negative() }; h.context.renderSteamTarget();
+  h.context.snapshot = { ...h.context.snapshot, steamAccounts: negative() }; h.context.renderSteamTarget();
   assert.match(h.copy.textContent, /已发现 1 个/);
   assert.equal(h.context.steamAccounts().length, 1);
   assert.equal(h.limitation.classList.contains('hidden'), true);
@@ -187,6 +205,55 @@ await run('focus-refresh-is-rate-limited-and-recovers-after-login', async () => 
 await run('manual-retry-bypasses-focus-rate-limit', async () => {
   const h = harness(); await h.context.refreshSteamAccountDiscovery();
   await h.context.refreshSteamAccountDiscovery(true); assert.equal(h.calls.length, 2);
+});
+await run('old-root-account-reply-does-not-update-new-root', async () => {
+  const reply = deferred(); const h = harness(negative(), () => reply.promise);
+  const stale = h.context.refreshSteamAccountDiscovery(); await flush();
+  h.context.snapshot = { dataRoot: 'G:\\LibraryB', steamAccounts: negative() };
+  reply.resolve(ready(2)); await stale;
+  assert.equal(h.context.snapshot.steamAccounts.accounts.length, 0);
+  assert.equal(h.context.steamAccounts().length, 0);
+});
+await run('new-root-account-request-does-not-join-retired-request', async () => {
+  const first = deferred(), second = deferred(); let attempts = 0;
+  const h = harness(negative(), () => (++attempts === 1 ? first.promise : second.promise));
+  const previous = h.context.refreshSteamAccountDiscovery(); await flush();
+  h.context.snapshot = { dataRoot: 'G:\\LibraryB', steamAccounts: negative() };
+  const current = h.context.refreshSteamAccountDiscovery(); await flush();
+  assert.notEqual(current, previous); assert.equal(attempts, 2);
+  first.reject(Error('old root timed out')); await previous;
+  assert.equal(h.get('steamAccountRequest'), current);
+  second.resolve(ready(1)); await current;
+  assert.equal(h.context.steamAccounts().length, 1);
+  assert.match(h.copy.textContent, /已发现 1 个/);
+});
+await run('account-cache-rate-limit-applies-only-to-current-root', async () => {
+  const h = harness(negative(), ready(2)); await h.context.refreshSteamAccountDiscovery();
+  h.context.snapshot = { dataRoot: 'g:/librarya/', steamAccounts: negative() };
+  await h.context.refreshSteamAccountDiscovery(); assert.equal(h.calls.length, 1);
+  h.context.snapshot = { dataRoot: 'G:\\LibraryB', steamAccounts: negative() };
+  h.context.renderSteamTarget();
+  assert.equal(h.context.steamAccounts().length, 0); assert.equal(h.copy.textContent, '正在检测 Steam 账户');
+  await h.context.refreshSteamAccountDiscovery(); assert.equal(h.calls.length, 2);
+});
+await run('retired-account-page-drops-install-prompt-and-cache', async () => {
+  let reply = negative('not-installed'); const h = harness(negative(), () => Promise.resolve(reply));
+  await h.context.refreshSteamAccountDiscovery(); const stalePrompt = h.timers[0];
+  h.context.silentRefreshEpoch++; h.context.silentRefreshClosed = true;
+  await stalePrompt(); assert.equal(h.prompts.length, 0);
+  h.context.silentRefreshClosed = false; reply = ready();
+  await h.context.refreshSteamAccountDiscovery(); assert.equal(h.calls.length, 2);
+  assert.match(h.copy.textContent, /已发现 1 个/);
+});
+await run('late-current-page-install-confirmation-cannot-open-after-root-switch', async () => {
+  const confirm = deferred(); const h = harness(negative(), negative('not-installed'));
+  let entered = false;
+  h.context.askConfirm = () => { entered = true; return confirm.promise; };
+  await h.context.refreshSteamAccountDiscovery();
+  const prompt = h.timers[0](); await flush(); assert.equal(entered, true);
+  h.context.snapshot = { dataRoot: 'G:\\LibraryB', steamAccounts: negative() };
+  confirm.resolve(true); await prompt;
+  assert.equal(h.calls.includes('openSteamWebsite'), false);
 });
 await run('multiple-account-targets-retain-all-users', async () => {
   const h = harness(negative(), ready(2)); await h.context.refreshSteamAccountDiscovery();

@@ -22,6 +22,7 @@ export const getPowerBtnIdx=async(ac:boolean)=>ac?state.acButton:state.dcButton;
 export const setPowerBtnIdx=async(ac:boolean,index:number)=>{state[ac?'acButton':'dcButton']=index;trace(ac?'acButton':'dcButton',index)};
 export const getActiveScheme=async()=>state.scheme;
 export const reactivateCurrentScheme=async()=>{};
+export const captureSleepPowerWrite=()=>({powerAdmission:{expectedPowerGeneration:1,expectedPowerNotificationSequence:0}});
 export const readHibernateState=async()=>({supportedKnown:true,supported:true,enabledKnown:true,enabled:state.hibernate});
 export const setHibernate=async(value:boolean)=>{state.hibernate=value;trace('hibernate',value);return {exitCode:0}};
 export const readHibernateSize=async()=>state.size;
@@ -44,8 +45,10 @@ async function staticWakeAction(action:'scan'|'restore',requestId:string){
   if(staticWake.holdReply)await new Promise<void>(resolve=>{staticWake.releaseReply=resolve});
   return result;
 }
-export const scanStaticWakeSources=(requestId:string)=>staticWakeAction('scan',requestId);
-export const restoreStaticWakeSources=(requestId:string)=>staticWakeAction('restore',requestId);
+export interface StaticWakeAdmission { expectedPowerGeneration:number; expectedPowerNotificationSequence:number; }
+export const captureStaticWakeAdmission=():StaticWakeAdmission=>({expectedPowerGeneration:1,expectedPowerNotificationSequence:0});
+export const scanStaticWakeSources=(requestId:string,_admission:StaticWakeAdmission)=>staticWakeAction('scan',requestId);
+export const restoreStaticWakeSources=(requestId:string,_admission:StaticWakeAdmission)=>staticWakeAction('restore',requestId);
 export const getStaticWakeAutoScanEnabled=async()=>{staticWake.preferenceReads++;const snapshot=state.staticWakeAutoScanEnabled;if(staticWake.holdPreferenceRead)await new Promise<void>(resolve=>{staticWake.preferenceReadReleases.push(resolve)});return snapshot};
 export const setStaticWakeAutoScanEnabled=async(value:boolean)=>{staticWake.preferenceWrites.push(value);if(staticWake.holdAutoScanSave)await new Promise<void>(resolve=>{staticWake.releaseAutoScanSave=resolve});if(staticWake.failAutoScanSave)throw Error('memory auto scan preference save refused');state.staticWakeAutoScanEnabled=value;trace('staticWakeAutoScanEnabled',value)};
 export const getSleepPowerPlanOptimizationEnabled=async()=>state.plan;

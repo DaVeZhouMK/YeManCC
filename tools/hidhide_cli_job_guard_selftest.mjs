@@ -6,9 +6,11 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 const started=Date.now();
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const args=process.argv.slice(2),trackingOnly=args.includes('--tracking-only');
-const positional=args.filter(arg=>arg!=='--tracking-only');
-assert(positional.length===4&&positional[0]==='--out'&&positional[2]==='--toolchain'&&path.isAbsolute(positional[1])&&path.isAbsolute(positional[3]),'Use --out ABS_FRESH_PRIVATE_DIRECTORY --toolchain ABS_CAPTURED_TOOLCHAIN [--tracking-only]');
+const args=process.argv.slice(2),trackingOnly=args.includes('--tracking-only'),bindingLaunchOnly=args.includes('--binding-launch-only');
+assert(!(trackingOnly&&bindingLaunchOnly),'Choose one explicit selection');
+assert(args.filter(a=>a==='--binding-launch-only').length<=1,'Do not duplicate binding-launch selection');
+const positional=args.filter(arg=>arg!=='--tracking-only'&&arg!=='--binding-launch-only');
+assert(positional.length===4&&positional[0]==='--out'&&positional[2]==='--toolchain'&&path.isAbsolute(positional[1])&&path.isAbsolute(positional[3]),'Use --out ABS_FRESH_PRIVATE_DIRECTORY --toolchain ABS_CAPTURED_TOOLCHAIN [--tracking-only | --binding-launch-only]');
 const out=path.resolve(positional[1]),toolchain=path.resolve(positional[3]),relative=path.relative(repo,out);
 assert(relative.startsWith('..'+path.sep)||path.isAbsolute(relative),'Private evidence must stay outside product repository');
 assert(!fs.existsSync(out),'Never overwrite prior evidence/failures');fs.mkdirSync(out,{recursive:true});
@@ -32,10 +34,13 @@ const identities=[cl,link,dump,process.execPath].map(file=>{
  return {path:file,sha256:sha(file)};
 });
 const byTool=new Map(manifest.files.map(f=>[path.resolve(f.frozen).toLowerCase(),f]));
-const variants=[{name:'Release',flags:['/O2']},...trackingOnly?[]:[{name:'Checked',flags:['/Od','/RTC1']}],
+const legacyVariants=[{name:'Release',flags:['/O2']},...trackingOnly?[]:[{name:'Checked',flags:['/Od','/RTC1']}],
  {name:'negative-no-atomic-association',originalVariant:'negative-no-job-list',flags:['/O2'],before:'if(!UpdateProcThreadAttribute(candidate->startup.lpAttributeList,0,PROC_THREAD_ATTRIBUTE_JOB_LIST,',after:'if(false&&!UpdateProcThreadAttribute(candidate->startup.lpAttributeList,0,PROC_THREAD_ATTRIBUTE_JOB_LIST,',requiredCase:'crash/ExitProcess-kills-child-before-late-write'},
  {name:'negative-no-kill-on-close',flags:['/O2'],before:'limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;',after:'limits.BasicLimitInformation.LimitFlags=0;',requiredCase:'crash/ExitProcess-kills-child-before-late-write'}];
-save(path.join(out,'PLAN.json'),{canonicalEntry:'tools/hidhide_cli_job_guard_selftest.mjs',trackingOnly,variants:variants.map(v=>({name:v.name,originalVariant:v.originalVariant,flags:v.flags})),execution:'actual current product JobGuard and this original private fixture; no cached execution',scope:'tracked JOB_LIST/HANDLE_LIST plus inherited private share-zero owner lease, legacy death control and original semantic mutants',queryJobLifeline:'NOT_RUN',jobAbsence:'UNKNOWN; never an idle proof',buildTimeoutMs:60000,runTimeoutMs:60000});
+const variants=bindingLaunchOnly?[{name:'Release',flags:['/O2']}]:legacyVariants;
+const bindingLaunchCases=bindingLaunchOnly?[...snapshots.get('tools/fixtures/hidhide_cli_job_guard/fixture.cpp').toString('utf8').matchAll(/run\("(binding-launch\/[^"]+)"/g)].map(m=>m[1]):[];
+assert(!bindingLaunchOnly||(bindingLaunchCases.length===10&&new Set(bindingLaunchCases).size===10),'Exact original binding-launch case set required');
+save(path.join(out,'PLAN.json'),{canonicalEntry:'tools/hidhide_cli_job_guard_selftest.mjs',trackingOnly,bindingLaunchOnly,selectedCaseNames:bindingLaunchOnly?bindingLaunchCases:undefined,variants:variants.map(v=>({name:v.name,originalVariant:v.originalVariant,flags:v.flags})),execution:'actual current product JobGuard and this original private fixture; no cached execution',scope:bindingLaunchOnly?'ten original LaunchScope binding-hint cases; two owned inert helpers; no original default/legacy/mutant groups':'tracked JOB_LIST/HANDLE_LIST plus inherited private share-zero owner lease, legacy death control and original semantic mutants',queryJobLifeline:'NOT_RUN',jobAbsence:'UNKNOWN; never an idle proof',buildTimeoutMs:60000,runTimeoutMs:60000});
 const results=[];
 try{
  for(const variant of variants){
@@ -57,21 +62,25 @@ try{
   const dlls=[...new Set([...imports.stdout.matchAll(/^\s+([A-Za-z0-9_.-]+\.dll)\s*$/gm)].map(m=>m[1].toLowerCase()))];assert.deepEqual(dlls,['kernel32.dll'],'No device/SDK/product imports');
   save(path.join(dir,'COMPILE-CLOSURE.json'),{inputs:compiled,unbound:[],toolIdentities:identities,binarySha256:sha(exe),staticImportedDlls:dlls,scope:'Static imports only; real private process/job/file/event/pipe APIs are expected, no device/product APIs.'});
   const closureMs=Date.now()-closureStart,terminal=path.join(dir,'RESULT.json');
-  const runArgs=[path.join(dir,'files'),terminal,...variant.before&&trackingOnly?['--default-negative-only']:trackingOnly?['--tracking-only']:[]];
+  const runArgs=[path.join(dir,'files'),terminal,...(bindingLaunchOnly?['--binding-launch-only']:variant.before&&trackingOnly?['--default-negative-only']:trackingOnly?['--tracking-only']:[])];
   const runStart=Date.now(),ran=spawnSync(exe,runArgs,{cwd:dir,env,encoding:'utf8',windowsHide:true,timeout:60000,maxBuffer:16*1024*1024});const runMs=Date.now()-runStart;
   fs.writeFileSync(path.join(dir,'run.log'),(ran.stdout??'')+(ran.stderr??''));save(path.join(dir,'RUN-COMMAND.json'),{executable:exe,arguments:runArgs,exit:ran.status,error:ran.error?.message,runMs});
   assert(fs.existsSync(terminal),'Terminal report required; unsupported OS is never a pass');const report=json(terminal);
   assert(!report.failures.some(f=>f.assertion.startsWith('fixture-exception:')),'Setup/OS/fixture exceptions never count as semantic detection');
   let accepted;
   if(variant.before){accepted=ran.status===1&&report.failures.some(f=>f.case===variant.requiredCase);assert(accepted,'Required original crash assertions must catch compiled mutant');}
-  else{
-   const crash=report.processObservations.find(o=>o.case==='crash/ExitProcess-kills-child-before-late-write');
+   else if(bindingLaunchOnly){
+    assert.deepEqual(report.cases.map(c=>c.name).sort(),[...bindingLaunchCases].sort(),'Exact selected original case set');
+    accepted=ran.status===0&&report.pass&&report.bindingLaunchOnly===true&&report.ownFixtureProcessesSpawnedByObserver===2&&report.jobTerminationUsed===false&&report.processCensusUsed===false&&report.archiveOrObserverUsed===false&&report.deviceApiCalls===0&&report.realCliOrHostLaunched===false;
+   }
+   else{
+    const crash=report.processObservations.find(o=>o.case==='crash/ExitProcess-kills-child-before-late-write');
    accepted=ran.status===0&&report.pass&&crash?.childExitConfirmedBeforeLateWriteRequest&&!crash?.lateWriteExecuted&&!crash?.observerHoldsJobHandle&&!crash?.cleanupJobUsed;
   }
   const receipt={variant:variant.name,originalVariant:variant.originalVariant,pass:variant.before?undefined:report.pass,accepted,expectedSemanticFailure:!!variant.before,executedThisRun:true,caseCount:report.caseCount,assertions:report.assertions,failures:report.failures.length,notExecutedCases:report.notExecutedCases,compilerInputs:compiled.length,binarySha256:sha(exe),result:terminal,timingMs:{build:buildMs,closure:closureMs,execute:runMs,total:Date.now()-variantStart}};
   results.push(receipt);console.log(JSON.stringify(receipt));
  }
  const sourceDrift=inputs.filter(f=>sha(f.path)!==f.sha256),pass=sourceDrift.length===0&&results.every(r=>r.accepted);
- save(path.join(out,'RESULT.json'),{pass,trackingOnly,results,inputs,sourceDrift,toolchain:{path:toolchain,manifestSha256:sha(path.join(toolchain,'toolchain-manifest.json')),identities},totalMs:Date.now()-started,realPrivateJobProcesses:true,observerHoldsJobHandleBeforeParentDeath:false,cleanupJobUsed:false,deviceApiCalls:0,realCliOrHostLaunched:false,mainIntegrated:false,queryJobLifelineExperiment:'NOT_RUN',jobAbsenceIsIdleProof:false,scope:'private controlled consumer of actual product JobGuard; file lease exclusion is independent writer quiet proof only, not full job idle or device recovery'});
+ save(path.join(out,'RESULT.json'),{pass,trackingOnly,bindingLaunchOnly,results,inputs,sourceDrift,toolchain:{path:toolchain,manifestSha256:sha(path.join(toolchain,'toolchain-manifest.json')),identities},totalMs:Date.now()-started,realPrivateJobProcesses:true,observerHoldsJobHandleBeforeParentDeath:false,cleanupJobUsed:false,deviceApiCalls:0,realCliOrHostLaunched:false,mainIntegrated:false,queryJobLifelineExperiment:'NOT_RUN',jobAbsenceIsIdleProof:false,scope:'private controlled consumer of actual product JobGuard; file lease exclusion is independent writer quiet proof only, not full job idle or device recovery'});
  process.exitCode=pass?0:1;
 }catch(error){save(path.join(out,'FAILED.json'),{pass:false,error:error.stack,results,inputs,totalMs:Date.now()-started});throw error;}

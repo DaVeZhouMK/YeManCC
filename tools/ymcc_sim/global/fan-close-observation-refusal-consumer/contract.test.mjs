@@ -12,3 +12,14 @@ test('natural no-native endpoint accepted; IO refusal/native bridge/live timers 
 test('incomplete stdout, compile diagnostics and timeout cannot claim behavioral fault',()=>{for(const alter of [row=>row.stdout='',row=>row.stdout='SyntaxError compile failure',row=>row.error='ETIMEDOUT']){const row=raw();alter(row);assert.throws(()=>verifyExecution(row,spec));}});
 test('only unique entry guard and original minified counter21 are accepted',()=>{assert.equal(mutateSource(spec.fault.before,spec.fault),spec.fault.after);assert.throws(()=>mutateSource('',spec.fault));assert.throws(()=>mutateSource(spec.fault.before+spec.fault.before,spec.fault));const original=fs.readFileSync(new URL('../../../../'+spec.original,import.meta.url),'utf8');assert.equal(verifyOriginalIdentityAssertion(original,spec).line,21);assert.throws(()=>verifyOriginalIdentityAssertion('\n'+original,spec));const wrong=structuredClone(spec);wrong.fault.expectedOriginalAssertionLine=20;assert.throws(()=>verifyReport(negative(),wrong,{fault:true}));});
 test('full no-message pinned Node assertion bytes independently generated',()=>{let rendered;try{assert.equal(1,0);}catch(error){rendered=String(error);}for(const row of spec.fault.expectedFailures)assert.equal(row.error,rendered);});
+test('aggregate compiler input count requires both verified worker arms',async()=>{
+ const {verifiedCompilerInputCount}=await import('./run.mjs');
+ const count=spec.buildInputs.length;
+ const worker={positive:{compilerInputs:count},negative:{compilerInputs:count}};
+ assert.equal(verifiedCompilerInputCount(worker,spec),count);
+ for(const [arm,code] of [['positive',/FAN_CLOSE_POSITIVE_COMPILER_INPUT_COUNT_MISMATCH/],['negative',/FAN_CLOSE_NEGATIVE_COMPILER_INPUT_COUNT_MISMATCH/]]){
+  for(const rejected of [undefined,{}, {compilerInputs:count-1},{compilerInputs:String(count)}]){
+   assert.throws(()=>verifiedCompilerInputCount({...worker,[arm]:rejected},spec),code);
+  }
+ }
+});

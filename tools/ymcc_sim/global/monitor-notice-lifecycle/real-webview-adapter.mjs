@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {SOURCE_MEMBERS,toolDeclaration,LIMIT} from '../../../fixtures/radial_private/scope.mjs';
+import {SOURCE_MEMBERS,toolDeclaration,REAL_MONITOR_RUNTIME_LIMIT as LIMIT} from '../../../fixtures/radial_private/scope.mjs';
 import {LIFECYCLE_GATE_SOURCES,normalizeLifecycleComponent} from '../capability-lifecycle/index.mjs';
 
 export const MODULE='tools/ymcc_sim/global/monitor-notice-lifecycle';
@@ -12,12 +12,12 @@ export const WEBVIEW_QUOTE_SOURCES=Object.freeze([
  'native/monitor_hud_input_policy.h','native/monitor_hud_panel_input.h',
  'native/monitor_hud_placement.h','native/monitor_hud_recovery.h',
  'native/monitor_hud_serialization.h','native/monitor_hud_visibility.h',
- 'native/screen_touchpad_input_surface.h','native/touch_haptic_dispatch.h',
+ 'native/screen_touchpad_input_surface.h','native/screen_touchpad_input_channel.h','native/touch_haptic_dispatch.h',
  MODULE+'/real-webview-selftest.cpp',
 ]);
 export const WEBVIEW_INPUTS=Object.freeze([...new Set([
  ...SOURCE_MEMBERS,...LIFECYCLE_GATE_SOURCES,...WEBVIEW_QUOTE_SOURCES,...ORIGINAL_ENTRIES,
- 'tsconfig.json',MODULE+'/real-webview-adapter.mjs',MODULE+'/real-webview-global.mjs',
+ 'tsconfig.json',MODULE+'/real-webview-adapter.mjs',MODULE+'/real-webview-global.mjs',MODULE+'/real-browser-ownership.mjs',
 ])]);
 export const WEBVIEW_COMPONENT=Object.freeze(normalizeLifecycleComponent({
  featureId:'monitor.notice-host',parentAdapterId:'lifecycle.monitor-notice-host',
@@ -32,7 +32,7 @@ const read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 const unique=files=>[...new Map(files.map(p=>[path.resolve(p).toLowerCase(),path.resolve(p)])).values()];
 /** Original tool authority remains authoritative; reviewed prepared inputs are explicit artifacts. */
 export function webViewToolDeclaration(repoRoot,env=process.env){
- const base=toolDeclaration(repoRoot);
+ const base=toolDeclaration(repoRoot,{entry:ORIGINAL_ENTRIES[0]});
  if(base.blockedReason)return base;
  try{
   const root=env.YMCC_MONITOR_WEBVIEW_PREPARED_ROOT;

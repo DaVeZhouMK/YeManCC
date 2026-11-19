@@ -81,6 +81,7 @@ struct FakeOps {
     ULONGLONG clock = 100;
     DWORD lastError = 700, nextExit = 0;
     std::string fail;
+    tv::foreground::DeliveryReceipt foregroundReceipt;
     bool directory = false, autoComplete = true, terminateAccepted = true, terminateExits = true;
     std::map<std::string, ULONGLONG> cost;
     std::map<std::uintptr_t, Node> nodes;
@@ -166,6 +167,9 @@ struct FakeOps {
         if (pid == ASFW_ANY || found == nodes.end() || !found->second.job || !found->second.resumed || !found->second.ready || found->second.released) violations.push_back("foreground grant targeted non-owned or uninitialized/already-released process");
         if (fail == "allowForeground") { lastError = foregroundError; return false; }
         return true;
+    }
+    bool foregroundGrantKnownRejected()const noexcept {
+        return tv::foregroundGrantWasExplicitlyRejected(foregroundReceipt);
     }
     bool resume(HANDLE thread) noexcept {
         record("resume", thread); auto* t = owned(thread, Kind::Thread); if (!t) return false;
@@ -430,6 +434,47 @@ static void grantFailureCleanupDebt() {
     ops.markExited(ops.processes.front());ops.fail.clear();ops.terminateAccepted=true;ops.terminateExits=true;
     assertSuccess(request(dispatcher,ops,ops.clock+4500));ops.sound();
 }
+static void explicitGrantRejectionRequestsShellOnce() {
+    using Stage=tv::foreground::DeliveryStage;
+    for(unsigned value=0;value<=static_cast<unsigned>(Stage::InvalidReply);++value){
+        const auto stage=static_cast<Stage>(value);
+        const bool allowed=stage==Stage::ApiRejected||stage==Stage::ApiRejectedNoError;
+        check(tv::foregroundGrantWasExplicitlyRejected({stage,ERROR_ACCESS_DENIED})==allowed,"unknown delivery was treated as explicit API rejection");
+    }
+    check(!tv::foregroundGrantWasExplicitlyRejected({Stage::ApiRejected,0}),"contradictory rejection receipt was accepted");
+    check(!tv::foregroundGrantWasExplicitlyRejected({Stage::ApiRejectedNoError,ERROR_INVALID_PARAMETER}),"invalid no-error receipt was accepted");
+    for(const auto stage:{Stage::ApiRejected,Stage::ApiRejectedNoError})for(const DWORD exitCodeValue:{DWORD(0),DWORD(E_ACCESSDENIED)}){
+        tv::Dispatcher dispatcher;FakeOps ops;ops.fail="allowForeground";ops.nextExit=exitCodeValue;ops.foregroundReceipt={stage,ERROR_ACCESS_DENIED};
+        const auto result=request(dispatcher,ops,ops.clock+4500);
+        check(result.status==(exitCodeValue?tv::Status::ApiFailed:tv::Status::Requested)&&result.executionReleased&&result.helperExitKnown&&result.helperExitCode==exitCodeValue,"known grant rejection suppressed Shell or invented its result");
+        check(result.foregroundGrantAttempted&&!result.foregroundGrantAccepted&&result.foregroundGrantError==FakeOps::foregroundError,"best-effort path erased actual grant rejection");
+        check(ops.count("start")==1&&ops.count("allowForeground")==1&&ops.count("release")==1&&ops.count("terminate")==0,"best-effort path replayed Shell or input");
+        check(position(ops,"ready")<position(ops,"allowForeground")&&position(ops,"allowForeground")<position(ops,"release"),"best-effort path skipped ready or grant attempt");ops.sound();
+    }
+    for(const char* boundary:{"deadline","cancel","timeout","cleanup-debt"}){
+        tv::Dispatcher dispatcher;FakeOps ops;ops.fail="allowForeground";ops.foregroundReceipt={Stage::ApiRejected,ERROR_ACCESS_DENIED};
+        const std::string mode=boundary;
+        if(mode=="deadline")ops.cost["allowForeground"]=4500;
+        if(mode=="timeout"||mode=="cleanup-debt")ops.autoComplete=false;
+        if(mode=="cleanup-debt"){ops.terminateAccepted=false;ops.terminateExits=false;}
+        wchar_t command[]=L"\"fixture helper.exe\" --task-view";
+        const auto result=dispatcher.request(ops,L"fixture helper.exe",command,ops.clock+4500,[&]{return mode!="cancel"||!ops.count("allowForeground");});
+        if(mode=="deadline"||mode=="cancel"){
+            check(!result.executionReleased&&ops.count("release")==0,"grant rejection crossed cancelled or expired request");
+            check(result.status==(mode=="deadline"?tv::Status::Expired:tv::Status::Cancelled),"grant rejection replaced cancellation status");ops.sound();
+        }else{
+            check(result.executionReleased&&ops.count("release")==1&&result.status!=(tv::Status::Requested),"unknown Shell completion was replayed or reported successful");
+            if(mode=="cleanup-debt"){
+                check(result.cleanupRetained&&!result.cleanupVerified,"released helper cleanup debt disappeared");
+                const auto next=request(dispatcher,ops,ops.clock+4500);
+                check(next.status==tv::Status::CleanupUnproven&&ops.count("start")==1&&ops.count("release")==1,"cleanup debt allowed another Shell request");
+                ops.sound(false);ops.markExited(ops.processes.front());ops.fail.clear();ops.autoComplete=true;ops.terminateAccepted=ops.terminateExits=true;
+                assertSuccess(request(dispatcher,ops,ops.clock+4500));
+            }
+            ops.sound();
+        }
+    }
+}
 static void grantConsumesDeadline() {
     tv::Dispatcher dispatcher; FakeOps ops; ops.cost["allowForeground"] = 5;
     const auto result = request(dispatcher,ops,ops.clock + 5);
@@ -602,8 +647,23 @@ int main() {
     runCase("remaining-deadline-and-3000-call-budget-boundaries",waitBudgetBoundaries);
     runCase("ready-timeout-exit-and-release-failure",readinessFailures);
     runCase("ready-shares-helper-call-budget",readinessConsumesCallBudget);
+    runCase("power-or-owner-context-cancels-before-shell-release",[]{
+        for(const char* phase:{"entry","after-start","after-ready","after-grant"}) {
+            tv::Dispatcher dispatcher;FakeOps ops;
+            wchar_t command[]=L"\"fixture helper.exe\" --task-view";
+            auto current=[&]{return std::string(phase)!="entry"&&
+                !(std::string(phase)=="after-start"&&ops.count("start"))&&
+                !(std::string(phase)=="after-ready"&&ops.count("ready"))&&
+                !(std::string(phase)=="after-grant"&&ops.count("allowForeground"));};
+            const auto result=dispatcher.request(ops,L"fixture helper.exe",command,ops.clock+4500,current);
+            check(result.status==tv::Status::Cancelled&&result.errorHint==ERROR_CANCELLED,"stale context not rejected");
+            check(!result.executionReleased&&ops.count("release")==0,"stale request reached Shell");
+            check(!result.helperStarted||result.cleanupVerified,"stale owned helper not cleaned");ops.sound();
+        }
+    });
     runCase("foreground-grant-failure-never-releases-shell-and-retry",grantFailureKeepsUi);
     runCase("foreground-grant-failed-cleanup-debt-blocks-next-helper",grantFailureCleanupDebt);
+    runCase("explicit-api-grant-rejection-still-requests-shell-once",explicitGrantRejectionRequestsShellOnce);
     runCase("foreground-grant-consumes-deadline-no-shell-release",grantConsumesDeadline);
     runCase("resume-crosses-deadline-zero-call-wait",resumeConsumesRemainder);
     runCase("one-ms-request-plus-500-cleanup-budget",cleanupUsesRemainder);

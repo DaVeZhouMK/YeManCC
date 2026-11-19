@@ -129,6 +129,14 @@ class GlobalReader {
     bool have_ = false, confirmed_ = false;
 public:
     void reset() { path_.clear(); text_.clear(); scratch_.clear(); parsed_ = {}; observed_ = 0; have_ = confirmed_ = false; }
+    bool confirmed() const { return confirmed_; }
+    // Only the change-notification owner below may renew this observation
+    // without reading bytes. A missing/broken watch is not unchanged proof.
+    Limit reuseConfirmed(long long now, ULONGLONG tick) {
+        if (now <= 0 || !confirmed_ || tick < observed_ || tick - observed_ > 5000) return {};
+        observed_ = tick;
+        return parsed_.valid ? Limit{true, parsed_.fps, now} : Limit{};
+    }
     Limit sample(const std::wstring& path, long long now, ULONGLONG tick) {
         if (now <= 0 || path.empty()) { reset(); return {}; }
         if (path != path_) { reset(); path_ = path; }
@@ -156,6 +164,82 @@ public:
     Limit sample(long long now, ULONGLONG tick) {
         const auto path = globalPath(); auto result = sample(path, now, tick);
         if (path != globalPath()) { reset(); return {}; } // concurrent directory change
+        return result;
+    }
+};
+
+// The configured cap changes at YMCC's explicit RTSS write/reload boundaries,
+// not with the game's measured FPS. Observe file changes on the existing
+// monitor thread; a quiet tick performs no file open, read or metadata query.
+// The 30s fallback covers delayed/missed notifications and directory changes.
+// No recursive scan, worker, timer, SDK call or configuration write is added.
+class ChangeDrivenReader {
+    static constexpr ULONGLONG fallbackMs = 30000;
+    GlobalReader reader_;
+    std::wstring path_;
+    HANDLE change_ = INVALID_HANDLE_VALUE;
+    Limit cached_{};
+    ULONGLONG lastTick_ = 0, nextProbe_ = 0;
+    unsigned attempts_ = 0;
+    bool haveTick_ = false;
+    void closeWatch() {
+        if (change_ != INVALID_HANDLE_VALUE) FindCloseChangeNotification(change_);
+        change_ = INVALID_HANDLE_VALUE;
+    }
+    void armWatch() {
+        const auto slash = path_.find_last_of(L"\\/");
+        if (slash == std::wstring::npos) return;
+        change_ = FindFirstChangeNotificationW(path_.substr(0, slash).c_str(), FALSE,
+            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
+            FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE);
+    }
+    bool changed() {
+        if (change_ == INVALID_HANDLE_VALUE) return false;
+        const auto wait = WaitForSingleObject(change_, 0);
+        if (wait == WAIT_TIMEOUT) return false;
+        // Rearm before any subsequent read, so a write during that read still
+        // invalidates it. Failed notification state cannot renew a cached cap.
+        if (wait != WAIT_OBJECT_0 || !FindNextChangeNotification(change_)) closeWatch();
+        return true;
+    }
+    void invalidate(ULONGLONG next) {
+        reader_.reset(); cached_ = {}; attempts_ = 0; nextProbe_ = next;
+    }
+public:
+    ChangeDrivenReader() = default;
+    ~ChangeDrivenReader() { closeWatch(); }
+    ChangeDrivenReader(const ChangeDrivenReader&) = delete;
+    ChangeDrivenReader& operator=(const ChangeDrivenReader&) = delete;
+    void reset() {
+        closeWatch(); reader_.reset(); path_.clear(); cached_ = {};
+        lastTick_ = nextProbe_ = 0; attempts_ = 0; haveTick_ = false;
+    }
+    Limit sample(const std::wstring& path, long long now, ULONGLONG tick) {
+        if (now <= 0 || path.empty()) { reset(); return {}; }
+        if (path != path_ || (haveTick_ && (tick < lastTick_ || tick - lastTick_ > 5000))) {
+            reset(); path_ = path; nextProbe_ = tick;
+        }
+        lastTick_ = tick; haveTick_ = true;
+        if (change_ == INVALID_HANDLE_VALUE && tick >= nextProbe_) armWatch();
+        if (changed()) invalidate(tick);
+        if (tick < nextProbe_) {
+            if (change_ != INVALID_HANDLE_VALUE && reader_.confirmed())
+                cached_ = reader_.reuseConfirmed(now, tick);
+            // Without a watch retain the actual read timestamp; stale/unknown
+            // remains subject to the existing six-second consumer expiry.
+            return cached_;
+        }
+        cached_ = reader_.sample(path, now, tick);
+        ++attempts_;
+        if (reader_.confirmed() || attempts_ >= 2) {
+            nextProbe_ = tick + fallbackMs; attempts_ = 0;
+        } else nextProbe_ = tick + 1000;
+        if (changed()) { invalidate(tick + 1000); return {}; }
+        return cached_;
+    }
+    Limit sample(long long now, ULONGLONG tick) {
+        const auto path = globalPath(); auto result = sample(path, now, tick);
+        if (path != globalPath()) { reset(); return {}; }
         return result;
     }
 };

@@ -1,0 +1,660 @@
+{
+  "schemaVersion": 1,
+  "kind": "CURRENT_CAPTURE_TERMINAL26_SOURCE_DERIVED_NEGATIVE_EXPECTATIONS_V1",
+  "managedInputContract": "current105-terminal26-sdk-lifetime-compact-v1",
+  "nativeSourceProfile": "current105-terminal26-current-capture-20261117a",
+  "sourceCaptureManifestSha256": "03bc36a4c6546e3a1d0ba505aa12aa8cd2c22da0249291ef4b7b66f58897eee9",
+  "sourceReviewSha256": "843b76d462063958e0753fdd58e483fc37f222d6611694bfa46f0abfca340804",
+  "expectations": {
+    "cancellation": {
+      "role": "cancellation",
+      "managedInputContract": "current105-terminal26-sdk-lifetime-compact-v1",
+      "mutation": "rollback-cancellation-guards",
+      "expectedExit": 1,
+      "expectedStatus": "FAIL",
+      "cases": 118,
+      "uniqueNames": 116,
+      "checks": 7280,
+      "expectedOwnedChildren": 124,
+      "traceIdentitySha256": "51739f5509d11172f912b49113f2d014f3da5f206780d7b8d39e52afd573edb9",
+      "exactFailures": [
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"fresh normal input after cancellation cannot reach Host frame terminal\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "fresh normal input after cancellation cannot reach Host frame terminal",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1227,
+          "passed": false,
+          "sourceOrdinal": 10
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"normal input without capture TLS cannot bypass actual user OFF or changed persona\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "normal input without capture TLS cannot bypass actual user OFF or changed persona",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1228,
+          "passed": false,
+          "sourceOrdinal": 10
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"actual RECREATE primitive refuses changed admission at send boundary\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1231,
+          "passed": false,
+          "sourceOrdinal": 10
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1237,
+          "passed": false,
+          "sourceOrdinal": 10
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"actual coordinated target count matches single prepare or explicit in-process replacement\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1257,
+          "passed": false,
+          "sourceOrdinal": 10
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge\",1,\"actual RECREATE primitive refuses changed admission at send boundary\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1398,
+          "passed": false,
+          "sourceOrdinal": 12
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1401,
+          "passed": false,
+          "sourceOrdinal": 12
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge\",1,\"actual coordinated target count matches single prepare or explicit in-process replacement\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1444,
+          "passed": false,
+          "sourceOrdinal": 12
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"fresh normal input after cancellation cannot reach Host frame terminal\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "fresh normal input after cancellation cannot reach Host frame terminal",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1606,
+          "passed": false,
+          "sourceOrdinal": 14
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"normal input without capture TLS cannot bypass actual user OFF or changed persona\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "normal input without capture TLS cannot bypass actual user OFF or changed persona",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1607,
+          "passed": false,
+          "sourceOrdinal": 14
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"actual RECREATE primitive refuses changed admission at send boundary\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1610,
+          "passed": false,
+          "sourceOrdinal": 14
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1613,
+          "passed": false,
+          "sourceOrdinal": 14
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"old Edge Host closes naturally without stale-query recreation before requested persona replacement starts\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "old Edge Host closes naturally without stale-query recreation before requested persona replacement starts",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1619,
+          "passed": false,
+          "sourceOrdinal": 14
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge\",1,\"new target generation invalidates a slow observation even when instance names are reused\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "new target generation invalidates a slow observation even when instance names are reused",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1935,
+          "passed": false,
+          "sourceOrdinal": 17
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge\",1,\"new target requires its own fresh ownership query and no second recreate\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "new target requires its own fresh ownership query and no second recreate",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1937,
+          "passed": false,
+          "sourceOrdinal": 17
+        }
+      ],
+      "requiredOriginalPassingInstances": [
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"cancelled query cannot mark rebuilt or rearm its retired request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance",
+          "checkIndex": 1238,
+          "passed": true,
+          "sourceOrdinal": 10
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge\",1,\"cancelled query cannot mark rebuilt or rearm its retired request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance",
+          "checkIndex": 1303,
+          "passed": true,
+          "sourceOrdinal": 11
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge\",1,\"cancelled query cannot mark rebuilt or rearm its retired request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance",
+          "checkIndex": 1402,
+          "passed": true,
+          "sourceOrdinal": 12
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance",
+          "checkIndex": 1496,
+          "passed": true,
+          "sourceOrdinal": 13
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge\",1,\"older endpoint query cannot clear or rebuild a newer pending PS request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "older endpoint query cannot clear or rebuild a newer pending PS request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance",
+          "checkIndex": 1497,
+          "passed": true,
+          "sourceOrdinal": 13
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge\",1,\"newer PS request requires its own fresh query before reusing existing target\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "newer PS request requires its own fresh query before reusing existing target",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance",
+          "checkIndex": 1499,
+          "passed": true,
+          "sourceOrdinal": 13
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge\",1,\"actual coordinated target count matches single prepare or explicit in-process replacement\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance",
+          "checkIndex": 1541,
+          "passed": true,
+          "sourceOrdinal": 13
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"cancelled query cannot mark rebuilt or rearm its retired request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance",
+          "checkIndex": 1614,
+          "passed": true,
+          "sourceOrdinal": 14
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance",
+          "checkIndex": 1757,
+          "passed": true,
+          "sourceOrdinal": 15
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge\",1,\"cancelled query cannot mark rebuilt or rearm its retired request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance",
+          "checkIndex": 1758,
+          "passed": true,
+          "sourceOrdinal": 15
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge\",1,\"actual coordinated target count matches single prepare or explicit in-process replacement\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance",
+          "checkIndex": 1802,
+          "passed": true,
+          "sourceOrdinal": 15
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge\",1,\"actual RECREATE primitive refuses changed admission at send boundary\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+          "assertionOccurrence": 1,
+          "origin": "current retained target-return contextCurrent exit-fence blocks before actual wire",
+          "checkIndex": 1299,
+          "passed": true,
+          "sourceOrdinal": 11
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "current retained target-return contextCurrent exit-fence blocks before actual wire",
+          "checkIndex": 1302,
+          "passed": true,
+          "sourceOrdinal": 11
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge\",1,\"actual coordinated target count matches single prepare or explicit in-process replacement\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+          "assertionOccurrence": 1,
+          "origin": "current retained target-return contextCurrent exit-fence blocks before actual wire",
+          "checkIndex": 1345,
+          "passed": true,
+          "sourceOrdinal": 11
+        }
+      ],
+      "boundaries": {
+        "pre": {
+          "ordinal": 102,
+          "checks": 6662,
+          "lastCaseName": "OFF-LIFECYCLE/expired-OFF-after-expired-new-ON",
+          "msiModeDebt": false
+        },
+        "post": {
+          "ordinal": 118,
+          "checks": 7280,
+          "lastCaseName": "OFF-LIFECYCLE/MSI-return-unproven",
+          "msiModeDebt": true
+        }
+      }
+    },
+    "psOwnership": {
+      "role": "psOwnership",
+      "managedInputContract": "current105-terminal26-sdk-lifetime-compact-v1",
+      "mutation": "rollback-ps-endpoint-ownership",
+      "expectedExit": 1,
+      "expectedStatus": "FAIL",
+      "cases": 118,
+      "uniqueNames": 116,
+      "checks": 7274,
+      "expectedOwnedChildren": 124,
+      "traceIdentitySha256": "b3ecc578c17baff0c8faf9c21922bedda9989bc4de8954239520b7b23b8ad5ea",
+      "exactFailures": [
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/none/dualsense-edge\",1,\"same-profile peer or retired endpoint cannot prove current owned PS readiness\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1103,
+          "passed": false,
+          "sourceOrdinal": 9
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/none/dualsense-edge\",1,\"same-profile unowned observation defers without clearing recovery or rebuilding beside a peer\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1104,
+          "passed": false,
+          "sourceOrdinal": 9
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/none/dualsense-edge\",1,\"same-profile peer or retired endpoint cannot prove current owned PS readiness\",2]",
+          "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+          "assertionOccurrence": 2,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1106,
+          "passed": false,
+          "sourceOrdinal": 9
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/none/dualsense-edge\",1,\"same-profile unowned observation defers without clearing recovery or rebuilding beside a peer\",2]",
+          "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+          "assertionOccurrence": 2,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1107,
+          "passed": false,
+          "sourceOrdinal": 9
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge\",1,\"same-profile peer or retired endpoint cannot prove current owned PS readiness\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 2031,
+          "passed": false,
+          "sourceOrdinal": 18
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge\",1,\"same-profile unowned observation defers without clearing recovery or rebuilding beside a peer\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 2032,
+          "passed": false,
+          "sourceOrdinal": 18
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge\",1,\"same-profile peer or retired endpoint cannot prove current owned PS readiness\",2]",
+          "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+          "assertionOccurrence": 2,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 2034,
+          "passed": false,
+          "sourceOrdinal": 18
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge\",1,\"same-profile unowned observation defers without clearing recovery or rebuilding beside a peer\",2]",
+          "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+          "assertionOccurrence": 2,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 2035,
+          "passed": false,
+          "sourceOrdinal": 18
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",12]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 12,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 5491,
+          "passed": false,
+          "sourceOrdinal": 83
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",13]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 13,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 5494,
+          "passed": false,
+          "sourceOrdinal": 83
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",15]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 15,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 5500,
+          "passed": false,
+          "sourceOrdinal": 83
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",16]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 16,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 5503,
+          "passed": false,
+          "sourceOrdinal": 83
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",17]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 17,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 5506,
+          "passed": false,
+          "sourceOrdinal": 83
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",18]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 18,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 5509,
+          "passed": false,
+          "sourceOrdinal": 83
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0\",1,\"actual owned-PS reader establishes the independent old-target witness before quarantine dispatch\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "nameOccurrence": 1,
+          "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 5946,
+          "passed": false,
+          "sourceOrdinal": 92
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0\",1,\"complete owned-PS absence allows the actual deferred restore and exact old tuple retirement\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "nameOccurrence": 1,
+          "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 5948,
+          "passed": false,
+          "sourceOrdinal": 92
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1\",1,\"actual owned-PS reader establishes the independent old-target witness before quarantine dispatch\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "nameOccurrence": 1,
+          "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 6152,
+          "passed": false,
+          "sourceOrdinal": 96
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1\",1,\"complete owned-PS absence allows the actual deferred restore and exact old tuple retirement\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "nameOccurrence": 1,
+          "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 6154,
+          "passed": false,
+          "sourceOrdinal": 96
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0\",1,\"qualified PS quarantine return consumes its exact durable target duty before tuple clear\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "nameOccurrence": 1,
+          "assertion": "qualified PS quarantine return consumes its exact durable target duty before tuple clear",
+          "assertionOccurrence": 1,
+          "origin": "current ps_return_cases durable target-duty assertion in original expected Foreign branch",
+          "checkIndex": 5949,
+          "passed": false,
+          "sourceOrdinal": 92
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1\",1,\"qualified PS quarantine return consumes its exact durable target duty before tuple clear\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "nameOccurrence": 1,
+          "assertion": "qualified PS quarantine return consumes its exact durable target duty before tuple clear",
+          "assertionOccurrence": 1,
+          "origin": "current ps_return_cases durable target-duty assertion in original expected Foreign branch",
+          "checkIndex": 6155,
+          "passed": false,
+          "sourceOrdinal": 96
+        }
+      ],
+      "requiredOriginalPassingInstances": [],
+      "boundaries": {
+        "pre": {
+          "ordinal": 102,
+          "checks": 6656,
+          "lastCaseName": "OFF-LIFECYCLE/expired-OFF-after-expired-new-ON",
+          "msiModeDebt": false
+        },
+        "post": {
+          "ordinal": 118,
+          "checks": 7274,
+          "lastCaseName": "OFF-LIFECYCLE/MSI-return-unproven",
+          "msiModeDebt": true
+        }
+      }
+    },
+    "psBinding": {
+      "role": "psBinding",
+      "managedInputContract": "current105-terminal26-sdk-lifetime-compact-v1",
+      "mutation": "rollback-ps-binding-revision",
+      "expectedExit": 1,
+      "expectedStatus": "FAIL",
+      "cases": 118,
+      "uniqueNames": 116,
+      "checks": 7274,
+      "expectedOwnedChildren": 124,
+      "traceIdentitySha256": "b3ecc578c17baff0c8faf9c21922bedda9989bc4de8954239520b7b23b8ad5ea",
+      "exactFailures": [
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge\",1,\"new target generation invalidates a slow observation even when instance names are reused\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "new target generation invalidates a slow observation even when instance names are reused",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1929,
+          "passed": false,
+          "sourceOrdinal": 17
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge\",1,\"new target requires its own fresh ownership query and no second recreate\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "new target requires its own fresh ownership query and no second recreate",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance",
+          "checkIndex": 1931,
+          "passed": false,
+          "sourceOrdinal": 17
+        }
+      ],
+      "requiredOriginalPassingInstances": [],
+      "boundaries": {
+        "pre": {
+          "ordinal": 102,
+          "checks": 6656,
+          "lastCaseName": "OFF-LIFECYCLE/expired-OFF-after-expired-new-ON",
+          "msiModeDebt": false
+        },
+        "post": {
+          "ordinal": 118,
+          "checks": 7274,
+          "lastCaseName": "OFF-LIFECYCLE/MSI-return-unproven",
+          "msiModeDebt": true
+        }
+      }
+    }
+  },
+  "meaning": "Exact semantic expectations for this fixed software source capture only. Source, compiler, process and resource authority require their own real binding; no installed/current moving mainline or full-parent approval."
+}

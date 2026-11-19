@@ -107,3 +107,46 @@ aliases cannot be uniquely recovered; large-window future ambiguity and same-ms
 cutover ordering remain helper limitations (equal queue ticks are refused; later ticks can resume). Tests use the
 actual bounded production age window and do not establish real clock, PBT, HID,
 firmware, scheduling or hardware guarantees. The stable helper is read-only.
+
+
+## Explicit RAWINPUT dispatcher boundary mode
+
+`node tools/legion_motion_consumer_selftest.mjs --raw-packet-only --prepare-only --out <fresh-core-evidence-directory>`
+extracts the complete actual `gamepadDispatchRawInput`, records exact source offsets
+and bytes, copies the selected harness, and returns passed=false with zero compiler
+and business starts. Unknown, duplicate, empty, or old-mode options are rejected.
+The default 31-scenario entry and all its original mutants remain independent.
+
+For actual bounded execution add `--raw-python <absolute-embedded-python.exe>`,
+`--raw-declarations <JSON>`, and `--raw-deadline <epoch-ms>`; omit --prepare-only.
+The declaration contains compiler, finite environment, and sources/tools arrays
+of absolute path/bytes/sha256. It must predeclare all actual MSVC14.44.35207 and
+SDK10.0.26100.0 inputs, libraries, compiler tools, Python and PowerShell runtime.
+Actual sourceDependencies and verbose linker inputs must all match before pins.
+Unknown actual inputs fail before business execution, never receive post-only pins.
+TEMP/TMP stay inside the fresh G output. Every compiler/business process uses the
+original host-process RawProgram atomic owned Job and checks zero before disposal;
+verified VCTIP cleanup remains separately labelled, never called natural product exit.
+
+Raw mode runs Release and Checked normal cases with diagnostics enabled and both
+observed/unobserved diagnostic paths, then the smallest named insufficient-retry
+and final-bounds semantic controls and one diagnostics-disabled compile only.
+For a failed parent, explicit --raw-phase remaining-controls runs only those two
+negative boundaries plus diagnostic-off compilation; --raw-phase final-bounds-suffix
+runs just the final-bounds case in Release/Checked and its single guard negative.
+These directed suffixes do not assert that a failed earlier parent passed.
+
+Eight parameterized original consumer cases check real Windows RAWINPUT ABI,
+the existing aligned1024-byte buffer, exact GetRawInputData calls/capacities/data,
+receipt-before-read, negative-cache eval/default cleanup, identity->physical->ROG
+->eval order, keyboard modifier/edge order and down/up/repeat suppression, header
+and size-query failures, short/zero/oversized reads, and bounded insufficient retry.
+The final boundary includes fast reads and recovery reads returning zero/short/
+oversized/UINT_MAX lengths; malformed payloads cannot publish stale buffer content.
+Diagnostic counters are checked against the actually called query/read leaves.
+
+API, scopes, identity, capture, gyro, keyboard, gamepadEval and cleanup effects are
+controlled memory leaves. These tests do not prove leaf internals, actual devices,
+Windows input delivery, Host behavior, real CPU benefit, full native build or deployment.
+No canonical ID, module minimum, timer, worker, background sampler or product setting
+is added. Raw mode does not run the old 31-scenario regression or its whole mutants.

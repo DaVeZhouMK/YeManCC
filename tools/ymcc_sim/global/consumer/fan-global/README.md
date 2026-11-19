@@ -36,4 +36,6 @@ $env:YMCC_FAN_GLOBAL_UNIT_ROOT = '<owned work directory>'
 node --test tools/ymcc_sim/global/consumer/fan-global/runner.test.mjs
 ```
 
-These validate failed/missing evidence and launch only tiny owned Node guard probes. No Host or network is used. `adapter-suggestion.json` supplies one reviewed adapter object for the parent; this directory does not edit global CLI/registry or sleep entries.
+Receipt assertions require the actual result; guard probes require the explicit owned work directory and retain their per-probe receipts there. With `--test-name-pattern`, only the selected assertions acquire their inputs. The five guard probes can run without an existing fan result, and receipt-only selection does not create a work directory. A full invocation still requires both inputs. A guard-only run does not prove any of the five original product suites passed.
+
+No Host or network is used. `adapter-suggestion.json` supplies one reviewed adapter object for the parent; this directory does not edit global CLI/registry or sleep entries.

@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include "custom-steam-library/custom_steam_library_paths.h"
 #include <cstdint>
 #include <chrono>
 #include <string>
@@ -24,12 +25,12 @@ inline bool ownedName(const std::filesystem::path& path) {
 // Called only for queued work or publication, never by a resident scan timer.
 inline Snapshot inspect(const std::filesystem::path& root, size_t maxEntries = 8192) {
     namespace fs = std::filesystem;
-    Snapshot result; std::error_code ec; auto existing = root;
+    Snapshot result; std::error_code ec; auto existing = custom_steam_library::ioPath(root);
     for(size_t n = 0; n < 64 && !existing.empty() && !fs::exists(existing, ec); ++n) {
         const auto parent = existing.parent_path(); if(parent == existing) break; existing = parent; ec.clear();
     }
     if(!existing.empty()) { const auto space = fs::space(existing, ec); if(!ec) { result.diskKnown = true; result.available = space.available; } }
-    ec.clear(); const auto folder = root / L"artwork" / L"video";
+    ec.clear(); const auto folder = custom_steam_library::ioPath(root / L"artwork" / L"video");
     if(!fs::exists(folder, ec)) { result.cacheKnown = !ec; return result; }
     size_t visited = 0; fs::directory_iterator it(folder, ec), end;
     if(ec) { result.cacheKnown = false; return result; }
@@ -62,12 +63,25 @@ inline void require(const std::filesystem::path& root, uint64_t incoming, bool a
 // A live request is bounded to two minutes; use a full day before reclamation.
 inline size_t collectTemporary(const std::filesystem::path& root, size_t maxEntries = 8192) {
     namespace fs = std::filesystem; std::error_code ec; size_t visited = 0, removed = 0;
-    for(fs::directory_iterator it(root / L"cache" / L"jobs" / L"game-media", ec), end; !ec && it != end && visited < maxEntries; it.increment(ec), ++visited) {
+    // A queue ownership record delegates this directory to its original
+    // PID/birth-aware cleanup. This generic legacy collector cannot validate
+    // that record or infer that an unreadable/future one has no active owner.
+    const auto ownership = custom_steam_library::ioPath(root / L"config" / L"game-media-download-temporary.json");
+    const auto queued = fs::symlink_status(ownership, ec);
+    if(ec && ec != std::errc::no_such_file_or_directory) return 0;
+    if(!ec && queued.type() != fs::file_type::not_found) return 0; ec.clear();
+    for(fs::directory_iterator it(custom_steam_library::ioPath(root / L"cache" / L"jobs" / L"game-media"), ec), end; !ec && it != end && visited < maxEntries; it.increment(ec), ++visited) {
         if(it->is_symlink(ec) || !it->is_regular_file(ec)) continue;
         const auto name = it->path().filename().wstring();
         if(name.size() <= 32 || name.substr(0, 32).find_first_not_of(L"0123456789abcdef") != std::wstring::npos) continue;
         const auto suffix = name.substr(32); if(suffix != L".part" && suffix != L".part.segment") continue;
         const auto stamp = it->last_write_time(ec); if(ec || fs::file_time_type::clock::now() - stamp < std::chrono::hours(24)) continue;
+        // The download consumer owns protocol and identity validation. Even
+        // malformed or future checkpoints must keep their original bytes.
+        const auto metadata = it->path().parent_path() / (name.substr(0, 32) + L".resume.json");
+        const auto checkpoint = fs::symlink_status(custom_steam_library::ioPath(metadata), ec);
+        if((ec && ec != std::errc::no_such_file_or_directory) || (!ec && checkpoint.type() != fs::file_type::not_found)) { ec.clear(); continue; }
+        ec.clear();
         if(fs::remove(it->path(), ec)) ++removed; ec.clear();
     }
     return removed;

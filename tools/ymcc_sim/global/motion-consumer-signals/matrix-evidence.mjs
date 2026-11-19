@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import {extract} from '../../../fixtures/legion_motion_consumer/extract_main.mjs';
 import {closeBrace} from '../../../fixtures/hc_remaining_model_capabilities/expectations.mjs';
 import {hashFile,readJson,ownedFile,ownedTree,inside} from './evidence.mjs';
-import {validHash,validCount} from './contracts.mjs';
+import {validHash,validCount,MAX_RAW_REPORT_JSON_BYTES} from './contracts.mjs';
 
 export const MATRIX_CHECKER='tools/hc_motion_matrix_binding_selftest.mjs';
 export const MATRIX_PROBE='tools/fixtures/hc_model_motion_consumer/matrix_binding_probe.cpp';
@@ -55,14 +55,21 @@ export const MOTION_MD_PREREQUISITES=Object.freeze([
     "sha256": "0f7f2f05de9b472d3447aca287b8ef908a22f2997282a0fc799eadcb921f6a9c"
   }
 ].map(row=>Object.freeze(row)));
-export const MATRIX_TOOL_MANIFESTS=Object.freeze([
- MOTION_TOOL_ADDITIONS,
- 'tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json',
- 'tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json',
- 'tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json',
- 'tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json',
- 'tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json',
-]);
+// Archived manifests retain their original logical parent names and byte pins.
+// Only these two reads are redirected; the active sleep manifests are independent.
+const MATRIX_TOOL_CHAIN=[
+ [MOTION_TOOL_ADDITIONS],
+ ['tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json'],
+ ['tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json'],
+ ['tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json'],
+ ['tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json',
+  'tools/ymcc_sim/global/motion-consumer-signals/toolchain-sleep-non-user-wake.55c4c44.json',
+  'd48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004'],
+ ['tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json',
+  'tools/ymcc_sim/global/motion-consumer-signals/toolchain-sleep-native-recovery.55c4c44.json',
+  '1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7'],
+];
+export const MATRIX_TOOL_MANIFESTS=Object.freeze(MATRIX_TOOL_CHAIN.map(([logical,file=logical])=>file));
 export const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const key=file=>path.resolve(file).toLowerCase();
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
@@ -72,7 +79,7 @@ const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 export function validateMotionToolAdditions(spec){
  need(object(spec)&&spec.schemaVersion===1,'MATRIX_MOTION_TOOL_SCHEMA');
  need(Object.keys(spec).sort().join(',')==='additional,schemaVersion,sharedManifest,sharedManifestSha256','MATRIX_MOTION_TOOL_FIELDS');
- need(spec.sharedManifest===MATRIX_TOOL_MANIFESTS[1]&&spec.sharedManifestSha256===MOTION_TOOL_PARENT_SHA256,'MATRIX_MOTION_TOOL_PARENT_PIN');
+ need(spec.sharedManifest===MATRIX_TOOL_CHAIN[1][0]&&spec.sharedManifestSha256===MOTION_TOOL_PARENT_SHA256,'MATRIX_MOTION_TOOL_PARENT_PIN');
  need(Array.isArray(spec.additional)&&spec.additional.length===MOTION_MD_PREREQUISITES.length,'MATRIX_MOTION_TOOL_EIGHT_REQUIRED');
  const expected=new Map(MOTION_MD_PREREQUISITES.map(row=>[key(row.path),row.sha256])),seen=new Set();
  for(const row of spec.additional){
@@ -81,14 +88,21 @@ export function validateMotionToolAdditions(spec){
  return {schemaVersion:1,prerequisites:8,observedLinkInputs:false};
 }
 export function matrixToolchainInputs(repo){
- const files=new Map();let base;
+ const files=new Map();let base,parentPin;
  for(let i=0;i<MATRIX_TOOL_MANIFESTS.length;i++){
-  const spec=readJson(path.join(repo,MATRIX_TOOL_MANIFESTS[i]));
+  const file=path.join(repo,MATRIX_TOOL_MANIFESTS[i]);
+  need(fs.statSync(file).size<=MAX_RAW_REPORT_JSON_BYTES,'MOTION_JSON_SIZE_LIMIT');
+  const bytes=fs.readFileSync(file);
+  need(bytes.length<=MAX_RAW_REPORT_JSON_BYTES,'MOTION_JSON_SIZE_LIMIT');
+  if(parentPin!==undefined)need(sha(bytes)===parentPin,'MATRIX_TOOL_MANIFEST_HASH');
+  const spec=JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/,''));
   need(spec.schemaVersion===1,'MATRIX_TOOL_MANIFEST_SCHEMA');
   if(i===0)validateMotionToolAdditions(spec);
-  if(i+1<MATRIX_TOOL_MANIFESTS.length){
-   need(spec.sharedManifest===MATRIX_TOOL_MANIFESTS[i+1],'MATRIX_TOOL_MANIFEST_CHAIN');
-   if(spec.sharedManifestSha256!==undefined)need(hashFile(path.join(repo,spec.sharedManifest))===spec.sharedManifestSha256,'MATRIX_TOOL_MANIFEST_HASH');
+  if(i+1<MATRIX_TOOL_CHAIN.length){
+   const [logical,,fixedPin]=MATRIX_TOOL_CHAIN[i+1];
+   need(spec.sharedManifest===logical,'MATRIX_TOOL_MANIFEST_CHAIN');
+   parentPin=spec.sharedManifestSha256;
+   if(fixedPin!==undefined)need(parentPin===fixedPin,'MATRIX_TOOL_MANIFEST_HASH');
   }else{need(!spec.sharedManifest&&Array.isArray(spec.files),'MATRIX_TOOL_MANIFEST_BASE');base=spec;}
   for(const row of [...(spec.files??[]),...(spec.additional??[])]){
    need(object(row)&&typeof row.path==='string'&&path.isAbsolute(row.path)&&!/[\0\r\n]/.test(row.path)&&validHash(row.sha256),'MATRIX_TOOL_MEMBER_INVALID');
@@ -97,7 +111,7 @@ export function matrixToolchainInputs(repo){
  }
  need(files.size>=574,'MATRIX_COMPLETE_TOOL_ALLOWLIST_REQUIRED');
  need(files.size===582,'MATRIX_MOTION_COMPLETE_TOOL_ALLOWLIST_REQUIRED');
- return {files:[...files.values()],nodeExecutable:base.nodeExecutable,cmdExecutable:base.cmdExecutable,vcvars64:base.vcvars64,declaredOnly:true};
+ return {files:[...files.values()],nodeExecutable:base.nodeExecutable,cmdExecutable:base.cmdExecutable,vcvars64:base.vcvars64,powershellExecutable:base.powershellExecutable,declaredOnly:true};
 }
 export function assertMatrixProcess(call){
  need(object(call)&&Number.isSafeInteger(call.pid)&&call.pid>0&&call.exitCode===0&&call.timedOut===false&&call.signal===null&&call.launchError===null&&call.outputTruncated===false&&Number.isFinite(call.durationMs)&&call.durationMs>=0,'MATRIX_CHECKER_PROCESS_FAILED');

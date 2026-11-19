@@ -42,8 +42,16 @@ inline void standaloneCancel() {
     standalonePending.store(0,std::memory_order_release);
     standaloneStatus.store(StandaloneStatus::Idle,std::memory_order_release);
 }
+// Explicit Steam pair is independent of the virtual persona. Native PS/Xbox
+// choices retain their original report route; rear buttons are always mapped.
+inline bool directSpecialButton(const Config& cfg,int index) {
+    const int profile=activeProfile.load();
+    return index>=1 && index<=2 && (cfg.standaloneSpecialMode==StandaloneSpecialMode::SteamDeck || profile==0 || profile==1);
+}
 inline bool standaloneCurrent(UINT_PTR generation) {
-    return generation==standaloneGeneration.load(std::memory_order_acquire) && activeProfile.load()==0 && appliedProfile.load()==0;
+    const int profile=activeProfile.load();
+    return generation==standaloneGeneration.load(std::memory_order_acquire) && profile==appliedProfile.load() &&
+        (profile==0 || getConfig().standaloneSpecialMode==StandaloneSpecialMode::SteamDeck || (profile==1 && available.load(std::memory_order_acquire)));
 }
 inline void standaloneFinish(UINT_PTR generation,StandaloneStatus status) {
     std::lock_guard<std::mutex> lock(standaloneMutex);
@@ -55,7 +63,8 @@ inline void standaloneFinish(UINT_PTR generation,StandaloneStatus status) {
     if(HWND parent=owner.load())PostMessageW(parent,kStandaloneResultMessage,generation,0);
 }
 inline void standaloneDispatch(const Config& cfg,int index) {
-    const auto action=standaloneAction(cfg.standaloneSpecialMode,index);
+    const auto mode=activeProfile.load()==1?StandaloneSpecialMode::SteamDeck:cfg.standaloneSpecialMode;
+    const auto action=standaloneAction(mode,index);
     UINT_PTR generation=0;
     {
         std::lock_guard<std::mutex> lock(standaloneMutex);

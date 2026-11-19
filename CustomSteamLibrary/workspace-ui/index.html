@@ -210,6 +210,18 @@
         </div>
       </section>
     </div>
+    <div id="steam-add-notice-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="steam-add-notice-title" aria-describedby="steam-add-notice-message">
+      <section class="modal-card">
+        <div class="modal-heading">
+          <h2 id="steam-add-notice-title">加入 Steam</h2>
+          <button id="steam-add-notice-close" class="icon-button" type="button" aria-label="返回">×</button>
+        </div>
+        <p id="steam-add-notice-message"></p>
+        <div class="modal-actions">
+          <button id="steam-add-notice-confirm" class="button steam" type="button">知道了</button>
+        </div>
+      </section>
+    </div>
     <div
       id="edit-modal"
       class="modal hidden"
@@ -289,12 +301,12 @@
                   id="edit-primary-block"
                   class="field hidden"
                   data-edit-row="primary"
-                  ><span>候选主程序</span
+                  ><span id="edit-primary-label">候选主程序</span
                   ><select
                     id="edit-primary-select"
                     aria-label="选择唯一主 EXE"
                     data-edit-row="primary"
-                  ></select></label
+                  ></select><span id="edit-native-primary" class="form-help hidden"></span></label
                 ><label class="field" data-edit-row="bucket"
                   ><span>页面归类</span
                   ><select
@@ -557,6 +569,6 @@
       ><span><span class="controller-key hint-b" data-controller-key="B">B</span> 返回</span
       ><span><span class="controller-key hint-x" data-controller-key="X">X</span> 编辑</span>
     </div>
-    <script src="app.js?v=20261104-media-status-priority"></script>
+    <script src="app.js?v=20261108-identity-history-recovery"></script>
   </body>
 </html>

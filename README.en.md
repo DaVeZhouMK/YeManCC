@@ -10,6 +10,10 @@ YeManCC (YMCC) is the open-source handheld console for YeMan System. Built aroun
 
 [Download the complete package](https://github.com/DaVeZhouMK/YeManCC/releases) · [Installation and build guide](docs/getting-started.en.md) · [Report an issue](https://github.com/DaVeZhouMK/YeManCC/issues)
 
+## Xbox full screen support and in-game access
+
+YMCC supports the **Xbox full screen experience on Windows**, with startup options for Xbox full screen alone or with Steam Big Picture. In supported fullscreen games, use your usual YMCC shortcut to view monitoring or adjust performance and common settings without leaving the game. Compatibility depends on the game’s display mode, device, and driver.
+
 ## 01 · Make Steam the home of your handheld
 
 ![YMCC overview: Steam Big Picture, the game library, and controller navigation on an ROG handheld](docs/images/ymcc-steam-experience.jpg)

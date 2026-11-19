@@ -1,28 +1,147 @@
-import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
-import {controllerInputFixtureInputs,snapshotControllerInputFixture} from './lib/hc_controller_input_fixture.mjs';
-import {snapshotVirtualControllerSource,readVirtualControllerSource} from './virtual_controller_runtime_source.mjs';
-// Actual pipe Runtime, wrappers and normal frame issue guards; all Win32 calls inert.
-// Started as a peer harness, maintained and run here after peer service interruption.
-import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
-const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const fixtureDirectory=path.join(repo,'tools/fixtures/input_frame_pipe_issue');
-let output=path.resolve(repo,'../../../Build/Validation/VirtualInput-Submission-R113-20261016/pipe-issue-formal');
-for(let i=2;i<process.argv.length;i++){assert(process.argv[i]==='--out'&&process.argv[i+1]);output=path.resolve(process.argv[++i]);}
-const run=path.join(output,'runs',new Date().toISOString().replace(/[:.]/g,'-'));const source=path.join(run,'source');fs.mkdirSync(source,{recursive:true});
-const runtime=snapshotVirtualControllerSource(path.join(repo,'native/main.cpp'),path.join(run,'runtime-source'));
-const runtimeBytes=new Map(runtime.inputs.map(input=>[path.relative(repo,input.file).replaceAll('\\','/'),input.data]));
-const sha=b=>crypto.createHash('sha256').update(b).digest('hex');const inputs=[...new Set([...runtimeBytes.keys(),...controllerInputFixtureInputs,'capabilities/HcControllerMotionCapabilityCatalog.h','capabilities/HcControllerMotionCapabilityCatalog.generated.h','capabilities/hc-device-catalog.generated.h','native/main.cpp','native/input_frame_submission.h','native/touch_haptic_dispatch.h','native/game_feedback_receipt.h','native/windows_motion_submission.h','native/legion_motion_source.h','native/legion_motion_message_clock.h','native/virtual_output_status.h','native/input_host_pipe_transport.h','deps/json/json.hpp','tools/virtual_controller_runtime_source.mjs','tools/input_frame_pipe_issue_selftest.mjs','tools/fixtures/input_frame_pipe_issue/fixture.cpp','tools/fixtures/input_frame_pipe_issue/windows.h'])];
-const bytes=new Map(inputs.map(n=>[n,runtimeBytes.get(n)??fs.readFileSync(path.join(repo,n))]));for(const[n,b]of bytes){const target=path.join(run,'snapshot',n);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,b);if(n!=='native/main.cpp')fs.writeFileSync(path.join(source,path.basename(n)),b);}
-fs.copyFileSync(path.join(fixtureDirectory,'windows.h'),path.join(source,'windows.h'));
-const main=runtime.source.replace(/\r\n/g,'\n'),bindings=[];
-function endBrace(s,start){let depth=0,mode='code';for(let i=start;i<s.length;++i){const c=s[i],n=s[i+1];if(mode==='line'){if(c==='\n')mode='code';continue;}if(mode==='block'){if(c==='*'&&n==='/'){mode='code';++i;}continue;}if(mode==='string'||mode==='char'){if(c==='\\'){++i;continue;}if(c===(mode==='string'?'"':"'"))mode='code';continue;}if(c==='/'&&n==='/'){mode='line';++i;continue;}if(c==='/'&&n==='*'){mode='block';++i;continue;}if(c==='"'||c==="'"){mode=c==='"'?'string':'char';continue;}if(c==='{')++depth;if(c==='}'&&--depth===0)return i+1;}throw new Error('unclosed');}
-function extract(kind,name){const re=new RegExp(kind==='function'?'^static[^\\n;{]*\\b'+name+'\\s*\\(':'^struct\\s+'+name+'\\s*\\{','mg');let m;while((m=re.exec(main))){const brace=main.indexOf('{',m.index),semi=main.indexOf(';',m.index);if(semi>=0&&semi<brace)continue;let end=endBrace(main,brace);if(kind==='struct')++end;const text=main.slice(m.index,end);bindings.push({symbol:name,file:runtime.manifest.expandedSnapshot,startLine:main.slice(0,m.index).split('\n').length,sha256:sha(text),text});return text;}throw new Error('missing '+name);}
-function block(text,label,a,b){const i=text.indexOf(a),j=text.indexOf(b,i);assert(i>=0&&j>i,label);const code=text.slice(i,j);bindings.push({symbol:label,sha256:sha(code),text:code});return code;}
+// Candidate for the ORIGINAL tools/input_frame_pipe_issue_selftest.mjs.
+// No new canonical consumer. Preparation path does not import a subprocess API.
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import assert from 'node:assert/strict';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+const here=path.dirname(fileURLToPath(import.meta.url));
+const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
+const options={repo:path.resolve(here,'..'),caseGroup:'all',cases:[],prepareOnly:false};
+const aliases=new Map([['--repo','repo'],['--Repo','repo'],['--MainFile','mainFile'],['--HeaderRoot','headerRoot'],['--out','out'],['--case-group','caseGroup'],['--real-pipe-case','realPipeCase'],['--real-pipe-variant','realPipeVariant']]);
+const seen=new Set();
+for(let i=2;i<process.argv.length;i++){
+ const arg=process.argv[i];
+ if(arg==='--case'){const value=process.argv[++i];assert(value&&!value.startsWith('--')&&!options.cases.includes(value),'empty/duplicate original case');options.cases.push(value);continue;}
+ if(arg==='--prepare-only'){assert(!seen.has(arg),'duplicate prepare-only');seen.add(arg);options.prepareOnly=true;continue;}
+ assert(aliases.has(arg),'unknown option '+arg);const key=aliases.get(arg),value=process.argv[++i];
+ assert(value&&!value.startsWith('--')&&!seen.has(key),'empty/duplicate '+arg);seen.add(key);options[key]=value;
+}
+if(seen.has('realPipeVariant'))assert(seen.has('realPipeCase'),'--real-pipe-variant requires --real-pipe-case');
+if(seen.has('realPipeCase'))assert(!seen.has('caseGroup')&&!options.cases.length,'--real-pipe-case is exclusive with --case-group/--case');
+if(options.cases.length){if(!seen.has('caseGroup'))options.caseGroup='original';assert.equal(options.caseGroup,'original','--case requires original group');}
+assert(['all','original','pipe-cancellation','request-shared-power','scheduling-delay'].includes(options.caseGroup),'unknown/empty group');
+if(seen.has('repo')||seen.has('mainFile')||seen.has('headerRoot'))for(const key of ['repo','mainFile','headerRoot'])assert(seen.has(key),'paired explicit input missing '+key);
+const repo=path.resolve(options.repo),mainFile=path.resolve(options.mainFile??path.join(repo,'native/main.cpp'));
+const headerRoot=path.resolve(options.headerRoot??path.join(repo,'native'));
+for(const [key,value]of Object.entries({repo,mainFile,headerRoot}))assert(path.isAbsolute(value),'absolute '+key);
+if(seen.has('realPipeCase')){
+ const {prepareRealPipe}=await import('./real_pipe_prepare.mjs');
+ prepareRealPipe({options,seen,repo,mainFile,headerRoot,runnerPath:fileURLToPath(import.meta.url)});
+}else{
+const output=path.resolve(options.out??path.join(repo,'../../../Build/Validation/VirtualInput-Submission-R113-20261016/pipe-issue-formal'));
+// Preserve the original run layout, with exclusive names and immutable output.
+const run=options.prepareOnly?output:path.join(output,'runs',new Date().toISOString().replace(/[:.]/g,'-'));
+assert(!fs.existsSync(run),'fresh run required');fs.mkdirSync(run,{recursive:true});
+const source=path.join(run,'source');fs.mkdirSync(source);
+const write=(relative,bytes)=>{const file=path.join(run,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes,{flag:'wx'});return {path:file,bytes:Buffer.byteLength(bytes),sha256:sha(bytes)};};
+const inputBytes=new Map();
+function pin(file,role){file=path.resolve(file);if(!inputBytes.has(file))inputBytes.set(file,{bytes:fs.readFileSync(file),roles:[]});const row=inputBytes.get(file);if(!row.roles.includes(role))row.roles.push(role);return row.bytes;}
+const importRepo=async relative=>{pin(path.join(repo,relative),'preparation-helper');return import(pathToFileURL(path.join(repo,relative)).href);};
+const {snapshotVirtualControllerSource}=await importRepo('tools/virtual_controller_runtime_source.mjs');
+const {extract:originalExtract}=await importRepo('tools/fixtures/legion_motion_consumer/extract_main.mjs');
+const {controllerInputFixtureInputs,snapshotControllerInputFixture}=await importRepo('tools/lib/hc_controller_input_fixture.mjs');
+const {calibrationToolchainPreamble}=await importRepo('tools/fixtures/hc_reviewed_calibration/toolchain.mjs');
+const actualMain=pin(mainFile,'actual-main'),mainBefore=sha(actualMain);
+const mappedRuntime=[];
+const runtime=snapshotVirtualControllerSource(mainFile,path.join(run,'runtime-source'),{readFile:file=>{
+ const origin=path.resolve(file)===mainFile?mainFile:[path.join(headerRoot,path.basename(file)),path.join(repo,'native',path.basename(file))].find(fs.existsSync);
+ assert(origin,'runtime header missing '+file);mappedRuntime.push({logical:file,actual:path.resolve(origin)});return pin(origin,'actual-runtime-expansion');
+}});
+const main=runtime.source,bindings=[];
+function extract(kind,name){const entry=originalExtract(main,name,kind);bindings.push({...entry,code:undefined,source:runtime.manifest.expandedSnapshot});return entry.code;}
+function block(text,label,a,b,last=false){const hits=needle=>[...new Set([needle,needle.replaceAll('\r\n','\n').replaceAll('\n','\r\n')])].map(value=>({value,index:last?text.lastIndexOf(value):text.indexOf(value)})).filter(row=>row.index>=0);const starts=hits(a);assert.equal(starts.length,1,label+' start');const i=starts[0].index;const ends=[...new Set([b,b.replaceAll('\r\n','\n').replaceAll('\n','\r\n')])].map(value=>text.indexOf(value,i+starts[0].value.length)).filter(index=>index>i);assert.equal(ends.length,1,label+' end');const code=text.slice(i,ends[0]);bindings.push({symbol:label,kind:'actual-block',sha256:sha(code),bytes:Buffer.byteLength(code),code});return code;}
 const submit=extract('function','inputHostSubmitPad'),request=extract('function','inputHostRequestPreparedLocked');
-const parts={COMMAND_DEADLINES:['inputHostStartProtectionNow','inputHostRequestIsLifecycleCommand','inputHostRequestHasExecutionDeadline'].map(n=>extract('function',n)).join('\n'),LEGION_BINDING:extract('function','legionMotionModelBinding'),LEGION_CURRENT:extract('function','legionMotionSubmissionCurrent'),SNAPSHOT:extract('struct','InputCaptureGamepadSnapshot'),SCOPE:extract('struct','InputFrameSubmission')+'\nstatic thread_local InputFrameSubmission* t_inputFrameSubmission=nullptr;\n'+extract('struct','InputFrameSubmissionScope')+'\nstatic thread_local bool t_inputFrameTransportGuard=false;\n'+extract('struct','InputFrameTransportScope')+'\n'+extract('struct','GameFeedbackFrameDispatchScope'),SOURCE_ELIGIBLE:extract('function','msiDinputMainSourceEligible'),MSI_NEUTRAL:extract('function','msiControllerNeutralCleanupAllowed'),SOURCE_ADMISSION:extract('function','inputHostPhysicalPublicationSourceAdmitted'),READ_PROGRESS:(()=>{const m=main.match(/^static ymcc::input::frameSubmission::ReadProgress g_inputHostReadProgress;/m);assert(m,'Actual Host read-progress declaration');bindings.push({name:'g_inputHostReadProgress',kind:'declaration',sha256:sha(m[0])});return m[0];})(),ADAPTERS:['inputCaptureBindStandardInput','inputHostFrameSubmissionSample','inputHostFrameSubmissionCurrent'].map(n=>extract('function',n)).join('\n'),NOTE:extract('function','inputHostFrameSubmissionNote'),REQUEST_GUARD:['inputHostWindowsMotionSubmissionCurrent','inputHostFrameSubmissionMayIssue','inputHostFrameSubmissionTransportRejected','inputHostFrameSubmissionRequestCurrent'].map(n=>extract('function',n)).join('\n'),FRAME:extract('struct','FocusFrameContent')+'\n'+extract('function','focusIsolationNeutralContent')+'\n'+extract('function','focusIsolationAssembleFrame'),PIPE_WRAPPERS:['inputHostPipeIo','inputHostWaitClientLocked'].map(n=>extract('function',n)).join('\n'),PRE_ENVELOPE:block(request,'actual normal-frame transport scope plus private deferred command declaration','    const bool deferredVisibilityCommand','    // R2：envelope'),TRANSPORT:block(request,'actual request factory/Connect/guard/write/read','    DWORD lastError = ERROR_SUCCESS;','    if (!read) {'),SETUP:block(submit,'actual ticket/sample scope','    // Bind normal BUS input','    // OFF revokes normal BUS'),POWER:block(submit,'actual initial power gate','    const bool powerAdmitted =','    if (!powerAdmitted)'),NORMALIZE:block(submit,'actual first-lock normalization and ticket neutral','        if(t_inputFrameSubmission && !semanticNeutral)','        suppressPublication ='),SUPPRESS:block(submit,'actual source suppression decision','        suppressPublication =','        inputHostRecoveryHealthObserveLocked'),ASSEMBLY:block(submit,'actual effective full-neutral construction','    FocusFrameContent effectiveContent =','    // B1：hash / motionProof'),HOST_READY:block(submit,'actual final Host ready','        const bool hostFrameReady =','        const ymcc::screenpads::NativeTransportObservation'),NOFAULT:block(submit,'actual no-fault context rejection response','                // Context retirement before a pipe write','            } else {\n                // 跳过原因计数')};
-let fixture=fs.readFileSync(path.join(fixtureDirectory,'fixture.cpp'),'utf8');const controllerFixture=snapshotControllerInputFixture(repo,path.join(run,'controller-input'));fixture=controllerFixture.preamble+fixture;for(const[k,v]of Object.entries(parts)){assert(v,k);assert.equal(fixture.split('@@'+k+'@@').length,2,k);fixture=fixture.replace('@@'+k+'@@',()=>v);}assert(!/@@\w+@@/.test(fixture));fs.writeFileSync(path.join(run,'fixture.cpp'),fixture);
-const receipt={repo,runtimeExpansion:runtime.manifest,sourceHashes:Object.fromEntries([...bytes].map(([n,b])=>[n,sha(b)])),bindings,real:'actual adapters/normalization/neutral assembly, request Connect-through-read fragment, real Runtime run/issue/cancel/reap; fake Windows APIs',limits:'not whole SubmitPad or whole RequestPrepared; no real Host/OS/device; no touch state engine; synthetic acceptance only after actual transport fragment returns; target-return creation boundary is a throwing guard and must never execute for SUBMIT_FRAME',runnerSha256:sha(fs.readFileSync(fileURLToPath(import.meta.url))),templateSha256:sha(fs.readFileSync(path.join(fixtureDirectory,'fixture.cpp'))),fakeWin32Sha256:sha(fs.readFileSync(path.join(fixtureDirectory,'windows.h')))};fs.writeFileSync(path.join(run,'source-binding.json'),JSON.stringify(receipt,null,2)+'\n');
-const result={run,profiles:{},sourceChanged:[]};const vc=process.env.YMCC_VCVARS64??'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';
-for(const profile of ['Release','Checked']){const dir=path.join(run,profile);fs.mkdirSync(dir);const batch=path.join(dir,'build.cmd');const exe=path.join(dir,'fixture.exe');fs.writeFileSync(batch,calibrationToolchainPreamble(vc)+'set VSLANG=1033\r\ncl /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /permissive- /sdl '+(profile==='Release'?'/O2 /MT /DNDEBUG':'/Od /MTd /RTC1 /Zi /D_DEBUG')+' /I"'+source+'" "'+path.join(run,'fixture.cpp')+'" /Fo"'+path.join(dir,'fixture.obj')+'" /Fe"'+exe+'" /Fd"'+path.join(dir,'fixture.pdb')+'"\r\nexit /b %errorlevel%\r\n');let r=spawnSync('cmd.exe',['/d','/c',batch],{cwd:dir,encoding:'utf8',windowsHide:true,timeout:60000});fs.writeFileSync(path.join(dir,'compile.txt'),r.stdout+'\n'+r.stderr);console.log(profile+' build status '+r.status);if(r.status!==0){console.log(r.stdout,r.stderr);result.profiles[profile]={buildPassed:false};continue;}r=spawnSync(exe,[],{cwd:dir,encoding:'utf8',windowsHide:true,timeout:15000});fs.writeFileSync(path.join(dir,'results.json'),r.stdout);fs.writeFileSync(path.join(dir,'stderr.txt'),r.stderr);let report;try{report=JSON.parse(r.stdout);}catch{console.log(r.stdout,r.stderr);result.profiles[profile]={buildPassed:true,executePassed:false};continue;}result.profiles[profile]={buildPassed:true,passed:r.status===0,tests:report.tests,assertions:report.assertions,failures:report.failures};console.log(JSON.stringify(result.profiles[profile]));}
-result.expandedSourceStable=sha(readVirtualControllerSource(path.join(repo,'native/main.cpp')).source)===sha(runtime.source);result.sourceChanged=inputs.filter(n=>sha(fs.readFileSync(path.join(repo,n)))!==sha(bytes.get(n)));fs.writeFileSync(path.join(run,'RESULT.json'),JSON.stringify(result,null,2)+'\n');fs.writeFileSync(path.join(output,'LATEST.json'),JSON.stringify(result,null,2)+'\n');console.log(run);process.exitCode=Object.values(result.profiles).every(r=>r.passed)&&result.sourceChanged.length===0&&result.expandedSourceStable?0:1;
+write('actual-inputHostRequestPreparedLocked.cpp',request);
+const latePre=block(request,'actual r6 post-tuple/identity pre-business block',
+ '        if(t_inputHostRequestPower&&!t_inputHostRequestPower->current()){\n            // Exact tuple/identity is proven above.',
+ '        if (helloCommand) {');
+const lateTail=block(request,'actual DOM final-current and wire sequence block',
+ '    if(!inputHostRequestPowerReceiptCurrent(command,responseOut,true,localFrameSubmission)){',
+ '    if (std::strcmp(command, "SUBMIT_FRAME") == 0) {',true);
+const legacyCall=block(submit,'actual legacy SUBMIT_FRAME request call',
+ '                return inputHostRequest','            };');
+ const backendHold=block(submit,'actual backend fault hold consumer',
+ '                        g_inputHostFaultHoldsStart.store(true, std::memory_order_release);',
+ '                    }\n                }\n            }');
+ const localFrameCall=request.includes('InputFrameSubmission* localFrameSubmission = nullptr');
+ const parts={
+ LOCAL_CONTEXT_CONDITION:block(submit,'actual context classification expression','            } else if(frameSubmission.rejected',') {\n                // Context retirement').replace('            } else if(',''),
+ TRANSPORT_UNUSABLE:block(submit,'actual unusable transport condition','                const bool transportUnusable =','                if (transportUnusable)'),
+ TRANSPORT_FAULT:block(submit,'actual unusable transport handling','                    // R103: transport health cannot erase an accepted PREPARE.','                } else {\n                    g_inputHostLifecycle = "faulted-no-write";'),
+ SUBMISSION_RESULT:block(submit,'actual final hostSubmission output','    result["hostSubmission"] =','    if(frameSubmission.rejected ||'),
+ LEGACY_CALL:legacyCall, BACKEND_HOLD:backendHold, LOCAL_FRAME_ARGUMENT:localFrameCall?'&frameSubmission':'nullptr',
+ COMMAND_DEADLINES:['inputHostStartProtectionNow','inputHostRequestIsLifecycleCommand','inputHostRequestHasExecutionDeadline'].map(n=>extract('function',n)).join('\n'),
+ LEGION_BINDING:extract('function','legionMotionModelBinding'),LEGION_CURRENT:extract('function','legionMotionSubmissionCurrent'),
+ SNAPSHOT:extract('struct','InputCaptureGamepadSnapshot'),
+ REQUEST_TLS:['t_inputHostRequestPower','t_inputHostRequestHardwareRequired'].map(name=>{const rows=[...main.matchAll(new RegExp('^static thread_local[^\\r\\n]*\\b'+name+'[^\\r\\n]*;\\r?$','gm'))];assert.equal(rows.length,1,name);bindings.push({symbol:name,kind:'declaration',sha256:sha(rows[0][0])});return rows[0][0];}).join('\n'),
+ SCOPE:extract('struct','InputFrameSubmission')+'\nstatic thread_local InputFrameSubmission* t_inputFrameSubmission=nullptr;\n'+extract('struct','InputFrameSubmissionScope')+'\nstatic thread_local bool t_inputFrameTransportGuard=false;\n'+extract('struct','InputFrameTransportScope')+'\n'+extract('struct','GameFeedbackFrameDispatchScope')+'\n'+extract('struct','InputHostRequestPowerScope'),
+ SOURCE_ELIGIBLE:extract('function','msiDinputMainSourceEligible'),MSI_NEUTRAL:extract('function','msiControllerNeutralCleanupAllowed'),
+ SOURCE_ADMISSION:extract('function','inputHostPhysicalPublicationSourceAdmitted'),
+ READ_PROGRESS:(()=>{const rows=[...main.matchAll(/^static ymcc::input::frameSubmission::ReadProgress g_inputHostReadProgress;\r?$/gm)];assert.equal(rows.length,1,'actual read-progress declaration');bindings.push({symbol:'g_inputHostReadProgress',kind:'declaration',sha256:sha(rows[0][0])});return rows[0][0];})(),
+ ADAPTERS:['inputCaptureBindStandardInput','inputHostFrameSubmissionSample','inputHostFrameSubmissionCurrent'].map(n=>extract('function',n)).join('\n'),
+ NOTE:extract('function','inputHostFrameSubmissionNote'),
+ REQUEST_GUARD:['inputHostWindowsMotionSubmissionCurrent','inputHostFrameSharedPowerCurrent','inputHostFrameSubmissionMayIssue','inputHostFrameSubmissionTransportRejected','inputHostFrameSubmissionRequestCurrent','inputHostRequestNeedsHardwarePower','inputHostRequestNeedsPowerScope','inputHostReceiptPassedSequenceGate','inputHostRequestPowerReceiptCurrent'].map(n=>extract('function',n)).join('\n'),
+ FRAME:extract('struct','FocusFrameContent')+'\n'+extract('function','focusIsolationNeutralContent')+'\n'+extract('function','focusIsolationAssembleFrame'),
+ PIPE_CLOSE:extract('function','inputHostPipeCloseOwned'),
+ PIPE_WRAPPERS:['inputHostPipeIo','inputHostWaitClientLocked'].map(n=>extract('function',n)).join('\n'),
+ REQUEST_POWER_ADMISSION:block(request,'actual payload-aware request power admission','    const bool hardwarePowerRequired=','    const bool deferredVisibilityCommand='),
+ PRE_ENVELOPE:block(request,'actual request transport scope and before-envelope admission','    const bool deferredVisibilityCommand','    // R2：envelope'),
+ TRANSPORT:block(request,'actual Connect through Read plus context/failure dispatch guards','    DWORD lastError = ERROR_SUCCESS;','    if (!read) {'),
+ FAILED_CONNECT_CLEANUP:block(request,'actual transport failure resource retirement and flags','        if (pipe) {','        // Normal-use incidents'),
+ LATE_ACK_TAIL:lateTail,
+ LATE_ACK_CONSUMER:'static unsigned fixtureBusinessConsumers=0;\nstatic bool fixtureValidatedReceiptEntry(const char* command,const json& response,bool advanceSequence,unsigned long long sequenceValue,json* responseOut,InputFrameSubmission* localFrameSubmission=nullptr){\n (void)localFrameSubmission;\n'+latePre+'\n ++fixtureBusinessConsumers;return true;\n}',
+ SETUP:block(submit,'actual sample/ticket/public source scope binding','    // Bind normal BUS input','    // OFF revokes normal BUS'),
+ POWER:block(submit,'actual initial frame power admission','    const bool powerAdmitted =','    if (!powerAdmitted)'),
+ NORMALIZE:block(submit,'actual normalization/neutral admission with original scope acquisition','        frameSubmission.powerScope=g_inputHostInputPowerCache.acquire(','        suppressPublication ='),
+ SUPPRESS:block(submit,'actual source suppression','        suppressPublication =','        inputHostRecoveryHealthObserveLocked'),
+ ASSEMBLY:block(submit,'actual full neutral construction','    FocusFrameContent effectiveContent =','    // B1：hash / motionProof'),
+ HOST_READY:block(submit,'actual final Host ready','        const bool hostFrameReady =','        const ymcc::screenpads::NativeTransportObservation'),
+ NOFAULT:block(submit,'actual context rejection response','                // Context retirement is not a Host fault.','            } else {\n                // 跳过原因计数'),
+};
+const fixtureDirectory=path.join(here,'fixtures/input_frame_pipe_issue');
+const templateFile=path.join(fixtureDirectory,'fixture.cpp');let fixture=pin(templateFile,'original-paired-template').toString('utf8');
+const controllerFixture=snapshotControllerInputFixture(repo,path.join(run,'controller-input'));fixture=controllerFixture.preamble+fixture;
+for(const [key,value]of Object.entries(parts)){assert.equal(fixture.split('@@'+key+'@@').length,2,key);fixture=fixture.replace('@@'+key+'@@',()=>value);}assert(!/@@\w+@@/.test(fixture));
+write('fixture.cpp',fixture);write('request_cases.inc',pin(path.join(fixtureDirectory,'request_cases.inc'),'parameterized-original-cases'));
+const roots=[headerRoot,path.join(repo,'native'),path.join(repo,'capabilities'),path.join(repo,'deps/json')],headers=new Map();
+function header(file){file=path.resolve(file);const name=path.basename(file);if(headers.has(name)){assert.equal(headers.get(name).origin,file,'header basename collision '+name);return;}const bytes=pin(file,'quoted-header-closure');headers.set(name,{origin:file,bytes});for(const match of bytes.toString('utf8').matchAll(/^\s*#\s*include\s*"([^"\r\n]+)"/gm)){const resolved=[path.resolve(path.dirname(file),match[1]),...roots.map(root=>path.resolve(root,match[1]))].find(fs.existsSync);assert(resolved,'unresolved quoted header '+match[1]);header(resolved);}}
+for(const name of ['input_frame_submission.h','touch_haptic_dispatch.h','game_feedback_receipt.h','windows_motion_submission.h','legion_motion_source.h','legion_motion_message_clock.h','virtual_output_status.h','input_host_pipe_transport.h','input_host_shared_power.h','msi_virtual_report_diagnostic.h','virtual_recovery_intent.h','virtual_start_protection.h','HcControllerMotionCapabilityCatalog.h','json.hpp']){const found=roots.map(root=>path.join(root,name)).find(fs.existsSync);assert(found,'required header '+name);header(found);}
+for(const relative of controllerInputFixtureInputs)pin(path.join(repo,relative),'controller-fixture-input');
+for(const [name,row]of headers)write('source/'+name,row.bytes);
+write('source/windows.h',pin(path.join(fixtureDirectory,'windows.h'),'fake-win32-leaves'));
+write('snapshot/tools/input_frame_pipe_issue_selftest.mjs',pin(fileURLToPath(import.meta.url),'actual-paired-runner'));
+const vc=process.env.YMCC_VCVARS64??'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';
+const recipes=[];
+for(const profile of ['Release','Checked']){
+ const recipeDir=path.join(run,profile);fs.mkdirSync(recipeDir);const flags=profile==='Release'?'/O2 /MT /DNDEBUG':'/Od /MTd /RTC1 /Zi /D_DEBUG';
+ const recipe=calibrationToolchainPreamble(vc)+'set VSLANG=1033\r\ncl /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /permissive- /sdl '+flags+' /I"'+source+'" "'+path.join(run,'fixture.cpp')+'" /Fo"'+path.join(recipeDir,'fixture.obj')+'" /Fe"'+path.join(recipeDir,'fixture.exe')+'" /Fd"'+path.join(recipeDir,'fixture.pdb')+'" /sourceDependencies "'+path.join(recipeDir,'dependencies.json')+'"\r\nexit /b %errorlevel%\r\n';
+ recipes.push({profile,directory:recipeDir,...write(profile+'/build.cmd',recipe)});
+}
+const prepared={status:'PREPARED_NOT_COMPILED_NOT_EXECUTED',originalEntry:'tools/input_frame_pipe_issue_selftest.mjs',repo,mainFile,headerRoot,caseGroup:options.caseGroup,selectedCases:options.cases,mainSha256:mainBefore,runtimeExpansion:runtime.manifest,mappedRuntime,bindings:bindings.map(({code,...row})=>row),parts:Object.fromEntries(Object.entries(parts).map(([name,code])=>[name,{bytes:Buffer.byteLength(code),sha256:sha(code)}])),headers:[...headers].map(([name,row])=>({name,origin:row.origin,sha256:sha(row.bytes)})),inputPins:[...inputBytes].map(([file,row])=>({path:file,bytes:row.bytes.length,sha256:sha(row.bytes),roles:row.roles})),recipes,actualPreparedRecipeCount:recipes.length,compiled:false,executed:false,fullRequestExecuted:false,fullTupleParserExecuted:false,scope:'original paired frame/pipe fragments plus actual r6 helper/pre-business/tail blocks; real C++ Runtime/Scope/Registration with controlled Win32/Reader leaves',limits:'Request envelope/tuple parsing and business endpoints excluded; post-validation entry requires upstream tuple proof; no Native producer/real devices/managed Host/Steam acceptance'};
+for(const [file,row]of inputBytes)assert.equal(sha(fs.readFileSync(file)),sha(row.bytes),'input changed during preparation '+file);
+write('PREPARED.json',JSON.stringify(prepared,null,2)+'\n');
+console.log(JSON.stringify({status:prepared.status,run,mainSha256:mainBefore,preparedOnly:options.prepareOnly,compilerInvocations:0,actualPassed:0}));
+if(!options.prepareOnly){
+ // Same original executable/profile mechanism; this branch is not used by this task.
+ const {spawnSync}=await import('node:child_process');
+ const result={run,caseGroup:options.caseGroup,profiles:{},sourceChanged:[]};
+ for(const recipe of recipes){
+  const build=spawnSync('cmd.exe',['/d','/c',recipe.path],{cwd:recipe.directory,encoding:'utf8',windowsHide:true,timeout:60000});
+  write(recipe.profile+'/compile.txt',(build.stdout??'')+'\n'+(build.stderr??''));if(build.status!==0){result.profiles[recipe.profile]={buildPassed:false};break;}
+  const execution=spawnSync(path.join(recipe.directory,'fixture.exe'),['--case-group',options.caseGroup,...options.cases.flatMap(name=>['--case',name])],{cwd:recipe.directory,encoding:'utf8',windowsHide:true,timeout:15000});
+  write(recipe.profile+'/results.json',execution.stdout??'');write(recipe.profile+'/stderr.txt',execution.stderr??'');
+  let report;try{report=JSON.parse(execution.stdout);}catch{result.profiles[recipe.profile]={buildPassed:true,executePassed:false};break;}
+  const names=report.cases?.map(row=>row.name)??[];
+  const exactCases=!options.cases.length||(names.length===options.cases.length&&options.cases.every(name=>names.includes(name)));
+  const selected=exactCases&&report.caseGroup===options.caseGroup&&names.length>0&&new Set(names).size===names.length&&names.length===report.tests&&names.every(name=>options.caseGroup==='all'||(options.caseGroup==='original'?!name.startsWith('pipe-cancellation/')&&!name.startsWith('request-shared-power/'):name.startsWith(options.caseGroup+'/')));
+  result.profiles[recipe.profile]={buildPassed:true,passed:execution.status===0&&report.passed===true&&selected,selectionMatches:selected,selectedCases:names,tests:report.tests,assertions:report.assertions,failures:report.failures};
+  if(!result.profiles[recipe.profile].passed)break;
+ }
+ result.sourceChanged=[...inputBytes].filter(([file,row])=>sha(fs.readFileSync(file))!==sha(row.bytes)).map(([file])=>file);
+ result.expandedSourceStable=!mappedRuntime.some(row=>result.sourceChanged.includes(row.actual));
+ write('RESULT.json',JSON.stringify(result,null,2)+'\n');fs.writeFileSync(path.join(output,'LATEST.json'),JSON.stringify(result,null,2)+'\n');
+ process.exitCode=Object.keys(result.profiles).length===recipes.length&&Object.values(result.profiles).every(row=>row.passed)&&result.sourceChanged.length===0&&result.expandedSourceStable?0:1;
+}
 
+} // real-pipe manual preparation is exclusive with all original preparation/execution.

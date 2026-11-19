@@ -58,7 +58,7 @@ export async function fanStatusCases({height,open,actionCase,page,shot,task}) {
    if(scenario.detail)assert.equal(projected.detail,scenario.detail,'requested message failed to reach actual status computed');
    if(scenario.name==='connecting')assert.equal(observed.button.busy,'true');
    if(scenario.name==='recovering'){assert.equal(observed.button.text,'正在恢复…');assert.equal(observed.button.pending,true,'recovery button lost lit pending style');assert.equal(observed.button.opacity,'1');assert.notEqual(observed.button.background,'rgba(0, 0, 0, 0)');}
-   if(scenario.name==='attention'||scenario.name==='device-gate-long')assert.equal(observed.button.text,'风扇未操控');
+   if(scenario.name==='attention'||scenario.name==='device-gate-long')assert.equal(observed.button.text,'点击启用');
    if(scenario.name==='attention')assert.equal(observed.badgeText,'风扇自动恢复未完成');
    if(scenario.name==='mirror-wait-not-confirmed')assert.notEqual(observed.badgeText,'控制已开启','pending mirror wording falsely claimed established control');
    if(scenario.name==='applying-retained-wording')assert.equal(observed.badgeText,'正在应用风扇曲线');

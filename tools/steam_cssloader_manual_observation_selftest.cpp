@@ -59,7 +59,7 @@ static void deckySidebarDiagnostic(const std::string&,const json&,bool){}static 
 #include "production-css-manual.h"
 static const char*helper=R"PS(param([string]$Action,[uint32]$SessionPid,[string]$SessionBirth,[string]$BackendPath,[string]$ReadyEvent,[string]$IdleEvent,[int]$GateTimeoutMs,[switch]$StartBackend,[switch]$VerifyOnly)
 $ErrorActionPreference='Stop'
-# SharedProcessQueryProtocol=1 ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1
+# SharedProcessQueryProtocol=1 SharedSteamReadProtocol=1 ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1
 $elevated=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if($Action -eq 'Ensure'){
  if(!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'permit-initialize'))){throw 'unexpected initialization'}
@@ -93,7 +93,7 @@ struct Scene{
  std::atomic<unsigned>epoch=1;bool guardStarted=false;
  Scene(const std::filesystem::path&root,const wchar_t*name,DWORD lifetime=5000,DWORD minimumHold=0):dir(root/name),link(dir/L"steam-appearance/backend.path"),entry(dir/L"steam-appearance.ps1"),use(false,1,[this]{return editor?steamcsseditor::State::Active:steamcsseditor::State::Absent;}){
   std::filesystem::create_directories(link.parent_path());const auto steamImage=dir/L"steam.exe",backend=dir/L"CssLoader-Standalone-Headless.exe";std::filesystem::copy_file(self(),steamImage);std::filesystem::copy_file(self(),backend);steam.p=launch(steamImage.wstring());css.p=launch(backend.wstring());session={dir.wstring(),GetProcessId(steam.p),0,birth(steam.p)};
-  write(link,backend.string());write(entry,helper);write(dir/L"steam-appearance/resident.ps1","AppearanceProcessQueryProtocol=2 function Start-ResidentAppearanceBackend");write(dir/L"steam-appearance/idle.ps1","AppearanceRenderProtocol=4 function Get-AppearanceVariableDefaults");
+  write(link,backend.string());write(entry,helper);write(dir/L"steam-appearance/resident.ps1","AppearanceProcessQueryProtocol=3 function Start-ResidentAppearanceBackend");write(dir/L"steam-appearance/idle.ps1","AppearanceRenderProtocol=4 AppearanceSharedSteamProtocol=1 function Get-AppearanceVariableDefaults");
   g_steamSettingsObserver.value=session;g_cssPower=1;g_powerLifecycle=PowerLifecycle::Ready;g_exitRequested=false;g_aiFanMockSession.isolated=false;
   g_steamCssGuard.port=[this](const auto&s,auto g){++manualEnds;return guardStarted?guard.requestReadOnlyRebind(s,g):true;};
   g_steamCssUse.port=[this](const auto&s){++readonly;auto h=permitConfirmation?use.confirmExisting(s):nullptr;if(h){if(lastCompletion.value)CloseHandle(lastCompletion.value);lastCompletion.value=nullptr;if(!DuplicateHandle(GetCurrentProcess(),h,GetCurrentProcess(),&lastCompletion.value,0,FALSE,DUPLICATE_SAME_ACCESS))throw std::runtime_error("owned completion duplicate");}return h;};

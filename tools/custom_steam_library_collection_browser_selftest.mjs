@@ -235,6 +235,36 @@ try {
     for(let i=0;i<6;i++)next.library.games.push({...structuredClone(fixtureGame),directoryName:'AAA '+i,gameDirectory:'G:/Fixture/AAA '+i,primaryExecutable:'G:/Fixture/AAA '+i+'/Game.exe'});
     next.steamPlan.items=next.library.games.map(game=>({...game,status:'waiting-steam-verification'}));
     applyLibrarySnapshot(next);await frames();check(scrollY===0,'Top view followed displaced first card');`);
+  await test('native-steam-partial-scan-shows-read-only-retained-cards', `
+    const pending={...structuredClone(fixtureGame),gameDirectory:'G:/Fixture/Steam/Pending',primaryProductName:'Pending native',steamNative:true,nativeSteamAppId:610,nativeSteamScanUnconfirmed:true};
+    const live={...structuredClone(fixtureGame),gameDirectory:'G:/Fixture/Steam/Live',primaryProductName:'Live native',steamNative:true,nativeSteamAppId:611};
+    live.primaryExecutable=live.gameDirectory+'/Live.exe';
+    const historical={...pending,gameDirectory:'G:/Fixture/Steam/Historical',nativeSteamAppId:612,nativeSteamScanUnconfirmed:false};
+    const duplicate={...pending,gameDirectory:'G:/Fixture/Steam/Alias',nativeSteamAppId:611};
+    const libraryState={games:[live],unscannedGames:[pending,historical,duplicate],nativeSteamInstallationUnavailable:true};
+    fixtureSnapshot={config:{roots:[],automaticScrapingEnabled:false},library:libraryState,manualOverrides:{items:{}},steamPlan:{items:[],summary:{}},steamAccounts:{accounts:[]}};
+    applyLibrarySnapshot(structuredClone(fixtureSnapshot));activeTab='native-steam';renderLibrary();await frames();
+    const card=libraryCards().find(c=>c.dataset.directory===keyFor(pending));
+    check(card&&libraryCards().length===2&&mergedGames().length===1,'Retained card was lost, duplicate history resurfaced, or stale action data was merged');
+    check($('#count-native-steam').textContent===formatCount(2)&&$('#library-result-count').textContent.includes('1 个待确认'),'Partial count lacked scope');
+    check($('#library-subtitle').textContent==='已确认 '+formatCount(1)+' · 待确认 '+formatCount(1),'Native page showed unrelated global counts');
+    check(card.querySelector('.native-scan-unconfirmed')?.textContent==='待确认'&&!card.querySelector('.sidebar-card-edit')&&card.getAttribute('aria-disabled')==='true'&&!card.dataset.executable,'Pending card exposed an edit affordance or stale executable');
+    focusLibraryCard(card);await frames();check(document.activeElement===card&&$('#library-dock-edit').disabled,'Pending card could not be focused safely');
+    card.click();card.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));
+    card.dispatchEvent(new KeyboardEvent('keydown',{key:'x',bubbles:true}));
+    window.dispatchEvent(new CustomEvent('workspace-action',{detail:'edit'}));await frames();
+    check(!editorOpen()&&!fixtureCalls.some(c=>['saveEditor','setPrimary','identifyOne'].includes(c.command)),'Pending card activated edit or a native mutation');
+    fixtureSnapshot.library.games=[fixtureGame];
+    applyLibrarySnapshot(structuredClone(fixtureSnapshot));await frames();
+    check(activeTab==='native-steam'&&libraryCards().some(c=>c.dataset.directory===keyFor(pending)),'Background scan switched away from the retained native page');
+    const restored={...pending};delete restored.nativeSteamScanUnconfirmed;
+    fixtureSnapshot.library={games:[live,restored],unscannedGames:[historical]};
+    applyLibrarySnapshot(structuredClone(fixtureSnapshot));await frames();
+    const ready=libraryCards().find(c=>c.dataset.directory===keyFor(pending));
+    check(ready&&ready!==card&&!ready.querySelector('.native-scan-unconfirmed')&&ready.querySelector('.sidebar-card-edit'),'Recovered card did not regain editing');
+    focusLibraryCard(ready);window.dispatchEvent(new CustomEvent('workspace-action',{detail:'edit'}));await frames();
+    check(editorOpen()&&selectedActionGame.nativeSteamAppId===610,'Recovered card did not open its own editor');closeEdit();`);
+
   await test('native-steam-local-horizontal-preview-renders-in-editor', `
     const image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jY4sAAAAASUVORK5CYII=';
     const game={...structuredClone(fixtureGame),steamNative:true,nativeSteamAppId:620,contentType:'steam-native'};

@@ -1,20 +1,20 @@
 #pragma once
 // Included inside ymcc::screenpads after the shared transparent-window helpers.
-// Same UI owner as the pads: native personas use BUS; disabled uses direct actions.
+// Same UI owner as the pads: SD/disabled menu keys use direct actions; other keys use BUS.
 // No hook, periodic timer or dedicated worker.
 inline std::array<HWND,7> buttonWindows{},buttonOutlines{};
 inline UINT64 buttonRefreshEpoch=0; // Invalidates a refresh superseded during dispatcher work.
 struct ButtonInputRecovery {unsigned long long aborts=0,retries=0,recovered=0,failed=0;DWORD lastError=0;int lastIndex=-1;};
 inline ButtonInputRecovery buttonInputRecovery;
 inline std::array<UINT32,7> buttonContacts{};
-// Menu keys are momentary actions. Bound their SD output independently of
-// Steam/CDP and the HWND owner, so a lost UP cannot pin a native menu signal.
+// SD menu actions have no BUS bits. Keep a bounded contact deadline so a new
+// DOWN can reclaim a lost UP without accepting its stale release.
 inline constexpr ULONGLONG kMenuSignalMaxMs=3000;
 inline std::array<std::atomic<ULONGLONG>,2> menuSignalExpires{};
 inline std::array<bool,7> buttonArmed{};
 inline std::array<UINT32,7> buttonFeedbackContacts{};
 inline std::array<bool,7> buttonFeedbackPressed{};
-inline bool renderButton(int index,int transparency,bool force=false);
+inline bool renderButton(int index,int transparency,bool force=false,DWORD* submissionError=nullptr);
 inline unsigned buttonHapticContacts=0; // Owner-thread only, maintained on contact edges.
 inline unsigned buttonFeedbackMask() {return buttonHapticContacts;}
 inline unsigned buttonEventCount=0,buttonSummonCount=0,buttonSummonPostCount=0;
@@ -55,6 +55,8 @@ inline std::array<RECT,7> buttonRects(const RECT& monitor,int scale,const RECT* 
         if(selected==1u)r[3+side*2]=inner;
         else if(selected==2u)r[4+side*2]=inner;
     }
+    const char* ids[]={"summon-y","native-steam","native-qam","native-rear-1","native-rear-2","native-rear-3","native-rear-4"};
+    for(int i=0;i<7;++i)r[i]=ymcc::customtouch::place(ids[i],monitor,r[i]);
     return r;
 }
 inline bool buttonPermitted(const Config& cfg,int index) {
@@ -64,6 +66,7 @@ inline bool buttonPermitted(const Config& cfg,int index) {
     if(profile!=appliedProfile.load())return false;
     // Disabled output has its own explicit, mutually exclusive dedicated pair.
     // "All" is Steam+QAM or PS+Mute; the separate rear-key settings are unchanged.
+    if((index==1 || index==2) && cfg.standaloneSpecialMode==StandaloneSpecialMode::SteamDeck)return true;
     if(profile==0)return (index==1 || index==2) && standaloneSpecialProfile(cfg)!=0;
     if(!controlTargetEnabled.load())return false;
     if(index<3) {const unsigned mask=effectiveSpecialMask(cfg);return (mask&(1u<<(index-1)))!=0 && (profile!=3 || index==1);}
@@ -109,15 +112,9 @@ inline void buttonFeedbackEvent(int index,UINT32 id,int phase,float x,float y,in
 inline unsigned buttonSnapshot() {
     unsigned bits=screenButtonMask.load(std::memory_order_relaxed);if(!bits)return 0;
     if(!controlTargetEnabled.load(std::memory_order_acquire) || activeProfile.load()==0 || activeProfile.load()!=appliedProfile.load())return 0;
-    if(activeProfile.load()==1&&(bits&3)) {
-        // Only while a menu key is held: one shared tick read in the existing
-        // sender, no watchdog thread, polling job, device query or rate change.
-        const auto now=GetTickCount64();
-        for(unsigned i=0;i<2;++i)if(bits&(1u<<i)) {
-            const auto expiry=menuSignalExpires[i].load(std::memory_order_acquire);
-            if(!expiry||now>=expiry)bits&=~(1u<<i);
-        }
-    }
+    // Defense in depth: a stale SD menu mask must never accompany the direct
+    // Steam action. Physical-controller reports do not use this screen snapshot.
+    if(activeProfile.load()==1 || ((bits&3u) && getConfig().standaloneSpecialMode==StandaloneSpecialMode::SteamDeck))bits&=~3u;
     return bits;
 }
 inline void handleButtonCaptureLoss(int index,UINT32 id,bool all=false) {
@@ -134,15 +131,19 @@ inline void handleButtonCaptureLoss(int index,UINT32 id,bool all=false) {
     if((all||buttonContacts[index]==id)&&buttonContacts[index]&&quickAccessEdgeObserver)quickAccessEdgeObserver(-1,false);
     if(all||buttonContacts[index]==id){buttonContacts[index]=0;buttonArmed[index]=false;if(index)screenButtonMask.fetch_and(~(1u<<(index-1)),std::memory_order_release);}
 }
+inline bool steamMenuContact(const Config& cfg,int index) {
+    return index>=1 && index<=2 && (activeProfile.load()==1 || cfg.standaloneSpecialMode==StandaloneSpecialMode::SteamDeck);
+}
 // Only a new DOWN may reclaim an expired momentary menu contact. A late UP
 // from its old pointer remains unable to clear the new gesture.
-inline void retireExpiredMenuContact(int index) {
-    if(index<1||index>2||activeProfile.load()!=1||!buttonContacts[index])return;
+inline void retireExpiredMenuContact(const Config& cfg,int index) {
+    if(!steamMenuContact(cfg,index)||!buttonContacts[index])return;
     const auto expiry=menuSignalExpires[index-1].load(std::memory_order_acquire);
     if(!expiry||GetTickCount64()>=expiry)handleButtonCaptureLoss(index,buttonContacts[index]);
 }
 inline bool buttonEventAtHit(const Config& cfg,int index,UINT32 id,int phase,bool inside,bool canceled=false) {
     if(index<0 || index>=7)return false;
+    if(!sharedInputAllowed()){buttonsRelease();return false;}
     if(!buttonPermitted(cfg,index)) {
         // A matching UP/CANCEL still owns its release after the gate changed.
         if(phase!=0&&buttonContacts[index]==id) {
@@ -155,17 +156,16 @@ inline bool buttonEventAtHit(const Config& cfg,int index,UINT32 id,int phase,boo
     const unsigned bit=index?1u<<(index-1):0;
     if(phase==0) {
         if(!inside)return false;
-        retireExpiredMenuContact(index);
+        retireExpiredMenuContact(cfg,index);
         if(buttonContacts[index])return false;
         buttonContacts[index]=id;buttonArmed[index]=true;
-        if(bit && activeProfile.load()!=0) {
-            if(index<=2&&activeProfile.load()==1)menuSignalExpires[index-1].store(GetTickCount64()+kMenuSignalMaxMs,std::memory_order_release);
+        if(steamMenuContact(cfg,index))
+            menuSignalExpires[index-1].store(GetTickCount64()+kMenuSignalMaxMs,std::memory_order_release);
+        if(bit && activeProfile.load()!=0 && !directSpecialButton(cfg,index))
             screenButtonMask.fetch_or(bit,std::memory_order_release);
-        }
-        if(quickAccessEdgeObserver) {
-            if(index==2&&activeProfile.load()==1)quickAccessEdgeObserver(0,true);
-            else quickAccessEdgeObserver(-1,false);
-        }
+        // Direct QAM starts only after an admitted UP in standaloneSubmit.
+        // Never start the old SD observer while no virtual key will be sent.
+        if(quickAccessEdgeObserver)quickAccessEdgeObserver(-1,false);
     } else {
         if(buttonContacts[index]!=id)return false;
         if(phase==1) {buttonArmed[index]=inside;return false;}
@@ -174,7 +174,7 @@ inline bool buttonEventAtHit(const Config& cfg,int index,UINT32 id,int phase,boo
         buttonContacts[index]=0;buttonArmed[index]=false;
         if(bit)screenButtonMask.fetch_and(~bit,std::memory_order_release);
         if(index==2 && !clicked && quickAccessEdgeObserver)quickAccessEdgeObserver(-1,false);
-        if(index && clicked && activeProfile.load()==0)standaloneDispatch(cfg,index);
+        if(clicked && directSpecialButton(cfg,index))standaloneDispatch(cfg,index);
         return summon;
     }
     return false;
@@ -184,19 +184,24 @@ inline bool buttonEvent(int index,UINT32 id,int phase,float x,float y,int width,
 }
 inline LRESULT handleButtonPointer(HWND h,int index,UINT message,UINT32 id,float x,float y,bool canceled=false) {
     if(index<0||index>=7||!std::isfinite(x)||!std::isfinite(y))return 0;
+    const char* ids[]={"summon-y","native-steam","native-qam","native-rear-1","native-rear-2","native-rear-3","native-rear-4"};
+    if(ymcc::customtouch::layoutPointer(h,ids[index],message,id,x,y,canceled))return 0;
     RECT rect{};if(!GetClientRect(h,&rect))return 0;
     // One event-local snapshot and rounded hit result serve wake, feedback and
     // mapping. The mapping helper still rechecks the live target/profile gate.
     const Config cfg=getConfig();const bool inside=buttonHit(x,y,rect.right,rect.bottom);
     const bool allowed=buttonPermitted(cfg,index);
     // Reclaim before wake/feedback so the fresh touch owns those states too.
-    if(message==WM_POINTERDOWN&&!canceled&&allowed&&inside)retireExpiredMenuContact(index);
+    if(message==WM_POINTERDOWN&&!canceled&&allowed&&inside)retireExpiredMenuContact(cfg,index);
     AutoHideTouchScope activity{false};
-    if(index==0 && allowed)activity.enabled=(message==WM_POINTERDOWN && !canceled && !buttonContacts[0] && inside) || buttonContacts[0]==id;
+    if(index==0 && allowed){
+        activity.freshDown=message==WM_POINTERDOWN&&!canceled&&!buttonContacts[0]&&inside;
+        activity.enabled=activity.freshDown||buttonContacts[0]==id;
+    }
     if((index==1 || index==2) && allowed) {
         auto& contact=autoHide.specialContacts[index-1];
         if(message==WM_POINTERDOWN && !canceled && !contact && inside) {
-            contact=id;activity.enabled=true;
+            contact=id;activity.enabled=activity.freshDown=true;
         } else if(contact==id) {
             activity.enabled=true;if(canceled || message==WM_POINTERUP)contact=0;
         }
@@ -204,7 +209,7 @@ inline LRESULT handleButtonPointer(HWND h,int index,UINT message,UINT32 id,float
     const int phase=canceled?2:message==WM_POINTERDOWN?0:message==WM_POINTERUP?2:1;
     if(allowed)buttonFeedbackAtHit(cfg,index,id,phase,inside);
     // Keep physical feedback in our own UI while suppressing mapped game input.
-    if(index&&activeProfile.load()!=0&&!dryRun&&owner.load()==GetForegroundWindow()) {
+    if(index&&activeProfile.load()!=0&&!directSpecialButton(cfg,index)&&!dryRun&&owner.load()==GetForegroundWindow()) {
         if(buttonsHaveMappedWork())buttonsReleaseMapped();
         return 0;
     }
@@ -234,6 +239,12 @@ inline void buttonsNativeInputDisable() {
     for(auto& surface:nativeButtonSurfaces)surface.close();
 #endif
 }
+template<class Current> inline bool buttonsNativeInputDisableCurrent(Current&& current) {
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+    for(auto& surface:nativeButtonSurfaces){if(!current())return false;surface.close();if(!current())return false;}
+#endif
+    return current();
+}
 inline bool buttonsNativeInputReady() {
 #ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
     for(int index=0;index<7;++index)if(buttonWindows[index]&&IsWindowVisible(buttonWindows[index])&&!nativeButtonSurfaces[index].active())return false;
@@ -254,11 +265,12 @@ inline bool buttonNativeInputSync(int index,bool wanted,bool force=false) {
     // ProcessEvents may abort a normal rebind. Recreate only this owned source,
     // once, while the same live selection still authorizes it. No timer/polling.
     for(int attempt=0;attempt<2;++attempt) {
-        const bool ok=surface.root()==root?surface.sync(force):surface.attach(nativeInputRuntime,root,index,nativeButtonSink,nullptr);
+        const bool ok=surface.root()==root?surface.sync(force):surface.attach(nativePadInputRuntime,root,index,nativeButtonSink,nullptr);
         // Never close a newer source installed by a nested refresh, or undo exit.
         if(!stillWanted())return false;
         if(ok){if(attempt)++buttonInputRecovery.recovered;return true;}
         const auto failure=surface.error;
+        recordNativeInputFailure(true,index,surface);
         buttonInputRecovery.lastError=(DWORD)failure;buttonInputRecovery.lastIndex=index;
         if(failure==E_ABORT)++buttonInputRecovery.aborts;
         surface.close();if(!stillWanted())return false;
@@ -279,6 +291,7 @@ inline LRESULT CALLBACK buttonProc(HWND h,UINT m,WPARAM w,LPARAM lp) {
 #ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
         if(index>=0&&index<7&&nativeButtonSurfaces[index].root()==h&&nativeButtonSurfaces[index].policyEnabled()&&
             !nativeButtonSurfaces[index].ensureMousePass()){
+            recordNativeInputFailure(true,index,nativeButtonSurfaces[index]);
             windowError=(DWORD)nativeButtonSurfaces[index].error;ShowWindow(h,SW_HIDE);
             if(buttonOutlines[index])ShowWindow(buttonOutlines[index],SW_HIDE);buttonsRelease();
         }
@@ -306,14 +319,14 @@ inline const unsigned char* buttonGlyph(int profile,int index) {
     if(profile==2) {switch(index){case 3:return glyphs::lfn;case 4:return glyphs::lb;case 5:return glyphs::rfn;case 6:return glyphs::rb;}}
     return nullptr;
 }
-inline bool renderButton(int index,int transparency,bool force) {
+inline bool renderButton(int index,int transparency,bool force,DWORD* submissionError) {
     const HWND h=buttonOutlines[index],input=buttonWindows[index];if(!h || !input)return false;
     // Owned popup windows do not inherit the owner's screen position/size.
     // The input HWND is authoritative, exactly as in renderOutline for pads.
     RECT rc{};if(!GetWindowRect(input,&rc)){windowError=GetLastError();return false;}
     const int width=rc.right-rc.left,height=rc.bottom-rc.top;if(width<1 || height<1)return false;
     const int applied=appliedProfile.load();const Config cfg=getConfig();
-    const int profile=applied==0?standaloneSpecialProfile(cfg):applied;
+    const int profile=(index==1 || index==2) && cfg.standaloneSpecialMode==StandaloneSpecialMode::SteamDeck?1:applied==0?standaloneSpecialProfile(cfg):applied;
     const bool pressed=buttonFeedbackPressed[index];transparency=outlineFeedbackTransparency(transparency,pressed);
     const int padding=pressGlowPadding(cfg.scale),frameWidth=width+padding*2,frameHeight=height+padding*2;
     const auto& cached=buttonUploads[index];
@@ -406,11 +419,13 @@ inline bool renderButton(int index,int transparency,bool force) {
         std::ofstream out(std::filesystem::path(file),std::ios::binary);out.write((const char*)pixels.data(),(std::streamsize)pixels.size()*4);
     }
     POINT destination{rc.left-padding,rc.top-padding},source{};SIZE size{frameWidth,frameHeight};BLENDFUNCTION blend{AC_SRC_OVER,0,alpha,AC_SRC_ALPHA};
+    const auto epoch=buttonRefreshEpoch;
     const bool ok=UpdateLayeredWindow(h,nullptr,&destination,&size,frame.dc,&source,0,&blend,ULW_ALPHA)!=FALSE;
+    if(buttonRefreshEpoch!=epoch||buttonOutlines[index]!=h||inputTeardown)return false;
     auto upload=buttonArtwork[index];upload.transparency=transparency;upload.pressed=pressed;upload.padding=padding;
     upload.maxAlpha=(upload.maxAlpha*alpha+127)/255;upload.transparentBackground=scalePressPixel(upload.transparentBackground,alpha);
     upload.hasIcon=upload.hasIcon && alpha!=0;upload.ready=ok;buttonUploads[index]=upload;++buttonUploadCount;
-    if(!ok){windowError=GetLastError();if(!windowError)windowError=ERROR_INVALID_DATA;}return ok;
+    if(!ok){DWORD& error=submissionError?*submissionError:windowError;error=GetLastError();if(!error)error=ERROR_INVALID_DATA;}return ok;
 }
 inline void repairButtonOutline(HWND h,bool contentLost){
     if(!contentLost)return;for(int i=0;i<7;++i)if(buttonOutlines[i]==h){buttonUploads[i]={};
@@ -428,8 +443,14 @@ inline bool buttonsRefresh(const Config& cfg,const RECT& monitor,const RECT& wor
     const auto rects=buttonRects(monitor,cfg.scale,&workArea,effectiveSummonPosition(cfg),effectiveRearMask(cfg));
     for(int i=0;i<7;i++) {
         if(!current())return false;
-        const bool show=buttonPermitted(cfg,i);const auto r=rects[i];const int width=r.right-r.left,height=r.bottom-r.top;
-        if(show && !buttonWindows[i]) {
+        if(!buttonPermitted(cfg,i)) {
+            if(buttonWindows[i])buttonNativeInputSync(i,false);
+            if(current()&&buttonWindows[i])ShowWindow(buttonWindows[i],SW_HIDE);
+            if(current()&&buttonOutlines[i])ShowWindow(buttonOutlines[i],SW_HIDE);
+            continue;
+        }
+        const auto r=rects[i];const int width=r.right-r.left,height=r.bottom-r.top;
+        if(!buttonWindows[i]) {
             buttonWindows[i]=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_NOREDIRECTIONBITMAP,L"YeManScreenButton",L"YeManCC Screen Button",WS_POPUP,0,0,width,height,nullptr,nullptr,instance,(void*)(INT_PTR)i);
             if(!buttonWindows[i])windowError=GetLastError();
         }
@@ -442,13 +463,13 @@ inline bool buttonsRefresh(const Config& cfg,const RECT& monitor,const RECT& wor
         const bool positioned=buttonWindows[i] && SetWindowPos(buttonWindows[i],HWND_TOPMOST,r.left,r.top,width,height,SWP_NOACTIVATE);
         if(!current())return false;
         if(buttonWindows[i] && !positioned)windowError=GetLastError();
-        const bool inputReady=positioned&&buttonNativeInputSync(i,show,force);
+        const bool inputReady=positioned&&buttonNativeInputSync(i,true,force);
         if(!current())return false;
         const bool ready=inputReady&&buttonOutlines[i]&&ymcc::screeninput::ensureDisplay(buttonOutlines[i])&&renderButton(i,cfg.transparency,force);
         if(!current())return false;
-        if(show && !ready && !windowError)windowError=ERROR_NOT_READY;
-        if(buttonWindows[i])ShowWindow(buttonWindows[i],show && ready?SW_SHOWNOACTIVATE:SW_HIDE);
-        if(buttonOutlines[i])ShowWindow(buttonOutlines[i],show && ready && (i>2 || !autoHide.hidden)?SW_SHOWNOACTIVATE:SW_HIDE);
+        if(!ready && !windowError)windowError=ERROR_NOT_READY;
+        if(buttonWindows[i])ShowWindow(buttonWindows[i],ready?SW_SHOWNOACTIVATE:SW_HIDE);
+        if(buttonOutlines[i])ShowWindow(buttonOutlines[i],ready && (i>2 || !autoHide.hidden)?SW_SHOWNOACTIVATE:SW_HIDE);
     }
     return current();
 }
@@ -459,6 +480,11 @@ inline bool buttonsNeedRefresh(const Config& cfg) {
         if(nativeInputCandidateRequested && !nativeButtonSurfaces[i].active())return true;
 #endif
         if((!autoHide.hidden || i>2) && !IsWindowVisible(buttonOutlines[i]))return true;
+        const auto& upload=buttonUploads[i];RECT r{},v{};
+        if(!upload.ready||!GetWindowRect(buttonWindows[i],&r)||!GetWindowRect(buttonOutlines[i],&v)||
+            upload.width!=r.right-r.left||upload.height!=r.bottom-r.top||
+            v.left!=r.left-upload.padding||v.top!=r.top-upload.padding||
+            v.right!=r.right+upload.padding||v.bottom!=r.bottom+upload.padding)return true;
     }
     return false;
 }
@@ -501,18 +527,31 @@ inline Json buttonCoreCases() {
     Json cases=Json::array();auto check=[&](const char* n,bool ok){cases.push_back({{"name",n},{"ok",ok}});};
     const Config saved=getConfig();const int oldActive=activeProfile.load(),oldApplied=appliedProfile.load();
     const bool oldTarget=controlTargetEnabled.load(),oldEdge=controlEdgeEnabled.load();
-    const auto defaults=ProfileBank();bool otherDefaultsOff=true;
-    for(const auto& c:defaults.slots)otherDefaultsOff=otherDefaultsOff && effectiveSummonPosition(c)==SummonPosition::Off && effectiveRearMask(c)==0;
-    check("summon-and-rear-default-off",otherDefaultsOff);
-    check("PS-Steam-Xbox-special-buttons-default-all-on",effectiveSpecialMask(defaults.slots[0])==0 &&
+    const auto defaults=ProfileBank();bool defaultsCorrect=true,directPair=true;
+    controlTargetEnabled.store(false);
+    for(int i=0;i<4;++i){
+        const auto& c=defaults.slots[i];
+        activeProfile.store(i);appliedProfile.store(i);
+        defaultsCorrect=defaultsCorrect && c.summonPosition==SummonPosition::Opposite && c.summonEnabled && effectiveRearMask(c)==0;
+        directPair=directPair && c.standaloneSpecialMode==StandaloneSpecialMode::SteamDeck &&
+            buttonPermitted(c,1) && buttonPermitted(c,2) && directSpecialButton(c,1) && directSpecialButton(c,2);
+    }
+    check("all-profiles-default-opposite-summon-and-no-rear",defaultsCorrect);
+    check("all-profiles-default-steam-pair-without-target",directPair);
+    check("explicit-original-special-pair-masks-are-retained",effectiveSpecialMask(defaults.slots[0])==0 &&
         effectiveSpecialMask(defaults.slots[1])==3 && effectiveSpecialMask(defaults.slots[2])==3 && effectiveSpecialMask(defaults.slots[3])==1);
     const ProfileBank savedOff({{"profiles",{{"steamdeck",{{"specialMask",0}}},{"dualsense-edge",{{"specialEnabled",false}}},{"elite",{{"specialMask",0},{"specialEnabled",false}}}}}});
     check("explicit-saved-special-off-overrides-new-all-on-default",effectiveSpecialMask(savedOff.slots[1])==0 && effectiveSpecialMask(savedOff.slots[2])==0 && effectiveSpecialMask(savedOff.slots[3])==0);
     const ProfileBank savedSingle({{"profiles",{{"steamdeck",{{"specialMask",2}}}}}});
     check("saved-partial-special-selection-preserved",effectiveSpecialMask(savedSingle.slots[1])==2);
-    Config cfg=profileDefault(1);cfg.summonPosition=SummonPosition::Right;cfg.specialMask=3;cfg.rearMask=15;cfg.summonEnabled=cfg.specialEnabled=cfg.rearEnabled=true;
+    Config cfg=profileDefault(1);cfg.standaloneSpecialMode=StandaloneSpecialMode::Off;cfg.summonPosition=SummonPosition::Same;
+    cfg.specialMask=3;cfg.rearMask=15;cfg.summonEnabled=cfg.specialEnabled=cfg.rearEnabled=true;
     const ProfileBank stored({{"profiles",{{"steamdeck",configJson(cfg)}}}});
-    check("button-selector-masks-persist-with-existing-profile",stored.slots[1].summonPosition==SummonPosition::Right && stored.slots[1].specialMask==3 && stored.slots[1].rearMask==15 && !stored.slots[2].summonEnabled);
+    check("button-selector-settings-persist-without-changing-other-profiles",configJson(stored.slots[1])==configJson(cfg) &&
+        configJson(stored.slots[2])==configJson(defaults.slots[2]));
+    Json legacyPlacement=configJson(cfg);legacyPlacement.erase("summonPlacementVersion");legacyPlacement["summonPosition"]="right";
+    const ProfileBank legacy({{"profiles",{{"steamdeck",legacyPlacement}}}});
+    check("old-absolute-summon-migrates-to-opposite",legacy.slots[1].summonPosition==SummonPosition::Opposite && legacy.slots[1].summonEnabled);
     Config parsed;check("reject-nonboolean-button-toggle",!parseConfig({{"specialEnabled",1}},cfg,parsed));
     check("accept-selector-masks-and-summon-position",parseConfig({{"summonPosition","left"},{"specialMask",2},{"rearMask",6}},cfg,parsed) && parsed.summonPosition==SummonPosition::Left && parsed.specialMask==2 && parsed.rearMask==6);
     const RECT monitors[]={{0,0,1280,720},{0,0,1920,1080},{1920,-1080,4480,360},{0,0,3840,2160}};
@@ -574,7 +613,8 @@ inline Json buttonCoreCases() {
     check("either-rear-key-alone-occupies-inner-cell-all-scales-monitors-and-taskbars",singleRearInner);
     check("both-rear-keys-retain-fixed-left-right-cells-all-scales-monitors-and-taskbars",doubleRearFixed);
     check("rear-pair-selection-does-not-move-Y-or-special-row",otherRowsUnchanged);
-    activeProfile.store(1);appliedProfile.store(1);controlTargetEnabled.store(true);controlEdgeEnabled.store(false);
+    // PS5 Edge's optional native keys still use the held-bit path; the Steam pair does not.
+    activeProfile.store(2);appliedProfile.store(2);controlTargetEnabled.store(true);controlEdgeEnabled.store(true);
     {std::lock_guard<std::mutex> lock(mutex);core.config=cfg;}
     bool independent=true;
     for(int mask=0;mask<8;mask++) {
@@ -590,19 +630,20 @@ inline Json buttonCoreCases() {
     for(int i=1;i<7;i++){buttonEvent(i,100+i,0,30,20,100,54);bitsCorrect=bitsCorrect && buttonSnapshot()==(1u<<(i-1));
         buttonEvent(i,900+i,2,30,20,100,54);bitsCorrect=bitsCorrect && buttonSnapshot()==(1u<<(i-1));
         buttonEvent(i,100+i,2,30,20,100,54);bitsCorrect=bitsCorrect && buttonSnapshot()==0;}
-    check("six-independent-real-button-bits-hold-release-ignore-other-id",bitsCorrect);
+    check("six-native-ps5-edge-button-bits-hold-release-ignore-other-id",bitsCorrect);
     buttonEvent(1,41,0,30,20,100,54);buttonEvent(3,43,0,30,20,100,54);buttonEvent(5,45,0,30,20,100,54);
     check("special-and-back-buttons-combine",buttonSnapshot()==21);buttonsRelease();check("cancel-clears-all-held-buttons",buttonSnapshot()==0);
     buttonEvent(1,42,0,30,20,100,54);controlTargetEnabled.store(false);check("target-disabled-blocks-held-button-before-UI-refresh",buttonSnapshot()==0);
     buttonsRelease();controlTargetEnabled.store(true);activeProfile.store(3);appliedProfile.store(3);
-    check("Xbox-offers-only-guide-no-rear",buttonPermitted(cfg,1) && !buttonPermitted(cfg,2) && !buttonPermitted(cfg,3) && !buttonPermitted(cfg,6));
+    check("xbox-native-selection-offers-guide-only-no-rear",buttonPermitted(cfg,1) && !buttonPermitted(cfg,2) && !buttonPermitted(cfg,3) && !buttonPermitted(cfg,6));
     activeProfile.store(2);appliedProfile.store(2);controlEdgeEnabled.store(false);
     check("plain-PS5-no-Edge-back-buttons",buttonPermitted(cfg,1) && buttonPermitted(cfg,2) && !buttonPermitted(cfg,3));
     controlEdgeEnabled.store(true);check("PS5-Edge-all-four-Fn-back-buttons",buttonPermitted(cfg,3) && buttonPermitted(cfg,4) && buttonPermitted(cfg,5) && buttonPermitted(cfg,6));
     activeProfile.store(0);appliedProfile.store(0);controlTargetEnabled.store(false);
-    check("disabled-persona-common-summon-only",buttonPermitted(cfg,0) && !buttonPermitted(cfg,1));
+    check("local-mode-explicitly-disabled-special-pair-keeps-summon",buttonPermitted(cfg,0) && !buttonPermitted(cfg,1));
     Config standalone=profileDefault(0),parsedStandalone;
-    check("standalone-special-old-config-defaults-off",standalone.standaloneSpecialMode==StandaloneSpecialMode::Off);
+    const ProfileBank legacyLocalOff({{"profiles",{{profileName(0),{{"specialMask",0}}}}}});
+    check("legacy-local-explicit-off-keeps-special-pair-off",legacyLocalOff.slots[0].standaloneSpecialMode==StandaloneSpecialMode::Off);
     check("standalone-special-rejects-unknown-or-nonstring-mode",!parseConfig({{"standaloneSpecialMode","elite"}},standalone,parsedStandalone) &&
         !parseConfig({{"standaloneSpecialMode",3}},standalone,parsedStandalone) && !parseConfig({{"standaloneSpecialMode",nullptr}},standalone,parsedStandalone));
     for(auto mode:{StandaloneSpecialMode::SteamDeck,StandaloneSpecialMode::PS5}) {
@@ -617,8 +658,9 @@ inline Json buttonCoreCases() {
             screenButtonMask.load()==0 && buttonSnapshot()==0 && activeProfile.load()==0 && !controlTargetEnabled.load());
         buttonsRelease();check("standalone-special-release-clears-held-bits",screenButtonMask.load()==0);
         ProfileBank bank;bank.slots[0]=standalone;const ProfileBank restored(bank.json());
-        check("standalone-special-stored-in-disabled-slot-only",restored.json()==bank.json() && restored.slots[1].standaloneSpecialMode==StandaloneSpecialMode::Off &&
-            restored.slots[2].standaloneSpecialMode==StandaloneSpecialMode::Off);
+        check(mode==StandaloneSpecialMode::SteamDeck?"local-steam-selection-roundtrip-preserves-other-profiles":"local-ps5-selection-roundtrip-preserves-other-profiles",
+            restored.json()==bank.json() && configJson(restored.slots[1])==configJson(defaults.slots[1]) &&
+            configJson(restored.slots[2])==configJson(defaults.slots[2]) && configJson(restored.slots[3])==configJson(defaults.slots[3]));
     }
     standalone.standaloneSpecialMode=StandaloneSpecialMode::Off;
     check("standalone-special-off-hides-both-pairs",!buttonPermitted(standalone,1) && !buttonPermitted(standalone,2));

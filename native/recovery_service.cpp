@@ -29,10 +29,15 @@
 #include <vector>
 #include <functional>
 #include <atomic>
+#include <limits>
 #include "recovery_ui_progress.h"
+#include "recovery_power_projection.h"
 
 // GP-XBOX-2（2026-09-28 裁决 §8）：--selftest 期间的事件名捕获；生产路径恒为 nullptr。
 std::vector<std::string>* g_selftestEventCapture = nullptr;
+struct RecoveryTerminationAttempt {bool attempted=false,ok=false;DWORD error=0;};
+static RecoveryTerminationAttempt guardedRecoveryTerminate(HANDLE,ymcc::sleeppower::RecoveryTerminationPermit&) noexcept;
+unsigned long long processStartKeyOf(HANDLE process);
 
 namespace {
 constexpr UINT WM_RECOVERY_WEBVIEW_PING = WM_USER + 20;
@@ -172,10 +177,11 @@ bool confirmationProbe(const Options& options, HANDLE pongEvent, DWORD& serial) 
 
 // GP-XBOX-2（§5.7）：终止与启动**拆开**——旧 PID 未经 WAIT_OBJECT_0 确认前不得
 // CreateProcess；且必须在 FanHost/8765 所有权释放等待之后才允许启动（§5.8）。
-bool terminateTargetProcess(HANDLE process, const std::wstring& log) {
-    if (!TerminateProcess(process, 0xE001)) {
-        writeLog(log, "restart-result", "\"ok\":false,\"reason\":\"target-terminate-failed\",\"error\":" +
-            std::to_string(GetLastError()));
+bool terminateTargetProcess(HANDLE process, const std::wstring& log,ymcc::sleeppower::RecoveryTerminationPermit& permit) {
+    const auto attempt=guardedRecoveryTerminate(process,permit);
+    if(!attempt.attempted){try{writeLog(log,"recovery-termination-deferred","\"reason\":\"power-notification-or-target-changed\"");}catch(...) {}return false;}
+    if(!attempt.ok){
+        try{writeLog(log,"restart-result","\"ok\":false,\"reason\":\"target-terminate-failed\",\"error\":"+std::to_string(attempt.error));}catch(...) {}
         return false;
     }
     return true;
@@ -208,14 +214,19 @@ bool spawnTargetProcess(const Options& options, const std::wstring& log) {
 // ================================================================
 static std::atomic<bool> g_systemSleeping{false};
 static std::atomic<ULONGLONG> g_lastWakeTick{0};
+static std::atomic<ULONGLONG> g_lastSuspendTick{0};
+static SRWLOCK g_recoveryPowerObservationLock=SRWLOCK_INIT;
+static std::atomic<std::uint64_t> g_recoveryPowerObservationSerial{0};
 static HPOWERNOTIFY g_powerNotify = nullptr;
 // 唤醒恢复 grace：主进程 UI 泵在唤醒后需要时间恢复（实测 5-6s），此窗口内不判死。
 constexpr DWORD kWakeGraceMs = 15000;
 
 static ULONG CALLBACK powerNotifyCallback(PVOID /*context*/, ULONG type, PVOID /*setting*/) {
+    AcquireSRWLockExclusive(&g_recoveryPowerObservationLock);
     switch (type) {
     case PBT_APMSUSPEND:
         // 系统进入睡眠：先于进程冻结置位，唤醒后判死闸即可拦截。
+        g_lastSuspendTick.store(GetTickCount64(),std::memory_order_release);
         g_systemSleeping.store(true, std::memory_order_release);
         break;
     case PBT_APMRESUMEAUTOMATIC:
@@ -225,6 +236,11 @@ static ULONG CALLBACK powerNotifyCallback(PVOID /*context*/, ULONG type, PVOID /
         g_lastWakeTick.store(GetTickCount64(), std::memory_order_release);
         break;
     }
+    if(type==PBT_APMSUSPEND||type==PBT_APMRESUMEAUTOMATIC||type==PBT_APMRESUMESUSPEND||type==PBT_APMRESUMECRITICAL){
+        const auto serial=g_recoveryPowerObservationSerial.load(std::memory_order_relaxed);
+        if(serial!=(std::numeric_limits<std::uint64_t>::max)())g_recoveryPowerObservationSerial.store(serial+1,std::memory_order_release);
+    }
+    ReleaseSRWLockExclusive(&g_recoveryPowerObservationLock);
     return 0;
 }
 
@@ -234,18 +250,57 @@ static ULONG CALLBACK powerNotifyCallback(PVOID /*context*/, ULONG type, PVOID /
 // （ULONG CALLBACK(PVOID Context, ULONG Type, PVOID Setting)；Setting 对 suspend/resume 不使用）。
 static DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS g_powerNotifyParams = { &powerNotifyCallback, nullptr };
 
-static bool powerDeferKill(const std::wstring& log) {
-    if (g_systemSleeping.load(std::memory_order_acquire)) {
+static bool powerDeferKill(const std::wstring& log,const ymcc::sleeppower::RecoveryWakeObservation* observed=nullptr,ymcc::sleeppower::RecoveryTerminationPermit* permit=nullptr) {
+    if(permit)*permit={};
+    if(observed&&!observed->boundary.current()){writeLog(log,"confirmation-deferred-sleep","\"reason\":\"native-boundary-revoked\"");return true;}
+    const auto now=GetTickCount64();
+    bool reconciled=false;
+    AcquireSRWLockExclusive(&g_recoveryPowerObservationLock);
+    const bool wasSleeping=g_systemSleeping.load(std::memory_order_acquire);
+    if(observed&&(wasSleeping||observed->boundary.required)&&(wasSleeping||observed->projection.committedTick>g_lastWakeTick.load(std::memory_order_acquire))&&
+       ymcc::sleeppower::freshRecoveryWake(*observed,g_lastSuspendTick.load(std::memory_order_acquire),now,wasSleeping?kHeartbeatStaleMs:(std::numeric_limits<std::uint64_t>::max)(),wasSleeping,wasSleeping)){
+        g_systemSleeping.store(false,std::memory_order_release);
+        g_lastWakeTick.store(observed->projection.committedTick,std::memory_order_release);
+        reconciled=true;
+    }
+    const bool sleeping=g_systemSleeping.load(std::memory_order_acquire);
+    const auto lastWake=g_lastWakeTick.load(std::memory_order_acquire);
+    const auto serial=g_recoveryPowerObservationSerial.load(std::memory_order_acquire);
+    const bool exhausted=serial==(std::numeric_limits<std::uint64_t>::max)();
+    if(permit){permit->notificationSequence=serial;permit->accepted=!sleeping&&!exhausted&&(!lastWake||(now>=lastWake&&now-lastWake>=kWakeGraceMs));}
+    ReleaseSRWLockExclusive(&g_recoveryPowerObservationLock);
+    if(permit&&observed)permit->boundary=observed->boundary;
+    if(reconciled){try{writeLog(log,"sleep-observation-reconciled","\"source\":\"shared-native-commit\",\"generation\":"+std::to_string(observed->projection.power.generation)+",\"committedTick\":"+std::to_string(observed->projection.committedTick));}catch(...) {}}
+    if(exhausted){try{writeLog(log,"confirmation-deferred-sleep","\"reason\":\"notification-sequence-exhausted\"");}catch(...) {}return true;}
+    if (sleeping) {
         writeLog(log, "confirmation-deferred-sleep", "\"reason\":\"system-sleeping\"");
         return true;
     }
-    const ULONGLONG lastWake = g_lastWakeTick.load(std::memory_order_acquire);
-    if (lastWake != 0 && GetTickCount64() - lastWake < kWakeGraceMs) {
+    if (lastWake != 0 && (now<lastWake || now-lastWake < kWakeGraceMs)) {
         writeLog(log, "confirmation-deferred-sleep",
             "\"reason\":\"wake-grace\",\"graceMs\":" + std::to_string(kWakeGraceMs));
         return true;
     }
     return false;
+}
+
+static RecoveryTerminationAttempt guardedRecoveryTerminate(HANDLE process,ymcc::sleeppower::RecoveryTerminationPermit& permit) noexcept {
+    RecoveryTerminationAttempt result;
+    AcquireSRWLockExclusive(&g_recoveryPowerObservationLock);
+    const auto now=GetTickCount64();
+    const auto wake=g_lastWakeTick.load(std::memory_order_acquire);
+    const bool accepted=permit.accepted;
+    permit.accepted=false;
+    if(accepted&&permit.notificationSequence==g_recoveryPowerObservationSerial.load(std::memory_order_acquire)&&
+       permit.notificationSequence!=(std::numeric_limits<std::uint64_t>::max)()&&
+       !g_systemSleeping.load(std::memory_order_acquire)&&(!wake||(now>=wake&&now-wake>=kWakeGraceMs))&&
+       process&&permit.targetPid&&permit.targetStartKey&&GetProcessId(process)==permit.targetPid&&processStartKeyOf(process)==permit.targetStartKey&&permit.boundary.current()){
+        result.attempted=true;
+        result.ok=TerminateProcess(process,0xE001)!=FALSE;
+        if(!result.ok)result.error=GetLastError();
+    }
+    ReleaseSRWLockExclusive(&g_recoveryPowerObservationLock);
+    return result;
 }
 
 // RECOVERY-1（2026-09-20 实测修正）：句柄改由 wWinMain 在**启动时**打开并**持有**
@@ -330,6 +385,15 @@ static_assert(offsetof(RecoveryStateSnapshot, fanOwnerState) == 140, "snapshot A
 static_assert(offsetof(RecoveryStateSnapshot, exitIntent) == 144, "snapshot ABI");
 static_assert(offsetof(RecoveryStateSnapshot, reserved0) == 148, "snapshot ABI");
 
+struct RecoveryStateWithPower {
+    RecoveryStateSnapshot recovery;
+    ymcc::sleeppower::RecoveryPowerProjection power;
+    ymcc::sleeppower::RecoveryPowerBoundary boundary;
+};
+static_assert(offsetof(RecoveryStateWithPower,power)==152);
+static_assert(offsetof(RecoveryStateWithPower,boundary)==224);
+static_assert(sizeof(RecoveryStateWithPower)==256);
+
 enum class SnapshotRead { Ok = 0, Unavailable = 1, Torn = 2 };
 
 struct SnapshotObservation {
@@ -349,11 +413,21 @@ struct SnapshotObservation {
     bool exitIntent = false;
     bool uiPulseKnown = false;
     unsigned int uiPulse = 0;
+    ymcc::sleeppower::RecoveryWakeObservation powerObservation;
 };
 
+struct SnapshotMapping {
+    HANDLE mapping=nullptr;
+    const RecoveryStateSnapshot* view=nullptr;
+    std::atomic<bool> retired{false};
+    ~SnapshotMapping(){if(view)UnmapViewOfFile(view);if(mapping)CloseHandle(mapping);}
+};
 struct SnapshotChannel {
     HANDLE mapping = nullptr;
     const RecoveryStateSnapshot* view = nullptr;
+    const RecoveryStateWithPower* powerView = nullptr;
+    const ymcc::sleeppower::RecoveryPowerBoundary* boundaryView=nullptr;
+    std::shared_ptr<SnapshotMapping> owner;
     DWORD pid = 0;
 };
 
@@ -362,8 +436,9 @@ std::wstring snapshotName(DWORD pid) {
 }
 
 void snapshotChannelClose(SnapshotChannel& channel) {
-    if (channel.view) { UnmapViewOfFile(channel.view); channel.view = nullptr; }
-    if (channel.mapping) { CloseHandle(channel.mapping); channel.mapping = nullptr; }
+    if(channel.owner)channel.owner->retired.store(true,std::memory_order_release);
+    channel.view=nullptr;channel.mapping=nullptr;channel.powerView=nullptr;channel.boundaryView=nullptr;
+    channel.owner.reset(); // Permits retain the read-only mapping until their own release.
     channel.pid = 0;
 }
 
@@ -371,11 +446,20 @@ bool snapshotChannelEnsure(SnapshotChannel& channel, DWORD pid) {
     if (channel.view && channel.pid == pid) return true;
     snapshotChannelClose(channel);
     const std::wstring name = snapshotName(pid);
+    auto owner=std::make_shared<SnapshotMapping>();
     HANDLE mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, name.c_str());
     if (!mapping) return false;
-    const auto* view = static_cast<const RecoveryStateSnapshot*>(
+    owner->mapping=mapping;
+    const auto* full = static_cast<const RecoveryStateWithPower*>(
+        MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, sizeof(RecoveryStateWithPower)));
+    const auto* prefix = full ? full : static_cast<const RecoveryStateWithPower*>(
+        MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, offsetof(RecoveryStateWithPower,boundary)));
+    const auto* view = prefix ? &prefix->recovery : static_cast<const RecoveryStateSnapshot*>(
         MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, sizeof(RecoveryStateSnapshot)));
-    if (!view) { CloseHandle(mapping); return false; }
+    if (!view) return false;
+    owner->view=view;channel.owner=std::move(owner);
+    channel.boundaryView=full?&full->boundary:nullptr;
+    channel.powerView = prefix;
     channel.mapping = mapping;
     channel.view = view;
     channel.pid = pid;
@@ -411,6 +495,21 @@ SnapshotRead readRecoverySnapshot(SnapshotChannel& channel, HANDLE process, DWOR
         if (s1 & 1u) { Sleep(2); continue; }
         std::atomic_thread_fence(std::memory_order_acquire);
         RecoveryStateSnapshot copy = *view;
+        ymcc::sleeppower::RecoveryPowerProjection powerCopy;
+        if(channel.powerView)powerCopy=channel.powerView->power;
+        ymcc::sleeppower::RecoveryBoundaryTicket boundaryCopy;
+        if(channel.boundaryView){
+            const auto& record=*channel.boundaryView;
+            const auto live=ReadAcquire64(&record.liveSerial);
+            auto& ticket=boundaryCopy;
+            ticket.required=record.magic||record.size||record.version||record.reserved||live||record.publicationStamp;
+            if(ticket.required){
+                ticket.liveSerial=&record.liveSerial;
+                ticket.retired=std::shared_ptr<const std::atomic<bool>>(channel.owner,&channel.owner->retired);
+                if(record.magic==ymcc::sleeppower::kRecoveryBoundaryMagic&&record.size==sizeof(record)&&record.version==1&&record.reserved==0&&powerCopy.size==sizeof(powerCopy)&&powerCopy.version==1&&ymcc::sleeppower::recoveryWatchdogEligible(powerCopy.power))
+                    ticket.serial=record.publicationStamp;
+            }
+        }
         std::atomic_thread_fence(std::memory_order_acquire);
         const unsigned int s2 = view->sequence;
         if (s1 != s2 || (s2 & 1u)) { Sleep(2); continue; }
@@ -433,6 +532,10 @@ SnapshotRead readRecoverySnapshot(SnapshotChannel& channel, HANDLE process, DWOR
         const ULONGLONG now = GetTickCount64();
         obs.heartbeatAgeMs = now >= copy.lastNativeHeartbeat ? now - copy.lastNativeHeartbeat : 0;
         obs.heartbeatFresh = obs.heartbeatAgeMs <= kHeartbeatStaleMs;
+        obs.powerObservation.projection=powerCopy;
+        obs.powerObservation.boundary=std::move(boundaryCopy);
+        obs.powerObservation.publishedTick=copy.lastNativeHeartbeat;
+        obs.powerObservation.processBound=targetKey!=0 && copy.processStartKey==targetKey;
         obs.lifecycleBusy = copy.lifecycleBusy != 0;
         obs.lifecycleStartedAt = copy.lifecycleStartedAt;
         obs.phase = boundedText(copy.lifecyclePhase, sizeof(copy.lifecyclePhase));
@@ -446,6 +549,16 @@ SnapshotRead readRecoverySnapshot(SnapshotChannel& channel, HANDLE process, DWOR
     }
     obs.unavailableReason = "torn-read";
     return SnapshotRead::Torn;
+}
+
+static bool captureRecoveryTerminationPermit(const std::wstring& log,const SnapshotObservation& observation,ymcc::sleeppower::RecoveryTerminationPermit& permit) noexcept {
+    permit={};
+    try{
+        if(observation.state!=SnapshotRead::Ok||!observation.powerObservation.processBound||!observation.pid||!observation.processStartKey)return true;
+        if(powerDeferKill(log,&observation.powerObservation,&permit))return true;
+        permit.targetPid=observation.pid;permit.targetStartKey=observation.processStartKey;
+        return !permit.accepted;
+    }catch(...){permit={};return true;}
 }
 
 // ---- 外部 FanHost 所有权核对（§5.8：旧 PID 结束后的释放等待判据）----
@@ -566,6 +679,7 @@ struct RecoveryEpisodeState {
 struct RecoveryOps {
     std::function<bool()> processAlive;
     std::function<bool()> terminateTarget;
+    std::function<bool()> powerDeferred;
     std::function<bool()> waitTargetExit;
     std::function<OwnerProbe()> ownerProbe;
     std::function<bool()> spawnTarget;
@@ -614,6 +728,7 @@ RoundResult recoveryPerformRestart(const SnapshotObservation& obs, RecoveryEpiso
     writeLog(log, "recovery-restart-allowed",
         "\"reason\":\"" + jsonEscape(reason) + "\"," + observationFields(obs));
     if (ops.processAlive()) {
+        if(ops.powerDeferred&&ops.powerDeferred()){episode.uiProgress.reset();return RoundResult::Continue;}
         writeLog(log, "restart-attempt", "\"reason\":\"unresponsive\"," + observationFields(obs));
         if (!ops.terminateTarget()) return RoundResult::Continue;
         if (!ops.waitTargetExit()) {
@@ -677,8 +792,7 @@ RoundResult recoveryDecisionRound(const SnapshotObservation& obs, RecoveryEpisod
         if ((episode.decisionRounds - 1) % 4 == 0) {
             const OwnerProbe probe = ops.ownerProbe();
             writeLog(log, "recovery-fan-owner-state",
-                "\"fanOwnerState\":\"" + ownerStateName(obs.fanOwnerState) + "\"," + ownerProbeFields(probe) +
-                "," + observationFields(obs));
+                ownerProbeFields(probe) + "," + observationFields(obs));
         }
         return RoundResult::Continue;
     }
@@ -853,6 +967,7 @@ std::string layoutText() {
 // 正例（roundtrip）/ 反例（撕裂序列 / 代次不符 / 映射缺失）。
 void runSnapshotChannelSelfTest(std::ostringstream& report, bool& pass,
                                 const std::function<void(const char*, bool, const std::string&)>& check) {
+    (void)report;(void)pass;
     const DWORD pid = GetCurrentProcessId();
     HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
         sizeof(RecoveryStateSnapshot), snapshotName(pid).c_str());
@@ -1292,9 +1407,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
     DWORD serial = 1;
     RecoveryEpisodeState episode;
     SnapshotChannel channel;
+    ymcc::sleeppower::RecoveryTerminationPermit terminationPermit;
     RecoveryOps ops;
     ops.processAlive = [&]() { return processAlive(process); };
-    ops.terminateTarget = [&]() { return terminateTargetProcess(process, log); };
+    ops.powerDeferred = [&]() {terminationPermit={};try{SnapshotObservation current;(void)readRecoverySnapshot(channel,process,options.pid,current);return captureRecoveryTerminationPermit(log,current,terminationPermit);}catch(...){terminationPermit={};return true;}};
+    ops.terminateTarget = [&]() { return terminateTargetProcess(process, log,terminationPermit); };
     ops.waitTargetExit = [&]() { return targetTerminationSettled(process); };
     ops.ownerProbe = []() { return probeFanHostOwner(); };
     ops.spawnTarget = [&]() { return spawnTargetProcess(options, log); };
@@ -1317,15 +1434,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                 // R-A（§32 A2）：睡眠中或唤醒 grace 内不判死——S0 Modern Standby
                 // 睡眠期 UI 泵冻结是正常现象（0915-0 链 1 根因）。defer 继续循环
                 // 探测，唤醒后恢复判死（真死锁仍会被救，最多延后 grace）。
-                if (powerDeferKill(log)) {
+                SnapshotObservation observation;
+                (void)readRecoverySnapshot(channel, process, options.pid, observation);
+                if (powerDeferKill(log,&observation.powerObservation)) {
                     episode.uiProgress.reset();
                     Sleep(kRoundIntervalMs);
                     continue;
                 }
                 // GP-XBOX-2（§5.1）：探针失败后先写观测行并读取生命周期快照——
                 // UI 通道失败不再单独构成判死条件。
-                SnapshotObservation observation;
-                (void)readRecoverySnapshot(channel, process, options.pid, observation);
                 writeLog(log, "recovery-observation",
                     "\"source\":\"lifecycle-snapshot\"," + observationFields(observation));
                 // §5.2 退出意图双通道（事件 + 快照，快照通道在决策核内再判一次）。

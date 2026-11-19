@@ -10,7 +10,7 @@ fs.mkdirSync(out,{recursive:true});
 const source=path.join(out,'source');
 const historical=JSON.parse(fs.readFileSync('D:/Codex/2026-10-21/steam-ai-steam-running-steam-api/work/steam-typed-failure-cleanup-20261023/FIXED-SOURCE-PINS.json','utf8').replace(/^\uFEFF/,''));
 const files=new Set(historical.files.map(f=>f.path));
-for(const file of ['native/decky_binding_worker.h','tools/decky_binding_worker_selftest.cpp','tools/decky_inherited_cancel_selftest.cpp','tools/decky_inherited_cancel_selftest.mjs','tools/decky_sidebar_bootstrap_selftest.cpp','tools/decky_sidebar_bootstrap_watch_selftest.cpp','tools/decky_binding_cancel_selftest.cpp'])files.add(file);
+for(const file of ['native/decky_binding_worker.h','tools/decky_binding_worker_selftest.cpp','tools/decky_inherited_cancel_selftest.cpp','tools/decky_inherited_cancel_selftest.mjs','tools/decky_sidebar_bootstrap_selftest.cpp','tools/decky_sidebar_bootstrap_watch_selftest.cpp','tools/decky_worker_bootstrap_scope_fixture.inc','tools/fixtures/decky_official_socket_diagnostic_cases.inc','tools/decky_binding_cancel_selftest.cpp'])files.add(file);
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');const pins=[];
 for(const file of files){const p=path.join(repo,file),bytes=fs.readFileSync(p),target=path.join(source,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes);assert.equal(sha(fs.readFileSync(p)),sha(bytes),'Concurrent source change: '+file);pins.push({path:file,bytes:bytes.length,sha256:sha(bytes)});}
 fs.writeFileSync(path.join(out,'SOURCE-PINS.json'),JSON.stringify({repo,source,files:pins},null,2));

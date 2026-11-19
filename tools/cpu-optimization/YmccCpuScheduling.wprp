@@ -3,7 +3,7 @@
   <Profiles>
     <SystemCollector Id="YmccCpuSchedulingCollector" Name="YMCC bounded CPU scheduling collector">
       <BufferSize Value="256" />
-      <Buffers Value="256" />
+      <Buffers Value="1024" />
     </SystemCollector>
     <SystemProvider Id="YmccCpuSchedulingProvider">
       <Keywords>

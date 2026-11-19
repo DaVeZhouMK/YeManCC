@@ -18,7 +18,9 @@ const browserRequire = createRequire(path.join(runtime, '_task-view-menu.cjs'));
 const { chromium } = browserRequire('playwright');
 const evidenceRoot = path.resolve(root, '../../../Build/Validation/TaskView-Api-20261015/menu-browser');
 const baseline = path.join(evidenceRoot, 'baseline-before-focus-fix');
-const out = path.join(evidenceRoot, 'focus-fix-' + new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-'));
+const args=process.argv.slice(2);const option=name=>args.includes(name)?args[args.indexOf(name)+1]:undefined;
+const height=Number(option('--height')||720);assert([720,800].includes(height));
+const out = path.resolve(option('--out')||path.join(evidenceRoot, 'system-touch-' + height + '-' + new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')));
 fs.mkdirSync(out, { recursive: true });
 const sha = value => createHash('sha256').update(value).digest('hex');
 const sources = new Map();
@@ -42,22 +44,28 @@ mocks['@/bridge/yeman'] += 'export const getTdpExecutionCapability=async()=>null
 mocks['@/bridge/gameQuickSession'] += 'export const captureAndLockGameTarget=()=>{throw Error("Unexpected trainer action in TaskView test")};';
 mocks['@/bridge/gameTrainer'] += 'export const openCheatEngine=()=>{throw Error("Unexpected Cheat Engine action in TaskView test")};';
 
+// The unchanged sibling features expose memory-only read ports in this suite.
+mocks['@/bridge/settingsRepository']+='export const getSettingsGeneration=()=>1;';
+mocks['@/bridge/performanceSchedule']+='export const onGameCustomConfigChanged=()=>()=>{};export const createGameCustomProfile=()=>{throw Error("Unexpected profile write")};export const removeGameCustomProfile=createGameCustomProfile,restorePerformanceScheduleIfConfigured=createGameCustomProfile,setGameCustomAutoMemory=createGameCustomProfile;';
+mocks['@/bridge/quickapp']+='export const removeLosslessGameProfile=()=>{throw Error("Unexpected lossless action")};export const onLosslessScalingChanged=()=>()=>{};';
+mocks['@/bridge/losslessRuntimeState']='export const retainLosslessObservation=()=>()=>{};export const readLosslessProgram=()=>({known:true,running:false,readable:true});';
 const engine = read('src/gamepad/engine.ts');
 const ast = ts.createSourceFile('engine.ts', engine, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 const functions = new Map(ast.statements.filter(ts.isFunctionDeclaration).map(node => [node.name?.text, node]));
 const activate = functions.has('activateCurrent') ? 'activateCurrent' : 'activate';
-const extractedNames = ['focusables', 'focusFirst', 'isRangeInput', activate, 'handleGamepadEditGame'];
-const extracted = extractedNames.map(name => { assert(functions.has(name), `Missing production ${name}`); return functions.get(name).getText(ast); }).join('\n');
+const extractedNames = ['focusFirst', 'isRangeInput', 'offerPageCommand', 'resetSliderCadence', activate, 'handleGamepadEditGame','handleGamepadBack','cancelPerformanceSliderEdit'];
+const focusBlock=engine.slice(functions.get('focusables').getStart(ast),functions.get('isRangeInput').getStart(ast));
+const extracted = focusBlock+'\n'+extractedNames.map(name => { assert(functions.has(name), `Missing production ${name}`); return functions.get(name).getText(ast); }).join('\n');
 const focusable = ast.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(d => d.name.getText(ast) === 'FOCUSABLE'));
 assert(focusable, 'Missing production FOCUSABLE selector');
 Object.assign(mocks, {
-  '@/gamepad/engine': `import {focusGamepadElement,setGamepadFocused} from './src/gamepad/focus.ts';
+  '@/gamepad/engine': `import {focusGamepadElement,setGamepadFocused,recoverGamepadFocus} from './src/gamepad/focus.ts';import {performancePanelTarget} from './src/gamepad/performanceNavigation.ts';import {spatialNavigationTarget,createSpatialMeasurements,type SpatialMeasurements} from './src/gamepad/spatial.ts';const activeFanNodeEditor=()=>null;
     import {withGamepadActivation} from './src/gamepad/activationEvidence.ts';
-    ${focusable.getText(ast)} let sliderEditMode=false;const log=()=>{};
+    ${focusable.getText(ast)} let sliderEditMode=false,sliderRepeatInput=null,sliderRepeatDirection=0,sliderAccelStart=0,sliderLastApply=0;const log=()=>{};
     const commitSlider=()=>{throw Error('Unexpected slider activation in TaskView test')};
     ${extracted}
     export const isMouseModeSuppressed=()=>false;
-    export const testControllerY=handleGamepadEditGame,testActivateCurrent=${activate};`,
+    export const testControllerY=handleGamepadEditGame,testActivateCurrent=${activate},testMoveFocus=moveFocus,testControllerBack=handleGamepadBack;`,
   '@/bridge/ipc': `export * from './src/bridge/ipc.ts';`,
   '@/gamepad/focus': `import {focusGamepadElement as actualFocus} from './src/gamepad/focus.ts';
     export * from './src/gamepad/focus.ts';
@@ -68,9 +76,9 @@ Object.assign(mocks, {
       return run().then(value=>{f.trace('api-resolve',{name,value});return value},error=>{f.trace('api-reject',{name,error:error.message});throw error})};
     export const dialog={openFile:unexpected,confirm:unexpected},keyboard={open:unexpected},proc={kill:unexpected};
     export const shell={open:unexpected,taskViewWithEvidence:e=>observe('shell.taskViewWithEvidence',e,()=>realShell.taskViewWithEvidence(e))};
-    export const windowApi={minimizeWithEvidence:e=>observe('windowApi.minimizeWithEvidence',e,()=>realWindow.minimizeWithEvidence(e))};`,
+    export const windowApi={prepareTaskViewTouch:e=>observe('windowApi.prepareTaskViewTouch',e,()=>realWindow.prepareTaskViewTouch(e)),touchTaskViewButton:e=>observe('windowApi.touchTaskViewButton',e,()=>realWindow.touchTaskViewButton(e)),minimizeWithEvidence:e=>observe('windowApi.minimizeWithEvidence',e,()=>realWindow.minimizeWithEvidence(e))};`,
   '@/bridge/gamedetect': `const f=()=>window.__fixture;
-    export const detectedGameName=game=>game?.name||'',detectGame=async()=>f().game;
+    export const detectedGameName=game=>game?.name||'',detectGame=async()=>f().game;export const getCurrentGame=()=>f().game,isCurrentGameTarget=target=>target===f().game,validateGameTarget=async target=>target===f().game;
     export const refreshGameStatus=async()=>f().game,refreshGameStatusStrict=async()=>f().game;
     export function subscribeGameStatus(cb){f().gameSubscriptions++;cb(f().game);return()=>{f().gameSubscriptions--}};`,
   '@/bridge/gameQuickSession': `${mocks['@/bridge/gameQuickSession']}
@@ -84,7 +92,7 @@ function memoryFixture() {
     side: 'ac', events: {}, global: {}, custom: { version: 1, entries: {}, rtss: {} },
     schedule: { profiles: { ac: {}, dc: {} }, active: {} }, globalWrites: [], customWrites: [],
     performanceWrites: [], applied: [], coreWrites: 0, joyCloses: 0, ruleWrites: 0,
-    gameSubscriptions: 0, taskMode: 'hold', minimizeMode: 'hold', requests: [], traceRows: [], hardwareQueries: [],
+    gameSubscriptions: 0, touchMode:'tap',taskMode: 'hold', minimizeMode: 'hold', requests: [], traceRows: [], hardwareQueries: [],
   };
   f.trace = (kind, data = {}) => f.traceRows.push({ kind, at: performance.now(), ...data });
   const receivers = new Set();
@@ -104,7 +112,11 @@ function memoryFixture() {
     addEventListener(type, cb) { if (type !== 'message') throw Error('Unexpected event'); receivers.add(cb); },
     postMessage(message) {
       const r = structuredClone(message); r.at = performance.now(); f.requests.push(r); f.trace('ipc-request', r);
-      if (!['shell.taskView', 'window.minimize'].includes(r.cmd)) throw Error('Unexpected native IPC: ' + r.cmd);
+      if (!['window.touchTaskViewButton','shell.taskView', 'window.minimize'].includes(r.cmd)) throw Error('Unexpected native IPC: ' + r.cmd);
+      if(r.cmd==='window.touchTaskViewButton'){
+        if(r.args.prepareTouch)queueMicrotask(()=>f.replyId(r.id,{touchTicket:r.id+1,requestedAtUnixMs:r.args.requestedAtUnixMs+3506}));
+        return;
+      }
       const mode = r.cmd === 'shell.taskView' ? f.taskMode : f.minimizeMode;
       if (mode === 'accept' || mode === 'false' || mode === 'reject') queueMicrotask(() =>
         f.replyId(r.id, mode !== 'false', mode === 'reject' ? 'fixture API rejected: ' + r.cmd : undefined));
@@ -120,11 +132,11 @@ function memoryFixture() {
 }
 const styles = [];
 const entry = `import {createApp} from 'vue';import Menu from './src/components/GameRecognitionControl.vue';
-  import {testControllerY,testActivateCurrent} from '@/gamepad/engine';
-  const app=createApp(Menu);window.__semanticY=()=>testControllerY({});window.__semanticA=()=>testActivateCurrent({});
+  import {testControllerY,testActivateCurrent,testMoveFocus,testControllerBack} from '@/gamepad/engine';
+  const app=createApp(Menu);window.__semanticY=()=>testControllerY({});window.__semanticA=()=>testActivateCurrent({});window.__move=(dx,dy)=>testMoveFocus(dx,dy);window.__back=()=>testControllerBack({});
   window.__unmount=()=>app.unmount();app.mount('#app');window.__ready=true;`;
 const result = await build({ stdin: { contents: entry, resolveDir: root, loader: 'ts' }, bundle: true,
-  write: false, format: 'iife', platform: 'browser', metafile: true, alias: { '@': path.join(root, 'src') },
+  loader:{'.svg':'dataurl','.png':'dataurl'},write: false, format: 'iife', platform: 'browser', metafile: true, alias: { '@': path.join(root, 'src') },
   define: { 'process.env.NODE_ENV': '"production"' }, plugins: [{ name: 'task-view-memory-fixture', setup(builder) {
     builder.onResolve({ filter: /.*/ }, args => args.path in mocks ? { path: args.path, namespace: 'fixture' } : undefined);
     builder.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: mocks[args.path], loader: 'ts', resolveDir: root }));
@@ -151,7 +163,7 @@ const server = createServer((req, res) => {
   else if (req.url === '/') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(html); }
   else { res.writeHead(404); res.end(); }
 });
-const cases = [], errors = [], blockedRequests = [], focus = [], images = [], boundaryResults = [], skipped = [];
+const cases = [], errors = [], blockedRequests = [], focus = [], images = [], boundaryResults = [], skipped = [],navigation=[];
 const startedAt = new Date().toISOString();
 let browser, page, failure, browserVersion;
 const check = (name, detail = {}) => cases.push({ name, ...detail });
@@ -161,7 +173,7 @@ try {
   const edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
   browser = await chromium.launch({ headless: true, ...(process.env.YMCC_UI_BROWSER_EXECUTABLE ? { executablePath: process.env.YMCC_UI_BROWSER_EXECUTABLE } : fs.existsSync(edge) ? { executablePath: edge } : {}) });
   browserVersion = browser.version();
-  const context = await browser.newContext({ viewport: { width: 980, height: 1160 }, serviceWorkers: 'block' });
+  const context = await browser.newContext({ viewport: { width:1280,height },hasTouch:true, serviceWorkers: 'block' });
   await context.route('**/*', route => {
     if ([origin + '/', origin + '/fixture.js', origin + '/favicon.ico'].includes(route.request().url())) return route.continue();
     blockedRequests.push(route.request().url()); return route.abort();
@@ -178,7 +190,17 @@ try {
   const reply = (cmd, error) => page.evaluate(({cmd,error}) => window.__fixture.reply(cmd, true, error), {cmd,error});
   const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const settle = async text => { await page.waitForFunction(() => document.querySelector('[data-gp-game-control="switch-program"]')?.disabled === false, {}, {timeout:1500}); if (text) await page.locator('.game-recognition-message').filter({ hasText: text }).waitFor(); await frames(); };
-  const semanticA = () => page.evaluate(() => window.__semanticA());
+  const deliverTouch=async()=>{
+    const pending=await page.evaluate(()=>{const f=window.__fixture,r=f.requests.findLast(r=>r.cmd==='window.touchTaskViewButton'&&!r.args.prepareTouch&&!r.fired);if(!r)return null;r.fired=true;return {r,mode:f.touchMode}});
+    if(!pending)return;
+    const {r,mode}=pending;
+    const before=await counts();
+    await page.evaluate(({id,mode})=>window.__fixture.replyId(id,{downAccepted:mode!=='no-delivery',upAccepted:mode!=='no-delivery',reason:mode==='no-delivery'?'fixture no delivery':'accepted'}),{id:r.id,mode});
+    if(mode==='tap')await page.touchscreen.tap(r.args.x,r.args.y);
+    await frames();
+    if(mode!=='tap')assert.deepEqual(await counts(),before,'Receipt without incoming touch must not execute Shell');
+  };
+  const semanticA = async() => {await page.evaluate(() => window.__semanticA());await deliverTouch()};
   const helperCount = () => page.evaluate(() => window.__fixture.traceRows.filter(r => r.kind === 'focus-helper' && r.control === 'switch-program').length);
   async function requireFocus(stage) {
     await observeFocus(stage); const state=focus.at(-1);
@@ -196,9 +218,14 @@ try {
   }
   assert.equal(await button.count(), 0); await page.locator('#outside').focus();
   await freshMenu(); assert.equal((await button.innerText()).trim(),'切换程序'); assert.deepEqual(await counts(),{task:0,min:0});
+  const move=async(dx,dy)=>{await page.evaluate(({dx,dy})=>window.__move(dx,dy),{dx,dy});const state=await page.evaluate(()=>{const n=document.activeElement,r=n?.getBoundingClientRect();return {text:n?.textContent?.trim(),control:n?.dataset.gpGameControl,row:n?.closest('[data-gp-game-row]')?.dataset.gpGameRow,visible:!!r&&r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight}});assert(state.visible,'Navigation target must remain fully visible');navigation.push({dx,dy,...state});return state};
+  assert.equal((await move(-1,0)).control,'switch-program');assert.equal((await move(1,0)).control,'return-desktop');assert.equal((await move(-1,0)).control,'switch-program');
+  assert.equal((await move(0,1)).row,'custom-entry');assert.equal((await move(1,0)).text,'手动添加');assert.equal((await move(1,0)).text,'手动添加');await move(-1,0);
+  assert.equal((await move(0,-1)).row,'controls');await move(-1,0);assert.equal((await move(-1,0)).control,'switch-program');
+  await page.evaluate(()=>window.__back());await button.waitFor({state:'detached'});await freshMenu();check('Actual engine directional navigation obeys row order and edges; B closes and Y restores focus');
   await screenshot('semantic-Y-focus'); check('Semantic Y opens real Vue menu and gives 切换程序 DOM/visual focus without IPC');
   await page.evaluate(()=>{window.__semanticA();window.__semanticA();const el=document.querySelector('[data-gp-game-control="switch-program"]');for(let i=0;i<12;i++)el.dispatchEvent(new MouseEvent('click',{bubbles:true}));});
-  await frames(); assert.deepEqual(await counts(),{task:1,min:0}); assert.equal(await button.isDisabled(),true); await observeFocus('task-busy');
+  assert.deepEqual(await counts(),{task:0,min:0},'Internal click must only request OS touch');await deliverTouch();await frames(); assert.deepEqual(await counts(),{task:1,min:0}); assert.equal(await button.isDisabled(),true); await observeFocus('task-busy');
   await reply('shell.taskView'); await page.waitForFunction(()=>window.__fixture.requests.some(r=>r.cmd==='window.minimize'));
   await button.dispatchEvent('click'); assert.deepEqual(await counts(),{task:1,min:1});
   await observeFocus('before-successful-handover'); assert.equal(focus.at(-1).tag,'BODY'); assert.equal(focus.at(-1).visualFocus,true);
@@ -206,9 +233,12 @@ try {
   assert.equal(await helperCount(),successHelpers,'Successful handover must not call the controller focus helper');
   assert.notEqual(focus.at(-1).control,'switch-program','Success must not reclaim the switch button');
   const trace=await page.evaluate(()=>window.__fixture.traceRows),calls=trace.filter(r=>r.kind==='api-call');
-  assert.deepEqual(calls.map(r=>r.name),['shell.taskViewWithEvidence','windowApi.minimizeWithEvidence']);
+  assert.deepEqual(calls.map(r=>r.name),['windowApi.prepareTaskViewTouch','windowApi.touchTaskViewButton','shell.taskViewWithEvidence','windowApi.minimizeWithEvidence']);
+  assert.equal(calls[1].evidence.requestedAtUnixMs-calls[0].evidence.requestedAtUnixMs,3506);
+  assert.equal(calls[2].evidence.requestedAtUnixMs,calls[1].evidence.requestedAtUnixMs);
+  assert.equal(calls[2].evidence.touchTicket,undefined);calls.splice(0,2);
   assert.deepEqual(calls[0].evidence,calls[1].evidence); assert.equal(calls[0].evidence.diagnosticAction,'game-recognition-switch-program');
-  assert.equal(calls[0].evidence.diagnosticActivation,'gamepad-engine');assert.equal(calls[0].evidence.diagnosticEventTrusted,false);
+  assert.equal(calls[0].evidence.diagnosticActivation,'gamepad-engine');assert.equal(calls[0].evidence.diagnosticEventTrusted,true);assert.equal(calls[0].evidence.diagnosticInputRoute,'system-touch');
   assert.match(calls[0].evidence.diagnosticActionId,/^switch-program:/);assert(Number.isFinite(calls[0].evidence.requestedAtUnixMs));
   assert(trace.findIndex(r=>r.kind==='api-resolve'&&r.name==='shell.taskViewWithEvidence')<trace.findIndex(r=>r.kind==='api-call'&&r.name==='windowApi.minimizeWithEvidence'));
   check('A calls TaskView once before minimize with identical evidence; same-turn A/click burst and pending minimize click do not duplicate');
@@ -218,6 +248,24 @@ try {
   const mouseEvidence=await page.evaluate(()=>window.__fixture.requests.findLast(r=>r.cmd==='shell.taskView').args);assert.equal(mouseEvidence.diagnosticActivation,'trusted-mouse');assert.equal(mouseEvidence.diagnosticEventTrusted,true);
   check('Mouse uses the same evidence API path once; real mouse origin differs from semantic controller');
 
+  await freshMenu();await mode('accept');const directBefore=await counts();
+  const nativeTouchBefore=await page.evaluate(()=>window.__fixture.requests.filter(r=>r.cmd==='window.touchTaskViewButton').length);
+  for(let i=0;i<2;i++){const r=await button.boundingBox();await page.touchscreen.tap(r.x+r.width/2,r.y+r.height/2);await settle('已请求切换程序')}
+  assert.deepEqual(await counts(),{task:directBefore.task+2,min:directBefore.min+2});
+  assert.equal(await page.evaluate(()=>window.__fixture.requests.filter(r=>r.cmd==='window.touchTaskViewButton').length),nativeTouchBefore);
+  const touchEvidence=await page.evaluate(()=>window.__fixture.requests.findLast(r=>r.cmd==='shell.taskView').args);
+  assert.equal(touchEvidence.diagnosticActivation,'trusted-touch');assert.equal(touchEvidence.diagnosticEventTrusted,true);
+  check('Two direct touchscreen activations use the same Shell/minimize chain without another injected contact');
+  for(const touchMode of ['no-delivery','no-event']){
+    await freshMenu();await mode('accept');await page.evaluate(mode=>{window.__fixture.touchMode=mode},touchMode);
+    const before=await counts();await semanticA();
+    await page.locator('.game-recognition-message').filter({hasText:touchMode==='no-delivery'?'Windows 未接受触控切换':'Windows 触控切换未收到按钮响应'}).waitFor();
+    assert.deepEqual(await counts(),before);assert.equal(await button.isDisabled(),false);
+    if(touchMode==='no-event'){const r=await button.boundingBox();await page.touchscreen.tap(r.x+r.width/2,r.y+r.height/2);await frames();assert.deepEqual(await counts(),before,'Late contact must be consumed without switching')}
+    await page.evaluate(()=>{window.__fixture.touchMode='tap'});await semanticA();await settle('已请求切换程序');
+    assert.deepEqual(await counts(),{task:before.task+1,min:before.min+1});
+    check('Touch '+touchMode+' causes no Shell replay and permits a later explicit activation');
+  }
   await freshMenu();await mode('hold');const rejected=await once('before-held-rejection');await frames();assert.equal(await button.isDisabled(),true);
   await reply('shell.taskView','本次程序切换未取得前台授权，已保留 YMCC，请稍后重试');await settle('切换 Windows 任务视图失败：本次程序切换未取得前台授权，已保留 YMCC，请稍后重试');
   assert.deepEqual(await counts(),{task:rejected.before.task+1,min:rejected.before.min});await requireFocus('after-rejection');
@@ -284,7 +332,7 @@ try {
   assert.equal(await button.count(), 0); assert.deepEqual(await counts(), unmountBefore);
   assert.equal(await page.evaluate(() => window.__fixture.gameSubscriptions), 0);
   assert.deepEqual(await page.evaluate(() => window.__fixture.hardwareQueries), []);
-  assert.equal(await page.evaluate(() => window.__fixture.requests.every(r => ['shell.taskView', 'window.minimize'].includes(r.cmd))), true);
+  assert.equal(await page.evaluate(() => window.__fixture.requests.every(r => ['window.touchTaskViewButton','shell.taskView', 'window.minimize'].includes(r.cmd))), true);
   assert.deepEqual(blockedRequests, []); assert.deepEqual(errors, []);
   check('Correlation IDs are unique across requests; unmount removes menu subscription and Y listener');
   check('No browser errors, hardware queries, unexpected native IPC or external network requests');
@@ -296,9 +344,9 @@ try {
   if (browser) await browser.close(); if (server.listening) await new Promise(resolve => server.close(resolve));
   const sourceHashes = [...sources].map(([file, bytes]) => ({ path: path.relative(root, file).replaceAll('\\', '/'), sha256: sha(bytes) }));
   sourceHashes.push({ path: 'tools/task_view_menu_browser_selftest.mjs', sha256: sha(fs.readFileSync(fileURLToPath(import.meta.url))) });
-  const report = { suite: 'TaskView real Vue menu / simulated semantic gamepad', ok: !failure, passed: cases.length, cases, focus, images, errors, blockedRequests, failure,
+  const report = { suite: 'TaskView real Vue menu / simulated semantic gamepad', ok: !failure, passed: cases.length, cases, navigation,focus, images, errors, blockedRequests, failure,
     scope: 'Real GameRecognitionControl/GameQuickActions + production Y/activate/focus + production API/IPC deadlines. All native IPC goes to in-memory chrome.webview. No physical MSI/ROG/controller, actual Shell API/helper, foreground handover or consumer acceptance tested.',
-    startedAt, finishedAt: new Date().toISOString(), browserVersion, nodeVersion: process.version, playwrightVersion: browserRequire('playwright/package.json').version,
+    viewport:{width:1280,height},startedAt, finishedAt: new Date().toISOString(), browserVersion, nodeVersion: process.version, playwrightVersion: browserRequire('playwright/package.json').version,
     engineFunctions: extractedNames, sourceHashes, mockModules: Object.keys(mocks), fixture, serverClosed: !server.listening, browserClosed: !browser?.isConnected(),
     boundaryResults, skipped, baseline: {directory:baseline,resultsSha256:sha(fs.readFileSync(path.join(baseline,'results.json'))),toolSha256:sha(fs.readFileSync(path.join(baseline,'task_view_menu_browser_selftest.mjs')))},
     findings: focus.filter(f => /^after-(timeout|rejection|minimize-)/.test(f.stage) && f.control !== 'switch-program').map(f => ({ kind:'focus-not-restored',...f })),

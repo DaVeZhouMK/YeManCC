@@ -24,6 +24,8 @@ def run(output):
     after=functions['nativeValveReadCurrentTarget']
     ports=(files/'ports.cpp.in').read_text(encoding='utf-8');cases=(files/'cases.cpp.in').read_text(encoding='utf-8')
     identity=(repo/'native/monitor_identity.h').read_bytes();(out/'monitor_identity.h').write_bytes(identity)
+    literal=(repo/'native/game_rule_literal.h').read_bytes();(out/'game_rule_literal.h').write_bytes(literal)
+    ports='#include \"game_rule_literal.h\"\n'+ports
     env={k:v for k,v in os.environ.items() if k.upper() not in ('CL','_CL_','LINK','_LINK_')}
     locked_env=r'''@echo off
 setlocal
@@ -57,11 +59,11 @@ set "PATH=%SystemRoot%\System32;%VCTOOLS%\bin\Hostx64\x64;%PATH%"
         results.append(item)
     pinned={name:hashlib.sha256(value.encode()).hexdigest() for name,value in functions.items()}
     now=(repo/'native/main.cpp').read_text(encoding='utf-8-sig')
-    unchanged=all(extract.function(now,name)==value for name,value in functions.items()) and (repo/'native/monitor_identity.h').read_bytes()==identity
+    unchanged=all(extract.function(now,name)==value for name,value in functions.items()) and (repo/'native/monitor_identity.h').read_bytes()==identity and (repo/'native/game_rule_literal.h').read_bytes()==literal
     result={'schema':'ymcc.production-valve-unused-rule-differential.v1','passed':all(x['passed'] for x in results) and unchanged,'variants':results,'productionFunctions':pinned,'preservedBeforeFunctionSha256':before_sha,'productionFunctionsUnchangedDuringRun':unchanged,'controlledPorts':['process identity/session/memory','rule loader entry calls','disk-stamp and selected target snapshot'],'realWindowsProcessCalls':0,'sleepActions':0,'ruleLoadCallsAreNotPhysicalDiskIo':True,'fieldSpeedImprovementProven':False}
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
     return result
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output',type=Path,required=True);args=parser.parse_args()
-    result=run(args.output);print(json.dumps(result));raise SystemExit(0 if result['passed'] else 1)
+    result=run(args.output);print(json.dumps(result));raise SystemExit(0 if result['passed'] else 1)

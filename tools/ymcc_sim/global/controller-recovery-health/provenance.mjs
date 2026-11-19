@@ -89,7 +89,7 @@ export function verifyBindings(runDir,project,before,{negativeHeader}={}){
  need(binding.runnerSha256===runnerRow.sha256,'RECOVERY_EXECUTED_RUNNER_NOT_BOUND');
  need(binding.fixture.sha256===hash(path.join(project,'tools/fixtures/input_host_recovery_health_fixture.cpp')),'RECOVERY_ORIGINAL_FIXTURE_CHANGED');
  need(binding.sources.current.sha256===hash(path.join(project,'native/main.cpp')),'RECOVERY_PRODUCT_MAIN_SNAPSHOT_CHANGED');
- const required=['inputHostRecoveryHealthContextLocked','inputHostRecoveryHealthSource','inputHostRecoveryHealthLatestSourceLocked','inputHostRecoveryHealthObserveLocked','inputHostRecoveryHealthAcceptedLocked','inputHostRecoveryMaintenanceTick','canonical producer previous source','canonical producer continuity commit'];
+ const required=['inputHostWakeBindingProofLocked','owned recreated wake proof ABI','inputHostRecoveryHealthContextLocked','inputHostRecoveryHealthSource','inputHostRecoveryHealthLatestSourceLocked','inputHostRecoveryHealthObserveLocked','inputHostRecoveryHealthAcceptedLocked','inputHostRecoveryMaintenanceTick','canonical producer previous source','canonical producer continuity commit'];
  const names=new Set(binding.sources.current.ranges.map(r=>r.name));for(const name of required)need(names.has(name),'RECOVERY_ACTUAL_SOURCE_BINDING_MISSING:'+name);
  need(binding.sources.current.fixed===true,'RECOVERY_CURRENT_WINDOW_HELPER_NOT_USED');
  const expectedDeps=PRODUCT_INPUTS.filter(p=>p!=='native/main.cpp'&&p!=='tools/input_host_recovery_health_selftest.mjs'&&p!=='tools/fixtures/input_host_recovery_health_fixture.cpp');

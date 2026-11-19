@@ -1,0 +1,157 @@
+// Software boundary ports: production capture, decoder and source lane run;
+// HIDP_DATA and a qualified Device are supplied by the fixture. No device I/O.
+#include "controller_hid_source.h"
+static std::array<std::vector<ymcc::controllerhid::DataPoint>,2> testReports;
+static bool parserFails=false;
+static ULONG fakeMessageAgeMs=0;
+static ULONG fakeMessageTime(){return static_cast<ULONG>(GetTickCount64())-fakeMessageAgeMs;}
+static NTSTATUS __stdcall fakeHidData(HIDP_REPORT_TYPE,PHIDP_DATA data,PULONG count,
+    PHIDP_PREPARSED_DATA,PCHAR report,ULONG length) {
+    fakeOs.apiTrace.push_back("data");
+    if(parserFails || length!=fakeOs.caps.InputReportByteLength || static_cast<unsigned char>(report[1])>1)return HIDP_STATUS_INVALID_REPORT_LENGTH;
+    const auto& points=testReports[static_cast<unsigned char>(report[1])];
+    if(*count<points.size())return HIDP_STATUS_BUFFER_TOO_SMALL;
+    for(std::size_t i=0;i<points.size();++i) {
+        data[i]={};data[i].DataIndex=static_cast<USHORT>(points[i].index);
+        data[i].RawValue=points[i].value;
+        if(points[i].index>=5 && points[i].index<=fakeOs.buttons[0].Range.DataIndexMax)data[i].On=points[i].down;
+    }
+    *count=static_cast<ULONG>(points.size());return HIDP_STATUS_SUCCESS;
+}
+@@ACTUAL_READ_RECEIPT@@
+struct CommonTestConfig {bool enabled=true,virtualTargetEnabled=true;};
+static CommonTestConfig g_realStickTest;
+static std::atomic<bool> g_externalPriorityVirtualSuspended{false};
+static bool releasing=false;
+static bool physicalReleaseWindowActive(){return releasing;}
+static DWORD (WINAPI* g_ymccXInputGetCapabilities14)(DWORD,DWORD,XINPUT_CAPABILITIES*)=nullptr;
+#define HidP_GetData fakeHidData
+#define GetMessageTime fakeMessageTime
+#include "controller_hid_source_runtime.h"
+#undef GetMessageTime
+#undef HidP_GetData
+static std::vector<XINPUT_GAMEPAD> consumed;
+static unsigned throwOnEvaluation=0;
+static bool invalidateOnEvaluation=false;
+static RAWINPUT* nestedPacket=nullptr;
+static UINT nestedPacketBytes=0;
+static bool reenterThenThrow=false;
+static void gamepadEval(){
+    ++evaluations;
+    if(reenterThenThrow) {
+        reenterThenThrow=false;
+        if(!commonControllerHidCapture(nestedPacket,nestedPacketBytes))throw std::runtime_error("nested packet rejected");
+        throw std::runtime_error("older callback failed after newer packet");
+    }
+    if(throwOnEvaluation==evaluations)throw std::runtime_error("injected semantic callback failure");
+    if(invalidateOnEvaluation) {
+        invalidateOnEvaluation=false;
+        std::lock_guard lock(g_gamepadReadMx);ymccCommonHid::invalidate();
+        return;
+    }
+    CommonControllerHidRead r;XINPUT_GAMEPAD p{};
+    if(commonControllerHidRead(p,r,true)) {
+        consumed.push_back(p);
+        g_inputCaptureGamepadSnapshot.inputSource="xinput-hid";
+        g_inputCaptureGamepadSnapshot.commonHidReportSequence=r.sequence;
+    }
+    commonControllerHidUiHandoff();
+}
+#include "inspect_cases.inc"
+static void commonRuntimeCases(const char* projection=nullptr) {
+    using namespace ymccCommonHid;
+    using namespace ymcc::controllerhid;
+    g_xinputPhysicalSourceLocked=false;
+    g_inputCaptureGamepadSnapshot.inputSource="xinput";
+    g_inputCaptureGamepadSnapshot.commonHidReportSequence=0;
+    Epoch e;check(context(e),"common route uses existing exact physical source proof");
+    Device d;d.ready=true;d.maxData=16;d.preparsed.resize(8);
+    d.info.hid.dwVendorId=0x45e;d.info.hid.dwProductId=0x28e;
+    d.caps.UsagePage=1;d.caps.Usage=5;d.caps.InputReportByteLength=15;
+    d.caps.NumberInputDataIndices=16;d.caps.NumberLinkCollectionNodes=4;
+    d.caps.NumberInputValueCaps=6;d.caps.NumberInputButtonCaps=1;
+    constexpr unsigned usages[]={0x31,0x30,0x34,0x33,0x32,0x39};
+    constexpr unsigned links[]={1,1,2,2,3,0};
+    for(unsigned i=0;i<6;++i) {
+        const bool hat=i==5;ValueCaps v;
+        v.page=1;v.usageFirst=v.usageLast=usages[i];v.dataFirst=v.dataLast=hat?15:i;
+        v.linkCollection=links[i];v.linkUsagePage=1;v.linkUsage=hat?5:0;
+        v.bitSize=hat?4:16;v.reportCount=1;v.bitField=hat?66:2;
+        v.logicalMin=hat?1:0;v.logicalMax=hat?8:-1;
+        v.isAbsolute=true;v.hasNull=hat;d.values.push_back(v);
+    }
+    ButtonCaps b;b.page=9;b.usageFirst=1;b.usageLast=10;b.dataFirst=5;b.dataLast=14;
+    b.linkUsagePage=1;b.linkUsage=5;b.bitField=2;b.isRange=b.isAbsolute=true;d.buttons.push_back(b);
+    check(qualified(d.descriptor()),"complete synthetic standard XUSB descriptor");
+    const HANDLE h=reinterpret_cast<HANDLE>(std::uintptr_t{7});
+    devices.clear();devices.emplace(h,std::move(d));cacheEpoch=e;epochStarted=0;boundDevice=nullptr;
+    const auto fixtureDevice=devices.at(h);
+    const auto prepare=[&] {devices.clear();devices.emplace(h,fixtureDevice);cacheEpoch=e;epochStarted=0;boundDevice=h;lane.clear();};
+    const auto seed=[&] {lane.clear();lane.observe(e,{{XINPUT_GAMEPAD_A},++sequence,GetTickCount64(),false});};
+    testReports[0]={{0,32768,false},{1,32768,false},{2,32768,false},{3,32768,false},{4,32768,false},{15,0,false},{5,1,true}};
+    testReports[1]={{0,32768,false},{1,32768,false},{2,32768,false},{3,32768,false},{4,32768,false},{15,0,false}};
+    constexpr auto offset=offsetof(RAWINPUT,data)+offsetof(RAWHID,bRawData);
+    std::vector<BYTE> memory(offset+30,0);auto* raw=reinterpret_cast<RAWINPUT*>(memory.data());
+    raw->header.dwType=RIM_TYPEHID;raw->header.dwSize=static_cast<DWORD>(memory.size());raw->header.hDevice=h;
+    raw->data.hid.dwSizeHid=15;raw->data.hid.dwCount=2;raw->data.hid.bRawData[16]=1;
+    if(projection) {
+#if defined(YMCC_COMMON_HID_SOURCE_BINDING_FIXTURE)
+        if(std::string_view(projection)=="source-binding"){commonSourceBindingCases(fixtureDevice,h);return;}
+#endif
+        if(std::string_view(projection)=="off-fse"){commonOffFseCases(fixtureDevice,h);return;}
+        if(std::string_view(projection)=="inspection-early"){earlyInspectionCases(fixtureDevice,h);return;}
+        if(std::string_view(projection)=="observation-only"){observationBoundaryCases(fixtureDevice,h);invalidate();ymccBackgroundUi::invalidate();return;}
+        if(std::string_view(projection)!="inspect-only")throw std::runtime_error("unknown runtime projection");
+        commonInspectRuntimeCases(fixtureDevice,h);return;
+    }
+    const auto oldEvaluations=evaluations;
+    check(commonControllerHidCapture(raw,static_cast<UINT>(memory.size())),"actual production capture consumes a multi-report packet");
+    check(evaluations==oldEvaluations+2&&consumed.size()==2,"exactly one original evaluator per report");
+    check(consumed[0].wButtons==XINPUT_GAMEPAD_A&&!consumed[1].wButtons,"same message press and release stay ordered");
+    check(g_inputCaptureGamepadSnapshot.pad.wButtons==0,"capture does not mutate BUS snapshot behind its owner");
+    Sample held;const auto seq=sequence;
+    for(unsigned i=0;i<128;++i)check(lane.read(e,true,{},held)&&held.sequence==seq,"BUS reads retain actual report sequence");
+    check(!held.pad.wButtons,"release stays neutral without phantom repeat");
+    seed();XINPUT_GAMEPAD native{};native.bLeftTrigger=47;native.bRightTrigger=93;
+    check(lane.read(e,true,native,held)&&held.pad.bLeftTrigger==47&&held.pad.bRightTrigger==93&&!held.independentTriggers,"partial HID preserves both original trigger values");
+    for(unsigned i=0;i<6;++i) {
+        seed();auto changed=e;
+        if(i==0)++changed.power;else if(i==1)++changed.topology;else if(i==2)++changed.identity;
+        else if(i==3)++changed.occupant;else if(i==4)++changed.slot;
+        check(!lane.read(changed,i!=5,{},held)&&!lane.hasSample(),"power/topology/identity/occupant/slot/eligibility retire held cache");
+    }
+    seed();raw->header.hDevice=reinterpret_cast<HANDLE>(std::uintptr_t{8});raw->data.hid.dwCount=0;
+    check(!commonControllerHidCapture(raw,static_cast<UINT>(memory.size()))&&lane.hasSample(),"other malformed collection cannot clear selected source");
+    raw->header.hDevice=h;
+    check(!commonControllerHidCapture(raw,static_cast<UINT>(memory.size()))&&!lane.hasSample(),"selected malformed packet retires held state");
+    raw->data.hid.dwCount=2;parserFails=true;seed();
+    check(commonControllerHidCapture(raw,static_cast<UINT>(memory.size()))&&!lane.hasSample(),"failed HID parser cannot publish prior held frame");parserFails=false;
+    seed();g_realStickTest.virtualTargetEnabled=false;CommonControllerHidRead receipt;XINPUT_GAMEPAD pad{};
+    check(!commonControllerHidRead(pad,receipt,true)&&!lane.hasSample(),"OFF retires data without restarting any controller");g_realStickTest.virtualTargetEnabled=true;
+    seed();check(!commonControllerHidRead(pad,receipt,false)&&!lane.hasSample(),"other original source owner retires common fallback");
+    g_inputReleaseRequired=false;g_gamepadAxisNeutralAdmissionRequired=false;uiRetirementPending=false;
+    seed();check(commonControllerHidRead(pad,receipt,true),"arm before common source retirement");
+    check(!commonControllerHidRead(pad,receipt,false)&&!g_inputReleaseRequired&&!g_gamepadAxisNeutralAdmissionRequired,"BUS publishes retirement without writing UI flags");
+    commonControllerHidUiHandoff();
+    check(g_inputReleaseRequired&&g_gamepadAxisNeutralAdmissionRequired,"UI reuses original release and axis-neutral barriers");
+    prepare();raw->data.hid.dwCount=2;const auto beforeThrow=evaluations;throwOnEvaluation=beforeThrow+2;
+    unsigned replayFallback=0;
+    if(!commonControllerHidCapture(raw,static_cast<UINT>(memory.size())))++replayFallback;
+    check(!replayFallback&&evaluations==beforeThrow+2&&!lane.hasSample(),"second evaluator failure remains consumed and cannot replay packet through old route");throwOnEvaluation=0;
+    prepare();invalidateOnEvaluation=true;const auto beforeInvalidate=evaluations;
+    check(commonControllerHidCapture(raw,static_cast<UINT>(memory.size()))&&evaluations==beforeInvalidate+1&&!lane.hasSample(),"same-epoch registration retires unprocessed old packet suffix");
+    prepare();std::vector<BYTE> triple(offset+45,0);auto* three=reinterpret_cast<RAWINPUT*>(triple.data());
+    three->header.dwType=RIM_TYPEHID;three->header.hDevice=h;three->header.dwSize=static_cast<DWORD>(triple.size());
+    three->data.hid.dwSizeHid=15;three->data.hid.dwCount=3;
+    three->data.hid.bRawData[1]=0;three->data.hid.bRawData[16]=2;three->data.hid.bRawData[31]=1;
+    const auto beforeThree=evaluations;
+    check(commonControllerHidCapture(three,static_cast<UINT>(triple.size()))&&evaluations==beforeThree+3&&lane.hasSample(),"single bad report clears itself without swallowing valid later release");
+    prepare();std::vector<BYTE> nested(offset+15,0);nestedPacket=reinterpret_cast<RAWINPUT*>(nested.data());
+    nestedPacket->header.dwType=RIM_TYPEHID;nestedPacket->header.hDevice=h;nestedPacket->header.dwSize=static_cast<DWORD>(nested.size());
+    nestedPacket->data.hid.dwSizeHid=15;nestedPacket->data.hid.dwCount=1;nestedPacketBytes=static_cast<UINT>(nested.size());
+    reenterThenThrow=true;
+    check(commonControllerHidCapture(raw,static_cast<UINT>(memory.size()))&&lane.read(e,true,{},held)&&held.pad.wButtons==XINPUT_GAMEPAD_A,"older callback failure cannot clear newer reentrant packet state");
+    check(!commonControllerHidCapture(raw,1),"tiny packet rejected before accessing RAWHID");
+    check(!sameXusbSource(L"invalid-interface",L"unbound"),"no arbitrary path or common-parent fallback");
+    invalidate();check(!lane.hasSample()&&!boundDevice&&devices.empty(),"registration/removal invalidation returns all source cache");
+}

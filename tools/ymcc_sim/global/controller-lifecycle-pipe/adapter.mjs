@@ -8,7 +8,8 @@ export const MODULE='tools/ymcc_sim/global/controller-lifecycle-pipe';
 export const REPO=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
 export const WORKSPACE=path.resolve(REPO,'../../..');
 export const CASE_ID='controller.lifecycle-native-managed-pipe';
-export const HEADERS=['input_host_pipe_transport.h','input_host_transaction_mutex.h','input_host_transport_state.h','input_host_compact_frame_reply.h','input_host_selftest_rules.h','input_frame_submission.h','virtual_output_status.h','controller_persona.h','canonical_frame_fingerprint_memo.h','msi_input_host_transport_evidence.h','msi_steamdeck_release_fence_1726.h','input_chain_command_evidence.h','input_chain_ack_evidence.h','game_feedback_receipt.h'];
+export const HEADERS=['input_host_shared_power.h','sleep_power_state.h','sleep_power_observation.h','sleep_power_revocation.h','input_host_pipe_transport.h','input_host_transaction_mutex.h','input_host_diagnostic_dispatch.h','input_host_transport_state.h','input_host_compact_frame_reply.h','input_host_selftest_rules.h','input_frame_submission.h','virtual_output_status.h','controller_persona.h','canonical_frame_fingerprint_memo.h','msi_input_host_transport_evidence.h','msi_steamdeck_release_fence_1726.h','input_chain_command_evidence.h','input_chain_ack_evidence.h','game_feedback_receipt.h'];
+HEADERS.push('virtual_recovery_intent.h','virtual_start_protection.h','game_input_override.h');
 export const NATIVE_INPUTS=['native/main.cpp',...HEADERS.map(p=>'native/'+p),'capabilities/HcControllerFeedbackCapabilityCatalog.h','capabilities/HcControllerFeedbackCapabilityCatalog.generated.h','deps/json/json.hpp','tools/input_lifecycle_pipe_integration.mjs','tools/fixtures/input_lifecycle_integration/NativeEntry.cpp','tools/fixtures/legion_motion_consumer/extract_main.mjs','tools/lib/hc_controller_motion_fixture.mjs','tools/fixtures/hc_remaining_model_capabilities/expectations.mjs','tools/lib/hc_motion_matrix_guard.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
 export const INFRASTRUCTURE=[MODULE+'/evidence-files.mjs',WIRE_PROJECTION_MODULE,MODULE+'/source-projection.mjs',WIRE_CONTRACT_SOURCE,MODULE+'/adapter.mjs',MODULE+'/run.mjs',MODULE+'/managed-fixture.json',MODULE+'/native-tool-inputs.json',MODULE+'/README.md','tools/ymcc_sim/global/controller-priority-ledger/adapter.mjs','tools/ymcc_sim/global/controller-priority-ledger/tool-inputs.json','tools/ymcc_sim/global/controller-priority/adapter.mjs','tools/ymcc_sim/global/inputhost-protocol/adapter.mjs','tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json','tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/host-process.ps1','tools/ymcc_sim/global/execution-completion/index.mjs'];
 export function inside(root,file){const rel=path.relative(path.resolve(root),path.resolve(file));return rel===''||(!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel));}
@@ -28,7 +29,9 @@ export function managedContract(){
  return {pin,manifest,value,buildRoot,artifacts};
 }
 export function runtimeTools(){
- const dotnet='C:/Program Files/dotnet';const runtime=toolchainFiles().filter(p=>/[\\/]shared[\\/]Microsoft.NETCore.App[\\/]/i.test(p)||path.resolve(p).toLowerCase()===path.resolve(dotnet,'dotnet.exe').toLowerCase());
+ const declaration=JSON.parse(fs.readFileSync(path.join(REPO,'tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json'),'utf8').replace(/^\uFEFF/,''));
+ const dotnet=declaration.dotnetRoot;if(typeof dotnet!=='string'||!path.isAbsolute(dotnet))throw Error('MANAGED_DOTNET_DECLARATION_INVALID');
+ const runtime=toolchainFiles(REPO,declaration).filter(p=>/[\\/]shared[\\/]Microsoft.NETCore.App[\\/]/i.test(p)||path.resolve(p).toLowerCase()===path.resolve(dotnet,'dotnet.exe').toLowerCase());
  // The native dotnet host selects the latest installed stable hostfxr. Pin that
  // resolver, not every obsolete resolver directory. Current selection was
  // verified with the owned dotnet --info COREHOST_TRACE receipt.
@@ -37,8 +40,7 @@ export function runtimeTools(){
  if(!versions.length)throw Error('MANAGED_HOSTFXR_UNAVAILABLE');
  runtime.push(path.join(fxr,versions[0],'hostfxr.dll'));return runtime;
 }
-export function artifactFiles(){let managed=[];try{managed=managedContract().artifacts;}catch{managed=[path.resolve(WORKSPACE,'Build/Validation/VirtualController-Lifecycle-20261019/integration/managed/COMPILED-FIXTURE-REQUIRED')];}
- const native=JSON.parse(fs.readFileSync(path.join(REPO,MODULE,'native-tool-inputs.json'),'utf8')).files;
+export function wireCompilerArtifacts(native,pinned,fixed){
  // Borrow compiler binaries/bootstrap conservatively, but use this consumer's
  // own observed header/library closure. The ledger's unrelated header growth
  // must not enlarge this wire consumer's acceptance surface or 640-file bound.
@@ -46,10 +48,24 @@ export function artifactFiles(){let managed=[];try{managed=managedContract().art
  // The fixed C++-to-EXE command does not invoke standalone browse/archive,
  // assembler/module/PGO-management/XML-documentation tools. Keep all DLLs.
  const unexecutedTools=new Set(['pwsh.exe','dumpbin.exe','bscmake.exe','editbin.exe','ifc.exe','lib.exe','ml64.exe','nmake.exe','pgosweep.exe','pgocvt.exe','pgomgr.exe','undname.exe','xdcmake.exe']);
+ // The explicit environment selects English compiler resources. Other locale
+ // resources and ASan-only tools are not used by this fixed non-ASan recipe.
+ // Anything actually observed by this wire consumer remains mandatory.
+ const sanitizerOnly=new Set(['asan_ignorelist.txt','clang_rt.asan_dbg_dynamic-x86_64.dll','clang_rt.asan_dbg_dynamic-x86_64.pdb','clang_rt.asan_dynamic-x86_64.dll','clang_rt.asan_dynamic-x86_64.pdb','llvm-symbolizer.exe']);
+ return [fixed.compiler,fixed.linker,fixed.cmd,process.execPath,...pinned].filter(p=>{
+  if(nativeSet.has(path.resolve(p).toLowerCase()))return true;
+  const relative=path.relative(path.dirname(fixed.compiler),p).replaceAll('\\','/'),name=path.basename(p).toLowerCase();
+  if(/^2052\/[^/]+ui\.dll$/i.test(relative)||!relative.includes('/')&&sanitizerOnly.has(name))return false;
+  return !/[\\/]include[\\/]/i.test(p)&&!unexecutedTools.has(name);
+ });
+}
+export function artifactFiles(){let managed=[];try{managed=managedContract().artifacts;}catch{managed=[path.resolve(WORKSPACE,'Build/Validation/VirtualController-Lifecycle-20261019/integration/managed/COMPILED-FIXTURE-REQUIRED')];}
+ const native=JSON.parse(fs.readFileSync(path.join(REPO,MODULE,'native-tool-inputs.json'),'utf8')).files;
  const fixed=resolveWireBuild(REPO);
+ const recipe=fs.readFileSync(path.join(REPO,'tools/input_lifecycle_pipe_integration.mjs'),'utf8');
+ if(/[\/-](?:fsanitize|analyze)(?::|\b)/i.test(recipe))throw Error('WIRE_COMPILER_ARTIFACT_RECIPE_UNREVIEWED');
  const pinned=JSON.parse(fs.readFileSync(path.join(REPO,'tools/ymcc_sim/global/controller-priority-ledger/tool-inputs.json'),'utf8')).files;
- const compiler=[fixed.compiler,fixed.linker,fixed.cmd,process.execPath,...pinned].filter(p=>nativeSet.has(path.resolve(p).toLowerCase())||
-   (!/[\\/]include[\\/]/i.test(p)&&!unexecutedTools.has(path.basename(p).toLowerCase())));
+ const compiler=wireCompilerArtifacts(native,pinned,fixed);
  return [...new Set([...compiler,...native,...runtimeTools(),...managed].map(p=>path.resolve(p)))];
 }
 export function sourceFiles(){let managed=[];try{managed=managedContract().value.inputBindings.sources.map(r=>path.relative(REPO,r.path).replaceAll('\\','/'));}catch{}

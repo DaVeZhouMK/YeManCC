@@ -12,9 +12,37 @@ const end = source.indexOf('function invoke(', begin);
 assert(begin >= 0 && end > begin, 'Missing production snapshot guard');
 const previous = { config: { roots: ['G:\\Games'] }, library: { games: [{ gameDirectory: 'G:\\Games\\Good', primaryExecutable: 'G:\\Games\\Good\\Game.exe', status: 'ready' }] }, steamPlan: { items: [{ gameDirectory: 'G:\\Games\\Good', status: 'already-in-steam' }], summary: {} } };
 const context = vm.createContext({ snapshot: structuredClone(previous) });
+const normalizedPathSource=source.split(/\r?\n/).find(line=>line.startsWith('function normalizedUiPath('));
+assert(normalizedPathSource,'Missing production path normalization');
+vm.runInContext(normalizedPathSource,context);
+const mediaSupportStart=source.indexOf('function selectMediaDownloadDisplay('),mediaSupportEnd=source.indexOf('let mediaManualBusy=',mediaSupportStart);
+assert(mediaSupportStart>=0&&mediaSupportEnd>mediaSupportStart,'Missing production media read support');
+vm.runInContext(source.slice(mediaSupportStart,mediaSupportEnd),context);
+const preserveMediaStart=source.indexOf('function preserveNewerEditorMedia('),preserveMediaEnd=source.indexOf('\nfunction ',preserveMediaStart+15);
+assert(preserveMediaStart>=0&&preserveMediaEnd>preserveMediaStart,'Missing production media revision support');
+vm.runInContext(source.slice(preserveMediaStart,preserveMediaEnd),context);
 vm.runInContext(source.slice(begin, end), context);
 const normalize = (value, prior = previous) => context.normalizeWorkspaceSnapshot(value, prior);
 const reports = [];
+const manualIdentityFeedback=[];
+function manualIdentityFeedbackFixture() {
+  let listener, refreshes=0;
+  const notices=[];
+  const fixture=vm.createContext({
+    window:{chrome:{webview:{addEventListener(type,callback){assert.equal(type,'message');listener=callback;}}}},
+    isWorkspaceRecord:context.isWorkspaceRecord,manualIdentifyGenerations:new Map(),
+    snapshot:{},editDraft:null,selectedActionGame:null,libraryNotice:{},
+    scheduleCardOperationState(){},scheduleSilentRefresh(){++refreshes;},
+    showNotice(message,error){notices.push({message:String(message),error:Boolean(error)});}
+  });
+  vm.runInContext(normalizedPathSource,fixture);
+  const matchBegin=source.indexOf('function manualIdentifyEventMatches('),matchEnd=source.indexOf('async function searchGame(',matchBegin);
+  assert(matchBegin>=0&&matchEnd>matchBegin);vm.runInContext(source.slice(matchBegin,matchEnd),fixture);
+  const eventBegin=source.indexOf("window.chrome.webview.addEventListener('message', event => {"),eventEnd=source.indexOf('\n});',eventBegin);
+  assert(eventBegin>=0&&eventEnd>eventBegin);vm.runInContext(source.slice(eventBegin,eventEnd+5),fixture);
+  return {emit(message){listener({data:structuredClone(message)});},notices,get refreshes(){return refreshes;}};
+}
+
 function run(name, action) {
   try { action(); reports.push({ name, passed: true }); }
   catch (error) { reports.push({ name, passed: false, error: error.message }); }
@@ -37,7 +65,37 @@ run('raw-download-result-is-not-treated-as-snapshot', () => { const result = { p
 run('state-response-without-snapshot-is-rejected', () => assert.throws(() => context.workspaceBridgeResult('state', { path: 'file.png' })));
 run('steam-write-error-refreshes-durable-state', () => assert(source.includes("['commit', 'deleteFromSteam', 'refreshSteamArtwork'].includes(command)") && source.includes("applyLibrarySnapshot(await invoke('state'))")));
 run('steam-open-does-not-relabel-join-button', () => { assert(source.includes("const label = '点击加入';")); assert(!source.includes("const label = running === true ? '点击关闭Steam'")); assert(html.includes('点击加入 <span class="count-label">[已选0个]</span>')); });
-run('malformed-bridge-message-does-not-access-array-shape', () => assert(source.includes('isWorkspaceRecord(event.data) ? event.data : {}')));
+run('malformed-bridge-message-does-not-access-array-shape', () => {
+  assert(source.includes('isWorkspaceRecord(event.data) ? event.data : {}'));
+  const messages=[
+    ['conflict','needs-confirmation','后台返回的身份与本次选择不一致，已保留当前 ID。',/本次选择不一致/,true],
+    ['ready','ready',null,/Steam 身份已确认/,false],
+    ['metadata','metadata-verified',null,/游戏资料已确认.*Steam 身份仍待确认/,false],
+    ['pending','pending-network',null,/网络补齐暂未完成/,false],
+    ['unconfirmed','needs-confirmation',null,/身份尚未确认/,true],
+    ['missing-status','',null,/身份尚未确认/,true]
+  ];
+  const base={kind:'event',executable:'G:/Fixture/Feedback/game.exe',generation:10};
+  for(const [variant,identityStatus,error,expected,errorStyle] of messages){
+    const fixture=manualIdentityFeedbackFixture();fixture.emit({...base,event:'manual-identify-started'});
+    fixture.emit({...base,event:'manual-identify-complete',identityStatus,error});
+    const actual=fixture.notices.at(-1),passed=Boolean(actual&&expected.test(actual.message)&&actual.error===errorStyle&&fixture.refreshes===1);
+    manualIdentityFeedback.push({variant,actual,refreshes:fixture.refreshes,passed});
+  }
+  const generations=manualIdentityFeedbackFixture();for(const data of [null,7,[],false])generations.emit(data);
+  generations.emit({...base,event:'manual-identify-started'});generations.emit({...base,event:'manual-identify-complete',identityStatus:'ready'});
+  generations.emit({...base,generation:11,event:'manual-identify-started'});generations.emit({...base,generation:11,event:'manual-identify-complete',identityStatus:'ready'});
+  const secondCompleted=generations.refreshes===2&&/Steam 身份已确认/.test(generations.notices.at(-1)?.message||'');
+  const count=generations.notices.length,refreshes=generations.refreshes;
+  for(const event of ['manual-identify-started','manual-identify-complete','manual-identify-failed'])generations.emit({...base,event,identityStatus:'ready',error:'stale'});
+  const oldIgnored=generations.notices.length===count&&generations.refreshes===refreshes;
+  generations.emit({...base,generation:12,event:'manual-identify-complete',identityStatus:'ready'});
+  const terminalWithoutStart=generations.refreshes===refreshes+1;
+  generations.emit({...base,executable:'G:/Fixture/Other/game.exe',generation:1,event:'manual-identify-complete',identityStatus:'metadata-verified'});
+  const independentExe=generations.refreshes===refreshes+2&&/游戏资料已确认/.test(generations.notices.at(-1)?.message||'');
+  manualIdentityFeedback.push({variant:'successive-generations',secondCompleted,oldIgnored,terminalWithoutStart,independentExe,passed:secondCompleted&&oldIgnored&&terminalWithoutStart&&independentExe});
+  assert(manualIdentityFeedback.every(row=>row.passed),'Manual identity feedback misreported completion or ignored the current generation');
+});
 run('deterministic-snapshot-field-fuzz-1000-combinations', () => {
   const values = [null, 7, false, 'bad', [], {}, [null], previous.library.games];
   for (let i = 0; i < 1000; i++) {
@@ -117,6 +175,7 @@ const mergeContext=vm.createContext({snapshot:{},activeTab:'not-in-steam',select
 const mergeBegin=source.indexOf('function defaultSelectedDirectories('),mergeEnd=source.indexOf('const WAITING_KEEP_STATUSES',mergeBegin);
 assert(mergeBegin>=0&&mergeEnd>mergeBegin,'Missing production library merge boundaries');
 vm.runInContext(source.slice(mergeBegin,mergeEnd),mergeContext);
+mergeContext.isBuiltinExcludedSteamTool=context.isBuiltinExcludedSteamTool;
 for(const name of ['formalSteamAppId','confirmedMediaAppId','pageSelectable','pageSelectionKeys','isPageSelected']){
  const line=source.split(/\r?\n/).find(value=>value.startsWith('function '+name+'('));assert(line,'Missing production '+name);
  if(name==='pageSelectionKeys'){const begin=source.indexOf('function pageSelectionKeys('),end=source.indexOf('\nfunction defaultPageKeys(',begin);assert(end>begin);vm.runInContext(source.slice(begin,end),mergeContext);}else vm.runInContext(line,mergeContext);
@@ -137,10 +196,23 @@ run('media-merge-normalizes-exact-executable-and-last-record-wins',()=>{
  const state=mergeFixture(1),exe=state.library.games[0].primaryExecutable.toUpperCase().replaceAll('/','\\');state.gameMedia.entries={first:{key:'first',executable:exe},last:{key:'last',executable:exe}};mergeContext.snapshot=state;assert.equal(mergeContext.mergedGames()[0].gameMedia.key,'last');
 });
 run('unconfirmed-id-never-becomes-a-wallpaper-alias',()=>{
- const state=mergeFixture(1);state.steamPlan.items[0].status='needs-identity-confirmation';state.steamPlan.items[0].steamVerificationStatus='unconfirmed';state.gameMedia.entries={only:{key:'only',appId:1000}};mergeContext.snapshot=state;const games=mergeContext.mergedGames();assert.equal(games.length,2);assert.equal(games[0].gameMedia,undefined);assert.equal(games[1].mediaOnly,true);
+ const state=mergeFixture(1);state.steamPlan.items[0].status='needs-identity-confirmation';state.steamPlan.items[0].steamVerificationStatus='unconfirmed';state.gameMedia.entries={only:{key:'only',appId:1000}};mergeContext.snapshot=state;const games=mergeContext.mergedGames();assert.equal(games.length,1);assert.equal(games[0].gameMedia,undefined);assert.equal(state.gameMedia.entries.only.appId,1000);
 });
 run('unmatched-media-records-stay-distinct-and-cleared-id-stays-cleared',()=>{
- const state=mergeFixture(1);state.manualOverrides.items[mergeContext.normalizedUiPath(state.library.games[0].primaryExecutable)]={idCleared:true};state.gameMedia.entries={a:{key:'a',appId:1000},b:{key:'b',appId:1000}};mergeContext.snapshot=state;const games=mergeContext.mergedGames();assert.equal(games.length,3);assert.equal(games[0].gameMedia,undefined);assert.equal(games[0].steam.appId,'');
+ const state=mergeFixture(1);state.manualOverrides.items[mergeContext.normalizedUiPath(state.library.games[0].primaryExecutable)]={idCleared:true};state.gameMedia.entries={a:{key:'a',appId:1000},b:{key:'b',appId:1000}};mergeContext.snapshot=state;const games=mergeContext.mergedGames();assert.equal(games.length,1);assert.equal(games[0].gameMedia,undefined);assert.equal(games[0].steam.appId,'');assert.equal(Object.keys(state.gameMedia.entries).length,2,'Unmatched cache records were destroyed');
+ const native=mergeFixture(0);native.gameMedia.entries={
+  native:{key:'steam-1687950',appId:1687950,name:'Persona 5 Royal',identityVerified:true,source:'steam',gameDirectory:'D:/soft/steam/steamapps/common/P5R'},
+  tool:{key:'steam-228980',appId:228980,name:'Steamworks Common Redistributables',identityVerified:true,gameDirectory:'D:/soft/steam/steamapps/common/Steamworks Shared'},
+  deleted:{key:'removed',appId:620,name:'Removed',deleted:true},
+  custom:{key:'custom',appId:1000,name:'Custom game',identityVerified:true,source:'steam',executable:'D:/GAME/Custom/game.exe',gameDirectory:'D:/GAME/Custom'},
+  unknown:{key:'unknown',appId:1001,name:'Unconfirmed',identityVerified:false,source:'steam',gameDirectory:'D:/soft/steam/steamapps/common/Unknown'}
+ };native.library.games=[{gameDirectory:'D:/soft/steam/steamapps/common/P5R',directoryName:'P5R',steamNative:true,nativeSteamAppId:1687950}];mergeContext.snapshot=native;const beforeCache=JSON.stringify(native.gameMedia);const visible=mergeContext.mergedGames();
+ assert.equal(visible.length,1,'A wallpaper cache record became an installation card');
+ assert.equal(mergeContext.isNativeSteamGame(visible[0]),true,'Scanned native Steam game disappeared');
+ assert.equal(JSON.stringify(native.gameMedia),beforeCache,'Library projection changed persisted cache');
+ assert.equal(visible.some(game=>game.mediaOnly),false,'Unmatched cache still generates headless cards');
+ assert.equal(mergeContext.gameDisplayName({directoryName:'The Legend of Zelda Tears of the kingdom',primaryExecutable:'D:/GAME/Zelda/totk_xlate.exe',primaryProductName:'totk_xlate'}),'The Legend of Zelda Tears of the kingdom');
+ assert.equal(mergeContext.gameDisplayName({directoryName:'Collection 12345',primaryExecutable:'D:/GAME/Collection 12345/Sifu.exe',primaryProductName:'Sifu'}),'Sifu','A valid PE title was replaced by an unrelated directory name');
 });
 run('card-selection-does-not-rebuild-or-copy-the-entire-library',()=>{
  const state=mergeFixture(2);mergeContext.snapshot=state;const game=mergeContext.mergedGames()[0];vm.runInContext('var actualMerged=mergedGames;var selectionMergeReads=0;mergedGames=()=>{++selectionMergeReads;return actualMerged();};',mergeContext);
@@ -176,12 +248,25 @@ run('lookup-scope-releases-indexes-on-error-and-next-in-place-update',()=>{
  const other={manualOverrides:{items:{[legacy]:{name:'nested'}}}};lookupScope(()=>{mergeContext.snapshot=other;assert.equal(lookupScope(()=>mergeContext.manualOverride(key)).name,'nested');mergeContext.snapshot=state;assert.equal(mergeContext.manualOverride(key).name,'new');});
 });
 run('changed-primary-does-not-inherit-old-directory-plan-or-media',()=>{
- const state=mergeFixture(1),original=state.library.games[0].primaryExecutable;state.library.games[0].primaryExecutable=original.replace('game.exe','Alternate.exe');state.steamPlan.items[0].status='added-to-steam';mergeContext.snapshot=state;const games=mergeContext.mergedGames();assert.equal(games[0].steam.appId,undefined);assert.equal(games[0].gameMedia,undefined);assert.equal(games[1].mediaOnly,true);
+ const state=mergeFixture(1),original=state.library.games[0].primaryExecutable;state.library.games[0].primaryExecutable=original.replace('game.exe','Alternate.exe');state.steamPlan.items[0].status='added-to-steam';mergeContext.snapshot=state;const games=mergeContext.mergedGames();assert.equal(games[0].steam.appId,undefined);assert.equal(games[0].gameMedia,undefined);assert.equal(games.length,1);assert.equal(state.gameMedia.entries['steam-1000'].executable,original);
+ // The same original merge consumer must not borrow identity metadata
+ // across a protected Steam AppID even when the executable is unchanged.
+ for(const kind of ['conflicting-cache','metadata-only-cache','same-id-cache','manual-title','native-conflicting-cache']){
+  const bound=mergeFixture(1),exe=bound.library.games[0].primaryExecutable,key=mergeContext.normalizedUiPath(exe),row=bound.steamPlan.items[0];
+  Object.assign(row,{steamStoreAppId:1000,storefrontAppId:1000,identityStatus:'verified',steamVerificationStatus:'steam-verified',formalName:'Bound identity'});
+  bound.resolvedIdentities[key]={steamAppId:kind==='same-id-cache'?1000:2000,appId:kind==='same-id-cache'?1000:2000,formalName:kind==='same-id-cache'?'Same identity refreshed title':'Foreign cached title'};
+  if(kind==='metadata-only-cache')bound.resolvedIdentities[key]={igdbId:77,formalName:'Auxiliary candidate title'};
+  if(kind==='manual-title')bound.manualOverrides.items[key]={name:'User title'};
+  if(kind==='native-conflicting-cache'){bound.library.games[0].steamNative=true;bound.library.games[0].nativeSteamAppId=1000;row.steamNative=true;row.nativeSteamAppId=1000;row.status='already-in-steam';}
+  mergeContext.snapshot=bound;const cached=JSON.stringify(bound.resolvedIdentities),game=mergeContext.mergedGames()[0];
+  assert.equal(mergeContext.confirmedMediaAppId(game),'1000');assert.equal(mergeContext.gameDisplayName(game),kind==='same-id-cache'?'Same identity refreshed title':kind==='manual-title'?'User title':'Bound identity',kind);
+  assert.equal(JSON.stringify(bound.resolvedIdentities),cached,'Raw cache must remain available for explicit review');
+ }
 });
 run('directory-plan-without-an-executable-retains-legacy-display-fallback',()=>{
  const state=mergeFixture(1);delete state.steamPlan.items[0].primaryExecutable;mergeContext.snapshot=state;assert.equal(mergeContext.mergedGames()[0].steam.appId,1000);
 });
-const report = { legacyLookupMetrics, mergeMetrics, allPassed: reports.every(test => test.passed), caseCount: reports.length, fuzzCombinationCount: 1000, artworkPriorityCombinationCount: 1000, cases: reports, realSteamFilesModified: false };
+const report = { manualIdentityFeedback, legacyLookupMetrics, mergeMetrics, allPassed: reports.every(test => test.passed), caseCount: reports.length, fuzzCombinationCount: 1000, artworkPriorityCombinationCount: 1000, cases: reports, realSteamFilesModified: false };
 const build = path.resolve(root, '../../Build');
 const output = path.resolve(process.argv[2] || path.join(build, 'CustomSteamLibrary/ui-datachain-summary.json'));
 const evidence = path.resolve(root, '../../../Testing/YMCC/Evidence');

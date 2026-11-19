@@ -13,10 +13,27 @@ import {getUiSetting,setUiSettings} from '@/bridge/uiSettings';
 import {sharedGameMedia,steamWallpaperEnabled,setSteamWallpaperEnabled} from '@/bridge/sharedGameMedia';
 import {gameMediaDownloads,backgroundDownloadEnabled,setBackgroundDownloadEnabled,downloadDescription,setDownloadCpuThreshold} from '@/bridge/gameMediaDownloads';
 const downloadCpuThreshold=ref(getUiSetting('steamWallpaperDownloadCpuThreshold'));
+const controllerCursorHide=ref(getUiSetting('steamControllerCursorHide'));
+const controllerCursorBusy=ref(false),controllerCursorError=ref('');
+const menuGameIdRepair=ref(getUiSetting('steamMenuGameIdRepair'));
+const menuGameIdBusy=ref(false),menuGameIdError=ref('');
+async function changeMenuGameIdRepair(enabled:boolean){
+  if(menuGameIdBusy.value)return;menuGameIdBusy.value=true;menuGameIdError.value='';
+  try{await setUiSettings({steamMenuGameIdRepair:enabled});}
+  catch(error){menuGameIdError.value=String(error instanceof Error?error.message:error);}
+  finally{menuGameIdRepair.value=getUiSetting('steamMenuGameIdRepair');menuGameIdBusy.value=false;}
+}
+async function changeControllerCursorHide(enabled:boolean){
+  if(controllerCursorBusy.value)return;controllerCursorBusy.value=true;controllerCursorError.value='';
+  try{await setUiSettings({steamControllerCursorHide:enabled});controllerCursorHide.value=getUiSetting('steamControllerCursorHide');}
+  catch(error){controllerCursorError.value=String(error instanceof Error?error.message:error);}
+  finally{controllerCursorBusy.value=false;}
+}
 const downloadCpuOptions=[10,15,20,30,50].map(value=>({value,label:value+'%'}));
 async function changeDownloadCpuThreshold(value:string|number){await setDownloadCpuThreshold(Number(value));downloadCpuThreshold.value=getUiSetting('steamWallpaperDownloadCpuThreshold');}
 const wallpaperDownloadEnabled=ref(backgroundDownloadEnabled());
 const wallpaperDownloads=ref(gameMediaDownloads.state);const wallpaperDownloadBusy=ref(false),wallpaperDownloadError=ref('');
+const wallpaperInventoryPending=computed(()=>Number(wallpaperDownloads.value.manualUntil||0)>Date.now()&&Number(wallpaperDownloads.value.inventoryAwaitUntil||0)>Date.now()&&wallpaperDownloads.value.inventoryReadyId!==wallpaperDownloads.value.inventoryRequestId);
 async function requestWallpaperDownloads(){if(wallpaperDownloadBusy.value)return;wallpaperDownloadBusy.value=true;wallpaperDownloadError.value='';try{if(Number(wallpaperDownloads.value.manualUntil||0)>Date.now())await gameMediaDownloads.cancelManual();else await gameMediaDownloads.requestNow();}catch(error){wallpaperDownloadError.value=String(error instanceof Error?error.message:error);}finally{wallpaperDownloadBusy.value=false;}}
 let stopWallpaperDownloads:(()=>void)|null=null;
 async function changeWallpaperDownloads(enabled:boolean){await setBackgroundDownloadEnabled(enabled);wallpaperDownloadEnabled.value=enabled;}
@@ -28,7 +45,7 @@ async function changeWallpaperPauseOnBattery(enabled:boolean){if(wallpaperBatter
 const wallpaperPreparation=ref(sharedGameMedia.preparationDescription());
 let stopWallpaperPreparation:(()=>void)|null=null;
 async function changeWallpaper(enabled:boolean){if(wallpaperBusy.value)return;wallpaperBusy.value=true;wallpaperError.value='';try{await setSteamWallpaperEnabled(enabled);wallpaperEnabled.value=enabled;}catch(error){wallpaperError.value=String(error instanceof Error?error.message:error);}finally{wallpaperBusy.value=false;}}
-const syncWallpaper=()=>{wallpaperEnabled.value=steamWallpaperEnabled();wallpaperPauseOnBattery.value=getUiSetting('steamWallpaperPauseOnBattery')===true;wallpaperDownloadEnabled.value=backgroundDownloadEnabled();downloadCpuThreshold.value=getUiSetting('steamWallpaperDownloadCpuThreshold');};
+const syncWallpaper=()=>{menuGameIdRepair.value=getUiSetting('steamMenuGameIdRepair');controllerCursorHide.value=getUiSetting('steamControllerCursorHide');wallpaperEnabled.value=steamWallpaperEnabled();wallpaperPauseOnBattery.value=getUiSetting('steamWallpaperPauseOnBattery')===true;wallpaperDownloadEnabled.value=backgroundDownloadEnabled();downloadCpuThreshold.value=getUiSetting('steamWallpaperDownloadCpuThreshold');};
 onMounted(()=>{stopWallpaperDownloads=gameMediaDownloads.subscribe(()=>{wallpaperDownloads.value=gameMediaDownloads.state;});window.addEventListener('ui-settings:changed',syncWallpaper);window.addEventListener('ui-settings:loaded',syncWallpaper);syncWallpaper();stopWallpaperPreparation=sharedGameMedia.subscribe(reason=>{if(reason==='policy')wallpaperPreparation.value=sharedGameMedia.preparationDescription();});});
 onBeforeUnmount(()=>{stopWallpaperDownloads?.();stopWallpaperPreparation?.();window.removeEventListener('ui-settings:changed',syncWallpaper);window.removeEventListener('ui-settings:loaded',syncWallpaper);});
 import SteamAppearanceCard from '@/components/SteamAppearanceCard.vue';
@@ -38,7 +55,7 @@ import InlineIcon from '@/components/InlineIcon.vue';
 import { dialog, shell } from '@/bridge/api';
 import { isUiVisible, onUiVisibilityChange, getUiVisibilityState } from '@/bridge/uiLifecycle';
 import { steamUi, type SteamUiState } from '@/bridge/steamUi';
-import { createSteamReadBudget } from '@/bridge/steamReadBudget';
+import { createSteamReadBudget, STEAM_AUTOMATIC_READ_GAP_MS } from '@/bridge/steamReadBudget';
 import {
   STEAM_ADDONS,
   type SteamAddonKey,
@@ -51,6 +68,7 @@ import {
   steamCustomAddons,
   steamExeExists,
   launchSteam,
+  launchSteamAddon,
 } from '@/bridge/yeman';
 import {
   type CustomSteamLibrarySummary,
@@ -104,10 +122,13 @@ onBeforeUnmount(() => { ++deckyViewEpoch; stopDeckyState?.(); stopDeckyState = n
 const running = ref(false);
 const steamUiState = ref<SteamUiState | null>(null);
 const steamPendingTarget = ref<'running' | 'desktop' | 'bigpicture' | null>(null);
-let steamReadEpoch = 0, steamObservationEpoch = 0, steamStateReadBusy = false, steamStateRefreshQueued = false;
+type SteamObservationKind = 'published' | 'passive';
+let steamReadEpoch = 0, steamObservationEpoch = 0, steamStateReadBusy = false;
+let steamStateRefreshQueued: SteamObservationKind | null = null;
 let stopSteamUiState: (() => void) | null = null;
 let steamEventTimer: ReturnType<typeof setTimeout> | null = null;
 const steamReadBudget = createSteamReadBudget();
+let steamLastStatusRead = -Infinity;
 let steamForceObservation = false;
 watch(running, () => window.dispatchEvent(new Event('steam-appearance:environment')));
 const addonStates: Record<string, boolean> = {};
@@ -120,21 +141,20 @@ const steamRunKnown = ref(false);
 const steamStateStale = ref(false);
 const steamChecking = ref(false);
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
-let steamPollTimer: ReturnType<typeof setInterval> | null = null;
-let steamPollDeadlineTimer: ReturnType<typeof setTimeout> | null = null;
-let steamFirstPollTimer: ReturnType<typeof setTimeout> | null = null;
-let steamPollBusy = false;
-let steamPollGeneration = 0;
+let steamConfirmation: { notify(published?: SteamUiState): void; drain(): void; cancel(): void } | null = null;
+let steamConfirmationHint = false;
 let steamActive = false;
 let steamPowerIntent = 0, steamPowerPending = false;
 let stopUiVisibility: (() => void) | null = null;
+let steamVisibilitySeedPending = false;
 const customLibrarySummary = ref<CustomSteamLibrarySummary | null>(null);
 const customLibraryBusy = ref(false);
 const customLibraryRunning = ref(false);
 
-const STEAM_FIRST_LAUNCH_CHECK_MS = 5000;
-const STEAM_POLL_INTERVAL_MS = 4000;
-const STEAM_POLL_TIMEOUT_MS = 40000;
+const STEAM_CONFIRM_TIMEOUT_MS = 40000;
+const STEAM_LAUNCH_BACKSTOPS_MS = [5000, 9000, 16000, 23000, 30000, 37000] as const;
+const STEAM_MODE_BACKSTOPS_MS = [0, 8000, 16000, 24000, 30000, 36000] as const;
+const STEAM_CONFIRM_EVENT_GAP_MS = 5000;
 function showNotice(message: string) {
   if (noticeTimer) clearTimeout(noticeTimer);
   errMsg.value = message;
@@ -165,72 +185,124 @@ function acceptSteamState(state: SteamUiState | null) {
   steamStateStale.value = false; steamRunKnown.value = true;
   steamUiState.value = state; running.value = state.running;
 }
-async function refreshSteamState(options?: { automatic: true }): Promise<SteamUiState | null> {
+function retainSteamObservation(kind: SteamObservationKind): void {
+  if (kind === 'passive' || steamStateRefreshQueued === null) steamStateRefreshQueued = kind;
+}
+function steamObservationDelay(kind: SteamObservationKind): number | null {
+  return kind === 'published' && !steamForceObservation
+    ? Math.max(0, steamLastStatusRead + STEAM_AUTOMATIC_READ_GAP_MS - performance.now())
+    : steamReadBudget.delay(performance.now());
+}
+function resumeQueuedSteamObservation(): void {
+  if (steamStateRefreshQueued) queueSteamStateRefresh(steamStateRefreshQueued);
+}
+async function refreshSteamState(options?: { automatic: true; publishedOnly?: true }): Promise<SteamUiState | null> {
   const automatic = options?.automatic === true;
+  const kind = options?.publishedOnly ? 'published' : 'passive';
   if (!automatic) {
     steamReadBudget.renew();
 
   } else {
     if (!steamActive || !steamReadVisible()) return null;
     // Global refreshes also respect the launch/mode confirmation owner.
-    if (steamPowerPending || steamChecking.value) { steamStateRefreshQueued = true; return null; }
-    const delay = steamReadBudget.delay(performance.now());
+    if (steamPowerPending || steamChecking.value) { retainSteamObservation(kind); return null; }
+    const delay = steamObservationDelay(kind);
     if (delay === null) return null;
-    if (delay > 0) { queueSteamStateRefresh(); return null; }
+    if (delay > 0) { queueSteamStateRefresh(kind); return null; }
   }
-  if (steamStateReadBusy) { steamStateRefreshQueued = true; return null; }
+  if (steamStateReadBusy) { retainSteamObservation(kind); return null; }
   steamStateReadBusy = true;
   const epoch = steamObservationEpoch;
-  steamReadBudget.started(performance.now());
+  steamLastStatusRead = performance.now();
+  let probing = kind === 'passive';
+  const visibilitySeed = steamVisibilitySeedPending && automatic && probing;
+  if (visibilitySeed) steamVisibilitySeedPending = false;
+  if (probing) steamReadBudget.started(steamLastStatusRead);
   try {
-    const state = await detectSteamState(automatic);
-    if (epoch === steamObservationEpoch) steamReadBudget.finished(!!state?.known && (!state.running || state.mode !== 'unknown'));
-    if (epoch === steamObservationEpoch && steamActive && steamReadVisible()) acceptSteamState(state);
+    let state: SteamUiState | null;
+    if (kind === 'published') {
+      let legacyNative = false;
+      try { state = await steamUi.read({ publishedOnly: true }); }
+      catch (error) {
+        state = null;
+        legacyNative = (error as Error)?.message === 'Invalid Steam UI read';
+      }
+      // Without Decky or CSS demand, no worker will publish the new mode.
+      // A pending or retired observation still has no authority to probe.
+      const unobserved = state?.known && state.running && state.mode === 'unknown' &&
+        state.pid > 0 && state.birth !== '0' && state.reason === 'published-steam-mode-unobserved';
+      if ((legacyNative || unobserved) && epoch === steamObservationEpoch &&
+          steamActive && steamReadVisible() && !steamPowerPending && !steamChecking.value &&
+          steamReadBudget.delay(performance.now()) === 0) {
+        probing = true;
+        steamLastStatusRead = performance.now();
+        steamReadBudget.started(steamLastStatusRead);
+        state = await detectSteamState(true);
+      }
+    } else state = await detectSteamState(automatic);
+    const confirmed = !!state?.known && (!state.running || state.mode !== 'unknown');
+    if (probing && epoch === steamObservationEpoch) steamReadBudget.finished(confirmed);
+    if (epoch === steamObservationEpoch && steamActive && steamReadVisible()) {
+      acceptSteamState(state);
+      if (visibilitySeed && !confirmed) queueSteamResumeRefresh();
+    }
     return epoch === steamObservationEpoch ? state : null;
   } finally {
     steamStateReadBusy = false;
-    if (steamStateRefreshQueued) { steamStateRefreshQueued = false; queueSteamStateRefresh(); }
+    steamConfirmation?.drain();
+    resumeQueuedSteamObservation();
   }
 }
-function queueSteamStateRefresh() {
+function queueSteamStateRefresh(kind: SteamObservationKind = 'published') {
   if (!steamActive || !steamReadVisible()) return;
-  if (steamStateReadBusy || steamChecking.value || steamPowerPending) { steamStateRefreshQueued = true; return; }
-  if (steamEventTimer) return;
-  const delay = steamReadBudget.delay(performance.now());
-  if (delay === null && !steamForceObservation) return; // Failed searches stop, not an idle retry loop.
+  retainSteamObservation(kind);
+  if (steamStateReadBusy || steamChecking.value || steamPowerPending || steamEventTimer) return;
+  const delay = steamObservationDelay(steamStateRefreshQueued!);
+  if (delay === null && !steamForceObservation) { steamStateRefreshQueued = null; return; }
   // Actual events create at most one trailing read; event storms cannot exceed
   // one automatic query per five seconds. An idle page has no timer at all.
   steamEventTimer = setTimeout(function runSteamObservation() {
     steamEventTimer = null;
-    if (!steamActive || !steamReadVisible()) return;
+    const queued = steamStateRefreshQueued;
+    if (!queued || !steamActive || !steamReadVisible() || steamStateReadBusy || steamChecking.value || steamPowerPending) return;
     // A manual read may have happened while the trailing event timer waited.
-    const wait = steamReadBudget.delay(performance.now());
-    if (wait !== null && wait > 0) { queueSteamStateRefresh(); return; }
+    const wait = steamObservationDelay(queued);
+    if (wait !== null && wait > 0) { queueSteamStateRefresh(queued); return; }
+    steamStateRefreshQueued = null;
     const force = steamForceObservation; steamForceObservation = false;
-    void refreshSteamState(force ? undefined : { automatic: true });
+    void refreshSteamState(force ? undefined : queued === 'published'
+      ? { automatic: true, publishedOnly: true } : { automatic: true });
   }, Math.max(350, delay ?? 0));
 }
 
 function queueSteamResumeRefresh() {
   steamReadBudget.renew(); steamForceObservation = true;
-  queueSteamStateRefresh(); // One renewed observation only; never a launch/mode action.
+  queueSteamStateRefresh('passive'); // One renewed observation only; never a launch/mode action.
 }
-function stopSteamPolling() {
-  steamPollGeneration += 1;
-  if (steamFirstPollTimer) { clearTimeout(steamFirstPollTimer); steamFirstPollTimer = null; }
-  if (steamPollDeadlineTimer) { clearTimeout(steamPollDeadlineTimer); steamPollDeadlineTimer = null; }
-  if (steamPollTimer) {
-    clearInterval(steamPollTimer);
-    steamPollTimer = null;
-  }
-  steamPollBusy = false;
+function stopSteamConfirmation() {
+  steamConfirmation?.cancel();
+  steamConfirmation = null;
+  steamConfirmationHint = false;
   steamChecking.value = false;
+}
+
+function onSteamStateChanged(published?: SteamUiState) {
+  if (steamConfirmation) steamConfirmation.notify(published);
+  else if (steamPowerPending) steamConfirmationHint = true;
+  else if (published && steamActive && steamReadVisible() && !steamStateReadBusy &&
+      !steamForceObservation && steamStateRefreshQueued !== 'passive') {
+    // Keep pending wake and active reads on their original ownership path.
+    steamStateRefreshQueued = null;
+    if (steamEventTimer) { clearTimeout(steamEventTimer); steamEventTimer = null; }
+    acceptSteamState(published);
+  } else queueSteamStateRefresh();
 }
 
 function finishSteamPower(intent: number) {
   if (intent !== steamPowerIntent) return;
   steamPowerPending = false; busy.value = false; steamPendingTarget.value = null;
-  if (steamStateRefreshQueued) { steamStateRefreshQueued = false; queueSteamStateRefresh(); }
+  if (steamConfirmationHint) { steamConfirmationHint = false; retainSteamObservation('published'); }
+  resumeQueuedSteamObservation();
 }
 function cancelSteamPowerWait() {
   ++steamPowerIntent; ++steamReadEpoch;
@@ -239,69 +311,118 @@ function cancelSteamPowerWait() {
   // wake observation. Truly hiding/leaving the view invalidates both.
   if (!readsVisible) {
     ++steamObservationEpoch;
+    steamVisibilitySeedPending = false;
     if (steamEventTimer) { clearTimeout(steamEventTimer); steamEventTimer = null; }
-    steamStateRefreshQueued = false; steamForceObservation = false;
+    steamStateRefreshQueued = null; steamForceObservation = false;
   }
   steamPendingTarget.value = null;
-  stopSteamPolling();
+  stopSteamConfirmation();
   if (steamPowerPending) { steamPowerPending = false; busy.value = false; }
-  if (readsVisible && steamStateRefreshQueued) { steamStateRefreshQueued = false; queueSteamStateRefresh(); }
+  if (readsVisible) resumeQueuedSteamObservation();
 }
-function pollSteamState(
+function confirmSteamState(
   target: 'running' | 'desktop' | 'bigpicture',
   onTimeout: () => void,
   onMatched: (state: SteamUiState) => void = () => {},
   expectedSession?: SteamUiState,
 ) {
-  stopSteamPolling();
-  const generation = steamPollGeneration;
-  const startedAt = performance.now();
+  const hinted = steamConfirmationHint;
+  stopSteamConfirmation();
+  const deadline = performance.now() + STEAM_CONFIRM_TIMEOUT_MS;
+  let eventTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingRead: { controller: AbortController; forced: boolean } | null = null;
+  let nextEventAt = 0, eventPending = false, backstopPending = false;
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  const active = (): boolean => steamConfirmation === owner && steamActive && isUiVisible();
+  const expire = () => {
+    if (steamConfirmation !== owner) return;
+    stopSteamConfirmation(); onTimeout();
+  };
+  const owner = {
+    notify(published?: SteamUiState) {
+      if (!active()) return;
+      if (performance.now() >= deadline) { expire(); return; }
+      // Only a notice after the command receipt can settle the bound mode action.
+      if (target !== 'running' && expectedSession && published?.mode === target &&
+          published.pid === expectedSession.pid && published.birth === expectedSession.birth &&
+          published.observedAccount !== undefined && published.observedAccount === expectedSession.observedAccount) {
+        acceptSteamState(published);
+        stopSteamConfirmation();
+        onMatched(published);
+        return;
+      }
+      if (eventTimer !== undefined || eventPending) return;
+      eventTimer = setTimeout(() => {
+        eventTimer = undefined;
+        eventPending = true; owner.drain();
+      }, Math.max(350, nextEventAt - performance.now()));
+    },
+    drain() {
+      if (!active() || steamStateReadBusy || (!eventPending && !backstopPending)) return;
+      if (performance.now() >= deadline) { expire(); return; }
+      const force = backstopPending;
+      eventPending = backstopPending = false;
+      if (eventTimer !== undefined) { clearTimeout(eventTimer); eventTimer = undefined; }
+      if (!force) nextEventAt = performance.now() + STEAM_CONFIRM_EVENT_GAP_MS;
+      void check(force);
+    },
+    cancel() {
+      for (const timer of timers) clearTimeout(timer);
+      if (eventTimer !== undefined) clearTimeout(eventTimer);
+      pendingRead?.controller.abort();
+    },
+  };
+  steamConfirmation = owner;
   steamChecking.value = true;
 
-  const check = async () => {
-    if (!steamActive || !isUiVisible() || generation !== steamPollGeneration || steamPollBusy) return;
-    if (performance.now() - startedAt >= STEAM_POLL_TIMEOUT_MS) { stopSteamPolling(); onTimeout(); return; }
-    steamPollBusy = true;
+  async function check(force: boolean) {
+    steamStateReadBusy = true;
+    const controller = new AbortController();
+    const signal = controller.signal;
+    pendingRead = { controller, forced: force };
     try {
-      const live = await refreshSteamState();
-      if (generation !== steamPollGeneration) return;
+      const live = await steamUi.read(force ? { signal } : { publishedOnly: true, signal }).catch(() => null);
+      if (!active() || signal.aborted) return;
+      if (performance.now() >= deadline) { expire(); return; }
+      acceptSteamState(live);
       if (live?.known && live.running && expectedSession &&
           (live.pid !== expectedSession.pid || live.birth !== expectedSession.birth)) {
-        stopSteamPolling(); onTimeout();
+        stopSteamConfirmation(); onTimeout();
         showNotice('Steam 会话已改变，已停止本次模式确认；请按当前状态重试。');
         return;
       }
       if (live?.known && live.running && (target === 'running' || live.mode === target)) {
-        stopSteamPolling();
+        stopSteamConfirmation();
         onMatched(live);
         return;
       }
-      if ((live?.known && !live.running && target !== 'running') || performance.now() - startedAt >= STEAM_POLL_TIMEOUT_MS) {
-        stopSteamPolling();
+      if (live?.known && !live.running && target !== 'running') {
+        stopSteamConfirmation();
         onTimeout();
       }
     } finally {
-      if (generation === steamPollGeneration) steamPollBusy = false;
+      pendingRead = null;
+      steamStateReadBusy = false;
+      steamConfirmation?.drain();
+      if (!steamConfirmation) resumeQueuedSteamObservation();
     }
-  };
-
-  // A launch receipt is only submission. Let the client initialize before the
-  // first read; later checks stay bounded and never launch/switch again.
-  steamPollDeadlineTimer = setTimeout(function expireSteamConfirmation() {
-    if (generation !== steamPollGeneration) return;
-    stopSteamPolling(); onTimeout();
-  }, STEAM_POLL_TIMEOUT_MS);
-  if (target === 'running') {
-    steamFirstPollTimer = setTimeout(() => {
-      steamFirstPollTimer = null;
-      if (generation !== steamPollGeneration || !steamActive || !isUiVisible()) return;
-      steamPollTimer = setInterval(check, STEAM_POLL_INTERVAL_MS);
-      void check();
-    }, STEAM_FIRST_LAUNCH_CHECK_MS);
-  } else {
-    steamPollTimer = setInterval(check, STEAM_POLL_INTERVAL_MS);
-    void check();
   }
+
+  // A notification joins the shared observation. A few forced checks cover
+  // missed notifications and sessions without a native mode observer.
+  const backstop = (last: boolean) => {
+    backstopPending = true;
+    // An earlier probe must not consume the final check's time budget.
+    if (pendingRead && (last || !pendingRead.forced)) pendingRead.controller.abort();
+    owner.drain();
+  };
+  timers.push(setTimeout(expire, STEAM_CONFIRM_TIMEOUT_MS));
+  const checks = target === 'running' ? STEAM_LAUNCH_BACKSTOPS_MS : STEAM_MODE_BACKSTOPS_MS;
+  checks.forEach((delay, index) => {
+    if (delay === 0) backstop(false);
+    else timers.push(setTimeout(() => backstop(index === checks.length - 1), delay));
+  });
+  if (hinted) owner.notify();
 }
 
 // 并行异步加载；状态检测失败时保持未确认，不把 Steam 错误显示为运行中。
@@ -321,7 +442,7 @@ async function refresh() {
 
 async function launch() {
   if (busy.value) return;
-  stopSteamPolling();
+  stopSteamConfirmation();
   const intent = ++steamPowerIntent;
   ++steamReadEpoch; ++steamObservationEpoch;
   if (steamEventTimer) { clearTimeout(steamEventTimer); steamEventTimer = null; }
@@ -336,7 +457,7 @@ async function launch() {
     // later: the user may already have chosen desktop outside YMCC.
     steamPendingTarget.value = 'running';
     busy.value = false; // Observation does not impose a 40-second button lock.
-    pollSteamState('running',
+    confirmSteamState('running',
       () => { finishSteamPower(intent); showNotice('Steam 启动后暂未检测到运行进程，请稍后确认。'); },
       () => finishSteamPower(intent));
   } catch (error) {
@@ -393,7 +514,7 @@ async function addCustomAddon() {
 async function launchCustomAddon(addon: SteamCustomAddon) {
   errMsg.value = '';
   try {
-    await shell.execute(addon.exe, []);
+    await launchSteamAddon(addon.exe, { userInitiated: true });
   } catch (e) {
     errMsg.value = '启动失败：' + (e as Error).message;
   }
@@ -402,7 +523,7 @@ async function launchCustomAddon(addon: SteamCustomAddon) {
 async function launchFixedAddon(exe: string) {
   errMsg.value = '';
   try {
-    await shell.execute(exe, []);
+    await launchSteamAddon(exe, { userInitiated: true });
   } catch (e) {
     errMsg.value = '启动失败：' + (e as Error).message;
   }
@@ -436,7 +557,7 @@ async function removeCustomAddon(addon: SteamCustomAddon) {
 
 async function switchSteamMode() {
   if (busy.value) return;
-  stopSteamPolling();
+  stopSteamConfirmation();
   const original = steamUiState.value;
   const target = original?.mode === 'desktop' ? 'bigpicture' : original?.mode === 'bigpicture' ? 'desktop' : null;
   const intent = ++steamPowerIntent;
@@ -461,7 +582,7 @@ async function switchSteamMode() {
     if (intent !== steamPowerIntent || !steamActive || !isUiVisible()) return;
     steamPendingTarget.value = target;
     busy.value = false;
-    pollSteamState(target,
+    confirmSteamState(target,
       () => { finishSteamPower(intent); showNotice('已提交模式切换，但尚未确认目标界面，请稍后重新检测。'); },
       () => finishSteamPower(intent), state);
   } catch (error) {
@@ -566,7 +687,7 @@ if (globalRefreshKey) {
 
 onMounted(() => {
   steamActive = true;
-  if (!stopSteamUiState) stopSteamUiState = steamUi.subscribe(queueSteamStateRefresh);
+  if (!stopSteamUiState) stopSteamUiState = steamUi.subscribe(onSteamStateChanged, { publishedMediaState: true });
   for (const event of steamReadonlyEvents) window.addEventListener(event, queueSteamResumeRefresh);
   // document visibility can return after resume-ready while powerReady is still false.
   // The aggregate lifecycle suppresses that unchanged false state; read-only Steam
@@ -574,23 +695,23 @@ onMounted(() => {
   document.addEventListener('visibilitychange', queueSteamResumeRefresh);
   window.addEventListener('customSteamLibrary:closed', onCustomLibraryClosed);
   window.addEventListener('customSteamLibrary:conflict', onCustomLibraryConflict);
+  let subscribing = true;
   stopUiVisibility = onUiVisibilityChange(({ visible }) => {
     if (!visible) cancelSteamPowerWait();
-    else if (steamActive) queueSteamResumeRefresh();
+    else if (steamActive) {
+      // The subscription's synchronous first value is not a visibility edge.
+      if (subscribing) steamVisibilitySeedPending = true;
+      else queueSteamResumeRefresh();
+    }
   });
+  subscribing = false;
   void refresh();
 
   void refreshCustomLibrarySummary();
 });
 onActivated(() => {
+  if (steamActive) return; // The initial mount already started the page reads.
   steamActive = true;
-  if (!stopSteamUiState) stopSteamUiState = steamUi.subscribe(queueSteamStateRefresh);
-  if (!stopUiVisibility) {
-    stopUiVisibility = onUiVisibilityChange(({ visible }) => {
-      if (!visible) cancelSteamPowerWait();
-      else if (steamActive) queueSteamResumeRefresh();
-    });
-  }
   void refresh();
 
   void refreshCustomLibrarySummary();
@@ -699,7 +820,7 @@ onBeforeUnmount(() => {
        <button type="button" class="button steam-wallpaper-download-now" data-gp-id="steam-wallpaper-download-now" :disabled="wallpaperDownloadBusy" @click="requestWallpaperDownloads">{{wallpaperDownloadBusy?'正在提交…':Number(wallpaperDownloads.manualUntil||0)>Date.now()?'停止本轮补齐':'立即补齐壁纸'}}</button>
        <p v-if="wallpaperDownloadError" role="alert">{{wallpaperDownloadError}}</p>
        <p class="steam-section-note">手动补齐本轮忽略 CPU 与游戏暂停；电池、启动和磁盘保护保留。</p>
-       <progress v-if="wallpaperDownloadEnabled && (wallpaperDownloads.total || wallpaperDownloads.workerPid)" :value="wallpaperDownloads.totalBytes ? wallpaperDownloads.bytes : wallpaperDownloads.current?.appId ? undefined : wallpaperDownloads.completed" :max="wallpaperDownloads.totalBytes || wallpaperDownloads.total || 1" aria-label="动态壁纸下载进度"></progress>
+       <progress v-if="wallpaperDownloadEnabled && (wallpaperDownloads.total || wallpaperDownloads.workerPid)" :value="wallpaperInventoryPending ? undefined : wallpaperDownloads.totalBytes ? wallpaperDownloads.bytes : wallpaperDownloads.current?.appId ? undefined : wallpaperDownloads.completed" :max="wallpaperDownloads.totalBytes || wallpaperDownloads.total || 1" aria-label="动态壁纸下载进度"></progress>
        <p v-if="wallpaperEnabled && wallpaperPreparation" class="steam-preparation-state">{{wallpaperPreparation}}</p>
       </div>
       <p class="steam-section-note">壁纸素材可在“自定义游戏库”中编辑。</p>
@@ -726,6 +847,14 @@ onBeforeUnmount(() => {
           :disabled="deckyBusy || busy || steamChecking || deckyState?.powerReady === false || !steamUiState?.known || !steamUiState.running || steamUiState.mode!=='bigpicture'"
           @click="repairDeckyConnection">{{deckyBusy?'修复中…':'修复连接'}}</button>
       </div>
+      <Toggle data-steam-setting="controller-cursor-hide" :model-value="controllerCursorHide" :disabled="controllerCursorBusy"
+        label="手柄模式隐藏鼠标" description="自动隐藏Steam游戏多余鼠标"
+        :gp-row="2" :gp-col="2" @update:model-value="changeControllerCursorHide" />
+      <p v-if="controllerCursorError" class="steam-section-note" role="alert">{{controllerCursorError}}</p>
+      <Toggle data-steam-setting="menu-game-id-repair" :model-value="menuGameIdRepair" :disabled="menuGameIdBusy"
+        label="自动补全游戏 ID" description="修正部分游戏的 Steam 三点菜单呼出位置"
+        :gp-row="3" :gp-col="2" @update:model-value="changeMenuGameIdRepair" />
+      <p v-if="menuGameIdError" class="steam-section-note" role="alert">{{menuGameIdError}}</p>
       <SteamQuickAccessMapping :enabled="deckyState?.enabled ?? true" />
 
      </section>

@@ -1,11 +1,13 @@
 #pragma once
 // Windows UI events are hints, never permission to launch or switch Steam.
 #include <windows.h>
+#include "steam_startup_capture_diagnostic.h"
 #include <algorithm>
 #include <map>
 #include <string>
 #include <utility>
 
+namespace ymcc::steamgamefacts {class ProcessParentEvidenceOwner;}
 namespace ymcc::steamsession {
 // One finite trailing delivery for the entire fan-out (WebView/mode/game link).
 // Subsequent hints do not postpone it. No timer exists while nothing is pending.
@@ -25,10 +27,14 @@ public:
 // Unknown/denied processes have only a short negative entry; later events retry.
 // This cache filters notifications ONLY. Action paths retain full verification.
 class WindowProcessCache {
+    friend class ymcc::steamgamefacts::ProcessParentEvidenceOwner;
+    friend class Observer;
     struct Entry {
         HANDLE process = nullptr;
         ULONGLONG until = 0, order = 0;
         unsigned kind = 0;
+        bool historicalCreateAttempted=false;
+        std::wstring observedImage;
         Entry() = default;
         Entry(const Entry&) = delete;
         Entry& operator=(const Entry&) = delete;
@@ -39,7 +45,22 @@ class WindowProcessCache {
 public:
     static constexpr size_t capacity = 256;
     void clear() { entries_.clear(); serial_ = 0; }
+    template<class Fact> void knownCreate(DWORD pid,DWORD event,Fact&& fact) const {
+        if(event!=EVENT_OBJECT_CREATE)return;
+        ymcc::steamgamefacts::startupdiagnostic::Scope trace(pid,ymcc::steamgamefacts::startupdiagnostic::Stage::Cache,"cache-entry-missing");
+        const auto found=entries_.find(pid);if(found==entries_.end())return;
+        const auto& entry=found->second;trace.reached("cache-child-unavailable");
+        if(entry.kind||entry.observedImage.empty()||!entry.process||WaitForSingleObject(entry.process,0)!=WAIT_TIMEOUT)return;
+        trace.reached("cache-held-child-forwarded");
+        fact(entry.observedImage); // Borrowed string only; no caller handle/query grant.
+    }
     template<class Classify> unsigned classify(DWORD pid, ULONGLONG now, Classify classifyPath) {
+        return classifyHeld(pid, now, [&](const std::wstring& image, HANDLE) { return classifyPath(image); });
+    }
+private:
+    // The observer may complete this hint on the same object, without sharing
+    // a process handle with a subscriber or reopening a PID.
+    template<class Classify> unsigned classifyHeld(DWORD pid, ULONGLONG now, Classify&& classifyPath) {
         if (auto it = entries_.find(pid); it != entries_.end()) {
             if (it->second.process ? WaitForSingleObject(it->second.process, 0) == WAIT_TIMEOUT : now < it->second.until)
                 return it->second.kind;
@@ -60,7 +81,8 @@ public:
             CloseHandle(entry.process); entry.process = nullptr; return 0;
         }
         try {
-            entry.kind = classifyPath(std::wstring(image, length));
+            entry.observedImage.assign(image,length);
+            entry.kind = classifyPath(entry.observedImage, entry.process);
         } catch (...) {
             // Do not pin a failed classification to this entire process lifetime.
             entries_.erase(pid);

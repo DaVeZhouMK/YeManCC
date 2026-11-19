@@ -356,10 +356,11 @@ inline ControlResult setEnabled(bool enabled,const std::filesystem::path& fallba
     };
     if(!allowed())return finish(L"操作已取消");
     auto process=identity();result.reused=process.pid!=0;
+    if(!allowed())return finish(L"操作已取消");
     if(enabled) {
         if(!ensurePreset(fallback,result.copied,result.reason))return finish(result.reason);
         if(executable().empty())return finish(L"未安装 FxSound");
-        const auto existing=observe();if(existing.enabled){result.ok=true;result.state=existing;result.reason=L"音质优化已开启";return result;}
+        const auto existing=observe();if(!allowed())return finish(L"操作已取消");if(existing.enabled){result.ok=true;result.state=existing;result.reason=L"音质优化已开启";return result;}
         if(processState()==ProcessState::running&&!process.pid)return finish(L"FxSound 实例身份待确认");
         if(process.pid&&!gracefulExit(process,allowed))return finish(L"FxSound 后台正常退出失败");
         if(!allowed())return finish(L"操作已取消");
@@ -368,7 +369,7 @@ inline ControlResult setEnabled(bool enabled,const std::filesystem::path& fallba
         auto path=executable();auto parameters=std::wstring(L"--preset=\"")+presetName+L"\"";
         SHELLEXECUTEINFOW info{sizeof(info)};info.fMask=SEE_MASK_NOCLOSEPROCESS|SEE_MASK_FLAG_NO_UI;info.lpVerb=L"open";info.lpFile=path.c_str();info.lpParameters=parameters.c_str();info.nShow=SW_HIDE;
         if(!allowed()||!ShellExecuteExW(&info))return finish(L"系统启动 FxSound 失败");if(info.hProcess)CloseHandle(info.hProcess);
-        for(int verify=0;verify<150&&allowed();++verify){Sleep(100);result.state=observe();if(result.state.enabled){result.ok=true;result.reason=L"音质优化已开启";return result;}}
+        for(int verify=0;verify<150&&allowed();++verify){Sleep(100);result.state=observe();if(!allowed())return finish(L"操作已取消");if(result.state.enabled){result.ok=true;result.reason=L"音质优化已开启";return result;}}
         return finish(L"FxSound 已收到请求，实际音效或输出尚未确认");
     }
     if(processState()==ProcessState::running&&!process.pid)return finish(L"FxSound 实例身份待确认，未退出或修复");

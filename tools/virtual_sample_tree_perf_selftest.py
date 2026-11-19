@@ -707,9 +707,18 @@ def main():
     mode=parser.add_mutually_exclusive_group()
     mode.add_argument('--benchmark-ready-run',type=Path,help='Only after explicit parent benchmark-go; reruns bound drift checks before/after timing')
     mode.add_argument('--final-actual-source',action='store_true',help='Only after parent production ready: current production blocks/context, Release/Checked verify only; never benchmark or git apply check')
+    mode.add_argument('--current-idle-imu',action='store_true',help='Explicit current-source zero-sequence IMU construction control; requires a frozen before source and fresh development output')
     parser.add_argument('--accepted-run',type=Path,default=FINAL_ACCEPTED_RUN,help='Frozen accepted measurement run used by final actual-source verification')
+    parser.add_argument('--before',type=Path,help='Exact current-idle-imu preimage; never used by historical modes')
+    parser.add_argument('--out',type=Path,help='Fresh current-idle-imu evidence directory')
     args=parser.parse_args()
-    if args.final_actual_source: final_actual_source(args.accepted_run)
+    if args.current_idle_imu:
+        if not args.before or not args.out: parser.error('--current-idle-imu requires --before and --out')
+        import runpy
+        runner=runpy.run_path(str(REPO/'tools/fixtures/virtual_sample_tree/idle_current.py'))
+        runner['run_current'](REPO,args.out,args.before,globals())
+    elif args.before or args.out: parser.error('--before/--out require --current-idle-imu')
+    elif args.final_actual_source: final_actual_source(args.accepted_run)
     elif args.benchmark_ready_run: benchmark(args.benchmark_ready_run)
     else: prepare()
 

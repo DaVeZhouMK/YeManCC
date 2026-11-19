@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "scope": "Additional actual /showIncludes header closure. Initial missing-input failure retained; acceptance reruns pin these files before use.",
+  "scope": "Additional actual /showIncludes headers (original 29 preserved) and the four static debug CRT libraries required by the unchanged Checked /MTd recipe. Shared compiler/include/lib selection comes from release-host-environment selectedNativeTools.",
   "discovery": "Build/Validation/VirtualController-Lifecycle-20261019/native/adapter-direct/positive/RESULT.json",
   "files": [
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\xatomic_wait.h",
@@ -31,6 +31,44 @@
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\ranges",
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\__msvc_int128.hpp",
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\__msvc_ranges_to.hpp",
-    "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\span"
+    "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\span",
+    "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libcmtd.lib",
+    "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libcpmtd.lib",
+    "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libvcruntimed.lib",
+    "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64\\libucrtd.lib"
+  ],
+  "configurationLibraries": [
+    {
+      "name": "libcmtd.lib",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libcmtd.lib",
+      "bytes": 6538988,
+      "sha256": "7d1880ae41c16fe1b4adb5a5918885d616641c4c4963b4ee742392b2a63a0049",
+      "configuration": "Checked",
+      "reason": "/MTd debug static CRT selected by original Checked /Od /MTd /RTC1 /D_DEBUG configuration"
+    },
+    {
+      "name": "libcpmtd.lib",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libcpmtd.lib",
+      "bytes": 22429560,
+      "sha256": "73754a696e50c5594032b60bb7f164134f41aa8ddb575f6e528bf8c66ed2e743",
+      "configuration": "Checked",
+      "reason": "/MTd debug static CRT selected by original Checked /Od /MTd /RTC1 /D_DEBUG configuration"
+    },
+    {
+      "name": "libvcruntimed.lib",
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libvcruntimed.lib",
+      "bytes": 2058954,
+      "sha256": "3a9bb38e1577ccb87e8a7f9038195a2b56fd6cfc1e7dd3adedf3e791eaaebbc0",
+      "configuration": "Checked",
+      "reason": "/MTd debug static CRT selected by original Checked /Od /MTd /RTC1 /D_DEBUG configuration"
+    },
+    {
+      "name": "libucrtd.lib",
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64\\libucrtd.lib",
+      "bytes": 44183354,
+      "sha256": "97eed5a1d36490ab8671bd0f9b7de722ef0ce4362667c1524c34934b834c8ed6",
+      "configuration": "Checked",
+      "reason": "/MTd debug static CRT selected by original Checked /Od /MTd /RTC1 /D_DEBUG configuration"
+    }
   ]
 }

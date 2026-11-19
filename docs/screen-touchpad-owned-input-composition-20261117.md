@@ -1,0 +1,19 @@
+# 末级输入通道独占合成资源与退场释放
+
+已写入主线，未导出或部署。只有原第三次修复启用的末级输入通道改变资源归属；普通触摸输入仍沿原路径。复用原独立STA/CoreDispatcher与阻塞事件循环，不创建新的常驻线程、轮询或刷新率；原3次修复/3个episode/5秒窗口保持。
+
+本轮先证实两个问题：独立输入线程退场时未通知UI取消，Core会残留按住接触；其间UI posted queue持续满时，原独立输入实现虽worker已退出，UI DispatcherQueue TryEnqueue接受但不派发，ShutdownQueueAsync超过原4秒仍Started。原UI输入无独立worker的反向同条件则能收尾。早期取消通知候选只解决信号，严格收尾未过，原SOURCE_READY=false及全部失败证据保持。
+
+进一步分段观测确认输入Source与seed确属同一worker Dispatcher、HasThreadAccess真，排除误把Source派到UI；worker仍活时UI满队列排空可恢复，排空后再退worker也可恢复。原跨线程借用UI visual的清理时序是本场景的可操作边界，但Windows内部原因及Win5现场对应关系仍UNKNOWN，不宣称已定位原0x8000FFFF。
+
+私有Win32/WinRT探针已确认：UI拥有的HWND可以由本程序worker创建并清理DesktopWindowTarget/visual/controlled source。现末级路径把compositor、target、visual、controller、source都放在同一worker上创建/同步/关闭；UI只持HWND和事件邮箱。末级不再新建UI compositor，既有共享UI queue完全保留。独立源结束前fence旧事件、ready=false，并经原loss通知释放UI接触；普通Post失败时用异步SendNotify。两种通知均失败则关闭回执保持失败，重复shutdown不伪报成功或清掉错误。
+
+受影响原生组通过：严格quota11、原完整复位20、原切换交错13、原邮箱溢出17。严格quota在UI不pump时等待worker退出、确认UI仍1816/loss pending/接触仍按住，再pump完成取消，且UI queue原期内关闭。取消/旧epoch/显示等待/退出/穿透/SD19/原共享peer保持。四组使用同一组产品及fixture字节，非一次完整默认父门。
+
+独审指出通知全失败未影响cleaned的问题，真实invalid-HWND必要旧对照失败，修后6项通过。最后仅该失败分支追加cleaned=false；四组原先都走retire成功分支，其余整头字节保持，故按原样函数和分支前提继承，未为收口重跑。该叶为显式私有consumer，测后只在所有原State COM/inputs/commands均空且线程已signaled时关闭准确HANDLE，不更改closed标记，不当作产品自动清理债恢复。
+
+保留OC-OLD-01：原ShutdownQueueAsync/Completed/Status/GetResults异常出口仍可能留下State COM引用后退出STA。本轮未复现或修正该永久异常路径，不能签所有Windows关闭失败的最终资源归属。正常与受控压力归还通过，不把原范围扩大。
+
+累计18个owned Job全部关前0；早期8组失败/正常、后7组含一次探针compileFAIL、最后3叶含一次漏宏compileFAIL及旧必要FAIL均原样保存。自然/工具收尾/rawbusiness逐项分列；不把进程归零当COM关闭成功，不把异epoch各数拼默认门。2产品+2原fixture/19依赖全部share0同持139.0452ms，23HANDLE全还，导后23源与最终候选核同。私有friend严格逆除，主线无port。原PS1选择/身份检查和生成字节核同实编，未重复启动完整原PS1入口。
+
+权威：FINAL-OWNED-VALIDATION-INTAKE.json、OWNED-REVIEW-RESOLUTION.json、REVIEW-OWNED-COMPOSITION.json、OWNED-MAINLINE-IMPORT.json、OWNED-POST-IMPORT-READBACK.json、SOURCE_READY-OWNED.json。旧SOURCE_READY.json与CLOSING.json记录的是先前拒绝候选，不覆盖；本后继前向推进。下一自然匹配Native/runtime/source-PDB须含所有源，Win5新版loaded、实际全屏触摸/捕获、原Windows内部原因、永久关闭和长期CPU仍OPEN，持续目标ACTIVE。

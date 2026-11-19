@@ -2,6 +2,7 @@ import {planEnabledMaintenance} from './lib/hc_active_integration_scope.mjs';
 import {buildControllerConfigurationArtifacts} from './lib/hc_controller_configuration_catalog.mjs';
 import {checkStoredModelMethodRegistry,planModelMethodChanges} from './lib/hc_model_method_consumption.mjs';
 import {checkPerformanceMetadata} from './lib/hc_performance_metadata.mjs';
+import {buildMotionArtifacts} from './lib/hc_motion_catalog.mjs';
 // Read-only maintenance/upgrade planning. Never loads HC, edits policy or promotes a binary.
 import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';import {createHash} from 'node:crypto';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),args=process.argv.slice(2),opt={};for(let i=0;i<args.length;i+=2){if(!['--out','--chains','--candidate-catalog','--controller-contract','--performance-metadata','--method-policy','--method-registry'].includes(args[i])||!args[i+1])throw Error('Usage --out evidence-directory [--chains manifest.json] [--candidate-catalog catalog.json]');opt[args[i].slice(2)]=path.resolve(args[i+1]);}if(!opt.out)throw Error('--out required');
@@ -22,7 +23,14 @@ if(fs.existsSync(methodPolicyPath)&&fs.existsSync(methodRegistryPath)){methodPol
 const methodModulePath=path.join(repo,'tools/lib/hc_model_method_consumption.mjs');need(fs.existsSync(methodModulePath),'METHOD_CONSUMPTION_MODULE_MISSING');if(fs.existsSync(methodModulePath))inputs.set(methodModulePath,sha(methodModulePath));
 const lighting=catalog.domains?.lighting;need(lighting?.rows?.length===lighting?.registeredClasses&&lighting?.rows?.length>0,'LIGHTING_REGISTRATION_MISMATCH');
 const battery=catalog.domains?.battery;need(battery?.rows?.length===battery?.registeredRules&&battery?.rows?.length>0,'BATTERY_REGISTRATION_MISMATCH');
-const motion=catalog.domains?.motion;need(motion?.rows?.length===motion?.registeredRecipes&&motion?.registeredRecipes===95&&motion.rows.filter(r=>r.kind==='Private').length===6,'MOTION_REGISTRATION_MISMATCH');
+const motion=catalog.domains?.motion;
+try{
+ const motionModulePath=path.join(repo,'tools/lib/hc_motion_catalog.mjs'),motionPolicyPath=path.join(repo,'capabilities/hc-motion-policy.json');
+ inputs.set(motionModulePath,sha(motionModulePath));inputs.set(motionPolicyPath,sha(motionPolicyPath));
+ const expectedMotion=buildMotionArtifacts({repo,catalog}).metadata;
+ need(JSON.stringify(motion)===JSON.stringify(expectedMotion),'MOTION_REGISTRATION_MISMATCH');
+ for(const table of expectedMotion.tables)for(const file of [table.file,...(table.sourceDependencies??[]).map(ref=>ref.file)]){const p=path.join(repo,file);inputs.set(p,sha(p));}
+}catch(error){errors.push('MOTION_REGISTRATION_MISMATCH:'+String(error.message));}
 const controllerInput=catalog.domains?.controller;need(controllerInput?.registeredInputProviders===2&&controllerInput.rows?.length===2&&controllerInput.sourceAliases===3&&controllerInput.frozenControllerSources?.length===29&&controllerInput.allControllerConsumersConnected===false,'CONTROLLER_INPUT_REGISTRATION_MISMATCH');
 const performancePath=opt['performance-metadata']??path.join(repo,'capabilities/hc-performance-metadata.json');
 const performanceMetadata=read(performancePath);inputs.set(performancePath,sha(performancePath));

@@ -1,3 +1,43 @@
+<!-- HC100-INTEL-OP3-LIFECYCLE:BEGIN -->
+## Intel OP3 当前停止链与身份证据（2026-11-07）
+
+当前源码沿原消费链实现：session退役清Home/GKey/M1/M2持有位与待发事件 → 原producer撤权/清mask及匹配代次队列 → UI动作前再次核代次、规则、退出状态；跨代持有须真实UP释放屏障。此为源码事实，尚未执行原回归或证明最终目标/硬件中和。来源逐符号与SHA：[LIFECYCLE-SOURCE-REVIEW.json](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-100-INTEL-OP3-LIFECYCLE-CONSUMPTION/LIFECYCLE-SOURCE-REVIEW.json)。
+
+固定HC的17个factory类、21个精确Product标签在当前共享选择器都有对应分支；Mini保留1002-C/V03/default版本区分，Apex保留既有显式canonical别名，未新增营销别名。ONEX-SRC-006继续保留额外商业机型来源缺失，不能将其误读为这21个已有入口均未接。
+
+扩大检查整个日志根的全部44份文件名含202611的ZIP，其中39份有native-lifecycle机器类，OneX为5份Apex和6份X2MiniPro，未观察到OneXPlayer3；另有2份MSI ClawCG3EM，G3E产品名不能用于跨厂商选型。此范围不代表检查了另外500份旧档案或所有身份来源。清单：[NOVEMBER-FIELD-IDENTITY-INVENTORY.json](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-100-INTEL-OP3-LIFECYCLE-CONSUMPTION/NOVEMBER-FIELD-IDENTITY-INVENTORY.json)。原手柄owner已核收HC099合同与六文件身份：[HC099-CONTRACT-INTAKE.json](G:/YeManCC-Work/Testing/YMCC/Evidence/VC-OneXFamily-20261105/intel-op3-home-route-label-20261107/HC099-CONTRACT-INTAKE.json)。
+
+已完成WMI源审：固定HC的OEM1 04EB/40解锁/清位未被当前产品消费；Turbo/Keyboard明确保留键盘所有权，PinFan只管044A/044B，HID灯光不替代接管。当前未证实已启用动作必须EC解锁，不能仅因上游存在方法就新增writer/API或开写。固定HC Close先销毁WMI再清位的缺陷不作为当前归还模板。来源核收：[WMI-TAKEOVER-PARENT-REVIEW.json](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-100-INTEL-OP3-LIFECYCLE-CONSUMPTION/WMI-TAKEOVER-PARENT-REVIEW.json)。本轮未新增产品接口、测试/预算、构建或硬件操作；既有全家族缺项和旧FAIL/UNKNOWN保留。
+原手柄owner进一步确认：当前动作派发没有EC解锁成功前置，状态仍为inputObserved=false/defaultActionSuppressionVerified=false；这是未验证，不是实测失败。保留一个准确条件风险：若Intel Turbo只发vendor0x20且所有键盘通道均无完整和弦，当前会跳过该vendor事件。尚无Intel原始记录证明此条件，不能据此认定开写EC是修复。最小证据为同一次实体键的keyboard/raw/vendor DOWN-UP、保存动作规则、canonical边沿到最终动作结果及原厂行为。核收：[CONSUMER-EC-PRECONDITION-INTAKE.json](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-100-INTEL-OP3-LIFECYCLE-CONSUMPTION/CONSUMER-EC-PRECONDITION-INTAKE.json)。
+<!-- HC100-INTEL-OP3-LIFECYCLE:END -->
+
+<!-- HC099-INTEL-OP3:BEGIN -->
+## Intel OP3 与此前 AMD Apex 的独立合同（2026-11-07）
+
+本次只刷新精确 OneXPlayer3 来源和消费导航；原全表历史快照、AMD 实测与其他机型状态保留。机器合同：[INTEL-OP3-CONTRACT.json](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-099-INTEL-OP3-PRIORITY/INTEL-OP3-CONTRACT.json)。
+
+- Intel 精确类为 HandheldCompanion.Devices.OneXPlayer3，deviceId 为 ymcc.device.OneXPlayer3；固定 f2e58468 工厂产品串仅 ONEXPLAYER 3 / ONEXPLAYER-3，厂商串仅 ONE-NETBOOK / ONE-NETBOOK TECHNOLOGY CO., LTD.。已有精确识别不使用 CPU 或 G3E 名称兜底。此前留存的 AMD Max+395 日志实际为 OneXPlayerApex，不能代签 Intel。
+- 当前原消费者已选 OneXX3 / kOneXX3Keys 六逻辑键：Turbo=Ctrl+Win+Alt、Keyboard=Ctrl+Win+O、Home=vendor0x21/0x24、M1/L4=0x22、M2/R4=0x23、G-Key=0x25。Intel Home/G-Key 都保留真实按下/抬起；厂商集合为 VID1A86/PIDFE00/FF00:0001，PID1305 不授予 Intel OP3。
+- 固定源 OneXPlayer3.BuildRemapPage3 将 G-Key 映射为键盘类型以取得 down/up；不能复用 X2 的 gamepad Guide 映射，也不能套用 Apex 的 Orange/后键顺序。HcOneXVendorInputContract 未包含 Intel OP3 是独立 X2 reader 已消费的边界。
+- 厂商手册分别描述 Home 返回桌面、G-Key(Xbox) 呼出/隐藏 Xbox、键鼠键长按切换模式/短按键盘、OneX 键长按游戏库/短按面板。它们是原厂 UI 行为；OneX 实体标签到现有 Turbo 逻辑ID、G-Key 到标准 Guide 的电气映射仍 UNKNOWN，不据此改默认动作。
+- 原有风扇 WmiBankedEc（44A/44B、最大184）、灯光 oxp3-hid-v1、充电 oxp3-wmi-ec（最低40%）和 neg-y-neg-z-x 运动转换均有当前静态消费者；本次不新增空登记。HC093 连续8字节 WMI 回执兼容仍待原消费端，未把它签为已修复；不借给 Apex。
+- 当前 Home 消费与 UI 元数据为 held，onexX2LogOwner 的固定 vendor-click 日志标签已由原虚拟手柄 owner 在当前主线修正：复用原 supported/clickOnly 模型判定，OP3 为 vendor-held，X2/MiniPro 仍为 vendor-click；已核净差异可逐字节逆还原前像，夹具/编译/导出均 NOT_RUN。该标签问题本身不证明输入动作失败。
+
+本次为源码与导航合同修正；Intel 实机按键/标准 Guide、实体风扇/灯光/充电与安装包仍未验收。完整家族、原未决问题和原测试 FAIL/UNKNOWN 保持；不扩大测试预算。
+
+源级 Vendor 按键差异（不由实体标签猜测）：
+
+| ID | Intel OP3 | AMD Apex |
+|---|---|---|
+| 0x21 | Home，真实按下/抬起 | Orange，真实按下/抬起 |
+| 0x22 | M1/L4 | R4 |
+| 0x23 | M2/R4 | L4 |
+| 0x24 | Home，真实按下/抬起 | Keyboard，真实按下/抬起 |
+| 0x25 | G-Key，真实按下/抬起 | 无此 vendor 映射 |
+
+消费端静态核收：[INTEL-OP3-CONSUMER-INTAKE.json](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-099-INTEL-OP3-PRIORITY/INTEL-OP3-CONSUMER-INTAKE.json)。
+<!-- HC099-INTEL-OP3:END -->
+
 # HC089：X2组现有消费链已核，保留各型号输入差异
 
 更新 2026-11-05T05:51:51.659951+00:00。本批只审当前已捕获源码及固定HC协议；X2、X2MiniPro和精确OneXPlayer3已有厂商输入owner/session/producer接线，不能概括为只有注册。MiniPro的M1/M2走F15/F16 canonical键盘链，vendor rear发布明确排除此类；X2 Home是点击，OneXPlayer3的Home/G-Key为真实held。这些差异需保留，避免新增重复生产者或套Apex协议。

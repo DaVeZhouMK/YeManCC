@@ -1,0 +1,17 @@
+# 独立输入通道的现有状态错误观察
+
+已写入主线，未导出部署。两个产品头三处上下文，正式fixture/main/UI/monitor/Steam/公共睡眠未改。本轮只增加已有state/profileState返回中的诊断，不调整输入、恢复、ok/error判定、定时或日志调度。
+
+现有原State.error会保存独立线程的原生错误，而原状态只给窗口错误、Runtime.error、线程号，无法直接核对该存储值。现const lastError只读原atomic；失败时附一个nativeInputChannelFailure对象，hresult为unsigned32位模式、scope=channel、thread为该通道原线程标识。健康时无新字段。它表示读取时当前State.error，不保证不可覆盖的首因，也不包含仅存于Command.error的失败。
+
+独审首候选发现归属问题：标量放在profile响应里，A的失败通道留存并切换B时可能被误读为B产生。r1原件和finding保留，r1未入主线或运行；r2明确通道层语义，不添加profile latch或清State.error。查询非当前profile仍擦除整个对象，真正切换到B时若同一通道仍持错误，记录明确同channel/thread，未宣称该错误发生于B。已新增实际A→B(masterOff)→A和同一State身份检查。
+
+真实旧对照13项中两条新诊断必要FAIL；候选15项全过。两者CPP逐字同，原C++/WinRT delegate new仅真实失败一次，State错误为E_OUTOFMEMORY，未伪造HRESULT/State。通过项包括原错误进state、unsigned位模式、未激活profile不继承、实际切换后channel归属、自动不重试、显式同设置恢复、健康后字段消失、原预算/选择和退出三轮信号确认、隐藏桌面及UI queue归还。两个独立epoch不拼完整Native或默认父门，正式fixture未写。
+
+运行前尊重本机CPU1原1200s观察：先按准确出生身份确认36924/39712/31576存活，未启动生产器；18:28:56Z确认三个原进程均结束后才运行。两实际Job均关闭前active0、2实际编译图，原负例businessfalse/自然与工具收尾/root分列；测试没有控制实际YMCC、游戏或输入设备。CPU等待和所有准备/失败/独审费用都计入本切片，不以短native耗时代替总时间。
+
+独审r2范围无阻塞；原首审自报约123s，后继未独立测完整区间，不冒签120/180秒内。日志出口仅只读核：原screenTouchpads.get的返回state进入现有screen-touchpads-state，当前比较器未知字段保持语义；没有实跑完整IPC/文件sink。无新增日志流/频率；字段变化可能改变原语义变化记录，不能承诺日志行数完全不变。健康路径增加一次atomic读取和判断，失败对象固定三字段，未做CPU测量、不称零开销或CPU收益。
+
+2target+21dep全部share0同持144.8234ms/23HANDLE归还，整源正逆及导后23源同实际候选。读取原CPU内存marker记录和UI核收，确认本机40128/birth134393259804936867在原18:06:20Z观察时已loaded2c8ab69e自然015012；本侧没有再读内存或安装动作，不能证明触摸板通道实例化或Win5运行新链。该包不含本轮诊断及dadce218终态结果后继。
+
+最终权威SOURCE_READY-r2.json；根SOURCE_READY.json保留首私有未运行候选false原件，不倒写。PendingSources/TouchpadInputChannelErrorObservation.json只前向接QueueTerminalResults的channel产品和pads依赖；其它旧Ready/raw/失败保。下一自然匹配Native/runtime/source-PDB及Win5实体全屏/捕获/睡眠反馈，原E_UNEXPECTED内部原因、永久Windows队列失败与长期CPU仍OPEN，持续修复ACTIVE。

@@ -15,7 +15,7 @@ const emit = defineEmits<{
       <button class="global-action discard-all-action" data-editor-action="discard" type="button" :disabled="busy || recording || (!dirty && !pending)" @click="emit('discard')">取消修改</button>
     </template>
     <template v-if="mode !== 'draft'">
-      <button class="global-action apply-action" data-editor-action="apply" type="button" :disabled="busy || recording || !dirty || pending" @click="emit('apply')">{{ busy ? '保存中…' : '应用修改' }}</button>
+      <button class="global-action apply-action" :class="{ 'has-changes': dirty || pending }" data-editor-action="apply" type="button" :disabled="busy || recording || !dirty || pending" @click="emit('apply')">{{ busy ? '保存中…' : '应用保存' }}</button>
       <button class="global-action close-editor-action cancel" data-editor-action="close" type="button" aria-label="关闭页面" :disabled="busy" @click="emit('close')"><span class="controller-key quick-key-b" aria-hidden="true" data-controller-key="B">B</span>关闭页面</button>
     </template>
   </div>
@@ -27,6 +27,7 @@ const emit = defineEmits<{
 .global-action{display:inline-flex;align-items:center;justify-content:center;gap:6px;box-sizing:border-box;flex:0 0 112px;width:112px;height:40px;min-height:40px;padding:0 12px;border:1px solid rgba(255,255,255,.08);border-radius:7px;background:var(--bg-input);color:var(--text);font-family:inherit;font-size:12px;font-weight:600;line-height:1.25;white-space:nowrap;cursor:var(--cursor-interaction,pointer)}
 .quick-key-b{color:var(--danger);font-weight:800}
 .global-action:disabled{color:var(--text-dim);opacity:.6;cursor:default}
+.global-action.apply-action.has-changes{border-color:#4897d2;background:#287ebd;color:#fff}
 .global-action.focused,.global-action:focus-visible{box-shadow:var(--focus-ring)}
 @media(max-width:650px){.editor-global-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}.global-action{width:100%;min-width:0}}
 </style>

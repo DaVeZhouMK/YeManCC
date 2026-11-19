@@ -18,7 +18,7 @@
 namespace script {
 struct Plan {
  BOOL issued=TRUE,query=TRUE;DWORD initial=0,queryError=0,n=32,eventState=WAIT_OBJECT_0,firstWait=WAIT_OBJECT_0,waitError=ERROR_INVALID_HANDLE;
- DWORD eventError=0,duplicateError=0;unsigned issuedCalls=0,queryCalls=0,cancels=0,disconnects=0,createdEvents=0;
+ DWORD eventError=0,duplicateError=0;unsigned issuedCalls=0,queryCalls=0,cancels=0,disconnects=0,createdEvents=0,zeroWaitCalls=0;
 };
 static Plan* p=nullptr;
 static BOOL issue(void* data,DWORD size){++p->issuedCalls;if(p->issued&&data)std::memset(data,0x69,size);SetLastError(p->initial);return p->issued;}
@@ -26,7 +26,7 @@ static BOOL read(HANDLE,void* data,DWORD n,DWORD*,OVERLAPPED*){return issue(data
 static BOOL write(HANDLE,const void*,DWORD n,DWORD*,OVERLAPPED*){return issue(nullptr,n);}
 static BOOL connect(HANDLE,OVERLAPPED*){return issue(nullptr,0);}
 static BOOL query(HANDLE,OVERLAPPED*,DWORD* n,BOOL){++p->queryCalls;*n=p->n;SetLastError(p->queryError);return p->query;}
-static DWORD wait(HANDLE,DWORD ms){SetLastError(ms==17?p->waitError:ERROR_INVALID_PARAMETER);return ms==0?p->eventState:ms==17?p->firstWait:WAIT_TIMEOUT;}
+static DWORD wait(HANDLE,DWORD ms){if(ms==0)++p->zeroWaitCalls;SetLastError(ms==17?p->waitError:ERROR_INVALID_PARAMETER);return ms==0?p->eventState:ms==17?p->firstWait:WAIT_TIMEOUT;}
 static BOOL cancel(HANDLE,OVERLAPPED*){++p->cancels;SetLastError(ERROR_NOT_FOUND);return FALSE;}
 static BOOL disconnect(HANDLE){++p->disconnects;return TRUE;}
 static HANDLE event(LPSECURITY_ATTRIBUTES a,BOOL b,BOOL c,LPCWSTR d){if(p->eventError){SetLastError(p->eventError);return nullptr;}++p->createdEvents;return CreateEventW(a,b,c,d);}
@@ -60,9 +60,16 @@ static HANDLE source(){HANDLE h=CreateEventW(nullptr,TRUE,FALSE,nullptr);check(h
 static void drain(transport::Runtime& owner,script::Plan& plan){plan.query=TRUE;plan.queryError=0;plan.n=0;plan.eventState=WAIT_OBJECT_0;owner.maintenance();check(!owner.hasPending(),"control retired owner not drained");}
 static json outcome(const transport::Result& r){return {{"ok",r.ok},{"error",r.error},{"known",r.byteCountKnown},{"bytes",r.transferred},{"terminal",r.terminal},{"retired",r.retired},{"admitted",r.admitted},{"initialError",r.initialError},{"queryError",r.queryError},{"firstWait",r.firstWait},{"cancelAttempted",r.cancelAttempted},{"cancelError",r.cancelError}};}
 static void single(const char* name,transport::Kind kind,script::Plan plan,DWORD expected,bool known=false){script::p=&plan;auto* owner=new transport::Runtime();HANDLE h=source();DWORD e=99;check(owner->adopt(h,L"test-control",e)&&e==0,"control adopt");std::vector<unsigned char> caller(64,0xA7);auto r=owner->run(h,kind,kind==transport::Kind::Connect?nullptr:caller.data(),kind==transport::Kind::Connect?0:64,17,3);check(r.error==expected&&r.ok==(expected==0),"control business outcome mismatch");check(r.byteCountKnown==known,"control byte provenance mismatch");const auto frozen=outcome(r);
+ const unsigned queryCallsAtReturn=plan.queryCalls,zeroWaitCallsAtReturn=plan.zeroWaitCalls;
+ if(plan.query&&queryCallsAtReturn){
+  check(queryCallsAtReturn==1,"successful completion result must still be queried once");
+  check(zeroWaitCallsAtReturn==0,"successful completion query performed zero-time event wait");
+ }else if(!plan.query&&queryCallsAtReturn&&plan.initial!=ERROR_MORE_DATA){
+  check(zeroWaitCallsAtReturn==queryCallsAtReturn,"failed completion query changed event observation count");
+ }
  if((r.error==WAIT_TIMEOUT||r.firstWait==WAIT_FAILED)||(!known&&kind==transport::Kind::Read))check(caller==std::vector<unsigned char>(64,0xA7),"unproven/expired control read copied bytes");
  if(plan.issued&&plan.query==FALSE){check(r.terminal&&!r.retired&&!r.cancelAttempted&&plan.cancels==0,"inline TRUE lost terminal fact");}
- if(r.retired)drain(*owner,plan);owner->close(h);owner->sealAndReap();check(outcome(r)==frozen,"cleanup changed returned control result");auto stats=owner->snapshot();check(stats.available&&stats.pending==0&&stats.payloadBytes==0&&stats.admitted==stats.reaped,"control stats leaked");cases.push_back({{"case",name},{"kind",static_cast<int>(kind)},{"APIIsSynthetic",true},{"result",frozen},{"issueCalls",plan.issuedCalls},{"cancelCalls",plan.cancels}});}
+ if(r.retired)drain(*owner,plan);owner->close(h);owner->sealAndReap();check(outcome(r)==frozen,"cleanup changed returned control result");auto stats=owner->snapshot();check(stats.available&&stats.pending==0&&stats.payloadBytes==0&&stats.admitted==stats.reaped,"control stats leaked");cases.push_back({{"case",name},{"kind",static_cast<int>(kind)},{"APIIsSynthetic",true},{"result",frozen},{"issueCalls",plan.issuedCalls},{"cancelCalls",plan.cancels},{"queryCallsAtReturn",queryCallsAtReturn},{"zeroWaitCallsAtReturn",zeroWaitCallsAtReturn}});}
 static void matrix(){for(auto kind:{transport::Kind::Read,transport::Kind::Write,transport::Kind::Connect}){
  script::Plan ok;single("inline-known",kind,ok,0,kind!=transport::Kind::Connect);
  for(auto error:{ERROR_IO_INCOMPLETE,ERROR_INVALID_HANDLE,ERROR_GEN_FAILURE,ERROR_OPERATION_ABORTED,ERROR_MORE_DATA}){auto failed=ok;failed.query=FALSE;failed.queryError=error;single("inline-failed-query",kind,failed,kind==transport::Kind::Read?ERROR_INVALID_DATA:0,false);}

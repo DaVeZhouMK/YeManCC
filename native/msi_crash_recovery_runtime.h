@@ -2,6 +2,8 @@
 // MSI-only write-ahead ownership; all hardware work stays on the lifecycle worker.
 #include "msi_crash_recovery_journal.h"
 #include "virtual_output_status.h"
+#include <type_traits>
+#include <utility>
 
 namespace msiRecovery = ymcc::msi::recovery;
 static std::mutex g_msiCrashMx;
@@ -53,13 +55,15 @@ static bool msiCrashHasDuty(const msiRecovery::Record& record) {
     return record.modeReturnPending || !record.hiddenPaths.empty();
 }
 static void msiCrashNote(const char* phase,const char* reason,bool persisted=false) {
-    appendNativeLifecycleLog("msi-crash-return",{{"phase",phase},{"reason",reason},
-        {"durableRecordCommitted",persisted},{"recordPath",W2U(msiCrashRecoveryPath())},
-        {"modeReturnPending",g_msiCrashRecord.modeReturnPending},
-        {"ownedHiddenPaths",g_msiCrashRecord.hiddenPaths},{"rootInstance",g_msiCrashRecord.rootInstance},
-        {"recordOwnerPid",g_msiCrashRecord.ownerPid},{"recordOwnerCreationTime",g_msiCrashRecord.ownerCreationTime},
-        {"modeAttemptOwner",g_msiCrashRecord.modeAttemptOwner},
-        {"scope","known-MSI-board;exact-owned-paths;write-receipt-not-Steam-proof"}});
+    try {
+        appendNativeLifecycleLog("msi-crash-return",{{"phase",phase},{"reason",reason},
+            {"durableRecordCommitted",persisted},{"recordPath",W2U(msiCrashRecoveryPath())},
+            {"modeReturnPending",g_msiCrashRecord.modeReturnPending},
+            {"ownedHiddenPaths",g_msiCrashRecord.hiddenPaths},{"rootInstance",g_msiCrashRecord.rootInstance},
+            {"recordOwnerPid",g_msiCrashRecord.ownerPid},{"recordOwnerCreationTime",g_msiCrashRecord.ownerCreationTime},
+            {"modeAttemptOwner",g_msiCrashRecord.modeAttemptOwner},
+            {"scope","known-MSI-board;exact-owned-paths;write-receipt-not-Steam-proof"}});
+    } catch (...) {}
 }
 static void msiCrashDecision(const char* reason) {
     std::lock_guard<std::mutex> lock(g_msiCrashMx);
@@ -67,10 +71,23 @@ static void msiCrashDecision(const char* reason) {
     g_msiCrashLastDecision=reason;++g_msiCrashDecisionRows;msiCrashNote("recovery-observation",reason);
 }
 static bool msiCrashStoreLocked(const msiRecovery::Record& next,const char* reason) {
-    if(!msiRecovery::validRecord(next) || !sgWriteFileAtomic(msiCrashRecoveryPath(),msiRecovery::encodeRecord(next))) {
+    if(!msiRecovery::validRecord(next)) {
         msiCrashNote("store-failed",reason);return false;
     }
-    g_msiCrashRecord=next;msiCrashNote("record-committed",reason,true);return true;
+    // Allocate the in-memory replacement before the durable write. Once the
+    // file commits, publishing its matching record cannot fail allocation.
+    try {
+        auto committed=next;
+        const auto encoded=msiRecovery::encodeRecord(committed);
+        if(!sgWriteFileAtomic(msiCrashRecoveryPath(),encoded)) {
+            msiCrashNote("store-failed",reason);return false;
+        }
+        static_assert(std::is_nothrow_move_assignable_v<msiRecovery::Record>);
+        g_msiCrashRecord=std::move(committed);
+    } catch (...) {
+        msiCrashNote("store-failed",reason);return false;
+    }
+    msiCrashNote("record-committed",reason,true);return true;
 }
 static bool msiCrashReadBounded(const std::wstring& path,size_t limit,std::string& text) {
     WIN32_FILE_ATTRIBUTE_DATA attr{};

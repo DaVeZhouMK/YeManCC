@@ -12,6 +12,16 @@ export function ownedUpdateOutputs(root){
  function visit(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);need(!entry.isSymbolicLink(),'OUTPUT_REPARSE');if(entry.isDirectory())visit(file);else{need(entry.isFile()&&inside(root,fs.realpathSync(file)),'OUTPUT_OUTSIDE_OWN_CASE');if(!['worker-result.json','result.json'].includes(entry.name))result.push({path:file,sha256:hash(file),status:'OK'});}need(result.length<=500,'OUTPUT_LIMIT');}}
  visit(root);return result.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
 }
+function verifyInertPowerInput(worker,repoRoot,inputMeta){
+ const text=fs.readFileSync(path.join(repoRoot,'tools/ymcc_sim/global/update-download-signals/worker.mjs'),'utf8');
+ const marker='const powerInputSource=`',start=text.indexOf(marker),end=text.indexOf('`;',start+marker.length);
+ need(start>=0&&end>start&&text.indexOf(marker,start+1)<0,'INERT_POWER_RECIPE_MISSING_OR_DUPLICATED');
+ const source=text.slice(start+marker.length,end);
+ need(!source.includes('${')&&!source.includes('\\'),'INERT_POWER_RECIPE_NOT_LITERAL');
+ const boundary=worker.sharedPowerInputBoundary;
+ need(boundary?.module==='powerLifecycleState'&&boundary.role==='inert snapshot/listener input'&&boundary.realSharedPowerSourceExecuted===false,'INERT_POWER_ROLE_CHANGED');
+ need(createHash('sha256').update(source).digest('hex')===boundary.sourceSha256&&inputMeta?.bytes===Buffer.byteLength(source),'INERT_POWER_SOURCE_CHANGED');
+}
 export function verifyUpdateToolEvidence(worker,repoRoot,evidenceDir,parentAuthority){
  const actual=verifyBundledToolScope(worker?.bundledToolAuthority,repoRoot);
  need(JSON.stringify(actual)===JSON.stringify(parentAuthority),'PARENT_WORKER_AUTHORITY_DIFFERENT');
@@ -19,7 +29,27 @@ export function verifyUpdateToolEvidence(worker,repoRoot,evidenceDir,parentAutho
  need(Array.isArray(worker.compiledToolInputs)&&worker.compiledToolInputs.length<=3072,'OBSERVED_TOOL_SCHEMA');
  const observed=new Set();for(const row of worker.compiledToolInputs){need(row&&typeof row.path==='string'&&path.isAbsolute(row.path)&&row.status==='OK'&&!observed.has(key(row.path)),'OBSERVED_TOOL_DUPLICATE_OR_PATH');observed.add(key(row.path));need(tools.get(key(row.path))===row.sha256&&hash(row.path)===row.sha256,'OBSERVED_TOOL_OUTSIDE_GRAPH_OR_CHANGED');}
  const expectedSources=new Map(),expectedObservedTools=new Map();const outputs=[];need(Array.isArray(worker.bundles)&&worker.bundles.length===11,'ORIGINAL_BUNDLES_INCOMPLETE');
- for(const bundle of worker.bundles){need(typeof bundle.path==='string'&&path.basename(bundle.path)===bundle.path&&bundle.path.endsWith('.mjs'),'BUNDLE_RELATIVE_NAME_REQUIRED');const file=path.resolve(caseRoot,bundle.path),real=fs.realpathSync(file);need(inside(caseRoot,real)&&key(real)===key(file),'BUNDLE_ESCAPE');need(hash(file)===bundle.sha256&&bundle.esbuildVersion===actual.compilerVersion,'BUNDLE_IDENTITY_CHANGED');const metafile=file.slice(0,-4)+'.metafile.json';need(fs.statSync(metafile).size<=8*1024*1024,'METAFILE_LIMIT');const meta=JSON.parse(fs.readFileSync(metafile,'utf8'));need(meta.inputs&&typeof meta.inputs==='object'&&!Array.isArray(meta.inputs)&&Object.keys(meta.inputs).length<=3072,'METAFILE_INPUT_SCHEMA');for(const input of Object.keys(meta.inputs)){if(['fixture:gamePolicyTarget','game-fixture:game-io-only'].includes(input))continue;const source=path.resolve(repoRoot,input),classified=classifyBundledInput(repoRoot,source,fs.readFileSync(source),actual),table=classified.role==='tool'?expectedObservedTools:expectedSources;table.set(classified.row.path,classified.row);}for(const target of [file,metafile])outputs.push({path:target,sha256:hash(target),status:'OK'});}
+ for(const bundle of worker.bundles){
+  need(typeof bundle.path==='string'&&path.basename(bundle.path)===bundle.path&&bundle.path.endsWith('.mjs'),'BUNDLE_RELATIVE_NAME_REQUIRED');
+  const file=path.resolve(caseRoot,bundle.path),real=fs.realpathSync(file);
+  need(inside(caseRoot,real)&&key(real)===key(file),'BUNDLE_ESCAPE');
+  const bundleHash=hash(file);
+  need(bundleHash===bundle.sha256&&bundle.esbuildVersion===actual.compilerVersion,'BUNDLE_IDENTITY_CHANGED');
+  const metafile=file.slice(0,-4)+'.metafile.json',maxMetafileBytes=8*1024*1024;
+  need(fs.statSync(metafile).size<=maxMetafileBytes,'METAFILE_LIMIT');
+  const metadata=fs.readFileSync(metafile);
+  need(metadata.length<=maxMetafileBytes,'METAFILE_LIMIT');
+  const meta=JSON.parse(metadata.toString('utf8'));
+  need(meta.inputs&&typeof meta.inputs==='object'&&!Array.isArray(meta.inputs)&&Object.keys(meta.inputs).length<=3072,'METAFILE_INPUT_SCHEMA');
+  for(const input of Object.keys(meta.inputs)){
+   if(input==='inert-power-input:shared-power-facts'){verifyInertPowerInput(worker,repoRoot,meta.inputs[input]);continue;}
+   if(['fixture:gamePolicyTarget','game-fixture:game-io-only'].includes(input))continue;
+   const source=path.resolve(repoRoot,input),classified=classifyBundledInput(repoRoot,source,fs.readFileSync(source),actual),table=classified.role==='tool'?expectedObservedTools:expectedSources;
+   table.set(classified.row.path,classified.row);
+  }
+  // Bind the bytes actually parsed, before the independent artifact reread below.
+  outputs.push({path:file,sha256:bundleHash,status:'OK'},{path:metafile,sha256:createHash('sha256').update(metadata).digest('hex'),status:'OK'});
+ }
  sameArtifactSet(worker.compiledToolInputs,[...expectedObservedTools.values()]);const actualSources=worker.compiledInputs.map(row=>({path:row.path,sha256:row.sha256,status:'OK'})).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0),sourceExpected=[...expectedSources.values()].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);need(new Set(actualSources.map(row=>row.path)).size===actualSources.length&&JSON.stringify(actualSources)===JSON.stringify(sourceExpected),'METAFILE_SOURCE_CLOSURE_MISSING_EXTRA_OR_CHANGED');const expected=bundledArtifacts(actual,[],outputs);sameArtifactSet(worker.toolArtifacts,expected);
  for(const row of worker.toolArtifacts)need(hash(row.path)===row.sha256,'TOOL_ARTIFACT_CHANGED');
  need(Array.isArray(worker.compiledInputs)&&worker.compiledInputs.every(row=>typeof row.path==='string'&&!path.isAbsolute(row.path)&&!row.path.split(/[\\/]/).some(part=>part==='..'||part.toLowerCase()==='node_modules')),'PRODUCT_SOURCE_CONTAINS_EXTERNAL_TOOL');

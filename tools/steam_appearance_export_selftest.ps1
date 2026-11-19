@@ -1,7 +1,49 @@
-﻿param([string]$Out='G:\YeManCC-Work\Build\Validation\SteamPresetChain-20261013-172935\export')
+﻿param([string]$Out='G:\YeManCC-Work\Build\Validation\SteamPresetChain-20261013-172935\export',[ValidateSet('All','ManifestPairing','InitializationGate')][string]$Case='All')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'steam-appearance-export.ps1')
 $source=Join-Path (Split-Path -Parent $PSScriptRoot) 'PowerControl'
+if($Case -in @('ManifestPairing','InitializationGate')){
+ New-Item -ItemType Directory -Path $Out -Force|Out-Null
+ $pairTarget=Join-Path $Out 'PowerControl'
+ foreach($relative in @(Get-SteamAppearanceExportFiles $source)){
+  $destination=Join-Path $pairTarget $relative
+  New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force|Out-Null
+  Copy-Item -LiteralPath (Join-Path $source $relative) -Destination $destination
+ }
+ $receipt=Assert-SteamAppearanceExport $source $pairTarget
+ if($receipt.defaultsEnabled -ne 7){throw 'Complete paired theme payload changed the factory defaults'}
+ $entry=Join-Path $pairTarget 'steam-appearance.ps1'
+ $original=[IO.File]::ReadAllBytes($entry)
+ if($Case -eq 'InitializationGate'){
+  $text=[IO.File]::ReadAllText($entry)
+  $old=$text.Replace('$script:AutomaticInitializeGateProtocol=1','$script:AutomaticInitializeGateProtocol=0')
+  if($old -ceq $text){throw 'Initialization gate mutation missing'}
+  [IO.File]::WriteAllText($entry,$old,(New-Object Text.UTF8Encoding($true)))
+  $rejected=$false;try{Get-SteamAppearanceExportFiles $pairTarget|Out-Null}catch{$rejected=$_.Exception.Message -eq 'Steam appearance initialization gate protocol missing'}
+  if(!$rejected){throw 'Missing initialization gate dependency was accepted'}
+  [IO.File]::WriteAllBytes($entry,$original)
+  $receipt=Assert-SteamAppearanceExport $source $pairTarget
+  if($receipt.defaultsEnabled -ne 7){throw 'Restored gate changed preset defaults'}
+  [pscustomobject]@{ok=$true;passed=3;selectedCase=$Case;cases=@('Complete matching payload accepted','Missing native initialization gate rejected','Exact entry restoration accepted');realSteamOperations=0;installedApplicationModified=$false;fullExportParentPassed=$false}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8
+  return
+ }
+ $tokens=$null;$errors=$null
+ $ast=[Management.Automation.Language.Parser]::ParseFile($entry,[ref]$tokens,[ref]$errors)
+ $reader=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Read-AppearanceThemeConfig'},$true)
+ if($errors.Count -or !$reader){throw 'Own complete payload reader is missing'}
+ $text=[IO.File]::ReadAllText($entry)
+ $withoutReader=$text.Remove($reader.Extent.StartOffset,$reader.Extent.EndOffset-$reader.Extent.StartOffset)
+ [IO.File]::WriteAllText($entry,$withoutReader,(New-Object Text.UTF8Encoding($true)))
+ $rejected=$false
+ try{Get-SteamAppearanceExportFiles $pairTarget|Out-Null}catch{$rejected=$_.Exception.Message -eq 'Steam appearance same-byte source reader missing'}
+ if(!$rejected){throw 'Packaging refuses a preset paired with an entry missing its same-byte reader'}
+ [IO.File]::WriteAllBytes($entry,$original)
+ $receipt=Assert-SteamAppearanceExport $source $pairTarget
+ if($receipt.defaultsEnabled -ne 7){throw 'Restoring the exact matching entry did not restore export readiness'}
+ [pscustomobject]@{ok=$true;passed=3;selectedCase=$Case;cases=@('Complete matching payload accepted','Missing source-reader dependency rejected','Exact entry restoration accepted');realSteamOperations=0;installedApplicationModified=$false;fullExportParentPassed=$false}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8
+ return
+}
+
 $target=Join-Path $Out ('PowerControl-'+[guid]::NewGuid().ToString('N'))
 $files=@(Get-SteamAppearanceExportFiles $source)
 foreach($relative in $files){$dest=Join-Path $target $relative;New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest)|Out-Null;Copy-Item -LiteralPath (Join-Path $source $relative) -Destination $dest}
@@ -31,6 +73,11 @@ $withoutResult=[IO.File]::ReadAllText($scriptPath).Replace('$script:AutomaticRes
 $rejected=$false;try{Get-SteamAppearanceExportFiles $target|Out-Null}catch{$rejected=$_.Exception.Message -like '*automatic result protocol missing*'}
 if(!$rejected){throw 'Missing automatic result protocol was accepted'};$cases.Add('Packaging refuses a helper without the bounded automatic result protocol')
 Copy-Item -LiteralPath (Join-Path $source 'steam-appearance.ps1') -Destination $scriptPath -Force
+$withoutGate=[IO.File]::ReadAllText($scriptPath).Replace('$script:AutomaticInitializeGateProtocol=1','$script:AutomaticInitializeGateProtocol=0')
+[IO.File]::WriteAllText($scriptPath,$withoutGate,(New-Object Text.UTF8Encoding($true)))
+$rejected=$false;try{Get-SteamAppearanceExportFiles $target|Out-Null}catch{$rejected=$_.Exception.Message -like '*initialization gate protocol missing*'}
+if(!$rejected){throw 'Missing native initialization gate protocol was accepted'};$cases.Add('Packaging refuses an automatic initialization script without the native phase gate')
+Copy-Item -LiteralPath (Join-Path $source 'steam-appearance.ps1') -Destination $scriptPath -Force
 $oldUpgrade=[IO.File]::ReadAllText($scriptPath).Replace('Invoke-OwnedPresetResourceUpdate $current','Write-Output $current')
 [IO.File]::WriteAllText($scriptPath,$oldUpgrade,(New-Object Text.UTF8Encoding($true)))
 $rejected=$false;try{Get-SteamAppearanceExportFiles $target|Out-Null}catch{$rejected=$_.Exception.Message -like '*owned resource update protocol missing*'}
@@ -41,7 +88,15 @@ $oldRunningBranch=[IO.File]::ReadAllText($scriptPath).Replace("Invoke-Appearance
 $rejected=$false;try{Get-SteamAppearanceExportFiles $target|Out-Null}catch{$rejected=$_.Exception.Message -like '*owned resource update protocol missing*'}
 if(!$rejected){throw 'Already-running mode without resource update was accepted'};$cases.Add('Packaging requires the already-running Automatic branch to update resources without starting another backend')
 Copy-Item -LiteralPath (Join-Path $source 'steam-appearance.ps1') -Destination $scriptPath -Force
-[IO.File]::WriteAllText($scriptPath,[IO.File]::ReadAllText($scriptPath).Replace('Invoke-AutomaticAppearanceRefresh|Out-Null','# old helper only observed flags'),(New-Object Text.UTF8Encoding($true)))
+$refreshOriginal=[IO.File]::ReadAllText($scriptPath)
+$refreshTokens=$null;$refreshErrors=$null
+$refreshAst=[Management.Automation.Language.Parser]::ParseInput($refreshOriginal,[ref]$refreshTokens,[ref]$refreshErrors)
+$refreshCalls=@($refreshAst.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -ceq 'Invoke-AutomaticAppearanceRefresh'},$true))
+if($refreshErrors.Count -or $refreshCalls.Count -ne 1){throw 'Exactly one real automatic-refresh call is required for the missing-call mutation'}
+$refreshCall=$refreshCalls[0].Extent
+$withoutRefresh=$refreshOriginal.Remove($refreshCall.StartOffset,$refreshCall.EndOffset-$refreshCall.StartOffset).Insert($refreshCall.StartOffset,'Write-Output $null')
+if($withoutRefresh -ceq $refreshOriginal){throw 'Missing-refresh-call mutation was not applied'}
+[IO.File]::WriteAllText($scriptPath,$withoutRefresh,(New-Object Text.UTF8Encoding($true)))
 $rejected=$false;try{Get-SteamAppearanceExportFiles $target|Out-Null}catch{$rejected=$_.Exception.Message -like '*automatic reapply protocol missing*'}
 if(!$rejected){throw 'Automatic helper without actual reapply was accepted'};$cases.Add('Packaging refuses an automatic helper that never reconciles the existing document')
 Copy-Item -LiteralPath (Join-Path $source 'steam-appearance.ps1') -Destination $scriptPath -Force

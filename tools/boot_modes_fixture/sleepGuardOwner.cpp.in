@@ -1,0 +1,149 @@
+#define NOMINMAX
+#include <windows.h>
+#include <atomic>
+#include <chrono>
+#include <fstream>
+#include <functional>
+#include <future>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+#include "settings_baseline.h"
+#include "boot_mode_preferences.h"
+#include "sleep_steam_preferences.h"
+using json=nlohmann::json;
+static json document;
+static std::timed_mutex settingsMx;
+static std::timed_mutex g_sgConfigWriteMx;
+static const std::wstring YM_SETTINGS_FILE=L"owned-memory/sleep-guard.json",SG_DIR=L"owned-memory/sleep";
+struct SettingsFileGuard {std::lock_guard<std::timed_mutex> lock{settingsMx};};
+static std::atomic<unsigned> ownerReads{0};
+static unsigned writes=0;
+static std::atomic<bool> g_exitRequested{false};
+static std::function<void()> beforePrepare;
+static bool failSave=false,failMirror=false;
+static std::function<void()> mirrorDuringWrite;
+static bool mirrorMutationDeferred=false;static unsigned mirrorWrites=0;static std::string mirrorContent;
+static bool g_guardEnabled=true,g_sgPauseResume=true,g_sgRetryEntryFailure=true,g_sgRetrySleepTimeout=true,g_sgResleepEnabled=true;
+static std::string g_sgMode="custom";
+static std::atomic<bool> g_sgFactMonitorEnabled{false},g_sleepRecoveryAutoEnabled{false};
+static struct {bool isolated=false;} g_aiFanMockSession;
+enum class SgRetryKind{None,SleepTimeout,UnexpectedWake};
+static struct {SgRetryKind retryKind=SgRetryKind::UnexpectedWake;} g_sgTask;
+static bool g_sgRetryInProgress=true;
+static std::string stage,change;
+static bool changed=false;
+static std::vector<std::string> effects;
+static std::size_t atChange=0;
+static json runtime(){return {{"mode",g_sgMode},{"enabled",g_guardEnabled},{"pause",g_sgPauseResume},{"entry",g_sgRetryEntryFailure},{"timeout",g_sgRetrySleepTimeout},{"nonUser",g_sgResleepEnabled}};}
+static json runtimeAtChange;
+static void mutateUnlocked(){
+ if(changed)return;changed=true;atChange=effects.size();runtimeAtChange=runtime();
+ if(change=="exit")g_exitRequested.store(true);
+ if(change=="revision")document["input"]["revision"]=8;
+ if(change=="hash")document["input"]["diagnostics"]["inputLoggingEnabled"]=!document["input"]["diagnostics"]["inputLoggingEnabled"].get<bool>();
+ if(change=="mode")document["extensions"]["bootModes"]["revision"]=4;
+ if(change=="result")document["extensions"]["bootModesStartupResult"]={{"schema",1},{"revision",99}};
+ if(change=="observed")document["input"]["startupObservedBoot"]="replacement-boot";
+ if(change=="ack")document["input"]["hostAcknowledgedRevision"]=17;
+ if(change=="unrelated")document["extensions"]["peer"]=true;
+}
+static void mutate(){SettingsFileGuard held;mutateUnlocked();}
+static void boundary(const std::string& name){if(stage==name)mutate();}
+static std::string ymSettingsReadRaw(const std::wstring& path){if(path!=YM_SETTINGS_FILE)throw std::runtime_error("Unexpected settings path");++ownerReads;if(mirrorMutationDeferred){mirrorMutationDeferred=false;mutateUnlocked();}return document.dump();}
+static json ymSettingsReadUnlocked(){++ownerReads;if(stage=="publication-read")mutateUnlocked();return document;}
+static std::atomic<unsigned> contentionCount{0};
+static std::function<void()> onContention;
+struct ObservedOwnerLock {
+ std::unique_lock<std::timed_mutex> lock;
+ ObservedOwnerLock(std::timed_mutex& mutex,std::defer_lock_t):lock(mutex,std::defer_lock){}
+ template<class Rep,class Period> bool try_lock_for(const std::chrono::duration<Rep,Period>& duration){if(lock.try_lock())return true;++contentionCount;if(onContention)onContention();return lock.try_lock_for(duration);}
+};
+// ORIGINAL_OWNER
+static json ymSettingsSection(const char* name){if(std::string(name)!="sleep")throw std::runtime_error("Unexpected section");json result;{SettingsFileGuard held;result=document["sleep"];}boundary("section-read");return result;}
+static bool ymSettingsWriteSection(const char* name,const json& value,const std::function<bool(json&,json&)>& prepare){
+ if(std::string(name)!="sleep")throw std::runtime_error("Unexpected write section");boundary("save-prepare");if(beforePrepare)beforePrepare();bool saved=false;
+ {SettingsFileGuard held;auto all=document;auto prepared=value;if(prepare(prepared,all)&&!failSave){all["sleep"]=prepared;document=all;++writes;effects.push_back("settings-write");saved=true;}}
+ boundary("save-return");return saved;
+}
+static void effect(const std::string& name){effects.push_back(name);boundary(name);}
+static void sgSleepTimeoutStop(const char* why){effect(std::string(why)=="guard-disabled"?"guard-timeout-stop":"timeout-stop");}
+static void sgCancelEntryFailureRetry(const char* why,SgRetryKind only=SgRetryKind::None){effect(std::string(why)=="guard-disabled"?"guard-timeout-cancel":only==SgRetryKind::SleepTimeout?"timeout-cancel":"entry-cancel");}
+static void sgAbnormalStopAsync(){effect("entry-stop");}
+static void sgSleepActivityEnd(const char*,int,int){effect("activity-end");}
+static void sgClearUnexpectedWake(const char*,bool){effect("wake-clear");}
+static void sgAbortSleepIntent(const char*, ULONGLONG){effect("wake-abort");}
+static bool sgAutomaticClassicSleepPending(){return false;}
+static bool sgModernStandbyRepairSupported(){return true;}
+static bool sgWriteFileAtomic(const std::wstring& file,const std::string& content){if(file!=SG_DIR+L"\\Enable.txt"||(content!="0"&&content!="1"))throw std::runtime_error("Unexpected compatibility mirror write");++mirrorWrites;mirrorContent=content;if(mirrorDuringWrite)mirrorDuringWrite();effects.push_back("mirror");if(stage=="mirror")mirrorMutationDeferred=true;return !failMirror;}
+// Original config consumers retain their inert file terminal; the actual
+// writer/path-lock regression is verified separately against the same source.
+static bool sgWriteFileAtomicFlags(const std::wstring& file,const std::string& content,bool durable,const std::function<void()>& prepare=nullptr){
+ if(!durable)throw std::runtime_error("Sleep enable mirror must remain durable");
+ if(prepare)prepare();return sgWriteFileAtomic(file,content);
+}
+// ORIGINAL_CONFIG_PREDICATES
+// ORIGINAL_SAVE_AND_MIRROR
+static std::map<std::string,std::function<json(const json&)>> handlers;
+static void ipc_on(const std::string& name,std::function<json(const json&)> callback){handlers[name]=std::move(callback);}
+// ORIGINAL_REGISTRATION
+static void need(bool value,const std::string& message){if(!value)throw std::runtime_error(message);}
+static json patch(bool enable){return {{"mode",enable?"custom":"off"},{"pauseGameOnSleep",enable},{"retryOnEntryFailure",enable},{"retryOnSleepTimeout",enable},{"retryOnNonUserWake",enable}};}
+static void reset(const json& defaults,const json& wire,bool enable){
+ document=defaults;document["input"]=wire.at("expectedBootContext").at("input");document["extensions"]=wire.at("expectedBootContext").at("extensions");
+ g_guardEnabled=g_sgPauseResume=g_sgRetryEntryFailure=g_sgRetrySleepTimeout=g_sgResleepEnabled=!enable;g_sgMode=enable?"off":"custom";document["sleep"].update(patch(!enable));
+ g_sgFactMonitorEnabled=false;g_sleepRecoveryAutoEnabled=false;document["sleep"]["factMonitorEnabled"]=false;document["sleep"]["wakePasswordEnabled"]=false;document["sleep"]["autoWakeRecovery"]=false;
+ mirrorDuringWrite={};mirrorMutationDeferred=false;mirrorWrites=0;mirrorContent.clear();g_exitRequested=false;g_sgRetryInProgress=true;g_sgTask.retryKind=SgRetryKind::UnexpectedWake;stage.clear();change="current";effects.clear();atChange=0;runtimeAtChange=nullptr;changed=false;ownerReads=writes=0;failSave=failMirror=false;beforePrepare=nullptr;contentionCount=0;onContention=nullptr;
+}
+static json invoke(const json& request){return handlers.at("sleepGuard.setConfig")(request);}
+int main(int argc,char** argv){
+ json rows=json::array(),controls=json::array();
+ try{
+  need(argc==5,"defaults, wire, selection and raw required");json defaults,wire;std::ifstream(argv[1])>>defaults;std::ifstream(argv[2])>>wire;const bool before=std::string(argv[3])=="before",mutexOnly=std::string(argv[3])=="mutex",exitOnly=std::string(argv[3])=="exit",exitNegative=std::string(argv[3])=="exit-negative",mirrorOnly=std::string(argv[3])=="mirror",mirrorNegative=std::string(argv[3])=="mirror-negative";registerSleepGuard();if(exitNegative)registerSleepGuardWithoutExit();std::ofstream raw(argv[4],std::ios::app);
+  const std::vector<std::string> enableStages={"dispatch","mutex","section-read","save-prepare","save-return","publication-read","timeout-stop","entry-stop","mirror"};
+  const std::vector<std::string> disableStages={"dispatch","mutex","section-read","save-prepare","save-return","publication-read","timeout-stop","timeout-cancel","entry-stop","entry-cancel","activity-end","guard-timeout-stop","guard-timeout-cancel","wake-clear","wake-abort","mirror"};
+  for(const auto& entry:wire["modes"])for(bool enable:{true,false})for(const auto& nextStage:enable?enableStages:disableStages)for(const std::string kind:{"revision","hash","mode","result","observed","exit","ack","unrelated","current"}){
+   if(mirrorOnly&&nextStage!="mirror")continue;
+   if(mirrorNegative)continue;
+   if(exitOnly&&kind!="exit")continue;
+   if(exitNegative&&(entry["mode"]!="global"||enable||nextStage!="timeout-stop"||kind!="exit"))continue;
+   if(mutexOnly&&nextStage!="mutex")continue;
+   if(before&&(entry["mode"]!="global"||enable||nextStage!="section-read"||kind!="hash"))continue;
+   reset(defaults,entry,enable);stage=nextStage;change=kind;const bool allowed=kind=="ack"||kind=="unrelated"||kind=="current";auto request=entry["request"];request.update(patch(enable));if(before)request["bootContext"]=entry["expectedBootContext"];
+   json result;std::string error;auto run=[&]{try{if(stage=="dispatch")mutate();result=invoke(request);}catch(const std::exception& e){error=e.what();}};
+   if(stage=="mutex"){
+    std::unique_lock<std::timed_mutex> held(g_sgConfigWriteMx);std::promise<void> entered;auto ready=entered.get_future();onContention=[&]{entered.set_value();};std::thread worker(run);const bool reached=ready.wait_for(std::chrono::seconds(1))==std::future_status::ready;
+    if(reached)mutate();held.unlock();worker.join();onContention=nullptr;need(reached&&contentionCount==1,"Actual native mutex contention was not observed");
+   }else run();
+   const std::vector<std::string> late(effects.begin()+static_cast<std::ptrdiff_t>(atChange),effects.end());json row={{"mode",entry["mode"]},{"enabled",enable},{"stage",stage},{"contentionCount",contentionCount.load()},{"workerJoined",stage=="mutex"},{"kind",kind},{"allowed",allowed},{"changed",changed},{"error",error},{"reply",result},{"lateEffects",late},{"runtime",runtime()},{"runtimeAtChange",runtimeAtChange},{"ownerReads",ownerReads.load()},{"writes",writes}};raw<<row.dump()<<'\n';raw.flush();rows.push_back(row);need(changed,"Sleep guard selected boundary not reached");
+   if(allowed){need(error.empty()&&result==true&&g_guardEnabled==enable,"Current sleep guard request failed");}
+   else{need(late.empty(),"expired sleep guard reached later effect");need(error=="BOOT_SLEEP_GUARD_REQUEST_EXPIRED","Expired sleep guard reply was accepted");need(runtime()==runtimeAtChange,"Expired sleep guard published later runtime state");}
+  }
+  if(mirrorOnly||mirrorNegative){
+   if(mirrorNegative){reset(defaults,wire["modes"][0],false);document["input"]["revision"]=8;const bool replied=sgSyncEnableMirror();rows.push_back({{"scenario","mirror-context-forwarding-removed"},{"reply",replied},{"writes",mirrorWrites}});raw<<rows.back().dump()<<'\n';raw.flush();need(mirrorWrites==0,"expired mirror request wrote compatibility flag");}
+   for(const bool enable:{true,false}){reset(defaults,wire["modes"][0],enable);need(invoke(patch(enable))==true&&ownerReads==0&&mirrorWrites==1&&mirrorContent==(enable?"1":"0"),"Ordinary mirror path changed");controls.push_back({{"name",enable?"ordinary-mirror-on":"ordinary-mirror-off"},{"ownerReads",0}});}
+   reset(defaults,wire["modes"][0],false);document["sleep"].update(patch(false));g_guardEnabled=true;const auto context=wire["modes"][0]["expectedBootContext"];bool blocked=false;mirrorDuringWrite=[&]{std::promise<bool> acquired;auto done=acquired.get_future();std::thread editor([&]{const bool got=settingsMx.try_lock_for(std::chrono::milliseconds(1));if(got)settingsMx.unlock();acquired.set_value(got);});const bool ended=done.wait_for(std::chrono::seconds(1))==std::future_status::ready;editor.join();need(ended,"Concurrent mirror observer did not return");blocked=!done.get();};need(sgSyncEnableMirror(&context)&&mirrorContent=="0"&&blocked,"Owned mirror did not lock its committed configuration");controls.push_back({{"name","mirror-uses-locked-committed-snapshot-not-runtime-draft"},{"competingWriterBlocked",blocked}});
+   reset(defaults,wire["modes"][0],false);document["input"]["revision"]=8;bool refused=false;try{sgSyncEnableMirror(&context);}catch(const std::exception& e){refused=std::string(e.what())=="BOOT_SLEEP_GUARD_REQUEST_EXPIRED";}need(refused&&mirrorWrites==0,"Owned mirror accepted a retired context");controls.push_back({{"name","mirror-refuses-expired-context-before-write"}});
+  }
+  if(!before&&!mutexOnly&&!mirrorOnly&&!mirrorNegative){
+   for(const bool enable:{true,false}){reset(defaults,wire["modes"][0],enable);need(invoke(patch(enable))==true&&g_guardEnabled==enable&&ownerReads==0,"Ordinary sleep guard control failed");controls.push_back({{"name",enable?"ordinary-on":"ordinary-off"},{"ownerReads",0}});}
+   reset(defaults,wire["modes"][0],false);const auto originalRuntime=runtime();failSave=true;bool refused=false;try{invoke(patch(false));}catch(...){refused=true;}need(refused&&runtime()==originalRuntime&&effects.empty(),"Failed settings commit changed runtime or canceled sleep work");controls.push_back({{"name","save-failure-no-runtime-or-cancel"}});
+   reset(defaults,wire["modes"][0],false);failMirror=true;refused=false;try{invoke(patch(false));}catch(...){refused=true;}need(refused&&writes==1,"Unconfirmed mirror returned success");controls.push_back({{"name","mirror-failure-no-success"}});
+   reset(defaults,wire["modes"][0],false);auto bad=patch(false);bad["retryOnSleepTimeout"]="invalid";refused=false;try{invoke(bad);}catch(...){refused=true;}need(refused&&runtime()==originalRuntime&&effects.empty(),"Invalid draft partly changed runtime");controls.push_back({{"name","invalid-draft-no-partial-state"}});
+   reset(defaults,wire["modes"][0],false);beforePrepare=[]{SettingsFileGuard held;document["sleep"]["wakePasswordEnabled"]=true;document["sleep"]["factMonitorEnabled"]=true;document["sleep"]["autoWakeRecovery"]=true;document["sleep"]["sleepPowerPlanOptimizationEnabled"]=false;document["sleep"]["staticWakeAutoScanEnabled"]=false;};need(invoke(patch(false))==true&&document["sleep"]["wakePasswordEnabled"]==true&&document["sleep"]["factMonitorEnabled"]==true&&document["sleep"]["autoWakeRecovery"]==true&&document["sleep"]["sleepPowerPlanOptimizationEnabled"]==false&&document["sleep"]["staticWakeAutoScanEnabled"]==false,"Guard save overwrote unrelated latest sleep preferences");controls.push_back({{"name","locked-latest-sleep-leaves-preserved"}});
+   reset(defaults,wire["modes"][0],false);need(invoke({{"pauseResume",false}})==true&&!g_sgPauseResume&&document["sleep"]["pauseGameOnSleep"]==false&&document["extensions"]["bootModes"]["global"]["sleep"]["config"]["pauseGameOnSleep"]==false,"Legacy alias failed ordinary global projection");controls.push_back({{"name","ordinary-alias-updates-only-global-intent"}});
+   reset(defaults,wire["modes"][0],false);auto scoped=wire["modes"][0]["request"];scoped["origin"]="ordinary";refused=false;try{invoke(scoped);}catch(...){refused=true;}need(refused&&effects.empty()&&runtime()==originalRuntime,"Bad origin reached runtime");controls.push_back({{"name","invalid-origin-no-effect"}});
+   reset(defaults,wire["modes"][0],false);refused=false;scoped=wire["modes"][0]["request"];scoped["bootContext"]={{"input",json::object()}};try{invoke(scoped);}catch(...){refused=true;}need(refused&&effects.empty(),"Bad context reached writes");controls.push_back({{"name","invalid-context-no-effect"}});
+   reset(defaults,wire["modes"][0],false);scoped=wire["modes"][0]["request"];scoped.update(patch(false));std::string busy;
+   {std::unique_lock<std::timed_mutex> held(g_sgConfigWriteMx);std::thread worker([&]{try{invoke(scoped);}catch(const std::exception& e){busy=e.what();}});worker.join();}
+   need(busy=="Sleep guard configuration is busy"&&effects.empty(),"Busy configuration gate did not refuse without side effects");need(invoke(scoped)==true,"Explicit new request did not recover released gate");controls.push_back({{"name","bounded-busy-gate-and-explicit-recovery"}});
+   reset(defaults,wire["modes"][0],true);sgSaveConfig();need(writes==1&&ownerReads==0&&effects.size()==5&&effects[0]=="timeout-stop"&&effects[1]=="timeout-cancel"&&effects[2]=="entry-stop"&&effects[3]=="entry-cancel"&&effects[4]=="settings-write","Non-editor save changed legacy cleanup ordering");controls.push_back({{"name","non-editor-save-retains-original-cleanup-order"}});
+   reset(defaults,wire["modes"][0],true);failSave=true;refused=false;try{sgSaveConfig();}catch(...){refused=true;}need(refused&&writes==0&&effects==std::vector<std::string>{"timeout-stop","timeout-cancel","entry-stop","entry-cancel"},"Non-editor failed save skipped original cleanup");controls.push_back({{"name","non-editor-failed-save-retains-cleanup"}});
+  }
+  std::cout<<json{{"status","PASS"},{"rows",rows},{"controls",controls}}.dump()<<'\n';return 0;
+ }catch(const std::exception& e){std::cout<<json{{"status","FAIL"},{"error",e.what()},{"rows",rows},{"controls",controls}}.dump()<<'\n';return 1;}
+}

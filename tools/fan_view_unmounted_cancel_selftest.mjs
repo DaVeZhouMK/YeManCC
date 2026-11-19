@@ -66,8 +66,8 @@ try {
   await page.waitForTimeout(300);
   const s=await snap();assert.equal(s.trace.filter(x=>x.op==='enable').length,0,'unmounted old page may not create a fresh apply after mirror OFF');
   assert.equal(s.hasIntent,false,'OFF must stay terminal');assert.equal(await page.evaluate(()=>window.__chain.boundary.writes),false);
-  await page.evaluate(()=>window.__fanSetVisible(true));await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇未操控');
-  await page.locator('.fan-toggle').click();await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+  await page.evaluate(()=>window.__fanSetVisible(true));await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击启用');
+  await page.locator('.fan-toggle').click();await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
   assert.equal((await snap()).trace.filter(x=>x.op==='enable').length,1,'the first subsequent manual click still works');
  });
 
@@ -88,13 +88,13 @@ try {
   await page.evaluate(()=>window.__chain.releaseGate());await page.evaluate(()=>window.__externalClose);await page.waitForTimeout(300);
   const s=await snap();assert.equal(s.trace.filter(x=>x.op==='enable').length,0);assert.equal(s.hasIntent,false);
   await page.evaluate(()=>window.__fanSetVisible(true));await page.waitForSelector('.fan-toggle');await page.locator('.fan-toggle').click();
-  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
  });
 
  await check('old page reset save cannot attach to a newer mirror OFF then ON while unmounted',async()=>{
   await heldFirstOn('GPDWin5','Open');await page.evaluate(()=>window.__chain.releaseGate());
-  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
-  await page.evaluate(()=>window.__fanRemount());await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
+  await page.evaluate(()=>window.__fanRemount());await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
   await page.evaluate(()=>window.__chain.saveHold='balanced');await page.getByRole('button',{name:'重置转速',exact:true}).click();
   await page.waitForFunction(()=>window.__chain.saveReached==='balanced');await page.evaluate(()=>window.__fanSetVisible(false));
   await page.evaluate(()=>window.__mirror.request('fan.setEnabled',{enabled:false},{generation:1,checkpoint(){}}));
@@ -112,10 +112,10 @@ try {
   await page.waitForFunction(()=>window.__chain.trace.some(x=>x.op==='public-disable-admitted'));
   await page.evaluate(()=>window.__fanSetVisible(true));
   await page.waitForSelector('.fan-toggle');
-  assert.equal((await snap()).button,'风扇未操控','canceled page task is not an active ON or a cancel button');
+  assert.equal((await snap()).button,'点击启用','canceled page task is not an active ON or a cancel button');
   await page.locator('.fan-toggle').click();
   await page.evaluate(()=>window.__chain.releaseGate());
-  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
   assert.equal((await snap()).trace.filter(x=>x.op==='enable').length,1,'only the new explicit ON writes');
  });
  assert.deepEqual(errors,[]);

@@ -15,13 +15,17 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include <utility>
 
 namespace {
 namespace wire=ymcc::dsu::protocol;
 using Frame=ymcc::dsu::Frame;
 std::mutex stateMx,lifecycleMx;
 Frame currentFrame;
-std::atomic<bool> running{false},hasClients{false};
+std::atomic<bool> running{false};
+std::atomic<std::uint64_t> demandEpoch{0},demandUntil{0};
+std::uint64_t publishedDemand=0; // Protected by stateMx.
+bool compatibilityFrame=false;
 SOCKET serverSocket=INVALID_SOCKET;
 HANDLE stopEvent=nullptr,frameEvent=nullptr;
 WSAEVENT networkEvent=WSA_INVALID_EVENT;
@@ -33,7 +37,8 @@ struct Client {
     sockaddr_in endpoint{};
     std::uint64_t all=0;
     std::array<std::uint64_t,4> ids{},macs{};
-    static bool fresh(std::uint64_t at,std::uint64_t now) noexcept{return at&&at<=now&&now-at<5000;}
+    static constexpr std::uint64_t lifetimeMs=5000;
+    static bool fresh(std::uint64_t at,std::uint64_t now) noexcept{return at&&at<=now&&now-at<lifetimeMs;}
     bool wants(unsigned slot,std::uint64_t now) const noexcept{return fresh(all,now)||fresh(ids[slot],now)||fresh(macs[slot],now);}
     bool alive(std::uint64_t now) const noexcept{for(unsigned s=0;s<4;++s)if(wants(s,now))return true;return false;}
 };
@@ -51,14 +56,24 @@ void registerClient(const sockaddr_in& from,const wire::Request& request,std::ui
         if(clients.size()>=256)return;
         clients.push_back(Client{});found=std::prev(clients.end());found->endpoint=from;
     }
-    if(request.flags==0)found->all=now;
+    bool dataSlot=request.flags==0;
+    if(dataSlot)found->all=now;
     else {
-        if((request.flags&1)&&request.id<4)found->ids[request.id]=now;
+        if((request.flags&1)&&request.id<4){found->ids[request.id]=now;dataSlot=request.id<3;}
         if(request.flags&2)for(unsigned slot=0;slot<4;++slot){
-            if(std::all_of(request.mac.begin(),request.mac.end(),[&](auto b){return b==0x10+slot;}))found->macs[slot]=now;
+            if(std::all_of(request.mac.begin(),request.mac.end(),[&](auto b){return b==0x10+slot;})){
+                found->macs[slot]=now;dataSlot=dataSlot||slot<3;
+            }
         }
     }
-    hasClients.store(std::any_of(clients.begin(),clients.end(),[&](const Client& c){return c.alive(now);}),std::memory_order_release);
+    if(!dataSlot||!now)return;
+    if(demandUntil.load(std::memory_order_relaxed)<=now){
+        // New demand cannot reuse a frame admitted for an expired subscription.
+        std::lock_guard<std::mutex> lock(stateMx);
+        const auto next=demandEpoch.load(std::memory_order_relaxed)+1;
+        demandEpoch.store(next?next:1,std::memory_order_release);
+        demandUntil.store(now+Client::lifetimeMs,std::memory_order_release);
+    }else demandUntil.store(now+Client::lifetimeMs,std::memory_order_release);
 }
 bool processRequest(std::span<const std::uint8_t> received,const sockaddr_in& from) {
     const auto request=wire::parse(received);if(!request.valid)return false;
@@ -71,9 +86,13 @@ bool processRequest(std::span<const std::uint8_t> received,const sockaddr_in& fr
 void sendFrame() {
     const auto now=GetTickCount64();
     std::erase_if(clients,[&](const Client& c){return !c.alive(now);});
-    hasClients.store(!clients.empty(),std::memory_order_release);
     if(clients.empty())return;
-    Frame snapshot;{std::lock_guard<std::mutex> lock(stateMx);snapshot=currentFrame;}
+    Frame snapshot;
+    {
+        std::lock_guard<std::mutex> lock(stateMx);
+        if(!compatibilityFrame&&(!publishedDemand||publishedDemand!=demandEpoch.load(std::memory_order_relaxed)))return;
+        snapshot=currentFrame;
+    }
     snapshot.timestampMs=now; // HC protocol time is output time, not hardware sample time.
     for(unsigned slot=0;slot<3;++slot){
         const bool wanted=std::any_of(clients.begin(),clients.end(),[&](const Client& c){return c.wants(slot,now);});
@@ -158,18 +177,39 @@ bool start(std::uint16_t port,bool loopback) {
     if(bind(serverSocket,reinterpret_cast<sockaddr*>(&address),sizeof(address))==SOCKET_ERROR||
        WSAEventSelect(serverSocket,networkEvent,FD_READ|FD_CLOSE)==SOCKET_ERROR){closeResources();return false;}
     int size=sizeof(address);if(getsockname(serverSocket,reinterpret_cast<sockaddr*>(&address),&size)==SOCKET_ERROR){closeResources();return false;}
-    currentFrame={};boundPort=ntohs(address.sin_port);serverId=std::uint32_t(GetTickCount64());sequence=0;
-    clients.clear();hasClients.store(false,std::memory_order_release);running.store(true,std::memory_order_release);
+    currentFrame={};publishedDemand=0;compatibilityFrame=false;
+    boundPort=ntohs(address.sin_port);serverId=std::uint32_t(GetTickCount64());sequence=0;
+    clients.clear();demandUntil.store(0,std::memory_order_release);running.store(true,std::memory_order_release);
     try{serverThread=std::thread(run);}catch(...){running.store(false);closeResources();return false;}
     return true;
 }
 static ymcc::dsu::Admission legacyNumeric(const Frame& f,std::uint64_t) noexcept{return {f.live,f.motionReady};}
 }
 extern "C" {
+std::uint64_t dsu_frame_demand() noexcept {
+    auto until=demandUntil.load(std::memory_order_acquire);
+    if(!until)return 0;
+    const auto ticket=demandEpoch.load(std::memory_order_acquire);
+    if(GetTickCount64()>=until){
+        // Clear an expired deadline once, without erasing a concurrent renewal.
+        demandUntil.compare_exchange_strong(until,0,std::memory_order_acq_rel);
+        return 0;
+    }
+    return running.load(std::memory_order_acquire)?ticket:0;
+}
 void dsu_publish(const Frame& frame) {
     std::lock_guard<std::mutex> lock(stateMx);
     currentFrame=frame;
-    if(running.load(std::memory_order_acquire)&&hasClients.load(std::memory_order_acquire)&&frameEvent)SetEvent(frameEvent);
+    compatibilityFrame=true;
+    if(dsu_frame_demand()&&frameEvent)SetEvent(frameEvent);
+}
+bool dsu_publish_for_demand(std::uint64_t ticket,Frame&& frame) {
+    if(!ticket)return false;
+    std::lock_guard<std::mutex> lock(stateMx);
+    if(ticket!=dsu_frame_demand()||!frameEvent)return false;
+    currentFrame=std::move(frame);
+    publishedDemand=ticket;compatibilityFrame=false;
+    return SetEvent(frameEvent)!=FALSE;
 }
 // Numeric compatibility seam used by existing isolated focus tests. The actual
 // BUS publishes a typed frame with a retained source and native validator.
@@ -196,8 +236,8 @@ void dsu_stop(){
     if(!joinStoppedServer())return;
     std::unique_lock<std::mutex> lock(stateMx,std::try_to_lock);
     if(!lock.owns_lock())return;
-    closeResources();currentFrame={};
-    clients.clear();hasClients.store(false);
+    closeResources();currentFrame={};publishedDemand=0;compatibilityFrame=false;
+    clients.clear();demandUntil.store(0,std::memory_order_release);
 }
 bool dsu_stopped() noexcept {
     try {

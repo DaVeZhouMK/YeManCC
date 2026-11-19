@@ -40,7 +40,8 @@ function Fixture($Case){
   }
   $ico=Join-Path $pkg 'assets/custom-steam-library.ico'
   $index+=@{path='assets/custom-steam-library.ico';bytes=(Get-Item -LiteralPath $ico).Length;sha256=(Get-FileHash -LiteralPath $ico).Hash.ToLowerInvariant()}
-  $m=@{backgroundMediaProtocol=1;backgroundCatalogProtocol=1;backgroundIdentityProtocol=1;backgroundVideoQualityPolicy=3;backgroundManualProtocol=1;backgroundVideoSelectionProtocol=1;schemaVersion=2;packageId='custom-steam-library';packageType='green-child';packageVersion='0.0.33';entryPoint='CustomSteamLibrary.exe';worker='SteamArtworkLab.exe';updater=@{unknownPaths='preserve';healthHandshake=@{protocol=1;requiredBeforeCommit=$true}};files=@('CustomSteamLibrary.exe','SteamArtworkLab.exe','assets/custom-steam-library.ico');managedPaths=@('CustomSteamLibrary.exe','SteamArtworkLab.exe','assets/custom-steam-library.ico');fileIndex=$index;sourceBuild=$sourceBuild}
+  $m=@{backgroundSteamSourceProtocol=1;backgroundMediaProtocol=1;backgroundCatalogProtocol=1;backgroundIdentityProtocol=1;backgroundVideoQualityPolicy=3;backgroundManualProtocol=1;backgroundVideoSelectionProtocol=1;schemaVersion=2;packageId='custom-steam-library';packageType='green-child';packageVersion='0.0.33';entryPoint='CustomSteamLibrary.exe';worker='SteamArtworkLab.exe';updater=@{unknownPaths='preserve';healthHandshake=@{protocol=1;requiredBeforeCommit=$true}};files=@('CustomSteamLibrary.exe','SteamArtworkLab.exe','assets/custom-steam-library.ico');managedPaths=@('CustomSteamLibrary.exe','SteamArtworkLab.exe','assets/custom-steam-library.ico');fileIndex=$index;sourceBuild=$sourceBuild}
+  $m.backgroundSharedSleepProtocol=1
   Write-Text (Join-Path $pkg 'package-manifest.json') ($m|ConvertTo-Json -Depth 20)
   return @{source=$src;package=$pkg;manifest=$m}
 }
@@ -49,10 +50,12 @@ Run 'tampered-binary-is-rejected-not-rehashed' {param($p)$f=Fixture $p;$mp=Join-
 Run 'same-size-binary-change-is-rejected' {param($p)$f=Fixture $p;Write-Text (Join-Path $f.package 'SteamArtworkLab.exe') 'fixture wrong!';Must-Reject {Assert-CustomSteamLibraryPackage $f.package}}
 Run 'valid-current-source-fingerprints-pass' {param($p)$f=Fixture $p;Assert-CustomSteamLibrarySourceFreshness -ProjectRoot $f.source -PackageRoot $f.package|Out-Null}
 Run 'old-1080-default-policy-is-rejected-by-exporter' {param($p)$f=Fixture $p;$f.manifest.backgroundVideoQualityPolicy=2;Write-Text (Join-Path $f.package 'package-manifest.json') ($f.manifest|ConvertTo-Json -Depth 20);Must-Reject {Assert-CustomSteamLibrarySourceFreshness -ProjectRoot $f.source -PackageRoot $f.package}}
-foreach($capability in @('backgroundMediaProtocol','backgroundCatalogProtocol','backgroundIdentityProtocol','backgroundVideoQualityPolicy','backgroundManualProtocol','backgroundVideoSelectionProtocol')){
+foreach($capability in @('backgroundSteamSourceProtocol','backgroundMediaProtocol','backgroundCatalogProtocol','backgroundIdentityProtocol','backgroundVideoQualityPolicy','backgroundManualProtocol','backgroundVideoSelectionProtocol','backgroundSharedSleepProtocol')){
   Run ('missing-capability-'+$capability+'-is-rejected') {param($p)$f=Fixture $p;$f.manifest.Remove($capability);Write-Text (Join-Path $f.package 'package-manifest.json') ($f.manifest|ConvertTo-Json -Depth 20);Must-Reject {Assert-CustomSteamLibrarySourceFreshness -ProjectRoot $f.source -PackageRoot $f.package}}
 }
-foreach($path in @('native/custom-steam-library/steam_artwork_lab.cpp','native/custom-steam-library/custom_steam_library_exclusions.h','deps/json/json.hpp','CustomSteamLibrary/assets/custom-steam-library.ico','tools/build-custom-steam-library-worker.ps1','native/custom-steam-library/build_worker.bat')){
+Run 'incompatible-shared-sleep-protocol-is-rejected' {param($p)$f=Fixture $p;$f.manifest.backgroundSharedSleepProtocol=2;Write-Text (Join-Path $f.package 'package-manifest.json') ($f.manifest|ConvertTo-Json -Depth 20);Must-Reject {Assert-CustomSteamLibrarySourceFreshness -ProjectRoot $f.source -PackageRoot $f.package}}
+Run 'shared-sleep-source-drift-is-rejected' {param($p)$f=Fixture $p;Write-Text (Join-Path $f.source 'native/sleep_power_native_task.h') 'changed after child build';Must-Reject {Assert-CustomSteamLibrarySourceFreshness -ProjectRoot $f.source -PackageRoot $f.package}}
+foreach($path in @('native/process_handle_inheritance.h','native/steam_source_lease_transfer.h','native/custom-steam-library/steam_artwork_lab.cpp','native/custom-steam-library/custom_steam_library_exclusions.h','deps/json/json.hpp','CustomSteamLibrary/assets/custom-steam-library.ico','tools/build-custom-steam-library-worker.ps1','native/custom-steam-library/build_worker.bat')){
   $changedPath=$path
   Run ('source-drift-'+$path.Replace('/','-')) {param($p)$f=Fixture $p;Write-Text (Join-Path $f.source $changedPath) 'changed during compilation';Must-Reject {Assert-CustomSteamLibrarySourceFreshness -ProjectRoot $f.source -PackageRoot $f.package}}
 }

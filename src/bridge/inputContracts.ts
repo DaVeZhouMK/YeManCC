@@ -44,7 +44,7 @@ export interface GyroMotionConfigV1 {
   invertHorizontal?: boolean; invertVertical?: boolean;
   autoCalibrate?: boolean;
   /** 用户裁决（2026-09-29）：虚拟手柄联动——虚拟手柄开启时联动启动陀螺仪，
-   *  关闭时一并关闭。默认 true。顶部专属配置的手柄/陀螺仪开关优先于此。 */
+   *  关闭时一并关闭。默认 true。全局与四模式统一管理，不再接受游戏专属覆盖。 */
   virtualPadLink?: boolean;
   /** 'off' remains valid for old snapshots; current UI uses enabled + fps/racing/custom/steam. */
   preset?: 'off' | 'fps' | 'racing' | 'custom' | 'steam';

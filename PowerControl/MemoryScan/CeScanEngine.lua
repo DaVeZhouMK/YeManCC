@@ -15,13 +15,38 @@ local function encode(v)
  for k,x in pairs(v) do if k~='__array' then parts[#parts+1]=encode(k)..':'..encode(x) end end
  return '{'..table.concat(parts,',')..'}'
 end
-local function exists(p)local h=io.open(p,'rb');if h then h:close();return true end;return false end
+-- CE's UTF-8 file APIs retain the actual Windows path. Lua's CRT io/os
+-- functions can silently address a different path under a non-ASCII data root.
+local function exists(p)return fileExists(p) end
+local function remove(p)return deleteFile(p) end
+local function rename(a,b)
+ -- MoveFileW never replaces an existing destination; preserve unknown frames.
+ local result,err=executeCodeLocalEx('kernel32.MoveFileW',{type=4,value=a},{type=4,value=b})
+ if not result or result==0 then return nil,err or 'CE session rename failed' end
+ return true
+end
 local function read(p,limit)
- local h,err,code=io.open(p,'rb')
- if not h then if code==2 then return nil end;error(err or 'CE session read failed') end
- local maximum=limit or 131072;local value=h:read(maximum+1) or '';h:close()
- if #value>maximum then error('CE session file exceeds read limit') end
- return value
+ if not exists(p) then return nil end
+ local h,err=createFileStream(p,0x40) -- fmOpenRead | fmShareDenyNone
+ if not h then error(err or 'CE session read failed') end
+ local ok,value=pcall(function()
+  local size=h.Size;local maximum=limit or 131072
+  if size>maximum then error('CE session file exceeds read limit') end
+  local text=h.readString(size)
+  if type(text)~='string' or #text~=size or h.Size~=size then error('CE session read was incomplete') end
+  return text
+ end)
+ h.destroy();if not ok then error(value) end;return value
+end
+local function write(p,text)
+ local h,err=createFileStream(p,0xff00) -- fmCreate; synchronous TFileStream writes
+ if not h then error(err or 'CE session create failed') end
+ local ok,failure=pcall(function()
+  h.writeString(text)
+  if h.Size~=#text or h.Position~=#text then error('CE session write was incomplete') end
+ end)
+ local closed,closeError=pcall(function()h.destroy()end)
+ if not ok or not closed then remove(p);error(failure or closeError or 'CE session close failed') end
 end
 local state={schemaVersion=1,token=C.token,engine='cheat-engine',stage='idle',message='输入当前数字',count=0,rows={__array=true},scanRound=0,searchValue='',lastWriteCount=0,lastWriteValue='',scannedBytes=0,totalBytes=0,scanElapsedMs=0,temporarilyPaused=false,pauseRestored=true,dataType='int32',commandId=''}
 local lastPublished,publication=nil,0
@@ -31,24 +56,25 @@ local function publish()
  local previous=read(path)
  if previous~=nil and previous~=lastPublished then error('CE state preimage is unknown; preserved') end
  publication=publication+1
- local temp=path..'.'..C.token..'.'..publication..'.tmp';local backup=temp..'.previous'
+ -- The full capability stays in every state/command. A short namespace here
+ -- keeps staging names bounded in longer data roots.
+ local temp=path..'.'..C.token:sub(1,16)..'.'..publication..'.tmp';local backup=temp..'.previous'
  if read(temp)~=nil or read(backup)~=nil then error('CE state staging path is not owned') end
- local h=assert(io.open(temp,'wb'));local wrote,writeError=pcall(function()assert(h:write(text));assert(h:flush())end);local closed=h:close()
- if not wrote or not closed then os.remove(temp);error(writeError or 'CE state flush failed') end
+ write(temp,text)
  local moved=false
  local ok,failure=pcall(function()
   if read(path)~=previous then error('CE state changed before commit') end
-  if previous~=nil then assert(os.rename(path,backup));moved=true;if read(backup)~=previous then error('CE state source changed') end end
+  if previous~=nil then assert(rename(path,backup));moved=true;if read(backup)~=previous then error('CE state source changed') end end
   if read(path)~=nil then error('CE state was concurrently replaced') end
-  assert(os.rename(temp,path))
+  assert(rename(temp,path))
   if read(path)~=text then error('CE state write was not acknowledged') end
  end)
  if not ok then
-  if moved and not exists(path) then os.rename(backup,path) end
-  os.remove(temp);error(failure)
+  if moved and not exists(path) then rename(backup,path) end
+  remove(temp);error(failure)
  end
  lastPublished=text
- if moved then os.remove(backup) end
+ if moved then remove(backup) end
 end
 local active,started,cancelled,closing=false,0,false,false
 local fatalError=nil
@@ -67,7 +93,7 @@ end
 local function finish()
  scanner().waitTillDone()
  active=false;state.temporarilyPaused=false;state.pauseRestored=true;state.scanElapsedMs=getTickCount()-started
- if exists(C.root..'\\cancel') then cancelled=true;os.remove(C.root..'\\cancel') end
+ if exists(C.root..'\\cancel') then cancelled=true;remove(C.root..'\\cancel') end
  if cancelled or fatalError then state.stage='failed';state.count=0;state.rows={__array=true};state.message=fatalError or '搜索已取消';state.scanRound=0
  else rowList();state.stage='ready';state.message=state.count==0 and '这次没有对上，请核对游戏里的数字' or '已记住当前数字';if state.nextScan then state.scanRound=state.scanRound+1 end end
  state.nextScan=nil;publish()
@@ -91,7 +117,7 @@ local function command(lines)
   if action=='first' and f.btnNextScan.Enabled then f.btnNewScan.doClick() end
   if action=='next' and not f.btnNextScan.Enabled then error('请先完成首次搜索') end
   scanner() -- Fail before dispatching a GUI handler if CE initialization is incomplete.
-  if exists(C.root..'\\cancel') then os.remove(C.root..'\\cancel');state.stage='failed';state.message='搜索已取消';state.scanRound=0;state.count=0;state.rows={__array=true};return end
+  if exists(C.root..'\\cancel') then remove(C.root..'\\cancel');state.stage='failed';state.message='搜索已取消';state.scanRound=0;state.count=0;state.rows={__array=true};return end
   f.ScanValue.Text=value
   active=true;cancelled=false;started=getTickCount();state.stage='scanning';state.message='正在由CE搜索';state.searchValue=value;state.nextScan=action=='next';state.lastWriteCount=0;state.lastWriteValue='';state.rows={__array=true};state.scannedBytes=0;state.totalBytes=0;state.scanElapsedMs=0
   if action=='first' then state.scanRound=0 end
@@ -112,7 +138,7 @@ local ok,err=pcall(function()
  reloadSettingsFromRegistry()
  f.hide()
  -- Trainer startup skips FormShow. Invoke CE's own initializer without displaying
- -- the form; the host has checked the saved first-run flag before launch.
+ -- the form; the host initializes only the first-run dialog flag before launch.
  -- Auto-attach is session state: this worker may attach only to YMCC's exact PID.
  getAutoAttachList().clear()
  if not getCurrentMemscan() then f.OnShow(f) end
@@ -141,13 +167,13 @@ local ok,err=pcall(function()
    if not active and not closing then
     local path=C.root..'\\ce-command.txt';local request=read(path,4096)
     if request then
-     local claimed=path..'.'..C.token..'.claim'
+     local claimed=path..'.'..C.token:sub(1,16)..'.claim'
      if read(claimed,4096)~=nil then error('CE command claim is unknown') end
-     assert(os.rename(path,claimed))
+     assert(rename(path,claimed))
      if read(claimed,4096)~=request then error('CE command changed while claiming') end
      local lines={};for line in (request..'\n'):gmatch('(.-)\n') do lines[#lines+1]=line:gsub('\r$','') end
      if #lines~=5 or lines[5]~='' then error('CE command frame is unsupported') end
-     command(lines);os.remove(claimed);publish()
+     command(lines);remove(claimed);publish()
     end
    end
   end)

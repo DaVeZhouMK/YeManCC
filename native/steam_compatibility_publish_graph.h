@@ -1108,7 +1108,7 @@ inline constexpr GraphRange publicRanges[] {
  {0x118e878, publish_contract_detail::publicBytes + 7250, 8, RangeKind::Data},
  {0x118e930, publish_contract_detail::publicBytes + 7258, 8, RangeKind::Data},
  {0x1198784, publish_contract_detail::publicBytes + 7266, 8, RangeKind::Data},
- {0x1198960, publish_contract_detail::publicBytes + 7274, 80, RangeKind::Data},
+ {0x1198960, publish_contract_detail::publicBytes + 7274, 80, RangeKind::SourceFile,"\\build\\src\\public\\tier1\\utlmemory.h"},
  {0x1199460, publish_contract_detail::publicBytes + 7354, 21, RangeKind::Data},
  {0x1199480, publish_contract_detail::publicBytes + 7375, 80, RangeKind::Data},
  {0x11c5050, publish_contract_detail::publicBytes + 7455, 37, RangeKind::Data},
@@ -2079,6 +2079,7 @@ inline constexpr SectionSpec publicSections[] {
 } // namespace publish_graph_detail
 inline GraphSpec publishGraph(Layout layout) noexcept {
  if (!validLayout(layout)) return {};
+ if (layout==Layout::OwnerScoped) return owner_scoped_publication::graph();
  if (layout == Layout::Legacy)
   return {publish_graph_detail::legacyRanges, publish_graph_detail::legacyFixups,
           publish_graph_detail::legacySections, 0x138000000ULL};

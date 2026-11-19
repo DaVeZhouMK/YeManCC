@@ -1,6 +1,7 @@
 // The context publisher is the exact BUS function extracted from main.cpp.
 static bool g_inputCaptureReady=true;
 struct FixtureMachine{std::string deviceClass=model().deviceClass;};static FixtureMachine g_machineIdentity;
+static std::string inputCaptureMotionDeviceClass(){return g_machineIdentity.deviceClass;}
 struct FixtureSelector{std::string selectorId="controlled-selector",gyroMatrixId=model().gyroMatrixId,
  accelMatrixId=model().accelMatrixId,matrixSourceSha256=std::string(64,'c');};static FixtureSelector g_hcMotionSelector;
 static bool inputCaptureMotionSelectorBound(){return fixtureModelBound;}

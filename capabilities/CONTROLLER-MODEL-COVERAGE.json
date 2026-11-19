@@ -1553,7 +1553,59 @@
         "normalVirtualOutputBlockedByUnsupported": false,
         "specialCaution": null
       },
-      "hardwareAccepted": false
+      "hardwareAccepted": false,
+      "oemFieldEvidence127": {
+        "taskDate": "2026-11-13",
+        "contract": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-127-AYA-AIRPRO-OEM-FIELD\\AYA-AIRPRO-OEM-CONTRACT.json",
+          "bytes": 5942,
+          "sha256": "d75f692a638ffa8aaca3c9cd26759b83541db85984233e2731475215911c2609"
+        },
+        "fieldEvidence": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-127-AYA-AIRPRO-OEM-FIELD\\FIELD-EVIDENCE.json",
+          "bytes": 46707,
+          "sha256": "8166821e05fb28792f539bde052ed5358f2b7f5299ad86073c6dff3fe016fc6c"
+        },
+        "sourceVerification": {
+          "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-127-AYA-AIRPRO-OEM-FIELD\\SOURCE-VERIFICATION.json",
+          "bytes": 18864,
+          "sha256": "84eddc892538afc945bf5a2dc9bc0f2caa5570be9daa5b217326a5c8fbb0272c"
+        },
+        "deviceClass": "HandheldCompanion.Devices.AYANEOAIRPro",
+        "cpuObserved": "AMD Ryzen7 5825U",
+        "profile": "AyaneoAir",
+        "profileId": 6,
+        "existingKeyIds": [
+          "ckbig",
+          "cksmall",
+          "cktl",
+          "cktr"
+        ],
+        "keyChords": [
+          "Ctrl+Win+F12",
+          "Win+D",
+          "Ctrl+Win+F11",
+          "Ctrl+Win+F10"
+        ],
+        "historicalTypeRows": 6,
+        "historicalPhysicalKeyIds": 4,
+        "firstWitnessIsNotCurrentPressOrActionProof": true,
+        "currentSession": {
+          "dateLocal": "2026-11-13",
+          "pid": 6512,
+          "powerGeneration": 15782,
+          "consumptionRows": 13,
+          "matchedSum": 0,
+          "replayedOsEventsSum": 22,
+          "meaning": "OS-chord suppression/replay only; physical press count and final action outcome UNKNOWN"
+        },
+        "fieldIsNotAir1SOrAirPro1S": true,
+        "physicalOriginKnown": false,
+        "newRuntimeMappingAdded": false,
+        "consumerThreadId": "01a12e67-8c00-7db3-b742-9307931b4056",
+        "originalNoVirtualTaskContinues": true,
+        "hardwareAccepted": false
+      }
     },
     {
       "name": "AYANEODevice",
@@ -3694,7 +3746,38 @@
           }
         ],
         "captureDisposition": "selector declaration; actual producer authority/interface/epoch and key-specific native guards required",
-        "profileNoneIsNotNoController": true
+        "profileNoneIsNotNoController": true,
+        "fieldReconciliation122": {
+          "taskId": "HC-CODEX-122-WIN5-OEM-KEY-LIBRARY",
+          "capturedAtUtc": "2026-11-09T16:40:56.504944+00:00",
+          "contract": {
+            "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Win5-OemKeys-20261110\\WIN5-OEM-CAPABILITY-CONTRACT.json",
+            "bytes": 7521,
+            "sha256": "000ccfe66559f71a652f995f19b96eff3a70694162481e66da1f9f82e78aebb5"
+          },
+          "sameExistingCanonicalFor388And395": true,
+          "keyCountUnchanged": 5,
+          "gamepadTransport": "current keyboard F13 plus vendor-HID body7; descriptor form is not an exclusive transport claim",
+          "firmwareComparisonTuple": [
+            1,
+            17
+          ],
+          "keyboardHomePhysicalHold": "UNKNOWN",
+          "r4HidPositive": "NOT_OBSERVED",
+          "hardwareAccepted": false,
+          "sourceOnlyOrUnusedRuntimeRegistrationAdded": false,
+          "logDelta123": {
+            "evidence": {
+              "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Win5-OemKeys-20261110\\continuation-20261111\\R4-KEYBOARD-FIELD-FINAL.json",
+              "bytes": 41934,
+              "sha256": "c7d33f0bf07fe0e3c399f9bcb77dfdce1694ae8f0faaf5fc7754f378b8f48aa0"
+            },
+            "r4KeyboardPairs": 4,
+            "cpuContext": "395; 3 exact window contexts plus1 initialhwnd0 same PID/power context",
+            "r4HidPositive": "NOT_OBSERVED",
+            "hardwareAccepted": false
+          }
+        }
       },
       "motion": {
         "recipeTableMembership": [
@@ -7773,8 +7856,8 @@
       },
       "oem": {
         "profileExpression": "id(OemChordProfileId::Ayaneo3)",
-        "catalogExpression": "oemCatalogOf(kAyaneoNext2Keys)",
-        "keyTable": "kAyaneoNext2Keys",
+        "catalogExpression": "oemCatalogOf(kAyaneo3Keys)",
+        "keyTable": "kAyaneo3Keys",
         "keys": [
           {
             "keyId": "ckbig",
@@ -8249,28 +8332,28 @@
           {
             "keyId": "m1",
             "label": "LC1",
-            "backIndex": 0,
+            "backIndex": 1,
             "form": "KeyboardVk",
             "clickOnly": false
           },
           {
             "keyId": "l4",
             "label": "LC2",
-            "backIndex": 0,
+            "backIndex": 3,
             "form": "KeyboardVk",
             "clickOnly": false
           },
           {
             "keyId": "m2",
             "label": "RC1",
-            "backIndex": 0,
+            "backIndex": 2,
             "form": "KeyboardVk",
             "clickOnly": false
           },
           {
             "keyId": "r4",
             "label": "RC2",
-            "backIndex": 0,
+            "backIndex": 4,
             "form": "KeyboardVk",
             "clickOnly": false
           }
@@ -8304,15 +8387,15 @@
     {
       "name": "OneXPlayer3",
       "deviceClass": "HandheldCompanion.Devices.OneXPlayer3",
-      "deviceId": null,
+      "deviceId": "ymcc.device.OneXPlayer3",
       "family": "OneXPlayer",
       "nativeFamilyForSelectorInspection": "OneXPlayer",
       "membership": "reviewed-native-extension",
-      "factoryInstantiable": null,
+      "factoryInstantiable": true,
       "aliases": [
         "HandheldCompanion.Devices.OneXPlayer3"
       ],
-      "declarationSource": null,
+      "declarationSource": "capabilities/upstream/f2e58468/OneXPlayer3.cs",
       "nativeResolverMentionsClass": true,
       "standardInput": {
         "eligibleExistingProviders": [
@@ -8394,7 +8477,49 @@
         "normalVirtualOutputBlockedByUnsupported": false,
         "specialCaution": null
       },
-      "hardwareAccepted": false
+      "hardwareAccepted": false,
+      "currentIntelSource099": {
+        "phaseId": "HC-CODEX-099",
+        "meaning": "Only this reviewed extension row is refreshed from fixed f2e58468; root capturedAt and frozen92/factory80 summary remain historical",
+        "sourcePin": "f2e58468d9917189d4be7ccfc242385ce2c3035b",
+        "declarationSha256": "e3a6275e34db52fa60c7b5a421655af24d8580611fe9ebb875986817891809dc",
+        "factorySource": {
+          "path": "capabilities/upstream/f2e58468/IDevice.cs",
+          "line": 1089,
+          "sha256": "f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47"
+        },
+        "exactIdentity": {
+          "manufacturer": [
+            "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+            "ONE-NETBOOK"
+          ],
+          "systemProduct": [
+            "ONEXPLAYER 3",
+            "ONEXPLAYER-3"
+          ]
+        },
+        "contract": {
+          "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-099-INTEL-OP3-PRIORITY/INTEL-OP3-CONTRACT.json",
+          "bytes": 10080,
+          "sha256": "b488fb0f262357b91c65ae2388b8075e11d52e58a60752cfa4d74a531b08b6cc"
+        },
+        "sourceManifest": {
+          "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-099-INTEL-OP3-PRIORITY/SOURCE-MANIFEST.json",
+          "bytes": 10492,
+          "sha256": "a38f803a04229618bb24aeed78d6934b7f6bbeeb3014558319c82adcaa523fc5"
+        },
+        "consumerReceipt": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-OneXFamily-20261105/intel-op3-consumer-status-20261107/DELIVERY.json",
+          "bytes": 727,
+          "sha256": "00dd69d2d57b426bb6e9906c94e1b70ab579ef7c85a20bb35de1962353bef112"
+        },
+        "fieldAccepted": false,
+        "consumerDiagnosticReceipt": {
+          "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-099-INTEL-OP3-PRIORITY/INTEL-OP3-CONSUMER-INTAKE.json",
+          "bytes": 4817,
+          "sha256": "1399dacc7295a545c5f56e75671d7d5c0d90f9c73b03d8182d0f17eb663f3227"
+        }
+      }
     },
     {
       "name": "OneXPlayerX2",
@@ -8621,5 +8746,492 @@
       },
       "hardwareAccepted": false
     }
-  ]
+  ],
+  "noVirtualOemSupport125": {
+    "taskDate": "2026-11-13",
+    "consumerThreadId": "01a12e67-8c00-7db3-b742-9307931b4056",
+    "entry": "oemUnifiedInputBindingFor/current-total-library",
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-125-OEM-NO-VIRTUAL-MODEL-SUPPORT\\CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 9791,
+      "sha256": "c893e096678db5b64efb87797887dfc09831433b6150c9f3b216bc78a8178243"
+    },
+    "modelMatrix": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-125-OEM-NO-VIRTUAL-MODEL-SUPPORT\\MODEL-MATRIX.json",
+      "bytes": 374557,
+      "sha256": "23a932240ed14d6a7641869ffeb2a58e40b663d7e0d07cd4328cac614598b969"
+    },
+    "sourceProjection": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-125-OEM-NO-VIRTUAL-MODEL-SUPPORT\\SOURCE-PROJECTION.json",
+      "bytes": 45278,
+      "sha256": "d0a3474b29fb575f9fd429d31bb8ac85493f61918c8fde5cc7428bfc84df8013"
+    },
+    "sourceRows": 102,
+    "modelKeyRows": 352,
+    "meaning": "descriptive current-source support; counts are not hardware or runtime acceptance",
+    "newRuntimeRegistration": false,
+    "coldNoHostAndAfterRealOffAccepted": false,
+    "hardwareAccepted": false,
+    "wholeGoalComplete": false
+  },
+  "familyNoVirtualConsumer128": {
+    "taskDate": "2026-11-13",
+    "humanRequirement": "同类型按共同根因做家族修复",
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "summary": {
+      "sourceRows": 102,
+      "modelKeyRows": 352,
+      "sourceRowsWithAnyImplementedOemKey": 91,
+      "canonicalKeyRowsDeclaredImplemented": 350,
+      "familyGroups": 13,
+      "allAreStaticRowsNotHardwareCounts": true
+    },
+    "defaultImpactBoundary": "existing implemented OEM keys through shared inputCapture consumer; all original per-model source/profile/authority gates retained",
+    "ayaLegacyAirGroup": [
+      "AYANEOAIR",
+      "AYANEOAIRLite",
+      "AYANEOAIRPro"
+    ],
+    "ayaDistinctCecGroupIncludes": [
+      "AYANEOAIR1S",
+      "AYANEOAIRPro1S"
+    ],
+    "notAllFamilyPhysicalOrRuntimeAcceptance": true,
+    "consumerThreadId": "01a12e67-8c00-7db3-b742-9307931b4056",
+    "newRuntimeMapping": false,
+    "wholeGoalComplete": false
+  },
+  "familySourceSuccessor129": {
+    "taskDate": "2026-11-13",
+    "humanRequirement": "记得作为家族能力而不是单独修复哦同类型一起修复bug",
+    "sourceRepairScope": "shared consumer and existing per-profile AYA observation; same-type family paths, not single-model registration",
+    "familyContract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "consumerHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\cold-return-aya-20261113\\HANDOFF.json",
+      "bytes": 1352,
+      "sha256": "6801b54c3d64d7683d3b50cc8eb8cc25675e32eaa1c6ce6ac6314c445d4554e2"
+    },
+    "consumerSourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\cold-return-aya-20261113\\SOURCE_READY.json",
+      "bytes": 5745,
+      "sha256": "e426eac83621f0254899afe687eae23949f24230612ead332d925a4b77c57d8f"
+    },
+    "sourceIntake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-129-COLD-RETURN-FAMILY-SUCCESSOR\\FINAL-SUCCESSOR-IDENTITY-INTAKE.json",
+      "bytes": 2422490,
+      "sha256": "1210a4209f5af429616186668a06fc21042765234d54440964774cd8c8ec9fa0"
+    },
+    "provenanceQualifications": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-129-COLD-RETURN-FAMILY-SUCCESSOR\\FINAL-SUCCESSOR-PROVENANCE-QUALIFICATIONS.json",
+      "bytes": 19390,
+      "sha256": "e97320e5be38aac118eed56ff89694bd7ed1ef3d94c46c427222ded5e7906c94"
+    },
+    "independentAyaFamilySourceReview": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-129-COLD-RETURN-FAMILY-SUCCESSOR\\aya-family-source-audit\\SOURCE-REVIEW.json",
+      "bytes": 31405,
+      "sha256": "ab84cad66120e60538f2851e14cf40588e69f7eff64e2be9b9d6897e94a1e5a6"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-129-COLD-RETURN-FAMILY-SUCCESSOR\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 3339,
+      "sha256": "4924783118a57734045e324d55dc84c5b91e1eea1c978ba564111b811418fcf9"
+    },
+    "sharedColdReturnCorrection": "RESOLVED_AT_SHARED_SOURCE_AND_BOUNDED_ENQUEUE_SCOPE",
+    "ayaFunctionKeyObservation": "existing-profile-only F10-F24; raw/hook/injected distinct; excludes Win+D/mouse",
+    "familyModelDifferencesPreserved": true,
+    "newRuntimeMapping": false,
+    "physicalAccepted": false,
+    "actualColdReturnAccepted": false,
+    "completeBuildAccepted": false,
+    "wholeLibraryComplete": false,
+    "originalTasksContinue": true
+  },
+  "sourceReconstructionSuccessor131": {
+    "taskDate": "2026-11-13",
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-131-SOURCE-RECONSTRUCTION-AND-GATE-OBSERVATION\\SOURCE-RECONSTRUCTION-INTAKE.json",
+      "bytes": 21450,
+      "sha256": "0498f50b293fef13e3c5d2617271d7b5ecd78b302f25a3c163df0e7b02f06106"
+    },
+    "status": "ACCEPTED_SOFTWARE_SCOPE_RECONSTRUCTED_TEXT_EQUALS_ORIGINAL_PINS",
+    "referenceCount": 14,
+    "distinctSources": 12,
+    "reconstructionAfterRun": true,
+    "originalColdAyaHandoffUnchanged": true,
+    "resolves": "HC129-R05 historical intermediate executor/fixture text missing only; original SDK before pins not recovered",
+    "historicalSdkBeforePinsStillUnknown": true,
+    "fullCompileIdentityAccepted": false,
+    "physicalAccepted": false,
+    "wholeLibraryComplete": false,
+    "originalConsumerContinues": true
+  },
+  "familyGateSoftwareEvidence132": {
+    "taskDate": "2026-11-13",
+    "handoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\gate-transition-20261113\\HANDOFF.json",
+      "bytes": 1242,
+      "sha256": "39876df27d5564761248e27fae9fdfe068a19b29ad1953851620774e861469e7"
+    },
+    "sourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\gate-transition-20261113\\SOURCE_READY.json",
+      "bytes": 4259,
+      "sha256": "ecb4d90a9dc13139efc7ce22637aa5dfa24d6448c8ea2858b31597ae4542e2ab"
+    },
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-132-GATE-REFRESH-BOUNDARY\\STABLE-GATE-DELIVERY-INTAKE.json",
+      "bytes": 741311,
+      "sha256": "227ea7cdb290208606bcf21842b7a05be678ad7a60021269676c16ad2ccc631d"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-132-GATE-REFRESH-BOUNDARY\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 2525,
+      "sha256": "1e896c8287b1cf313288cf31bc69dd1e82cc6a84e94e9ca2b5532f8f81856bcd"
+    },
+    "boundedSoftwareStatus": "ACCEPTED_SOFTWARE_SCOPE",
+    "prefixQualifiedFamilyAssertions": 78,
+    "prefixExtraCanonicalLookup": 1,
+    "tailAssertions": 84,
+    "wholeParentPass": false,
+    "models": [
+      "AYANEOAIRPro",
+      "ClawA1M",
+      "GPDWin5",
+      "OneXPlayerMiniAMD",
+      "AOKZOEA1",
+      "GamingZone"
+    ],
+    "rogScope": "qualified simulated Raw Input ownership only",
+    "hostHandlesAlwaysAbsent": true,
+    "actualBackendOffAndReturnAccepted": false,
+    "periodicSettingsRefreshOnly": true,
+    "miniAmdRepresentative": "orange; existing catalog unchanged",
+    "fullCompilerIdentityAccepted": false,
+    "physicalAccepted": false,
+    "goalStatus": "active",
+    "wholeLibraryComplete": false
+  },
+  "ordinaryOemPackage133": {
+    "taskDate": "2026-11-13",
+    "status": "ACCEPTED_SOFTWARE_SCOPE_PACKAGE_IDENTITY_ONLY",
+    "package": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-OEM-Native-Test-20261113-060357Z\\YeManCC.zip",
+      "bytes": 111748357,
+      "sha256": "9004a15422a437eb351c2d77b30810d168c93aba6a80d90a79ab09b98839b41d"
+    },
+    "nativeSha256": "121b019be858322b3b3feef23948eb1249678be74b0894bc95fe72308e6e2381",
+    "nativeBuildId": "d1675f4ede71c5c5f362a2c3db05886108c8ed17a8ef4b151139b5d9a3fbb106",
+    "buildId": "cdf949b08b451ecc92eaff94d59a55c0d4fdef01aac5d2aa5ef71083813e381d",
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-133-OEM-PACKAGE-SOURCE-PREFLIGHT\\STABLE-PACKAGE-INTAKE.json",
+      "bytes": 815332,
+      "sha256": "350f4a1d792e7b0bcc782bce255469926dc636b1f772e2bb78ef81c699566eaa"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-133-OEM-PACKAGE-SOURCE-PREFLIGHT\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 2954,
+      "sha256": "9420b84d58eda5ae1e229565acd24aeac14a6686b24fd3fc175f853e23971655"
+    },
+    "sourceEntries": 1785,
+    "buildPayload": 235,
+    "zipFiles": 619,
+    "actualHostOffReturnAccepted": false,
+    "physicalAccepted": false,
+    "fixtureValidation": "NOT_RUN",
+    "formalReleaseAccepted": false,
+    "goalStatus": "active",
+    "wholeLibraryComplete": false
+  },
+  "hostOffOemSoftwareComposition137": {
+    "taskDate": "2026-11-13",
+    "status": "ACCEPTED_SOFTWARE_SCOPE_TWO_KEYBOARD_SOURCE_REPRESENTATIVES",
+    "familyContract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "consumerHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\host-off-action-20261113\\HANDOFF.json",
+      "bytes": 2136,
+      "sha256": "a6d7b20da69e82490e9da3db67d8abb8d7290b9eba89373cef6d9a73896dcb3b"
+    },
+    "consumerSourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\host-off-action-20261113\\SOURCE_READY.json",
+      "bytes": 2134,
+      "sha256": "e619bdf7024a1f8294f502c9100314784c49e4f9edbce28d08732d114673493a"
+    },
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-137-OEM-HOST-OFF-ACTION-COMPOSITION.json",
+      "bytes": 1293,
+      "sha256": "00bba1594a16230a8825c2abaa5a10c1f97ff767ff0d5cf1ed31f5e272126acb"
+    },
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-137-OEM-HOST-OFF-ACTION-COMPOSITION\\STABLE-FINAL-DELIVERY-INTAKE.json",
+      "bytes": 40508,
+      "sha256": "b19670d6209999272c0e4e94144c1fc22dbabe57ad48e21c1412674f2638d6f4"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-137-OEM-HOST-OFF-ACTION-COMPOSITION\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 6775,
+      "sha256": "0f0a1e6711c4453ef817b3607d59f2ea47c47f629180a97d267ce7273ddc4efc"
+    },
+    "actualChecks": 174,
+    "models": [
+      "AYANEOAIRPro",
+      "GPDWin5"
+    ],
+    "actualPrivateManagedOffSoftwareAccepted": true,
+    "physicalHostOffOrOsEffectsAccepted": false,
+    "fullProductShutdownAccepted": false,
+    "priorAttempt001UnknownPreserved": true,
+    "newProductEdits": false,
+    "newRuntimeMapping": false,
+    "newPackage": false,
+    "wholeLibraryComplete": false,
+    "goalStatus": "active"
+  },
+  "hostOffFieldQualification139": {
+    "taskDate": "2026-11-13",
+    "status": "PARTIAL_FIELD_NOT_YET_QUALIFIED",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-139-OEM-FIELD-QUALIFICATION-AND-PATH-ERRATUM.json",
+      "bytes": 1571,
+      "sha256": "2e442a95a0bf9033f08b87bff3cb8110ff68c4611aa4502a4ff2384b27185c91"
+    },
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-139-OEM-FIELD-QUALIFICATION-AND-PATH-ERRATUM\\STABLE-FIELD-DELIVERY-INTAKE.json",
+      "bytes": 14651,
+      "sha256": "00d325deddc574bad10f266aa9bda33d3984b0bf8d42482e644bd363d0b6536f"
+    },
+    "pathErratum": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-139-OEM-FIELD-QUALIFICATION-AND-PATH-ERRATUM\\HC137-C05-PACKAGE-PATH-ERRATUM.json",
+      "bytes": 1381,
+      "sha256": "0ce3ad5a014096b1d34129d9d9cc7722764f5843acecd5898f2ac3a2bde31991"
+    },
+    "correctPackageHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\package-intake-20261113\\HANDOFF.json",
+      "bytes": 1802,
+      "sha256": "3ca54447ca3d29440357fa9924df4996037202391a88aa811ca798424e6da0c9"
+    },
+    "fieldHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\field-intake-20261113\\HANDOFF.json",
+      "bytes": 2072,
+      "sha256": "83ead046b1ac0629b02bbfb8dfc7ec873d7e9f713b4f3d3fea0ff4ae14801f72"
+    },
+    "twoExportedGlobalCustomTablesEmpty": true,
+    "defaultActionAbsenceProven": false,
+    "loadedCandidateProven": false,
+    "physicalOemBehaviorAccepted": false,
+    "newRuntimeMapping": false,
+    "wholeLibraryComplete": false,
+    "goalStatus": "active"
+  },
+  "win5NativeOnlyPositiveField142": {
+    "taskDate": "2026-11-13",
+    "status": "PARTIAL_POSITIVE_NATIVE_ONLY_WINDOW_FIELD",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD.json",
+      "bytes": 1159,
+      "sha256": "205232184eb90c198210fd1496aaa6265552c97c53df99748cba9f0f05b64d04"
+    },
+    "archive": {
+      "path": "G:\\YeManCC-Work\\日志\\Win5\\YeManCC-logs-20261113-153718-潜行者2失败.zip",
+      "bytes": 12830720,
+      "sha256": "07b37b05a58c7190d0e9ced7d083d2283201da9d8f27b93a6c1af794f76a360b"
+    },
+    "fieldRows": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD\\STABLE-FIELD-ROWS-AND-PHASES.json",
+      "bytes": 14398,
+      "sha256": "7093737b1368569e5f03a1bf874707ce03f040110e53b4b16aff612261314221"
+    },
+    "package": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD\\SELECTED-PACKAGE-IDENTITY.json",
+      "bytes": 1566,
+      "sha256": "2919611e298394776a4014c5ffe5cc870d0f738bb6359b065fba91ecc39b26a2"
+    },
+    "selectedSourceComparison": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD\\OEM-SELECTED-SOURCE-COMPARISON.json",
+      "bytes": 5076,
+      "sha256": "9e2ab3912fcce3da6b60ad23ed45e5fd9b929974b5676cd577506e2c19bbaeb3"
+    },
+    "humanFeedback": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD\\ORIGINAL-CONSUMER-HUMAN-FEEDBACK.json",
+      "bytes": 645,
+      "sha256": "a6b7c757c25459c9e1c9cbccd42c99fbbafb4ad59b9b9864759bbe1c2598473b"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 3921,
+      "sha256": "a938bc81cb14bb2f75914672f5038ba1f42519b6e27d86d8a4603167577c1bed"
+    },
+    "positiveWindowFeedbackAccepted": true,
+    "triggerKeyUnknown": true,
+    "customBoundActionAccepted": false,
+    "physicalOemSuppressionAccepted": false,
+    "wholeGpdFamilyPhysicalAccepted": false,
+    "newRuntimeMapping": false,
+    "wholeLibraryComplete": false,
+    "goalStatus": "active"
+  },
+  "win5GamepadFieldClarification143": {
+    "taskDate": "2026-11-13",
+    "status": "PARTIAL_WIN5_GAMEPAD_HUMAN_FIELD_CONFIRMED",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-143-WIN5-GAMEPAD-FAMILY-FIELD-CLARIFICATION.json",
+      "bytes": 1303,
+      "sha256": "bb46c702eac0927c16d7142b80b5d3df79e7db6f7d5d51990b8a39cc49692f52"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-143-WIN5-GAMEPAD-FAMILY-FIELD-CLARIFICATION\\FINAL-RESULT.json",
+      "bytes": 3331,
+      "sha256": "f581b4e25312efdac659adc3db49bc44d13606869a5581f57e0aa9fa4c1d28eb"
+    },
+    "consumerHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\field-win5-153718-20261113\\HANDOFF.json",
+      "bytes": 1227,
+      "sha256": "19adc053ede439bfd0878cb8f5f7ceddb9470d38d6afd919ae9456784a7f30c4"
+    },
+    "evidence": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-143-WIN5-GAMEPAD-FAMILY-FIELD-CLARIFICATION\\OWNER-FIELD-INTAKE.json",
+      "bytes": 47379,
+      "sha256": "c081849794e9018f5abe0c7aa5b7b82a2ca76336694b0365807406d91a64437d"
+    },
+    "humanClarification": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-143-WIN5-GAMEPAD-FAMILY-FIELD-CLARIFICATION\\DIRECT-HUMAN-KEY-CLARIFICATION.json",
+      "bytes": 1369,
+      "sha256": "a792943ab0e2062cb00134261e84d97ab3cc4e48b7a0c5d902fef2a33bcbe6d3"
+    },
+    "familyContract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "supersedesHistorical142TriggerKeyUnknownForHumanAttributionOnly": true,
+    "physicalTriggerKeyHumanConfirmed": true,
+    "keyId": "gamepad",
+    "rawSourceToEachActionProven": false,
+    "savedCustomBoundActionAccepted": false,
+    "physicalOemSuppressionAccepted": false,
+    "wholeGpdFamilyPhysicalAccepted": false,
+    "newRuntimeMapping": false,
+    "wholeLibraryComplete": false,
+    "goalStatus": "active"
+  },
+  "familyConsumerConsultation144": {
+    "taskDate": "2026-11-13",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-144-FAMILY-CONSUMER-CONSULT-AND-SLEEP-CONTACT.json",
+      "bytes": 1382,
+      "sha256": "36ef640482300dfb2a8e806f8b7741153be771f804811cf0ba564e7ef6586878"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-144-FAMILY-CONSUMER-CONSULT-AND-SLEEP-CONTACT\\FINAL-RESULT.json",
+      "bytes": 3901,
+      "sha256": "f343356eb95fd6c005a64fa70dedb3311aaa3f45a5aab4607bcc3c341e3eb77e"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-144-FAMILY-CONSUMER-CONSULT-AND-SLEEP-CONTACT\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 5106,
+      "sha256": "37640ae96b3d61b2f9c400563547b1e47865e85cd8b2a1b5733d4caba811b3a6"
+    },
+    "familyContract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "gpdObservationSoftwareAccepted": true,
+    "newModelOrAlias": false,
+    "newActionOrSuppressionProof": false,
+    "mixedOwnerConsumerPending": true,
+    "threeOldFunctionPrefixComparisonsCorrected": true,
+    "wholeLibraryComplete": false
+  },
+  "mixedRetainedOwnerAdmission145": {
+    "taskDate": "2026-11-13",
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-145-FAMILY-MIXED-OEM-OWNER-ADMISSION\\FINAL-RESULT.json",
+      "bytes": 3890,
+      "sha256": "8e7b661082152db4899dae7a8fe5f6cfd06261794ccbeda1c604c721892b3917"
+    },
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-145-FAMILY-MIXED-OEM-OWNER-ADMISSION.json",
+      "bytes": 1352,
+      "sha256": "847e8e8011a74d00e0946dd0b21fcbbc1e8b35954821256ff4c9d159299b9c72"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-145-FAMILY-MIXED-OEM-OWNER-ADMISSION\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 3754,
+      "sha256": "f48e25b333854f597799b8ab564d95071dd9d229abef27de4b5ff466f9d1876c"
+    },
+    "sourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\oem-mixed-owner-20261113\\SOURCE_READY.json",
+      "bytes": 7546,
+      "sha256": "2701cb7712fd8e5305033a9425a53d88058d989801ed42bbdec5603a393d35cd"
+    },
+    "familyContract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "retainedMixedControllerAdmissionSoftwareAccepted": true,
+    "pureOemIndependent": true,
+    "observedControlledChecks": 56,
+    "allFamilyPhysicalAccepted": false,
+    "afterQueueOwnerBoundaryAccepted": false,
+    "newRuntimeMapping": false,
+    "wholeLibraryComplete": false
+  },
+  "recordingDefinitionConsumption164": {
+    "schemaVersion": 1,
+    "atHongKong": "2026-11-14T01:02:57.596793+08:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-164-RECORDED-KEY-DEFINITIONS-SOURCE-ACCEPTANCE.json",
+      "bytes": 1364,
+      "sha256": "5af84c7c07e75281fe7064130eb6cd5b3567f07cc3888774f2d79b050af37592"
+    },
+    "sourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\recording-definitions-20261113\\SOURCE_READY.json",
+      "bytes": 6050,
+      "sha256": "60801d165dbbeba9e06cfa4f8a840251b0921851def9b2a4f7e50100818df969"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-164-RECORDED-KEY-DEFINITIONS-SOURCE-ACCEPTANCE\\CONDITIONS-AND-HC163-RESOLUTION.json",
+      "bytes": 1843,
+      "sha256": "e57bf3998ea3daa1d6b70da428ff55196ab01abe093717826cf48097c4153a47"
+    },
+    "scope": "Existing family-bound read-only recording-definition/presentation consumer and exact scoped mainline import",
+    "sourceOnly": true,
+    "noNewCapabilityOrProtocolRows": true,
+    "noCrossSourceAutomaticMerge": true,
+    "preservesSavedF13PressAndDistinctHomeKeyboardRearIds": true,
+    "softwareEvidence": {
+      "nativeDefinitionsControlledChecks": 158,
+      "uiChecks": 31,
+      "uiHeights": [
+        720,
+        800
+      ],
+      "normalizationChecks": 19,
+      "countsAreSeparateNotPhysicalOrCombinedFamilyPass": true,
+      "typecheck": "fixed-private-source",
+      "ownedJobsZeroBeforeDispose": 14
+    },
+    "hc163ConditionsClosed": [
+      "HC163-C01",
+      "HC163-C02"
+    ],
+    "completeNativeWebPackage": false,
+    "physicalSuccessForThisNewSource": false,
+    "previousWin5HumanSuccessReview": "HC161",
+    "wholeLibraryComplete": false,
+    "next": "Next natural matching paired build; no new export/retest/device request."
+  }
 }

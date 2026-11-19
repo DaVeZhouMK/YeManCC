@@ -7,8 +7,104 @@ static int checks=0;static void check(bool ok,const char* why){++checks;if(!ok)t
 static bool until(const std::function<bool()>& fn,DWORD ms=3000){const auto end=GetTickCount64()+ms;do{if(fn())return true;Sleep(10);}while(GetTickCount64()<end);return false;}
 static Json target(int id){return {{"appId",id},{"verified",true},{"name","isolated recovery fixture"}};}
 static int child(wchar_t** argv){const auto root=custom_steam_library::configuredDataRoot();Queue q(root);const auto token=utf8(argv[4]);q.update(token,[](Json& j){j["workerPid"]=GetCurrentProcessId();j["workerBirth"]=processBirthToken(GetCurrentProcessId());});atomicWrite(root/L"started.json",{{"pid",GetCurrentProcessId()}});const auto item=q.claim(token);if(item.is_object())q.result(token,item.value("key",std::string{}),true);q.end(token,"complete");return 0;}
+static void cachedSummaryUpgrade(const fs::path& base,const Json& legacy){
+ Queue idle(base/L"cache-upgrade-idle");idle.enqueue(Json::array({target(570)}));
+ const auto queueFile=idle.root()/L"config"/L"game-media-downloads.json",statusFile=idle.root()/L"config"/L"game-media-download-progress.json";
+ auto durable=idle.document();durable["jobs"]["steam-570"]["state"]="done";
+ auto tool=legacy;tool["state"]="pending";tool["autoStopped"]=false;tool["attempts"]=1;tool.erase("stopReason");durable["jobs"]["steam-228980"]=tool;
+ durable["statusRevision"]=durable.value("statusRevision",uint64_t{0})+1;atomicWrite(queueFile,durable);
+ auto old=idle.snapshot();old.erase("summaryPolicyVersion");old["total"]=2;old["completed"]=1;old["remaining"]=1;old["nextDueAt"]=0;old["sourceCounts"]["steamNative"]=1;
+ atomicWrite(statusFile,old);const auto idleStamp=fs::last_write_time(statusFile);const auto visible=idle.snapshot();
+ const bool readOnly=read(statusFile)==old&&fs::last_write_time(statusFile)==idleStamp;
+ const bool repaired=idle.recheck();const auto stored=read(statusFile),saved=idle.document();
+ const auto queueStamp=fs::last_write_time(queueFile),statusStamp=fs::last_write_time(statusFile);
+ const bool again=idle.recheck();const bool idleStable=read(statusFile)==stored&&idle.document()==saved&&fs::last_write_time(queueFile)==queueStamp&&fs::last_write_time(statusFile)==statusStamp;
+
+ Queue active(base/L"cache-upgrade-active");active.enqueue(Json::array({target(570)}));const auto token=active.start();
+ check(!token.empty()&&stringField(active.claim(token),"key")=="steam-570","cache upgrade fixture owns the ordinary active task");
+ check(active.update(token,[&](Json& j){j["workerPid"]=GetCurrentProcessId();j["workerBirth"]=processBirthToken(GetCurrentProcessId());j["jobs"]["steam-228980"]=tool;}),"cache upgrade fixture publishes its exact live owner");
+ check(active.resource("",0,0),"cache upgrade fixture has a healthy resource receipt");Sleep(2);
+ check(active.progress(token,"steam-570","downloading",321,1024),"cache upgrade fixture advances real queue progress");active.resumed(token,"steam-570",128);
+ const auto activeQueue=active.root()/L"config"/L"game-media-downloads.json",activeStatus=active.root()/L"config"/L"game-media-download-progress.json";
+ const auto activeDurable=active.document();const auto progress=read(activeStatus);
+ const auto stale=[&]{auto j=read(activeStatus);j.erase("summaryPolicyVersion");j["total"]=2;j["remaining"]=2;j["nextDueAt"]=0;j["sourceCounts"]["steamNative"]=1;atomicWrite(activeStatus,j);};
+ stale();const auto activeVisible=active.snapshot();const bool activeRepaired=active.recheck();const auto activeStored=read(activeStatus);const auto activeSaved=active.document();
+ const auto activeQueueStamp=fs::last_write_time(activeQueue),activeStatusStamp=fs::last_write_time(activeStatus);
+ const bool activeAgain=active.recheck();const bool activeStable=active.document()==activeSaved&&read(activeStatus)==activeStored&&fs::last_write_time(activeQueue)==activeQueueStamp&&fs::last_write_time(activeStatus)==activeStatusStamp;
+ stale();const auto configuredBefore=read(activeStatus);active.configure(activeSaved.value("enabled",true),stringField(activeSaved,"pauseReason"),activeSaved.value("cpuThreshold",15));const auto configured=read(activeStatus);
+ stale();const auto resourceBefore=read(activeStatus);const bool resourceOk=active.resource("",0,0);const auto resource=read(activeStatus);
+ auto foreign=resource;foreign["session"]="foreign-session";foreign["bytes"]=999;foreign["active"]["steam-570"]["bytes"]=999;atomicWrite(activeStatus,foreign);
+ const auto foreignVisible=active.snapshot();const bool foreignRepaired=active.recheck();
+ const auto current=read(activeStatus);const auto resumed=current.value("sessionResumedBytes",uint64_t{0});
+ active.result(token,"steam-570",true);active.end(token,"completed");
+ atomicWrite(base/L"cache-upgrade-observations.json",{{"idle",{{"old",old},{"visible",visible},{"readOnly",readOnly},{"repaired",repaired},{"stored",stored},{"again",again},{"stable",idleStable},{"jobsPreserved",saved["jobs"]==durable["jobs"]}}},
+  {"active",{{"durable",activeDurable},{"progress",progress},{"visible",activeVisible},{"repaired",activeRepaired},{"stored",activeStored},{"saved",activeSaved},{"again",activeAgain},{"stable",activeStable},{"configuredBefore",configuredBefore},{"configured",configured},{"resourceBefore",resourceBefore},{"resourceOk",resourceOk},{"resource",resource},{"foreignVisible",foreignVisible},{"foreignRepaired",foreignRepaired},{"resumed",resumed}}}});
+ check(visible.value("total",0)==1&&visible.value("remaining",1)==0&&visible.value("nextDueAt",int64_t{0})==-1,"old same-revision cache must not retain excluded totals or a runnable deadline");
+ check(readOnly,"cache upgrade snapshot rebuilds derived state without writing");
+ check(repaired&&stored.value("summaryPolicyVersion",0)==1&&stored.value("total",0)==1,"existing recheck repairs old summary policy once");
+ check(!again&&idleStable&&saved["jobs"]==durable["jobs"],"healthy cache recheck stays write-idle and preserves all historical jobs");
+ check(progress.value("bytes",uint64_t{0})>activeDurable.value("bytes",uint64_t{0}),"active fixture has newer live bytes than its durable checkpoint");
+ const auto retained=[&](const Json& j){return j.value("bytes",uint64_t{0})==321&&j.value("totalBytes",uint64_t{0})==1024&&j.value("resumedBytes",uint64_t{0})==128&&j["active"]["steam-570"].value("bytes",uint64_t{0})==321;};
+ check(activeVisible.value("total",0)==1&&activeVisible.value("remaining",0)==1&&activeVisible.value("nextDueAt",int64_t{0})==-1&&retained(activeVisible),"old cache counts are rebuilt while valid owner progress remains visible");
+ check(activeRepaired&&activeStored.value("summaryPolicyVersion",0)==1&&retained(activeStored)&&retained(activeSaved),"repair preserves newer bytes and resumed progress for the same owner");
+ check(!activeAgain&&activeStable,"repaired active owner does not cause repeated writes");
+ check(configured.value("summaryPolicyVersion",0)==1&&configured.value("total",0)==1&&retained(configured)&&configured.value("statusRevision",uint64_t{0})>configuredBefore.value("statusRevision",uint64_t{0}),"unchanged configure upgrades old cached summary without losing progress");
+ check(resourceOk&&resource.value("summaryPolicyVersion",0)==1&&resource.value("total",0)==1&&retained(resource)&&resource.value("statusRevision",uint64_t{0})>resourceBefore.value("statusRevision",uint64_t{0}),"healthy resource receipt upgrades old cached summary without losing progress");
+ check(foreignVisible.value("bytes",uint64_t{0})==321&&foreignRepaired&&resumed==128,"summary upgrade never imports foreign-owner progress");
+}
+static void unavailableStatus(const fs::path& base,const fs::path& captured={}){
+ Queue q(base/L"unavailable-status");q.enqueue(Json::array({target(3551360),target(2676230),target(2051010)}));const auto token=q.start();for(const auto app:{3551360,2676230}){const auto entry=q.claim(token);q.result(token,stringField(entry,"key"),true,app==3551360?"store-unavailable":"not-game-or-no-video");}const auto entry=q.claim(token);q.result(token,stringField(entry,"key"),false,"media-size-invalid");q.end(token,"deferred");const auto state=q.snapshot();check(state.value("unavailable",0)==2&&state.value("remaining",0)==1,"unsupported items are skipped instead of occupying failed remainder");check(state.value("reason",std::string{})=="media-size-invalid","finished unavailable entry cannot hide the real pending failure");check(state["history"].back().value("reason",std::string{})=="media-size-invalid","history records resolved interruption reason");q.requestSupplement(true);const auto jobs=q.document()["jobs"];check(jobs["steam-2051010"].value("attempts",9)==0&&jobs["steam-3551360"].value("state",std::string{})=="pending","new explicit manual request retries skipped and failed jobs with a fresh budget");
+ q.cancelManual();
+ auto checkpoint=q.document();auto legacy=target(228980);legacy["sourceTier"]=1;legacy["catalogSource"]="steam-native";
+ legacy["state"]="unavailable";legacy["autoStopped"]=true;legacy["attempts"]=3;legacy["automaticElapsedMs"]=1234;legacy["retryAt"]=0;
+ legacy["lastError"]="store-unavailable";legacy["stopReason"]="store-unavailable";legacy["unknownHistory"]={{"keep",7}};
+ checkpoint["jobs"]["steam-228980"]=legacy;checkpoint["statusRevision"]=checkpoint.value("statusRevision",uint64_t{0})+1;atomicWrite(q.root()/L"config"/L"game-media-downloads.json",checkpoint);
+ const auto beforeManual=q.snapshot();q.requestSupplement(true);const auto afterManual=q.document();
+ auto scoped=afterManual;scoped["manualTargets"]=Json::array({"steam-228980"});scoped["jobs"]["steam-228980"]["state"]="pending";
+ const bool scopedDone=manualTargetsComplete(scoped)&&manualWorkComplete(scoped);
+ q.inventoryReady(stringField(q.document(),"inventoryRequestId"));const auto run=q.start();check(!run.empty(),"bulk fixture starts after inventory acknowledgement");Json claimed=Json::array();for(int n=0;n<8;++n){const auto row=q.claim(run);if(row.is_null())break;claimed.push_back(row["key"]);q.result(run,stringField(row,"key"),true);}q.end(run,"completed");
+ bool targetedRejected=false;try{q.requestSupplement(true,"steam-228980");}catch(const std::exception& e){targetedRejected=std::string(e.what())=="media-download-target-unavailable";}
+ Queue fresh(base/L"excluded-admission");fresh.enqueue(Json::array({target(228980),target(570)}));const auto freshState=fresh.snapshot();
+ const auto freshMedia=read(fresh.root()/L"config"/L"game-media.json");
+ Queue active(base/L"excluded-active");active.enqueue(Json::array({target(570)}));active.requestSupplement(true);active.inventoryReady(stringField(active.document(),"inventoryRequestId"));const auto activeToken=active.start();check(!activeToken.empty(),"active fixture starts after inventory acknowledgement");
+ active.update(activeToken,[&](Json& value){
+   value["jobs"]["steam-570"]["state"]="done";auto item=legacy;item["state"]="running";item["autoStopped"]=false;item["attempts"]=0;item["automaticElapsedMs"]=0;item.erase("stopReason");
+   value["jobs"]["steam-228980"]=item;item["key"]="steam-228980";item["session"]=activeToken;item["taskStartedAt"]=now();item["attemptBudgetMs"]=automaticAttemptMs;
+   value["active"]["steam-228980"]=item;value["current"]=item;value["workerPid"]=GetCurrentProcessId();value["workerBirth"]=processBirthToken(GetCurrentProcessId());
+ });
+ const auto activeState=active.snapshot();const bool activeComplete=manualWorkComplete(active.document());
+ active.result(activeToken,"steam-228980",true,"store-unavailable");const auto settled=active.snapshot();active.end(activeToken,"completed");
+ Json field=Json::object();
+ if(!captured.empty()){
+   const auto imported=read(captured);check(imported.contains("jobs")&&imported["jobs"].size()==67&&imported["jobs"].contains("steam-228980"),"explicit captured fixture is not the selected Win5 checkpoint");
+   check(imported.value("workerPid",DWORD{0})==0&&imported.value("active",Json::object()).empty(),"field replay accepts only the original idle checkpoint");
+   const auto replayRoot=base/L"field-replay";atomicWrite(replayRoot/L"config"/L"game-media-downloads.json",imported);Queue replay(replayRoot);
+   field={{"snapshot",replay.snapshot()},{"jobsPreserved",replay.document()["jobs"]==imported["jobs"]}};
+ }
+ atomicWrite(base/L"excluded-tool-observations.json",{{"beforeManual",beforeManual},{"legacyBefore",legacy},{"legacyAfterManual",afterManual["jobs"]["steam-228980"]},
+   {"claimed",claimed},{"scopedComplete",scopedDone},{"targetedRejected",targetedRejected},{"fresh",freshState},{"freshMedia",freshMedia},
+   {"active",activeState},{"activeComplete",activeComplete},{"settled",settled},{"field",field}});
+ check(beforeManual.value("total",0)==3&&beforeManual["sourceCounts"].value("steamNative",1)==0,"excluded legacy tool must not inflate visible task counts");
+ check(afterManual["jobs"]["steam-228980"]==legacy,"manual bulk retry preserves excluded tool history and debt");
+ check(std::find(claimed.begin(),claimed.end(),Json("steam-228980"))==claimed.end()&&claimed.size()==3,"excluded legacy tool never occupies a new worker claim");
+ check(scopedDone,"inactive excluded-only manual scope completes without a restart loop");
+ check(targetedRejected,"explicit excluded-tool request is refused before resetting its history");
+ check(freshState.value("total",0)==1&&!fresh.document()["jobs"].contains("steam-228980")&&!freshMedia.value("entries",Json::object()).contains("steam-228980"),"excluded tool admission creates no queue job or media entry");
+ check(activeState.value("total",0)==2&&activeState.value("remaining",0)==1&&activeState.value("activeCount",0)==1&&!activeComplete,"already-owned legacy tool activity remains visible until settled");
+ check(settled.value("total",0)==1&&settled.value("remaining",1)==0&&settled.value("activeCount",1)==0,"settled legacy tool no longer pollutes visible counts");
+ if(!captured.empty())check(field["snapshot"].value("total",0)==66&&field["snapshot"].value("unavailable",0)==7&&field["jobsPreserved"]==true,"selected Win5 replay excludes one tool while preserving all67 historical jobs");
+ cachedSummaryUpgrade(base,legacy);
+}
 int wmain(int argc,wchar_t** argv){try{
  if(argc>=5&&std::wstring_view(argv[1])==L"--media-background")return child(argv);
+ if(argc>=3&&std::wstring_view(argv[2])==L"--unavailable-status"){
+  if(argc!=3&&argc!=4)throw std::runtime_error("unavailable-status takes a fresh root and optional captured checkpoint");
+  const auto base=fs::absolute(argv[1]);if(fs::exists(base))throw std::runtime_error("fresh root required");fs::create_directories(base);
+  Json result={{"selection","unavailable-status"},{"cases",Json::array()}};bool ok=true;
+  try{unavailableStatus(base,argc==4?fs::absolute(argv[3]):fs::path{});result["cases"].push_back({{"name","unavailable-status"},{"ok",true}});}
+  catch(const std::exception& e){ok=false;result["cases"].push_back({{"name","unavailable-status"},{"ok",false},{"error",e.what()}});}
+  result["ok"]=ok;result["checks"]=checks;atomicWrite(base/L"result.json",result);std::cout<<result.dump()<<std::endl;return ok?0:1;
+ }
  if(argc!=2)throw std::runtime_error("new isolated root required");const auto base=fs::absolute(argv[1]);if(fs::exists(base))throw std::runtime_error("fresh root required");fs::create_directories(base);
  for(const int threshold:{5,15,50,90}){CpuGate gate;check(std::string(gate.observe(double(threshold+1),threshold,1000))=="cpu-busy","above saved threshold still pauses");const double calm=threshold-(std::clamp)(threshold/10,1,3)-.25;check(std::string(gate.observe(calm,threshold,2000))=="cpu-recovering","nonzero low-threshold load can recover");check(std::string(gate.observe(calm,threshold,11999))=="cpu-recovering","ten-second stability is mandatory");check(std::string(gate.observe(calm,threshold,12000)).empty(),"low and high thresholds recover without zero-load requirement");}
  {CpuGate gate;gate.observe(80,15,1000);gate.observe(10,15,2000);check(std::string(gate.observe(std::nullopt,15,12000))=="cpu-unknown","unknown sample never bypasses protection");check(std::string(gate.observe(10,15,13000))=="cpu-recovering","unknown interval restarts calm confirmation");check(std::string(gate.observe(10,15,23000)).empty(),"confirmed calm resumes");}
@@ -16,7 +112,7 @@ int wmain(int argc,wchar_t** argv){try{
  {CpuReader reader;check(!reader.read(1000).has_value(),"fresh CPU reader requires a sample pair");Sleep(25);check(reader.read(1025).has_value(),"short confirmation obtains real CPU delta");check(!reader.read(70000).has_value(),"minute gap does not reuse stale CPU delta");Sleep(25);check(reader.read(70025).has_value(),"after minute sleep the next short sample recovers instead of staying unknown");}
  {Queue q(base/L"old-snapshot");q.enqueue(Json::array({target(570)}));const auto token=q.start();q.claim(token);q.update(token,[](Json& j){j["active"]["steam-570"]["session"]="stale-session";});check(q.recheck(),"normalization repairs stale active-session metadata");check(q.snapshot().value("nextDueAt",int64_t{-1})>=0,"normalized state refreshes small deadline snapshot");check(!q.recheck(),"repaired metadata does not cause repeated writes");q.update(token,[](Json& j){j["active"]=Json::object();j["jobs"]["steam-570"]["state"]="running";j["workerPid"]=0;});check(q.recheck()&&q.document()["jobs"]["steam-570"]["state"]=="pending","pre-upgrade orphan without active map is recovered");}
  {const auto root=base/L"manual-cache-backoff";Store store(root);Queue q(root);auto lease=store.begin(target(570));lease["reason"]="media-network-read-failed";store.fail(lease);check(!store.begin(target(570)).value("acquired",false),"automatic admission still honors store backoff");q.enqueue(Json::array({target(570)}));q.requestSupplement(true);const auto manual=stringField(q.snapshot(),"manualRequestId");auto retry=store.begin(target(570),manual);check(retry.value("acquired",false),"one explicit manual request bypasses retained store backoff");check(!store.begin(target(570),randomId()).value("acquired",false),"manual retry never steals a live preparation lease");retry["reason"]="media-network-read-failed";store.fail(retry);check(!store.begin(target(570),manual).value("acquired",false),"same request cannot repeatedly reset the store failure budget");check(store.resolve(target(570)).value("attempts",0)==1,"new explicit attempt has a fresh bounded retry budget");auto skipped=store.begin(target(570),randomId());skipped["videoUnavailable"]=true;skipped["staticUnavailable"]=true;store.finish(skipped);q.cancelManual();q.requestSupplement(true);check(store.begin(target(570),stringField(q.snapshot(),"manualRequestId")).value("acquired",false),"new manual request can recheck previously unavailable metadata");}
- {Queue q(base/L"unavailable-status");q.enqueue(Json::array({target(228980),target(2676230),target(2051010)}));const auto token=q.start();for(const auto app:{228980,2676230}){const auto entry=q.claim(token);q.result(token,stringField(entry,"key"),true,app==228980?"store-unavailable":"not-game-or-no-video");}const auto entry=q.claim(token);q.result(token,stringField(entry,"key"),false,"media-size-invalid");q.end(token,"deferred");const auto state=q.snapshot();check(state.value("unavailable",0)==2&&state.value("remaining",0)==1,"unsupported items are skipped instead of occupying failed remainder");check(state.value("reason",std::string{})=="media-size-invalid","finished unavailable entry cannot hide the real pending failure");check(state["history"].back().value("reason",std::string{})=="media-size-invalid","history records resolved interruption reason");q.requestSupplement(true);const auto jobs=q.document()["jobs"];check(jobs["steam-2051010"].value("attempts",9)==0&&jobs["steam-228980"].value("state",std::string{})=="pending","new explicit manual request retries skipped and failed jobs with a fresh budget");}
+ unavailableStatus(base);
  wchar_t self[32768]{};GetModuleFileNameW(nullptr,self,32768);
  const auto setup=[&](const fs::path& root){fs::create_directories(root);fs::copy_file(self,root/L"CustomSteamLibrary.exe");atomicWrite(root/L"package-manifest.json",{{"backgroundMediaProtocol",1},{"backgroundCatalogProtocol",1},{"backgroundIdentityProtocol",1},{"backgroundVideoQualityPolicy",2},{"backgroundManualProtocol",1},{"backgroundVideoSelectionProtocol",1}});SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",root.c_str());};
  {const auto root=base/L"missed-ac";setup(root);Queue q(root);q.enqueue(Json::array({target(570)}));std::atomic<int> ac{0};std::atomic<int> cpuReads{0};Supervisor owner(root,root/L"CustomSteamLibrary.exe",Limits{5000,10000,20000,20,0,100},ResourcePorts{[&]{return ac.load();},[&](uint64_t){++cpuReads;return std::optional<double>{0};}});q.configure(true,"");owner.wake(true);check(until([&]{return q.snapshot().value("resourcePauseReason",std::string{})=="on-battery";}),"battery correctly blocks launch");check(!fs::exists(root/L"started.json")&&cpuReads==0,"battery fallback never starts helper or samples CPU");ac=1;check(until([&]{return q.snapshot().value("completed",0)==1;}),"missed power event recovers through slow supervisor timer");const auto reads=cpuReads.load();Sleep(250);check(cpuReads==reads,"completed owner stops resource sampling");}

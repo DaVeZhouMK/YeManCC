@@ -66,6 +66,18 @@ public:
         if (phase_ == "expired" && persona_ == persona) return {true,id_,false};
         return beginLocked(persona, now);
     }
+    // VC-PREHOST-WRITER-RECOVERY-20261111-R1: a classified, already
+    // returned native writer can leave its exact ON request expired before a
+    // Host existed. Only the bounded runtime owner may request a DISTINCT
+    // recovery period. Ordinary consume keeps returning the expired old ID.
+    Admission admitRecoveryAfterTerminal(Tick expected,const std::string& persona,Tick now) {
+        std::lock_guard<std::mutex> guard(mx_);
+        const auto current=viewLocked(now);
+        if(!expected || current.requestId!=expected || current.persona!=persona ||
+                persona.empty() || persona=="disabled" || current.locked ||
+                (current.phase!="failure" && current.phase!="expired"))return {};
+        return beginLocked(persona,now);
+    }
     Tick pendingTicket(const std::string& persona, Tick now) {
         std::lock_guard<std::mutex> guard(mx_);
         const auto view = viewLocked(now);

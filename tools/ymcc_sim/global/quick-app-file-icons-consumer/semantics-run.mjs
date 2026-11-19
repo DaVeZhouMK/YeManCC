@@ -55,17 +55,25 @@ export async function execute({repoRoot,outDir}) {
     const view=fs.readFileSync(path.join(repo,'src/views/QuickAppView.vue'),'utf8');
     const component=fs.readFileSync(path.join(repo,'src/components/QuickAppIcon.vue'),'utf8');
     assert(view.includes('return quickAppIconKind(app);')&&view.includes('return quickAppIconVariant(app);')&&view.includes(':app-path="app.path"')&&component.includes('if (!path || isDefaultQuickAppPath(path)) return;'),'FORMAL_SEMANTICS_CONSUMER_NOT_FOUND');
-    for(const fault of spec.faults)assert.equal(source[fault.source]?.split(fault.before).length,2,'EXACT_FAULT_ANCHOR_CHANGED:'+fault.id);
+    for(const [role,relative] of [['defaults',spec.defaultsSource],['icons',spec.productSource]]) {
+      assert.equal(sha(source[role]),inputs.find(row=>row.path===relative)?.sha256,'COMPILE_INPUT_NOT_PINNED:'+role);
+    }
+    for(const fault of spec.faults) {
+      assert(fault.before!==fault.after,'NO_OP_FAULT:'+fault.id);
+      assert.equal(source[fault.source]?.split(fault.before).length,2,'EXACT_FAULT_ANCHOR_CHANGED:'+fault.id);
+    }
     write(out+'/inputs.json',{schemaVersion:1,prototypeOnly:prototype,sources:[...inputs,...own],authority,helpers,
       legacyCasesExecuted:0,actualUiConsumerExecuted:false,allowedProductRequires:spec.allowedProductRequires});
     process.env.ESBUILD_WORKER_THREADS='0';process.env.ESBUILD_BINARY_PATH=authority.compilerBinary;
     const forbidden=()=>{throw Error('QUICK_ICON_SEMANTICS_UNREVIEWED_CHILD_PROCESS_REFUSED');};
+    const compilerPin=authority.tools.find(row=>key(row.path)===key(authority.compilerBinary));
     for(const name of ['spawn','spawnSync','exec','execSync','execFile','fork'])cp[name]=forbidden;
     cp.execFileSync=function(file,args,options) {
       assert.equal(key(noRedirect(file)),key(authority.compilerBinary),'UNBOUND_COMPILER');
       assert(args.length===1&&args[0]==='--service='+authority.compilerVersion,'UNREVIEWED_COMPILER_ARGUMENTS');
       assert(options?.input,'COMPILER_PROTOCOL_INPUT_REQUIRED');
       const before=hash(file),row={path:file,sha256:before,args:[...args],inputSha256:sha(options.input),naturalExit:false};
+      assert.equal(before,compilerPin?.sha256,'BOUND_COMPILER_CHANGED');
       compilerRuns.push(row);
       try {const bytes=originalChild.execFileSync.call(cp,file,args,options);row.outputSha256=sha(bytes);row.naturalExit=true;row.exitCode=0;return bytes;}
       finally {assert.equal(hash(file),before,'COMPILER_CHANGED');}
@@ -73,26 +81,38 @@ export async function execute({repoRoot,outDir}) {
     const require=createRequire(path.join(repo,'package.json')),esbuild=require(authority.compilerEntry);
     assert.equal(esbuild.version,authority.compilerVersion);
     const steps=[];
+    let defaultsTransform;
     for(const selected of [{id:'positive',names:spec.caseNames},...spec.faults.map(f=>({...f,names:[f.case]}))]) {
       const stepRoot=path.join(out,selected.id);fs.mkdirSync(stepRoot);
       const current={...source};
       if(selected.before)current[selected.source]=current[selected.source].replace(selected.before,selected.after);
       const compiled={},compilation=[];
-      // Transform both actual modules independently; no bundled/reimplemented defaults.
       for(const role of ['defaults','icons']) {
         const input=current[role],sourcefile=role==='defaults'?spec.defaultsSource:spec.productSource;
         write(path.join(stepRoot,role+'.input.ts'),input);
-        const transformed=esbuild.transformSync(input,{loader:'ts',format:'cjs',target:'es2022',sourcefile,sourcemap:'external'});
+        // Reuse only the exact unchanged defaults transform from this invocation.
+        const sameRunTransformReused=Boolean(role==='defaults'&&input===source.defaults&&defaultsTransform);
+        let record= sameRunTransformReused ? defaultsTransform : null;
+        if(!record) {
+          const compilerInvocation=compilerRuns.length+1;
+          const transformed=esbuild.transformSync(input,{loader:'ts',format:'cjs',target:'es2022',sourcefile,sourcemap:'external'});
+          assert.equal(compilerRuns.length,compilerInvocation,'TRANSFORM_COMPILER_INVOCATION_MISSING_OR_EXTRA');
+          record={transformed,compilerInvocation};
+          if(role==='defaults'&&input===source.defaults)defaultsTransform=record;
+        }
+        const {transformed,compilerInvocation}=record;
         compiled[role]=transformed.code;
         write(path.join(stepRoot,role+'.cjs'),transformed.code);
         write(path.join(stepRoot,role+'.cjs.map'),transformed.map);
-        compilation.push({role,sourcefile,inputSha256:sha(input),outputSha256:sha(transformed.code),compileSucceeded:true});
+        compilation.push({role,sourcefile,inputSha256:sha(input),outputSha256:sha(transformed.code),mapSha256:sha(transformed.map),compileSucceeded:true,compilerInvocation,sameRunTransformReused});
       }
       const observation={vmRuns:0,moduleGraphs:[]};
       const cases=runSemanticsCases(compiled,selected.names,observation),negative=Boolean(selected.before);
-      const good=negative
-        ? cases.length===1&&cases[0].status==='FAIL'&&cases[0].startupSucceeded&&cases[0].assertionName==='AssertionError'&&cases[0].error.includes(selected.expected)
-        : cases.length===spec.caseNames.length&&cases.every(c=>c.status==='PASS'&&c.startupSucceeded);
+      const remaining=new Set(selected.names);
+      const exactNames=remaining.size===selected.names.length&&cases.length===selected.names.length&&cases.every(c=>remaining.delete(c.name));
+      const good=exactNames&&(negative
+        ? cases[0].status==='FAIL'&&cases[0].startupSucceeded===true&&cases[0].assertionName==='AssertionError'&&cases[0].error.includes(selected.expected)
+        : cases.every(c=>c.status==='PASS'&&c.startupSucceeded===true));
       const row={label:selected.id,compileSucceeded:true,compilation,vmRuns:observation.vmRuns,moduleGraphs:observation.moduleGraphs,
         cases,expectedFailureDetected:negative?good:undefined,accepted:good,compileFailureCountsAsDetection:false,vmFailureCountsAsDetection:false};
       write(path.join(stepRoot,'raw-result.json'),row);steps.push(row);
@@ -102,7 +122,8 @@ export async function execute({repoRoot,outDir}) {
       assert(pin&&pin.sha256===hash(real),'ACTUAL_REQUIRED_TOOL_NOT_IN_BOUND_GRAPH:'+real);
       return {path:real,sha256:hash(real),status:'OK'};
     });
-    assert.equal(compilerRuns.length,2*(1+spec.faults.length),'EXACT_COMPILER_PROCESS_COUNT');
+    const changedDefaults=spec.faults.filter(f=>f.source==='defaults').length;
+    assert.equal(compilerRuns.length,2+spec.faults.length+changedDefaults,'EXACT_COMPILER_PROCESS_COUNT');
     assert(compilerRuns.every(p=>p.naturalExit&&p.exitCode===0),'COMPILER_DID_NOT_EXIT_NATURALLY');
     assert(steps.every(s=>s.accepted),'SEMANTICS_CASE_OR_EXACT_NEGATIVE_FAILED');
     assert(Date.now()-began<spec.timeoutMs,'ORIGINAL_FINITE_OUTER_BUDGET_EXCEEDED');

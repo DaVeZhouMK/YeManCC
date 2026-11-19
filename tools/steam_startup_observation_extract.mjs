@@ -1,17 +1,17 @@
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';
 const out=path.resolve(process.argv[2]),source=path.resolve(process.argv[3]||'native/main.cpp'),text=fs.readFileSync(source,'utf8').replaceAll('\r\n','\n');fs.mkdirSync(out,{recursive:true});
-function blockEnd(opening,marker){
- assert.equal(text[opening],'{',marker);let depth=1,at=opening+1;
+function blockEnd(opening,marker,open='{',close='}'){
+ assert.equal(text[opening],open,marker);let depth=1,at=opening+1;
  for(;depth&&at<text.length;++at){
   if(text.startsWith('//',at)){const end=text.indexOf('\n',at);assert(end>=0,marker+' line comment');at=end;continue;}
   if(text.startsWith('/*',at)){const end=text.indexOf('*/',at+2);assert(end>=0,marker+' block comment');at=end+1;continue;}
   if(text[at]==='R'&&text[at+1]==='"')throw Error('Review raw literal in '+marker);
   if(text[at]==='"'||text[at]==="'"){const quote=text[at];for(++at;at<text.length&&text[at]!==quote;++at)if(text[at]==='\\')++at;assert(at<text.length,marker+' string');continue;}
-  if(text[at]==='{')depth++;if(text[at]==='}')depth--;
+  if(text[at]===open)depth++;if(text[at]===close)depth--;
  }
  assert.equal(depth,0,marker);return at;
 }
-function lambda(marker){const start=text.indexOf(marker);assert(start>=0&&text.indexOf(marker,start+marker.length)<0,marker);const opening=text.indexOf('{',start),end=blockEnd(opening,marker),expressionStart=text.indexOf('[',start);assert(expressionStart>=start&&expressionStart<opening,marker+' capture');return text.slice(expressionStart,end);}
+function lambda(marker){const start=text.indexOf(marker);assert(start>=0&&text.indexOf(marker,start+marker.length)<0,marker);const expressionStart=text.indexOf('[',start);assert(expressionStart>=start,marker+' capture');const captureEnd=blockEnd(expressionStart,marker,'[',']'),opening=text.indexOf('{',captureEnd),end=blockEnd(opening,marker);return text.slice(expressionStart,end);}
 const ensure=lambda('cssGuard.ensure ='),confirm=lambda('cssGuard.confirmIdle ='),sidebar=lambda('[]() -> ymcc::deckysidebar::LaunchAdmission'),changed=lambda('modeObserver.changed =');
 for (const callback of [ensure,confirm,sidebar,changed]) assert(!/\b(?:ShellExecute(?:Ex)?W|CreateProcess(?:AsUser|WithToken)?W|TerminateProcess|WinExec|SendInput|SetForegroundWindow|SetUIMode|SwitchToGamepadUI)\s*\(/.test(callback),'Unsafe direct external action in startup regression callback');
 const health=lambda('config.connectionHealth=');

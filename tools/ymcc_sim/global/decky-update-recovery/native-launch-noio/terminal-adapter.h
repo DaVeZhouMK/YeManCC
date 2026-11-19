@@ -3,6 +3,16 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+// SDK/STL declarations must be parsed before the terminal macros below.
+#include <winternl.h>
+#include <atomic>
+#include <cstddef>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <string_view>
+#include <utility>
 #include <tlhelp32.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -33,15 +43,35 @@ inline std::wstring norm(const fs::path& p){auto s=p.lexically_normal().wstring(
 inline bool below(const fs::path& root,const fs::path& p){auto a=norm(root),b=norm(p);return b==a||(b.size()>a.size()&&b.compare(0,a.size(),a)==0&&b[a.size()]==L'\\');}
 inline std::wstring module(){if(!__argv||!__argv[0])std::abort();return fs::path(__argv[0]).lexically_normal().wstring();}
 inline bool isChild(){return norm(fs::path(module()).filename())==L"inert-addon.exe";}
-struct State{uint64_t tick=900000;uintptr_t nextToken=0x71000000;std::set<HANDLE> tokens,files,processes,threads;unsigned createCalls=0,resumed=0,waited=0,denied=0,memoryCalls=0;std::vector<nlohmann::json> events;bool elevated=false,manualSteamMode=false,manualSteamPresent=false,manualShellOkay=true;unsigned manualPrimaryCalls=0,manualShellCalls=0;std::set<HANDLE> manualSnapshots;};
+struct State{uint64_t tick=900000;uintptr_t nextToken=0x71000000;std::set<HANDLE> tokens,files,processes,threads;uintptr_t nextMutex=0x73000000;std::set<HANDLE> mutexes,acquiredMutexes;unsigned mutexCreates=0,mutexWaits=0,mutexReleases=0,mutexCloses=0;unsigned createCalls=0,resumed=0,waited=0,denied=0,memoryCalls=0;std::vector<nlohmann::json> events;bool elevated=false,manualSteamMode=false,manualSteamPresent=false,manualShellOkay=true;unsigned manualPrimaryCalls=0,manualShellCalls=0;std::set<HANDLE> manualSnapshots;unsigned inventoryQueryResolutions=0,inventoryQueryCalls=0,inventoryBasicQueryCalls=0,inventoryOtherQueryCalls=0;};
 inline State& state(){static State* value=new State;return *value;}
 inline void event(const char* api,const char* decision,const std::wstring& detail=L""){auto& s=state();if(s.events.size()>=4096)std::abort();s.events.push_back({{"api",api},{"decision",decision},{"detail",fs::path(detail).string()}});}
+// Never expose the real process query through a dynamic import. The exact
+// named export is always unsupported (including detail/unknown classes), so
+// processInventory can use only the already reviewed Toolhelp terminals.
+inline NTSTATUS NTAPI querySystemInformationUnsupported(SYSTEM_INFORMATION_CLASS kind,PVOID,ULONG,PULONG returned){
+ auto& s=state();++s.inventoryQueryCalls;
+ if(kind==static_cast<SYSTEM_INFORMATION_CLASS>(252))++s.inventoryBasicQueryCalls;else ++s.inventoryOtherQueryCalls;
+ if(returned)*returned=0;
+ event("NtQuerySystemInformation","UNSUPPORTED_NO_NATIVE_CALL");
+ return static_cast<NTSTATUS>(0xC00000BBL);
+}
+inline FARPROC getProcAddress(HMODULE module,LPCSTR name){
+ // Ordinal lookups are not strings; every unrelated lookup keeps Win32 semantics.
+ if(reinterpret_cast<uintptr_t>(name)>0xffffu&&std::strcmp(name,"NtQuerySystemInformation")==0){
+  ++state().inventoryQueryResolutions;event("GetProcAddress:NtQuerySystemInformation","MEMORY_UNSUPPORTED_EXPORT");
+  return reinterpret_cast<FARPROC>(&querySystemInformationUnsupported);
+ }
+ return ::GetProcAddress(module,name);
+}
 inline void denied(const char* api){++state().denied;event(api,"DENY_NO_NATIVE_CALL");::SetLastError(ERROR_ACCESS_DENIED);}
 // Preserve the exact approved target while using the Win32 extended-length spelling.
 // fileAllowed/directoryAllowed and the owned ancestor checks remain authoritative.
 inline std::wstring ownedNativePath(const fs::path& p){auto value=p.lexically_normal().make_preferred().wstring();if(value.size()>2&&value[1]==L':'&&value[2]==L'\\')return L"\\\\?\\"+value;return value;}
 inline bool owned(const fs::path& p){if(!p.is_absolute()||!below(caseRoot(),p))return false;for(auto c=p.lexically_normal();below(caseRoot(),c);c=c.parent_path()){auto attr=::GetFileAttributesW(ownedNativePath(c).c_str());if(attr!=INVALID_FILE_ATTRIBUTES&&(attr&FILE_ATTRIBUTE_REPARSE_POINT))return false;if(norm(c)==norm(caseRoot()))break;}return true;}
-inline bool fileAllowed(const fs::path& p){if(!owned(p))return false;auto value=norm(p);const auto start=norm(scratch()/L".earlystart");if(value==start)return true;if(value.starts_with(start+L".ymcc-42420-")){const auto tail=value.substr((start+L".ymcc-42420-").size());if(!tail.empty()&&tail.find_first_not_of(L"0123456789")==tail.npos){const auto n=std::stoull(tail);if(n>=900001&&n<=900128)return true;}return false;}for(const auto& f:{caseRoot()/L"launch.exe",scratch()/L"inert-addon.exe",scratch()/L"inert-addon.exe.started",scratch()/L"Scaling App.exe",scratch()/L"CssLoader-Standalone-Headless.exe",scratch()/L"steam.exe",scratch()/L"YeManCC"/L"steam-launch"/L"launch-17-42-7.receipt",runtimeRoot()/L"profile"/L".earlystart",runtimeRoot()/L"local"/L"YeManCC"/L"steam-launch"/L"launch-17-42-7.receipt"})if(value==norm(f))return true;for(const auto* n:{L"one.txt",L"duplicate.txt",L"hidden-css.txt",L"disabled.txt.disabled",L"bad.txt"})if(value==norm(scratch()/L"PowerControl"/L"YeManSteam"/n))return true;else {const auto prefix=norm(scratch()/L"PowerControl"/L"YeManSteam"/n)+L".ymcc-42420-";if(value.starts_with(prefix)){const auto tail=value.substr(prefix.size());if(!tail.empty()&&tail.find_first_not_of(L"0123456789")==tail.npos){const auto counter=std::stoull(tail);if(counter>=900001&&counter<=900128)return true;}}}return false;}
+// Only current producer-generated raw startup backups, in this exact owned scratch.
+inline bool startupBackupPath(const fs::path& p){if(!owned(p))return false;const auto prefix=norm(scratch()/L".earlystart")+L".ymcc-before-42420-",value=norm(p);if(!value.starts_with(prefix))return false;const auto tail=value.substr(prefix.size());const auto dash=tail.find(L'-');if(dash==tail.npos||tail.find(L'-',dash+1)!=tail.npos)return false;const auto clock=tail.substr(0,dash),sequence=tail.substr(dash+1);if(clock.empty()||clock.size()>7||sequence.empty()||sequence.size()>3||clock.find_first_not_of(L"0123456789")!=clock.npos||sequence.find_first_not_of(L"0123456789")!=sequence.npos)return false;const auto tick=std::stoull(clock),count=std::stoull(sequence);return tick>=900000&&tick<=1000000&&count>=1&&count<=128&&std::to_wstring(tick)==clock&&std::to_wstring(count)==sequence;}
+inline bool fileAllowed(const fs::path& p){if(!owned(p))return false;if(startupBackupPath(p))return true;auto value=norm(p);const auto start=norm(scratch()/L".earlystart");if(value==start)return true;if(value.starts_with(start+L".ymcc-42420-")){const auto tail=value.substr((start+L".ymcc-42420-").size());if(!tail.empty()&&tail.find_first_not_of(L"0123456789")==tail.npos){const auto n=std::stoull(tail);if(n>=900001&&n<=900128)return true;}return false;}for(const auto& f:{caseRoot()/L"launch.exe",scratch()/L"inert-addon.exe",scratch()/L"inert-addon.exe.started",scratch()/L"Scaling App.exe",scratch()/L"CssLoader-Standalone-Headless.exe",scratch()/L"steam.exe",scratch()/L"YeManCC"/L"steam-launch"/L"launch-17-42-7.receipt",runtimeRoot()/L"profile"/L".earlystart",runtimeRoot()/L"local"/L"YeManCC"/L"steam-launch"/L"launch-17-42-7.receipt"})if(value==norm(f))return true;for(const auto* n:{L"one.txt",L"duplicate.txt",L"hidden-css.txt",L"disabled.txt.disabled",L"bad.txt"})if(value==norm(scratch()/L"PowerControl"/L"YeManSteam"/n))return true;else {const auto prefix=norm(scratch()/L"PowerControl"/L"YeManSteam"/n)+L".ymcc-42420-";if(value.starts_with(prefix)){const auto tail=value.substr(prefix.size());if(!tail.empty()&&tail.find_first_not_of(L"0123456789")==tail.npos){const auto counter=std::stoull(tail);if(counter>=900001&&counter<=900128)return true;}}}return false;}
 inline bool directoryAllowed(const fs::path& p){if(!owned(p))return false;for(const auto& f:{caseRoot(),runtimeRoot(),scratch(),scratch()/L"PowerControl",scratch()/L"PowerControl"/L"YeManSteam",scratch()/L"YeManCC",scratch()/L"YeManCC"/L"steam-launch",runtimeRoot()/L"profile",runtimeRoot()/L"local",runtimeRoot()/L"local"/L"YeManCC",runtimeRoot()/L"local"/L"YeManCC"/L"steam-launch"})if(norm(p)==norm(f))return true;return false;}
 inline bool handle(HANDLE h){return state().files.contains(h);}
 inline HANDLE token(){auto h=reinterpret_cast<HANDLE>(state().nextToken++);state().tokens.insert(h);return h;}
@@ -79,9 +109,18 @@ inline BOOL createProcess(LPCWSTR app,LPWSTR cmd,LPSECURITY_ATTRIBUTES pa,LPSECU
  ++state().manualPrimaryCalls;event("CreateProcessW","MEMORY_MANUAL_FAILURE_NO_CHILD",steam.wstring());*child={};::SetLastError(ERROR_ACCESS_DENIED);return FALSE;
 }const auto target=scratch()/L"inert-addon.exe";auto expected=std::getenv("YMCC_NOIO_EXPECTED_EXE_SHA256");const DWORD wanted=CREATE_SUSPENDED|CREATE_NO_WINDOW|CREATE_UNICODE_ENVIRONMENT|NORMAL_PRIORITY_CLASS;if(!app||norm(app)!=norm(target)||!cmd||std::wstring(cmd)!=L"\""+target.wstring()+L"\""||!cwd||norm(cwd)!=norm(scratch())||pa||ta||inherit||environment||flags!=wanted||!startup||startup->dwFlags!=STARTF_USESHOWWINDOW||startup->wShowWindow!=SW_HIDE||!child||state().createCalls||!expected||sha256(fileBytes(target))!=expected||sha256(fileBytes(caseRoot()/L"launch.exe"))!=expected){denied("CreateProcessW");return FALSE;}struct LockedImage{HANDLE value;~LockedImage(){if(value!=INVALID_HANDLE_VALUE)::CloseHandle(value);}};LockedImage imageLock{::CreateFileW(target.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr)},parentLock{::CreateFileW((caseRoot()/L"launch.exe").c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr)};if(imageLock.value==INVALID_HANDLE_VALUE||parentLock.value==INVALID_HANDLE_VALUE||sha256(fileBytes(target))!=expected||sha256(fileBytes(caseRoot()/L"launch.exe"))!=expected){denied("CreateProcessW:image-lock-or-bytes");return FALSE;}event("CreateProcessW","EXACT_OWNED_CHILD_LOCKED_SHA256",target.wstring());if(!::CreateProcessW(app,cmd,pa,ta,inherit,flags,environment,cwd,startup,child))return FALSE;++state().createCalls;state().processes.insert(child->hProcess);state().threads.insert(child->hThread);return TRUE;}
 inline DWORD resume(HANDLE h){if(!state().threads.contains(h)){denied("ResumeThread");return DWORD(-1);}++state().resumed;return ::ResumeThread(h);}
-inline DWORD wait(HANDLE h,DWORD n){if(!state().processes.contains(h)||n>5000){denied("WaitForSingleObject");return WAIT_FAILED;}++state().waited;return ::WaitForSingleObject(h,n);}
+// Fixed-name synthetic mutex domain only; never delegates mutex operations to Win32.
+inline HANDLE createMutex(LPSECURITY_ATTRIBUTES attrs,BOOL initial,LPCWSTR name){
+ auto& s=state();
+ if(attrs||initial||!name||std::wstring(name)!=L"Local\\YeManSteamArtworkLabShortcutWriter"||s.nextMutex>=0x74000000||s.nextToken>=0x73000000){denied("CreateMutexW:fixed-memory-contract");return nullptr;}
+ const auto h=reinterpret_cast<HANDLE>(s.nextMutex++);
+ if(s.tokens.contains(h)||s.manualSnapshots.contains(h)||s.files.contains(h)||s.processes.contains(h)||s.threads.contains(h)){denied("CreateMutexW:handle-domain-collision");return nullptr;}
+ s.mutexes.insert(h);++s.mutexCreates;event("CreateMutexW","MEMORY_FIXED_SHORTCUT_WRITER");return h;
+}
+inline BOOL releaseMutex(HANDLE h){auto& s=state();if(!s.mutexes.contains(h)||!s.acquiredMutexes.erase(h)){denied("ReleaseMutex:unknown-or-unowned");return FALSE;}++s.mutexReleases;event("ReleaseMutex","MEMORY_OWNED_MUTEX");return TRUE;}
+inline DWORD wait(HANDLE h,DWORD n){if(state().mutexes.contains(h)){if(n>30000||state().acquiredMutexes.contains(h)){denied("WaitForSingleObject:memory-mutex-contract");return WAIT_FAILED;}state().acquiredMutexes.insert(h);++state().mutexWaits;event("WaitForSingleObject","MEMORY_OWNED_MUTEX");return WAIT_OBJECT_0;}if(!state().processes.contains(h)||n>5000){denied("WaitForSingleObject");return WAIT_FAILED;}++state().waited;return ::WaitForSingleObject(h,n);}
 inline BOOL terminate(HANDLE h,UINT code){if(!state().processes.contains(h)){denied("TerminateProcess");return FALSE;}event("TerminateProcess","OWNED_FAILURE_CLEANUP");return ::TerminateProcess(h,code);}
-inline BOOL close(HANDLE h){if(state().manualSnapshots.erase(h)){event("CloseHandle","MEMORY_SNAPSHOT");return TRUE;}if(state().tokens.erase(h)){event("CloseHandle","MEMORY_TOKEN");return TRUE;}if(state().files.erase(h)||state().threads.erase(h)){event("CloseHandle","OWNED_NATIVE_HANDLE");return ::CloseHandle(h);}if(state().processes.contains(h)){const auto done=wait(h,5000);if(done!=WAIT_OBJECT_0)std::abort();state().processes.erase(h);return ::CloseHandle(h);}denied("CloseHandle:unknown");return FALSE;}
+inline BOOL close(HANDLE h){if(state().mutexes.contains(h)){if(state().acquiredMutexes.contains(h)){denied("CloseHandle:held-memory-mutex");return FALSE;}state().mutexes.erase(h);++state().mutexCloses;event("CloseHandle","MEMORY_OWNED_MUTEX");return TRUE;}if(state().manualSnapshots.erase(h)){event("CloseHandle","MEMORY_SNAPSHOT");return TRUE;}if(state().tokens.erase(h)){event("CloseHandle","MEMORY_TOKEN");return TRUE;}if(state().files.erase(h)||state().threads.erase(h)){event("CloseHandle","OWNED_NATIVE_HANDLE");return ::CloseHandle(h);}if(state().processes.contains(h)){const auto done=wait(h,5000);if(done!=WAIT_OBJECT_0)std::abort();state().processes.erase(h);return ::CloseHandle(h);}denied("CloseHandle:unknown");return FALSE;}
 inline BOOL image(HANDLE h,DWORD,wchar_t* out,DWORD* n){if(!state().processes.contains(h)){denied("QueryFullProcessImageNameW");return FALSE;}const auto s=(scratch()/L"inert-addon.exe").wstring();if(!out||!n||*n<=s.size())return FALSE;std::wmemcpy(out,s.c_str(),s.size()+1);*n=DWORD(s.size());event("QueryFullProcessImageNameW","MEMORY_OWNED_CHILD");return TRUE;}
 inline HANDLE openProcess(DWORD,BOOL,DWORD){denied("OpenProcess");return nullptr;}
 inline HANDLE snapshot(DWORD flags,DWORD pid){if(state().manualSteamMode&&flags==TH32CS_SNAPPROCESS&&pid==0){auto h=reinterpret_cast<HANDLE>(state().nextToken++);state().manualSnapshots.insert(h);event("CreateToolhelp32Snapshot","MEMORY_STEAM_ABSENCE");return h;}denied("CreateToolhelp32Snapshot");return INVALID_HANDLE_VALUE;}
@@ -110,16 +149,23 @@ inline void systemTime(LPFILETIME out){if(out)*out={};event("GetSystemTimeAsFile
 inline int compareTime(const FILETIME*,const FILETIME*){denied("CompareFileTime");return 0;}
 inline HWND console(){event("GetConsoleWindow","MEMORY_NO_WINDOW");return nullptr;}
 inline BOOL visible(HWND h){if(h)denied("IsWindowVisible:foreign-window");return FALSE;}
-inline LPWSTR* commandArgs(LPCWSTR line,int* count){std::vector<std::wstring> values;const std::wstring text=line?line:L"";if(text==L"\"x:\\ymcc.exe\" --steam-logon-start --dev ignored")values={L"x:\\ymcc.exe",L"--steam-logon-start",L"--dev",L"ignored"};else if(text==L"\"x:\\ymcc.exe\" --minimized")values={L"x:\\ymcc.exe",L"--minimized"};else{denied("CommandLineToArgvW:unreviewed-input");return nullptr;}size_t bytes=(values.size()+1)*sizeof(wchar_t*);for(const auto& v:values)bytes+=(v.size()+1)*sizeof(wchar_t);auto p=static_cast<LPWSTR*>(std::malloc(bytes));if(!p)return nullptr;auto cursor=reinterpret_cast<wchar_t*>(p+values.size()+1);for(size_t i=0;i<values.size();++i){p[i]=cursor;std::wcscpy(cursor,values[i].c_str());cursor+=values[i].size()+1;}p[values.size()]=nullptr;*count=int(values.size());event("CommandLineToArgvW","MEMORY_REVIEWED_INPUT");return p;}
+inline LPWSTR* commandArgs(LPCWSTR line,int* count){std::vector<std::wstring> values;const std::wstring text=line?line:L"";if(text==L"\"x:\\ymcc.exe\" --steam-logon-start")values={L"x:\\ymcc.exe",L"--steam-logon-start"};else if(text==L"\"x:\\ymcc.exe\" --steam-logon-start --dev ignored")values={L"x:\\ymcc.exe",L"--steam-logon-start",L"--dev",L"ignored"};else if(text==L"\"x:\\ymcc.exe\" --minimized")values={L"x:\\ymcc.exe",L"--minimized"};else{denied("CommandLineToArgvW:unreviewed-input");return nullptr;}size_t bytes=(values.size()+1)*sizeof(wchar_t*);for(const auto& v:values)bytes+=(v.size()+1)*sizeof(wchar_t);auto p=static_cast<LPWSTR*>(std::malloc(bytes));if(!p)return nullptr;auto cursor=reinterpret_cast<wchar_t*>(p+values.size()+1);for(size_t i=0;i<values.size();++i){p[i]=cursor;std::wcscpy(cursor,values[i].c_str());cursor+=values[i].size()+1;}p[values.size()]=nullptr;*count=int(values.size());event("CommandLineToArgvW","MEMORY_REVIEWED_INPUT");return p;}
 inline HLOCAL localFree(HLOCAL p){std::free(p);return nullptr;}
 inline void sleep(DWORD n){if(n>400)std::abort();::Sleep(n);}
-inline void finish(){auto& s=state();const auto file=caseRoot()/(isChild()?L"terminal-child.json":L"terminal-parent.json");std::ofstream out(file);out<<nlohmann::json{{"kind","steam-native-memory-terminal"},{"realTokenCalls",0},{"realForeignProcessCalls",0},{"realRegistryCalls",0},{"manualSteamPrimaryMemoryCalls",s.manualPrimaryCalls},{"manualSteamShellMemoryCalls",s.manualShellCalls},{"unclosedManualSnapshots",s.manualSnapshots.size()},{"ownedChildCreates",s.createCalls},{"ownedChildResumes",s.resumed},{"ownedChildWaits",s.waited},{"denied",s.denied},{"unclosedMemoryTokens",s.tokens.size()},{"unclosedOwnedFiles",s.files.size()},{"events",s.events}}.dump(2);}
+inline void finish(){auto& s=state();const auto file=caseRoot()/(isChild()?L"terminal-child.json":L"terminal-parent.json");std::ofstream out(file);out<<nlohmann::json{{"kind","steam-native-memory-terminal"},{"realTokenCalls",0},{"realForeignProcessCalls",0},{"realRegistryCalls",0},{"inventoryQueryResolutions",s.inventoryQueryResolutions},{"inventoryQueryCalls",s.inventoryQueryCalls},{"inventoryBasicQueryCalls",s.inventoryBasicQueryCalls},{"inventoryOtherQueryCalls",s.inventoryOtherQueryCalls},{"manualSteamPrimaryMemoryCalls",s.manualPrimaryCalls},{"manualSteamShellMemoryCalls",s.manualShellCalls},{"unclosedManualSnapshots",s.manualSnapshots.size()},{"ownedChildCreates",s.createCalls},{"ownedChildResumes",s.resumed},{"ownedChildWaits",s.waited},{"denied",s.denied},{"memoryMutexCreates",s.mutexCreates},{"memoryMutexWaits",s.mutexWaits},{"memoryMutexReleases",s.mutexReleases},{"memoryMutexCloses",s.mutexCloses},{"unclosedMemoryMutexes",s.mutexes.size()},{"unreleasedMemoryMutexes",s.acquiredMutexes.size()},{"unclosedMemoryTokens",s.tokens.size()},{"unclosedOwnedFiles",s.files.size()},{"events",s.events}}.dump(2);}
 inline struct Lifecycle{Lifecycle(){std::atexit(finish);}} lifecycle;
 }
 namespace std::filesystem {inline path ymcc_noio_temp(){return ymcc_noio::runtimeRoot();}}
-namespace ymcc_noio {inline BOOL copyFileDenied(LPCWSTR,LPCWSTR,BOOL){denied("CopyFileW:startup-repair-not-executed-by-this-fixture");return FALSE;}}
+namespace ymcc_noio {
+inline BOOL attributesEx(LPCWSTR p,GET_FILEEX_INFO_LEVELS level,LPVOID value){if(!p||!value||level!=GetFileExInfoStandard||(!fileAllowed(p)&&!directoryAllowed(p))){denied("GetFileAttributesExW");return FALSE;}event("GetFileAttributesExW","OWNED_FILE_METADATA",p);return ::GetFileAttributesExW(ownedNativePath(fs::path(p)).c_str(),level,value);}
+// CopyFileW remains an adapter: raw bytes move through existing guarded owned-file ports.
+// It cannot copy applications, overwrite a backup, or touch a foreign source/destination.
+inline BOOL copyStartupBackup(LPCWSTR from,LPCWSTR to,BOOL failIfExists){if(!from||!to||!failIfExists||norm(from)!=norm(scratch()/L".earlystart")||!fileAllowed(from)||!startupBackupPath(to)){denied("CopyFileW:startup-backup-boundary");return FALSE;}const auto attr=attributes(from);if(attr==INVALID_FILE_ATTRIBUTES||(attr&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)))return FALSE;HANDLE source=createFile(from,GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);if(source==INVALID_HANDLE_VALUE)return FALSE;LARGE_INTEGER size{};if(!fileSize(source,&size)||size.QuadPart<0||size.QuadPart>1024*1024){close(source);return FALSE;}std::vector<unsigned char> bytes(static_cast<size_t>(size.QuadPart));DWORD got=0;const bool read=bytes.empty()||readFile(source,bytes.data(),static_cast<DWORD>(bytes.size()),&got,nullptr)&&got==bytes.size();const DWORD sourceError=::GetLastError();close(source);if(!read){::SetLastError(sourceError);return FALSE;}HANDLE backup=createFile(to,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);if(backup==INVALID_HANDLE_VALUE)return FALSE;DWORD wrote=0;const bool saved=(bytes.empty()||writeFile(backup,bytes.data(),static_cast<DWORD>(bytes.size()),&wrote,nullptr)&&wrote==bytes.size())&&flush(backup);const DWORD backupError=::GetLastError();close(backup);if(!saved){deleteFile(to);::SetLastError(backupError);return FALSE;}event("CopyFileW","OWNED_STARTUP_BACKUP_BYTES",to);return TRUE;}
+}
 #define temp_directory_path ymcc_noio_temp
-#define CopyFileW ymcc_noio::copyFileDenied
+#define CopyFileW ymcc_noio::copyStartupBackup
+#define GetFileAttributesExW ymcc_noio::attributesEx
+#define GetProcAddress ymcc_noio::getProcAddress
 #define GetCurrentProcess ymcc_noio::current
 #define GetCurrentProcessId ymcc_noio::pid
 #define GetTickCount64 ymcc_noio::tick
@@ -131,6 +177,8 @@ namespace ymcc_noio {inline BOOL copyFileDenied(LPCWSTR,LPCWSTR,BOOL){denied("Co
 #define IsValidSid ymcc_noio::validSid
 #define GetSidSubAuthorityCount ymcc_noio::sidCount
 #define GetSidSubAuthority ymcc_noio::sidRid
+#define CreateMutexW ymcc_noio::createMutex
+#define ReleaseMutex ymcc_noio::releaseMutex
 #define CloseHandle ymcc_noio::close
 #define GetFileAttributesW ymcc_noio::attributes
 #define CreateFileW ymcc_noio::createFile

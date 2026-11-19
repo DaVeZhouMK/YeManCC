@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Threading;
 
@@ -16,15 +17,25 @@ internal static class HostCostArchive
         @"^input-host-cost\.log\.archive\.[0-9]{19}\.[0-9a-f]{24}\.zip(?:\.tmp)?$", RegexOptions.CultureInvariant);
     private static int _queued, _lastError;
     private static long _completed, _failed, _evicted, _evictedBytes, _receiptFailures;
-    internal static object Snapshot() => new {
-        schemaVersion = 2, totalMaxBytes = TotalMaxBytes, compressedMaxBytes = 0,
-        workerQueued = Volatile.Read(ref _queued) != 0, completed = Interlocked.Read(ref _completed),
-        failures = Interlocked.Read(ref _failed), receiptFailures = Interlocked.Read(ref _receiptFailures),
-        evictedVolumes = Interlocked.Read(ref _evicted), evictedCompressedBytes = Interlocked.Read(ref _evictedBytes),
-        lastErrorHResult = Volatile.Read(ref _lastError),
-        retention = "single-active-newest-lines;legacy-volumes-retired;no-new-ZIPs",
-        temporaryBudgetException = "legacy-cleanup-or-IO-failure-is-explicit;active-writes-do-not-wait-for-archives"
-    };
+    internal static object Snapshot(bool includePolicyText = true) => new ArchiveSnapshot(includePolicyText);
+
+    private sealed class ArchiveSnapshot(bool includePolicyText)
+    {
+        public int schemaVersion { get; } = includePolicyText ? 2 : 3;
+        public long totalMaxBytes => TotalMaxBytes;
+        public int compressedMaxBytes => 0;
+        public bool workerQueued { get; } = Volatile.Read(ref _queued) != 0;
+        public long completed { get; } = Interlocked.Read(ref _completed);
+        public long failures { get; } = Interlocked.Read(ref _failed);
+        public long receiptFailures { get; } = Interlocked.Read(ref _receiptFailures);
+        public long evictedVolumes { get; } = Interlocked.Read(ref _evicted);
+        public long evictedCompressedBytes { get; } = Interlocked.Read(ref _evictedBytes);
+        public int lastErrorHResult { get; } = Volatile.Read(ref _lastError);
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? retention { get; } = includePolicyText ? "single-active-newest-lines;legacy-volumes-retired;no-new-ZIPs" : null;
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? temporaryBudgetException { get; } = includePolicyText ? "legacy-cleanup-or-IO-failure-is-explicit;active-writes-do-not-wait-for-archives" : null;
+    }
     internal static void Request(string directory)
     {
         if (Interlocked.CompareExchange(ref _queued, 1, 0) != 0) return;

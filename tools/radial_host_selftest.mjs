@@ -2,14 +2,20 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {createRequire} from 'node:module';
 import {beginRadialHostTools,radialHostInputPlugin,completeRadialHostCompile,verifyRadialHostTools} from './ymcc_sim/global/radial-host-tool-scope/index.mjs';
 const root=path.resolve(import.meta.dirname,'..'),require=createRequire(path.join(root,'package.json'));
+const sleepArgs=process.argv.slice(3),allowedBoundaryNames=['pending-active','pending-summon','held-power','held-settings','held-checkpoint','held-create','missing-ready','duplicate-ready'];
+if(sleepArgs.some(arg=>arg!=='--exercise-development'&&arg!=='--sleep-lifecycle-only'&&!arg.startsWith('--sleep-boundary='))||sleepArgs.filter(arg=>arg==='--sleep-lifecycle-only').length>1||sleepArgs.filter(arg=>arg.startsWith('--sleep-boundary=')).length>1||sleepArgs.some(arg=>arg.startsWith('--sleep-boundary=')&&(!sleepArgs.includes('--sleep-lifecycle-only')||!allowedBoundaryNames.includes(arg.slice('--sleep-boundary='.length)))))throw Error('Unknown or unsupported exact radial sleep selection');
 let toolScope;try{toolScope=beginRadialHostTools(root,process.argv[2]);}catch(error){const report={pass:false,status:'BLOCKED',reason:'RADIAL_HOST_TOOL_AUTHORITY_UNAVAILABLE',error:error.message,checks:0,hardwareWrites:0,installedApplicationMutated:false};if(process.argv[2])fs.writeFileSync(process.argv[2],JSON.stringify(report,null,2));console.error(JSON.stringify(report));process.exit(7);}
 const {build}=require(toolScope.authority.compilerEntry);
 const development=process.argv.includes('--exercise-development');
-const state={handlers:new Map(),calls:[],revision:0,generation:1,power:1,ready:true,capable:true,ack:false,writes:[],results:[],created:[],closed:[],windows:[],model:null,delay:null};
+const sleepOnly=process.argv.includes('--sleep-lifecycle-only'),sleepBoundary=process.argv.find(value=>value.startsWith('--sleep-boundary='))?.slice('--sleep-boundary='.length)||'';
+const state={handlers:new Map(),calls:[],revision:0,generation:1,power:1,ready:true,hardwareWritesAllowed:true,notificationPending:false,known:true,publicationRevision:1,capable:true,ack:false,writes:[],results:[],created:[],closed:[],windows:[],model:null,delay:null};
 globalThis.__radialHostFixture=state;globalThis.window=new EventTarget();
 // Keep original production host/actions. Only its interval clock is virtual;
 // the native transport remains the existing explicit memory terminal.
 const originalSetInterval=globalThis.setInterval,originalClearInterval=globalThis.clearInterval;
+const originalSetTimeout=globalThis.setTimeout,originalClearTimeout=globalThis.clearTimeout,powerRetryTimers=new Map();
+globalThis.setTimeout=(callback,delay,...args)=>{if([1000,2000,5000,15000,30000].includes(delay)){const token={};powerRetryTimers.set(token,{callback:()=>callback(...args),delay});return token;}return originalSetTimeout(callback,delay,...args);};
+globalThis.clearTimeout=token=>{if(powerRetryTimers.has(token))powerRetryTimers.delete(token);else originalClearTimeout(token);};
 const heartbeatTimers=new Map();let heartbeatClock=0,heartbeatTimerId=0,heartbeatCallbacks=0;
 globalThis.setInterval=(callback,period)=>{const id=++heartbeatTimerId;heartbeatTimers.set(id,{callback,period,next:heartbeatClock+period});return id;};
 globalThis.clearInterval=id=>heartbeatTimers.delete(id);
@@ -36,16 +42,16 @@ const modules={
   updateActive:()=>{},updateDuty:()=>{},power:async()=>({generation:s.power}),featureAllowed:alive,uiBusy:()=>false,currentDisplay:()=>f.display,display:value=>f.display=value,nextRevision:()=>String(++f.revision)});`,
  '@/bridge/deckyFanDisplay':`export const onFanMirrorDisplay=()=>()=>{};export const onFanMirrorUiGate=()=>()=>{};`,
  '@/bridge/ipc':`const s=globalThis.__radialHostFixture;export const isNativeRuntime=true;export function on(k,cb){if(!s.handlers.has(k))s.handlers.set(k,new Set());s.handlers.get(k).add(cb);return()=>s.handlers.get(k).delete(cb)}export const invoke=(cmd,a={},options={})=>s.invoke(cmd,a,options);`,
- '@/bridge/api':`const s=globalThis.__radialHostFixture;export const powerLifecycle={get:async()=>({phase:s.ready?'ready':'suspending',generation:s.power,inputReady:s.ready})};export const shell={execute:async(...a)=>{s.windows.push(a);return true},open:async(...a)=>{s.windows.push(a);return true},taskView:async()=>{s.windows.push('taskView');return true}};export const windowApi={show:async()=>{s.windows.push('ymcc');return true}};`,
+ '@/bridge/api':`const s=globalThis.__radialHostFixture;export const powerLifecycle={get:async()=>{const held=s.powerRead;if(held){s.powerRead=null;held.entered=true;return held.promise;}return s.nativePower();}};export const shell={execute:async(...a)=>{s.windows.push(a);return true},open:async(...a)=>{s.windows.push(a);return true},taskView:async()=>{s.windows.push('taskView');return true}};export const windowApi={show:async()=>{s.windows.push('ymcc');return true}};`,
  'radial-preference-repository':`const s=globalThis.__radialHostFixture;export const getSettingsGeneration=()=>s.generation;export const assertSettingsGeneration=value=>{if(value!==s.generation)throw Error('settings generation changed')};export const readSettingsSection=async key=>structuredClone(s.sections[key]);export const saveSettingsSection=async(key,patch,generation=s.generation)=>{assertSettingsGeneration(generation);s.sections[key]={...s.sections[key],...structuredClone(patch)}};`,
  '@/bridge/settingsRepository':`export const getSettingsGeneration=()=>globalThis.__radialHostFixture.generation;`,
  '@/bridge/yeman':`export const getTdpExecutionCapability=async()=>({ready:globalThis.__radialHostFixture.capable,minPL1:5,maxPL1:30});`,
  '@/bridge/performanceSchedule':`const s=globalThis.__radialHostFixture;export const getContinuousPerformanceSnapshot=async()=>s.snapshot();export const updateContinuousPerformanceControls=async(identity,patch,admit)=>{if(admit&&!admit())throw Error('fixture scheduler admission refused');s.writes.push({identity,patch});s.bank=s.patch(s.bank,patch,'ac');s.bankRevision++;return {...s.snapshot(),tdpWriteReceipt:{requested:s.bank.tdp,accepted:s.ack?s.bank.tdp:null,ok:s.ack,proof:s.ack?'write-ack':'unconfirmed'}};};`,
- 'radial-settings':`export const loadRadialSettings=async()=>structuredClone(globalThis.__radialHostFixture.model);`,
+ 'radial-settings':`export const loadRadialSettings=async()=>{const s=globalThis.__radialHostFixture,held=s.settingsRead;if(held){s.settingsRead=null;held.entered=true;await held.promise;}return structuredClone(s.model);};`,
 };
-const compiled=await build({stdin:{contents:`export {startRadialHost} from './src/radial/host';export {defaultRadialSettings} from './src/radial/model';export {isRadialTestingEnabled} from './src/radial/testingState';export {RADIAL_USER_AVAILABLE} from './src/radial/availability';export {setRadialTestingPreference,syncRadialTestingPreference} from './src/radial/testing';export {loadUiSettings,getUiSetting} from './src/bridge/uiSettings';export {defaultContinuousBank,patchContinuousBank} from './src/bridge/performanceControls';`,resolveDir:root,loader:'ts'},bundle:true,write:false,metafile:true,platform:'node',format:'cjs',alias:{'@':path.join(root,'src')},plugins:[radialHostInputPlugin(toolScope),{name:'radial-memory-contract',setup(b){b.onResolve({filter:/.*/},a=>{const owner=a.importer.replaceAll('\\','/').endsWith('/radial/host.ts');const key=a.importer.replaceAll('\\','/').endsWith('/bridge/uiSettings.ts')&&a.path==='./settingsRepository'?'radial-preference-repository':owner&&a.path==='./settings'?'radial-settings':owner&&a.path==='./fanHost'?'radial-fan-host':owner&&a.path==='./inputHost'?'radial-input-host':owner&&a.path==='./utilitiesHost'?'radial-utilities-host':a.path;if(key in modules)return{path:key,namespace:'fixture'};});b.onLoad({filter:/.*/,namespace:'fixture'},a=>({contents:modules[a.path],loader:'ts'}));}}]});
+const compiled=await build({stdin:{contents:`export {getSharedPowerLifecycle,getSharedPowerLifecycleDiagnostics} from './src/bridge/powerLifecycleState';export {startRadialHost} from './src/radial/host';export {defaultRadialSettings} from './src/radial/model';export {isRadialTestingEnabled} from './src/radial/testingState';export {RADIAL_USER_AVAILABLE} from './src/radial/availability';export {setRadialTestingPreference,syncRadialTestingPreference} from './src/radial/testing';export {loadUiSettings,getUiSetting} from './src/bridge/uiSettings';export {defaultContinuousBank,patchContinuousBank} from './src/bridge/performanceControls';`,resolveDir:root,loader:'ts'},bundle:true,write:false,metafile:true,platform:'node',format:'cjs',alias:{'@':path.join(root,'src')},plugins:[radialHostInputPlugin(toolScope),{name:'radial-memory-contract',setup(b){b.onResolve({filter:/.*/},a=>{const owner=a.importer.replaceAll('\\','/').endsWith('/radial/host.ts');const key=a.importer.replaceAll('\\','/').endsWith('/bridge/powerLifecycleState.ts')&&a.path==='./ipc'?'@/bridge/ipc':a.importer.replaceAll('\\','/').endsWith('/bridge/uiSettings.ts')&&a.path==='./settingsRepository'?'radial-preference-repository':owner&&a.path==='./settings'?'radial-settings':owner&&a.path==='./fanHost'?'radial-fan-host':owner&&a.path==='./inputHost'?'radial-input-host':owner&&a.path==='./utilitiesHost'?'radial-utilities-host':a.path;if(key in modules)return{path:key,namespace:'fixture'};});b.onLoad({filter:/.*/,namespace:'fixture'},a=>({contents:modules[a.path],loader:'ts'}));}}]});
 completeRadialHostCompile(toolScope,compiled,Object.keys(modules));
-const module={exports:{}};new Function('require','module','exports',compiled.outputFiles[0].text)(require,module,module.exports);const {startRadialHost,defaultRadialSettings,RADIAL_USER_AVAILABLE,isRadialTestingEnabled,setRadialTestingPreference,syncRadialTestingPreference,loadUiSettings,getUiSetting,defaultContinuousBank,patchContinuousBank}=module.exports;
+const module={exports:{}};new Function('require','module','exports',compiled.outputFiles[0].text)(require,module,module.exports);const {getSharedPowerLifecycle,getSharedPowerLifecycleDiagnostics,startRadialHost,defaultRadialSettings,RADIAL_USER_AVAILABLE,isRadialTestingEnabled,setRadialTestingPreference,syncRadialTestingPreference,loadUiSettings,getUiSetting,defaultContinuousBank,patchContinuousBank}=module.exports;
 
 for(const input of ['tools/radial_host_selftest.mjs','src/radial/availability.ts','src/radial/testingState.ts','src/radial/testing.ts','src/bridge/uiSettings.ts'])sourceHashes[input]=hash(path.join(root,input));
 await loadUiSettings();assert.equal(RADIAL_USER_AVAILABLE,true,'Actual release availability remains true');assert.equal(getUiSetting('radialTestingEnabled'),false,'Actual UI preference default remains closed');
@@ -58,7 +64,9 @@ state.model.pages[0].items[6]={id:'tdp',label:'TDP',action:'tdp',enabled:true};s
 state.model.pages[0].items[4]={id:'settings',label:'设置',action:'page.settings',enabled:true};
 const inputPage=defaultRadialSettings().pages[0];inputPage.id='input-test';inputPage.items.forEach(item=>{if(!item.action.startsWith('input.'))item.id='input-fixture-'+item.id;item.children?.forEach(child=>child.id='input-fixture-'+child.id)});state.model.pages.push(inputPage);state.model.pages[0].items[2]={id:'monitor',label:'监控',action:'page.monitor',enabled:true};
 const utilityPage=defaultRadialSettings().pages[0];utilityPage.id='utility-test';utilityPage.items.forEach(item=>{item.id='utility-'+item.id;item.children?.forEach(child=>child.id='utility-'+child.id)});state.model.pages.push(utilityPage);
-state.invoke=async(cmd,args)=>{if(cmd==='radial.testing.configure'){state.testingRequests.push(structuredClone(args));return {ok:!args.enabled||state.testingAck,enabled:!!args.enabled&&state.testingAck,reason:'fixture native admission refused'};}state.calls.push({cmd,args});if(cmd==='radial.create'){const receipt={id:state.created.length+1,nonce:args.nonce};state.created.push({receipt,args});if(state.delay)await state.delay.promise;return receipt;}if(cmd==='radial.result'){state.results.push(args);return true;}if(cmd==='radial.close'){state.closed.push(args);return true;}return true;};
+state.nativePower=()=>({phase:state.ready?'ready':'suspending',generation:state.power,inputReady:state.ready,hardwareWritesAllowed:state.hardwareWritesAllowed,notificationPending:state.notificationPending,known:state.known,publicationRevision:state.publicationRevision,observedNotificationSequence:state.publicationRevision});
+state.invoke=async(cmd,args)=>{if(cmd==='power.lifecycle')return state.nativePower();if(cmd==='radial.testing.configure'){state.testingRequests.push(structuredClone(args));return {ok:!args.enabled||state.testingAck,enabled:!!args.enabled&&state.testingAck,reason:'fixture native admission refused'};}state.calls.push({cmd,args});if(cmd==='radial.create'){const receipt={id:state.created.length+1,nonce:args.nonce};state.created.push({receipt,args});if(state.delay)await state.delay.promise;return receipt;}if(cmd==='radial.result'){state.results.push(args);return true;}if(cmd==='radial.close'){state.closed.push(args);return true;}return true;};
+const nativePowerTransition=ready=>{state.ready=ready;state.hardwareWritesAllowed=ready;state.notificationPending=false;state.publicationRevision++;emit('power.lifecycleChanged',state.nativePower());};
 const emit=(event,data)=>{if(event==='radial.summon-request')data={issuedAt:Date.now(),expiresAt:Date.now()+4000,powerGeneration:state.power,...data};for(const cb of state.handlers.get(event)||[])cb(data);};
 async function until(fn){for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,2));}throw Error('Radial owner did not settle');}
 let host=startRadialHost({push:async route=>state.windows.push(route)});
@@ -89,6 +97,7 @@ async function summon(source='shortcut'){const count=state.created.length;emit('
 emit('radial.summon-request',{source:'shortcut',issuedAt:Date.now()-7000,expiresAt:Date.now()-1000});await new Promise(r=>setTimeout(r,5));check(state.created.length===0);
 emit('radial.summon-request',{source:'shortcut',powerGeneration:0});await new Promise(r=>setTimeout(r,5));check(state.created.length===0);
 let owner=await summon();check(state.created.at(-1).args.source==='shortcut');
+if(!sleepOnly){
 phase='owned-heartbeat-lifecycle';
 check(heartbeatTimers.size===1);
 const originalInvoke=state.invoke;let keepAliveCalls=0,delayedHeartbeat;
@@ -117,11 +126,86 @@ const closeBeforeRefusal=state.closed.length;
 state.invoke=(cmd,args,options)=>cmd==='radial.keepAlive'?Promise.resolve(false):originalInvoke(cmd,args,options);
 await advanceHeartbeat(2000);check(state.closed.length===closeBeforeRefusal+1);check(heartbeatTimers.size===0);
 state.invoke=originalInvoke;owner=await summon();
+}
 phase='original-host-business-scenarios';
 
 let request=0;
 async function intent(itemId,extra={}){const before=state.results.length,id='request-'+(++request),now=Date.now();const body={requestId:id,itemId,revision:state.model.revision,issuedAt:now,expiresAt:now+5000,...extra};emit('radial.intent',{...owner,intent:body});await until(()=>state.results.length>before);return {outcome:state.results.at(-1).result,body};}
+const sleepBoundaryNames=['pending-active','pending-summon','held-power','held-settings','held-checkpoint','held-create','missing-ready','duplicate-ready'];
+const sleepResults=[];
+async function sleepFlush(){for(let n=0;n<180;n++)await Promise.resolve();await new Promise(resolve=>originalSetTimeout(resolve,2));}
+async function exerciseSleepBoundaries(){
+ host.stop();await sleepFlush();
+ const selected=sleepBoundary?sleepBoundaryNames.filter(name=>name===sleepBoundary):sleepBoundaryNames;
+ const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve,entered:false};};
+ const publish=(patch={},deliver=true)=>{Object.assign(state,patch);state.publicationRevision++;const value=state.nativePower();if(deliver)emit('power.lifecycleChanged',value);return value;};
+ const pending=()=>{const fact=publish({ready:true,hardwareWritesAllowed:false,notificationPending:true}),shared=getSharedPowerLifecycle();assert(shared&&shared.known===true&&shared.phase==='ready'&&shared.notificationPending===true&&shared.hardwareWritesAllowed===false&&shared.generation===fact.generation,'actual shared source must consume the pending native fact');return fact;};
+ const ready=(deliver=true)=>publish({ready:true,hardwareWritesAllowed:true,notificationPending:false,known:true},deliver);
+ const closeCurrent=async current=>{emit('radial.closed',current);await sleepFlush();assert.equal(heartbeatTimers.size,0);};
+ const isClosed=current=>state.closed.some(row=>row.wheelId===current.wheelId&&row.nonce===current.nonce);
+ let requestId=0;
+ const sendIntent=(current,itemId)=>{const now=Date.now();emit('radial.intent',{...current,intent:{requestId:'sleep-'+(++requestId),itemId,revision:state.model.revision,issuedAt:now,expiresAt:now+4000}});};
+ for(const name of selected){
+  phase='sleep-'+name;let held=null;
+  try{
+   ready();host=startRadialHost({push:async route=>state.windows.push(route)});await sleepFlush();
+   let current=await summon();assert.equal(heartbeatTimers.size,1);
+   const createdBefore=state.created.length,writesBefore=state.writes.length,windowsBefore=state.windows.length;
+   if(name==='pending-active'){
+    const old=state.nativePower();pending();await sleepFlush();
+    assert.equal(isClosed(current),true,'pending shared power must retire the current radial session');
+    assert.equal(heartbeatTimers.size,0,'pending shared fence must release the owned heartbeat');
+    emit('power.lifecycleChanged',old);await sleepFlush();assert.equal(heartbeatTimers.size,0);ready();await sleepFlush();
+   }else if(name==='pending-summon'){
+    await closeCurrent(current);pending();await sleepFlush();
+    emit('radial.summon-request',{source:'settings'});await sleepFlush();
+    assert.equal(state.created.length,createdBefore,'unadmitted Ready must reject a fresh radial summon');ready();await sleepFlush();
+   }else if(name==='held-power'||name==='held-settings'){
+    await closeCurrent(current);held=deferred();const captured=state.nativePower();
+    if(name==='held-power')state.powerRead=held;else state.settingsRead=held;
+    emit('radial.summon-request',{source:'settings'});await until(()=>held.entered);
+    pending();ready();held.resolve(captured);await sleepFlush();
+    assert.equal(state.created.length,createdBefore,'retired pending summon read must not create a wheel after same-generation recovery');
+   }else if(name==='held-checkpoint'){
+    held=deferred();state.settingsRead=held;sendIntent(current,'settings');await until(()=>held.entered);
+    pending();ready();held.resolve();await sleepFlush();
+    assert.equal(state.windows.length,windowsBefore,'retired settings checkpoint must not open a page');
+    assert.equal(isClosed(current),true);assert.equal(heartbeatTimers.size,0);
+   }else if(name==='held-create'){
+    await closeCurrent(current);held=deferred();state.delay=held;
+    emit('radial.summon-request',{source:'settings'});await until(()=>state.created.length>createdBefore);
+    const late=state.created.at(-1).receipt;pending();ready();held.resolve();await sleepFlush();state.delay=null;
+    assert.equal(isClosed({wheelId:late.id,nonce:late.nonce}),true,'late created wheel must return its exact native receipt');
+    assert.equal(heartbeatTimers.size,0,'retired create must not acquire a heartbeat');
+   }else if(name==='missing-ready'){
+    pending();await sleepFlush();ready(false);
+    assert.equal(powerRetryTimers.size,1,'one shared timer owns lost Ready observation');
+    const [token,timer]=powerRetryTimers.entries().next().value;powerRetryTimers.delete(token);timer.callback();await sleepFlush();
+    assert.equal(getSharedPowerLifecycle().hardwareWritesAllowed,true);assert.equal(powerRetryTimers.size,0);
+    assert.equal(isClosed(current),true);assert.equal(heartbeatTimers.size,0);
+   }else{
+    const fact=ready(),before=state.created.length;for(let n=0;n<100;n++)emit('power.lifecycleChanged',fact);await sleepFlush();
+    assert.equal(state.created.length,before,'duplicate Ready must not recreate a wheel');assert.equal(isClosed(current),false);assert.equal(heartbeatTimers.size,1);await closeCurrent(current);
+   }
+   assert.equal(state.writes.length,writesBefore,'retired sleep work must not issue a performance write');
+   current=await summon('settings');assert.equal(heartbeatTimers.size,1,'fresh explicit summon works after same-generation Ready');
+   const beforePage=state.windows.length;sendIntent(current,'settings');await until(()=>state.windows.length>=beforePage+2);
+   assert.equal(heartbeatTimers.size,0);assert.equal(isClosed(current),true);
+   sleepResults.push({name,passed:true,sameGeneration:state.power,newExplicitSummon:true,oldPerformanceWrites:state.writes.length-writesBefore});checks++;
+  }finally{
+   held?.resolve(state.nativePower());state.powerRead=state.settingsRead=state.delay=null;host.stop();await sleepFlush();
+   assert.equal(heartbeatTimers.size,0);assert.equal(powerRetryTimers.size,0);assert.equal(getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+  }
+ }
+ assert.deepEqual(sleepResults.map(row=>row.name),selected);
+ console.log(JSON.stringify({radialSleepBoundaries:sleepResults}));
+}
+
 try{
+ if(sleepOnly){
+ await exerciseSleepBoundaries();
+ finalReport={pass:true,checks,defaultGateChecks,sourceHashes,toolScope:toolScope.report,sleepBoundaries:sleepResults,selectedSleepNames:sleepResults.map(row=>row.name),actualConsumer:'src/radial/host.ts',originalBusinessCasesNotRun:true,hardwareWrites:0,installedApplicationMutated:false};
+ }else{
  const activeBefore=state.closed.length,createdBefore=state.created.length;
  for(const source of ['monitor','fullscreen','fullscreen-raw'])emit('radial.summon-request',{source});
  await new Promise(r=>setTimeout(r,10));check(state.closed.length===activeBefore&&state.created.length===createdBefore);
@@ -134,9 +218,9 @@ try{
  state.capable=false;result=await intent('tdp',{value:16});check(!result.outcome.ok&&state.writes.length===2);state.capable=true;
  state.model.revision++;result=await intent('browserDirect');check(!result.outcome.ok&&state.windows.length===0);state.model.revision--;
  emit('radial.intent',{...owner,nonce:'stale-session',intent:{requestId:'bad'}});check(state.windows.length===0);
- const count=state.closed.length;emit('power.suspending',{});await until(()=>state.closed.length>count);check(state.closed.at(-1).wheelId===owner.wheelId);
+ const count=state.closed.length;nativePowerTransition(false);emit('power.suspending',{});await until(()=>state.closed.length>count);check(state.closed.at(-1).wheelId===owner.wheelId);nativePowerTransition(true);
  owner=await summon('fullscreen');check(state.created.at(-1).args.source==='fullscreen'&&state.created.at(-1).args.x===42);
- emit('power.suspending',{});await until(()=>state.closed.some(c=>c.wheelId===owner.wheelId));
+ nativePowerTransition(false);emit('power.suspending',{});await until(()=>state.closed.some(c=>c.wheelId===owner.wheelId));nativePowerTransition(true);
  owner=await summon('fullscreen-raw');check(state.created.at(-1).args.source==='fullscreen-raw');
  result=await intent('thisPc');check(result.outcome.ok);await until(()=>state.windows.length===1);assert.deepEqual(state.windows[0],['explorer.exe',['shell:MyComputerFolder']]);checks++;
  owner=await summon();result=await intent('ymcc');check(result.outcome.ok);await until(()=>state.windows.includes('ymcc'));
@@ -178,7 +262,9 @@ try{
  const old=owner;emit('power.sourceChanged',{});await until(()=>state.closed.some(c=>c.wheelId===old.wheelId));check(true);
  let release;state.delay={promise:new Promise(r=>release=r)};const before=state.created.length;emit('radial.summon-request',{source:'shortcut'});await until(()=>state.created.length>before);const late=state.created.at(-1).receipt;host.stop();release();await until(()=>state.closed.some(c=>c.wheelId===late.id&&c.nonce===late.nonce));check(true);
  check([...state.handlers.values()].every(v=>v.size===0));
- finalReport={pass:true,checks,defaultGateChecks,heartbeat:{virtualTime:true,idleObservationMs:120000,idleCallbacks:idleCallbackDelta,normalPeriodMs:2000,slowReadPeakInFlight:1,ownedTimersAfterStop:heartbeatTimers.size},sourceHashes,toolScope:toolScope.report,gateContract:'Actual uiSettings -> setRadialTestingPreference -> syncRadialTestingPreference -> inert native receipt -> actual testingState; no environment bypass or direct ref write',actualConsumer:'src/radial/host.ts',performanceProvider:'memory fixture; real schedule writer separately covered by continuous_performance_selftest',hardwareWrites:0,installedApplicationMutated:false};
-}finally{host.stop();await setRadialTestingPreference(false);assert.equal(isRadialTestingEnabled(),false,'Public contract restores default-closed admission');for(const [input,digest]of Object.entries(sourceHashes))assert.equal(hash(path.join(root,input)),digest,'Source changed: '+input);verifyRadialHostTools(toolScope);if(finalReport){finalReport.restoredAdmissionClosed=true;finalReport.testingRequests=state.testingRequests;const output=process.argv[2];if(output)fs.writeFileSync(output,JSON.stringify(finalReport,null,2));console.log(JSON.stringify({pass:true,checks,defaultGateChecks,restoredAdmissionClosed:true}));}globalThis.setInterval=originalSetInterval;globalThis.clearInterval=originalClearInterval;globalThis.localStorage=originalStorage;delete globalThis.__radialHostFixture;}
+ await exerciseSleepBoundaries();
+ finalReport={pass:true,checks,defaultGateChecks,sleepBoundaries:sleepResults,selectedSleepNames:sleepBoundaryNames,heartbeat:{virtualTime:true,idleObservationMs:120000,idleCallbacks:idleCallbackDelta,normalPeriodMs:2000,slowReadPeakInFlight:1,ownedTimersAfterStop:heartbeatTimers.size},sourceHashes,toolScope:toolScope.report,gateContract:'Actual uiSettings -> setRadialTestingPreference -> syncRadialTestingPreference -> inert native receipt -> actual testingState; no environment bypass or direct ref write',actualConsumer:'src/radial/host.ts',performanceProvider:'memory fixture; real schedule writer separately covered by continuous_performance_selftest',hardwareWrites:0,installedApplicationMutated:false};
+ }
+}finally{host.stop();await setRadialTestingPreference(false);assert.equal(isRadialTestingEnabled(),false,'Public contract restores default-closed admission');for(const [input,digest]of Object.entries(sourceHashes))assert.equal(hash(path.join(root,input)),digest,'Source changed: '+input);verifyRadialHostTools(toolScope);if(finalReport){finalReport.restoredAdmissionClosed=true;finalReport.testingRequests=state.testingRequests;const output=process.argv[2];if(output)fs.writeFileSync(output,JSON.stringify(finalReport,null,2));console.log(JSON.stringify({pass:true,checks,defaultGateChecks,restoredAdmissionClosed:true}));}globalThis.setInterval=originalSetInterval;globalThis.clearInterval=originalClearInterval;globalThis.setTimeout=originalSetTimeout;globalThis.clearTimeout=originalClearTimeout;globalThis.localStorage=originalStorage;delete globalThis.__radialHostFixture;}
 
 }

@@ -8,8 +8,25 @@ import readline from 'node:readline';
 import assert from 'node:assert/strict';
 import {compileTouchFixture,collectTouchSources,runTouchExecutable,digest} from './native-toolchain.mjs';
 import {generateTouchExcerpts} from './source-excerpts.mjs';
+import {simulationCorePath} from '../release-host-environment.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url)),defaultRepo=path.resolve(here,'../../../..');
 const json=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
+const samePath=(a,b)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
+function openTouchExecution(repoRoot,requested){
+ const workDir=path.resolve(requested??simulationCorePath('Workspace'));
+ const relative=path.relative(repoRoot,workDir);
+ assert(relative&&(path.isAbsolute(relative)||relative==='..'||relative.startsWith('..'+path.sep))&&!samePath(workDir,path.parse(workDir).root),'TOUCH_WORK_ROOT_OUTSIDE_REPOSITORY_REQUIRED');
+ const verify=dir=>{
+  let stat;
+  try{stat=fs.lstatSync(dir);}catch(error){if(error.code==='ENOENT')return false;throw error;}
+  assert(stat.isDirectory()&&!stat.isSymbolicLink()&&samePath(fs.realpathSync.native(dir),dir),'TOUCH_WORK_ROOT_REDIRECTED');
+  return true;
+ };
+ let ancestor=workDir;
+ while(!verify(ancestor))ancestor=path.dirname(ancestor);
+ fs.mkdirSync(workDir,{recursive:true});assert(verify(workDir));
+ return fs.mkdtempSync(path.join(workDir,'execution-'));
+}
 function bundle(repoRoot,entry,contents){const require=createRequire(path.join(repoRoot,'package.json'));return require('esbuild').build({...(contents?{stdin:{contents,sourcefile:'touch-memory-entry.ts',loader:'ts',resolveDir:repoRoot}}:{entryPoints:[path.join(repoRoot,entry)]}),absWorkingDir:repoRoot,bundle:true,write:false,platform:'node',format:'cjs',metafile:true,logLevel:'silent'});}
 async function originalTs(repoRoot){
  const compiled=await bundle(repoRoot,'tools/screen_touchpads_selftest.ts'),module={exports:{}},messages=[];
@@ -41,23 +58,26 @@ async function bridgeRegression(repoRoot,native){
  }finally{child.stdin.end();await new Promise(resolve=>child.once('exit',resolve));reader.close();}
 }
 export async function runTouchSurfaceRegressions(options={}){
- const repoRoot=fs.realpathSync(options.repoRoot??defaultRepo),workDir=path.resolve(options.workDir??path.join(process.cwd(),'work/touch-surface'));
+ const repoRoot=fs.realpathSync(options.repoRoot??defaultRepo);
  const before=collectTouchSources(repoRoot),generated=generateTouchExcerpts(repoRoot),suites=[];
- const custom=await compileTouchFixture({repoRoot,workDir,name:'touch-surface',source:path.join(here,'touch-fixture.cpp'),generated:generated.generated});
+ const suiteEvidence=openTouchExecution(repoRoot,options.workDir),buildDir=path.join(suiteEvidence,'build');
+ fs.mkdirSync(buildDir);
+ const acceptSuite=suite=>{suites.push(suite);const file=path.join(suiteEvidence,suite.id+'.json'),fd=fs.openSync(file,'wx');try{fs.writeFileSync(fd,JSON.stringify(suite,null,2)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}assert.equal(suite.status,'PASS','TOUCH_REQUIRED_SUITE_FAILED:'+suite.id);};
+ const custom=await compileTouchFixture({repoRoot,workDir:buildDir,name:'touch-surface',source:path.join(here,'touch-fixture.cpp'),generated:generated.generated});
  const run=await runTouchExecutable(custom),direct=JSON.parse(run.stdout);
- suites.push({id:'formal-native-four-stage',status:run.exitCode===0&&direct.status==='PASS'?'PASS':'FAIL',result:direct,importAudit:custom.importAudit,executableSha256:custom.executableSha256});
+ acceptSuite({id:'formal-native-four-stage',status:run.exitCode===0&&direct.status==='PASS'?'PASS':'FAIL',result:direct,importAudit:custom.importAudit,executableSha256:custom.executableSha256});
  for(const [name,source]of [['event-time','tools/ymcc_sim/global/touch-surface-signals/legacy-event-time.cpp'],['feedback-lease','tools/screen_touchpads_feedback_lease_selftest.cpp'],['partial-send','tools/screen_touchpad_partial_send_selftest.cpp']]){
-  const compiled=await compileTouchFixture({repoRoot,workDir,name,source:path.join(repoRoot,source),generated:name==='partial-send'?generated.generated:{}});
+   const compiled=await compileTouchFixture({repoRoot,workDir:buildDir,name,source:path.join(repoRoot,source),generated:name==='partial-send'?generated.generated:{}});
   const execution=await runTouchExecutable(compiled,name==='partial-send'?[]:[path.join(compiled.dir,'result.json')]);
   const result=name==='partial-send'?JSON.parse(execution.stdout.match(/SUMMARY (\{[^\n]+\})/)?.[1]??'{}'):json(path.join(compiled.dir,'result.json'));
-  suites.push({id:'original-'+name,status:execution.exitCode===0&&(name==='partial-send'?result.failed===0:result.ok===true)?'PASS':'FAIL',result,importAudit:compiled.importAudit,executableSha256:compiled.executableSha256});
+  acceptSuite({id:'original-'+name,status:execution.exitCode===0&&(name==='partial-send'?result.failed===0:result.ok===true)?'PASS':'FAIL',result,importAudit:compiled.importAudit,executableSha256:compiled.executableSha256});
  }
- suites.push({id:'original-frontend-TS',...await originalTs(repoRoot)});
- const bridge=await bridgeRegression(repoRoot,custom);suites.push({id:'formal-bridge-native-config',...bridge});
+ acceptSuite({id:'original-frontend-TS',...await originalTs(repoRoot)});
+ const bridge=await bridgeRegression(repoRoot,custom);acceptSuite({id:'formal-bridge-native-config',...bridge});
  const after=collectTouchSources(repoRoot),sourceDrift=before.filter(s=>after.find(a=>a.path===s.path)?.sha256!==s.sha256).map(s=>s.path);
  return {schemaVersion:1,kind:'touch-surface-signals',status:suites.every(s=>s.status==='PASS')&&!sourceDrift.length?'PASS':'FAIL',
   summary:{suites:suites.length,passed:suites.filter(s=>s.status==='PASS').length,nativeScenarios:direct.checks,bridgeScenarios:bridge.checks,originalEventTimeChecks:suites[1].result.cases.length,originalLeaseChecks:suites[2].result.cases.length,originalPartialSendChecks:suites[3].result.checks,originalPartialSendFaultCases:suites[3].result.faultScenarios},
-  sourceChanges:[],sourceHashes:before,sourceDrift,
+  sourceChanges:[],sourceHashes:before,sourceDrift,suiteEvidence,
   executedProductModules:[{path:'native/screen_touchpads.h',execution:'actual-header-in-original-event-time-test;byte-identical-Core-config-transport-output-configure-shutdown-excerpts'},
    {path:'native/screen_touchpad_owner.h',execution:'byte-identical-owner-thread-resume-epoch-shutdown-functions'},
    ...['native/screen_touchpad_auto_hide.h','native/screen_touchpad_visibility.h','native/screen_touchpad_display_policy.h','native/touch_haptic_dispatch.h','native/touch_feedback_lease.h','native/msi_dinput_acquire_recovery.h','src/bridge/screenTouchpads.ts','src/bridge/ipc.ts'].map(p=>({path:p,execution:'actual-header-or-unmodified-TS-consumer'}))].map(s=>({...s,sha256:before.find(h=>h.path===s.path)?.sha256})),

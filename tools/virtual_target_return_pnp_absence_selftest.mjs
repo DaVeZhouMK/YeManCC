@@ -53,7 +53,8 @@ const variants=[
   {name:'negative-enum-error-absent',before:'return finish({State::Unknown,Reason::EnumerationFailed,scanned,error});',after:'return finish({State::Absent,Reason::EnumerationFailed,scanned,error});',requiredCase:'enumeration/error-before-first'},
   {name:'negative-property-error-absent',before:'return finish({State::Unknown,Reason::HardwareIdsReadFailed,scanned,0,property});',after:'return finish({State::Absent,Reason::HardwareIdsReadFailed,scanned,0,property});',requiredCase:'property/read-error'},
   {name:'negative-observed-id-authority-alphabet',before:'if(!leafDetail::observedInstance(observed)){',after:'if(!ymcc::targetReturn::detail::instance(leafDetail::instanceUtf8(observed))){',requiredCase:'id/opaque-colon-before-live-target'},
-  {name:'negative-forget-family',before:'if(family)return finish({State::Present,Reason::SupportedFamilyPresent,scanned});',after:'if(family)return finish({State::Absent,Reason::SupportedFamilyPresent,scanned});',requiredCase:'family/new-epoch-0'}
+  {name:'negative-forget-family',before:'if(family)return finish({State::Present,Reason::SupportedFamilyPresent,scanned});',after:'if(family)return finish({State::Absent,Reason::SupportedFamilyPresent,scanned});',requiredCase:'family/new-epoch-0'},
+  {name:'negative-ps-unclassified-absent',before:'if(profileUnknown)return finish({State::Unknown,Reason::UnclassifiedProfileRoot,scanned});',after:'if(profileUnknown)return finish({State::Absent,Reason::UnclassifiedProfileRoot,scanned});',requiredCase:'ps/unclassified-generic-root'}
 ];
 const results=[],boundInputs=new Map();
 try{
@@ -97,15 +98,26 @@ try{
     const exports=spawnSync(dump,['/exports',exe],{cwd:dir,env,encoding:'utf8',windowsHide:true,timeout:10000});
     fs.writeFileSync(path.join(dir,'exports.log'),(exports.stdout??'')+(exports.stderr??''));assert.equal(exports.status,0);
     assert(exports.stdout.includes('productionPnpAbsenceCompileOnly'),'real ProductionReader is actually compiled and retained as an uncalled export');
+    assert(exports.stdout.includes('productionPnpPsProfileCompileOnly'),'real PS ProductionReader API is actually compiled and retained as an uncalled export');
     const executableIdentity=identity(exe);
     save(path.join(dir,'COMPILE-CLOSURE.json'),{compiler:identity(cl),binary:executableIdentity,generatedImportLibrary:identity(importLibrary),inputs:actualInputs,libraries,staticImportedDlls:dlls,runtimeModuleLoadingTraced:false});
-    const ran=spawnSync(exe,[path.join(dir,'RESULT.json')],{cwd:dir,env,encoding:'utf8',windowsHide:true,timeout:45000,maxBuffer:4*1024*1024});
+    const runArguments=[path.join(dir,'RESULT.json'),...(variant.before?[variant.requiredCase]:[])];
+    const ran=spawnSync(exe,runArguments,{cwd:dir,env,encoding:'utf8',windowsHide:true,timeout:45000,maxBuffer:4*1024*1024});
     fs.writeFileSync(path.join(dir,'run.log'),(ran.stdout??'')+(ran.stderr??''));
     assert(fs.existsSync(path.join(dir,'RESULT.json')),'fixture must produce a terminal result');
     assert.equal(hash(exe),executableIdentity.sha256,'executed binary did not change');
     const result=read(path.join(dir,'RESULT.json'));
-    if(variant.before){assert.equal(ran.status,1,'semantic fault must compile and fail original assertions without crashing');assert(result.failures.some(f=>f.case===variant.requiredCase),'semantic fault must hit intended original case');}
-    else{assert.equal(ran.status,0,'actual fixture assertions failed: '+path.join(dir,'RESULT.json'));assert(result.pass);}
+    assert.equal(result.caseCount,result.cases.length,'terminal count matches the actual case list');
+    if(variant.before){
+      assert.equal(ran.status,1,'semantic fault must compile and fail original assertions without crashing');
+      assert.equal(result.pass,false,'semantic fault must preserve the failing fixture result');
+      assert.equal(result.caseFilter,variant.requiredCase,'fixture received the exact semantic case selector');
+      assert.equal(result.caseCount,1,'semantic fault executes only its required case');
+      assert.deepEqual(result.cases.map(c=>c.case),[variant.requiredCase],'semantic fault actual case set is exact');
+      assert.equal(result.cases[0].pass,false,'the selected original assertions reject the semantic fault');
+      assert(result.failures.some(f=>f.case===variant.requiredCase),'semantic fault must hit intended original case');
+    }
+    else{assert.equal(ran.status,0,'actual fixture assertions failed: '+path.join(dir,'RESULT.json'));assert(result.pass);assert.equal(result.caseFilter,null,'Release/Checked run the complete original and PS case set');}
     const receipt={variant:variant.name,positive:!variant.before,pass:variant.before?ran.status===1:result.pass,
       cases:result.caseCount,assertions:result.assertions,failureCount:result.failures.length,requiredCase:variant.requiredCase??null,
       compilerInputs:actualInputs.length,linkerLibraries:libraries.length,binary:executableIdentity,result:identity(path.join(dir,'RESULT.json'))};
@@ -117,7 +129,7 @@ try{
   const result={pass:true,status:'BOUNDED_PNP_ABSENCE_FAKE_READER_VERIFIED_RUNTIME_NOT_INTEGRATED',createdAt:new Date().toISOString(),sources,tools:toolInputs,
     variants:results,capturedToolchain:toolchain,sourceCurrent:true,selectedHostRulesCurrent:true,wholeHostFileChanged:hash(hostSource.path)!==hostSource.sha256,selectedHostRules,boundToolchainInputs:[...boundInputs.values()],
     scope:{algorithm:'actual bounded production verify template, only read-only SetupAPI/CM Reader leaves controlled',deviceApisExecuted:false,
-      productionReader:'actual SetupAPI/CM imports retained by exported compile-only function, never called by fixture',
+      productionReader:'actual SetupAPI/CM imports retained by default and PS exported compile-only functions, never called by fixture',
       maximumNodeReads:1024,maximumEnumerationCalls:1025,maximumHardwareIdBytesPerNode:16384,maximumKnownExactIds:1024,noParentOrDeviceWrites:true,
       noPhysicalHardwareOrInstalledAppdata:true,checkedConfiguration:'/Od /RTC1 /MT; not an arithmetic-overflow sanitizer',
       productOrHostExecuted:false,deviceServiceDriverOrSteamOperations:false,

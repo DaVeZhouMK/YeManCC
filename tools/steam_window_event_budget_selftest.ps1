@@ -1,12 +1,14 @@
-param([Parameter(Mandatory=$true)][string]$Out,[string]$BaselineNative='',[switch]$ExceptionsOnly)
+param([Parameter(Mandatory=$true)][string]$Out,[string]$BaselineNative='',[switch]$ExceptionsOnly,[switch]$ReceiptBorrowOnly,[switch]$ColdImageOnly)
 $ErrorActionPreference='Stop'
+if($ReceiptBorrowOnly -and ($ExceptionsOnly -or $BaselineNative)){throw 'Receipt borrow selection cannot combine baseline or exception selections'}
+if($ColdImageOnly -and ($ReceiptBorrowOnly -or $ExceptionsOnly)){throw 'Cold image selection cannot combine receipt or exception selections'}
 $repo=Split-Path -Parent $PSScriptRoot
 $Out=[IO.Path]::GetFullPath($Out);New-Item -ItemType Directory -Path $Out -Force|Out-Null
 $flags=''
 if($BaselineNative){$BaselineNative=(Resolve-Path -LiteralPath $BaselineNative).Path;$flags='/DYMCC_BASELINE_METRICS /I"'+$BaselineNative+'"'}
 $cmd=Join-Path $Out 'compile.cmd'
-$selection=if($ExceptionsOnly){' --exceptions-only'}else{''}
-$costStage=if($ExceptionsOnly){'exit /b 0'}else{''}
+$selection=if($ExceptionsOnly){' --exceptions-only'}elseif($ReceiptBorrowOnly){' --receipt-borrow-only'}elseif($ColdImageOnly){' --cold-image-only'}else{''}
+$costStage=if($ExceptionsOnly -or $ReceiptBorrowOnly -or $ColdImageOnly){'exit /b 0'}else{''}
 $recipe=@"
 @echo off
 chcp 65001 >nul

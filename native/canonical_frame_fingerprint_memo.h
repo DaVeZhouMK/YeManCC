@@ -1,7 +1,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
-#include <cstdio>
+#include <charconv>
 #include <cstring>
 #include <string>
 
@@ -24,10 +24,17 @@ public:
         const std::array<std::uint32_t, 7> key{static_cast<std::uint32_t>(buttons),
             bits(lx), bits(ly), bits(rx), bits(ry), bits(lt), bits(rt)};
         if (valid_ && key == key_) return std::string(hash_.data(), hash_.size());
-        char canonical[160]{};
-        std::snprintf(canonical, sizeof(canonical), "%d|%08X|%08X|%08X|%08X|%08X|%08X", buttons,
-            key[1], key[2], key[3], key[4], key[5], key[6]);
-        auto result = hash(std::string(canonical));
+        char canonical[160];
+        // int plus six fixed-width IEEE words fits the original buffer.
+        // Keep the exact decimal sign and uppercase eight-digit hex bytes.
+        char* cursor = std::to_chars(canonical, canonical + sizeof(canonical), buttons).ptr;
+        static constexpr char hex[] = "0123456789ABCDEF";
+        for (std::size_t axis = 1; axis < key.size(); ++axis) {
+            *cursor++ = '|';
+            for (int shift = 28; shift >= 0; shift -= 4)
+                *cursor++ = hex[(key[axis] >> shift) & 0xFu];
+        }
+        auto result = hash(std::string(canonical, static_cast<std::size_t>(cursor - canonical)));
         // Failed/incomplete computations never become hits. Keep fixed storage
         // so a fully changing input adds no heap allocation on a cache miss.
         valid_ = result.size() == hash_.size();

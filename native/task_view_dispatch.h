@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <string>
+#include <functional>
 #include "task_view_foreground_grant.h"
 
 // One explicit TaskView request at a time. Only the exact process created here
@@ -16,12 +17,12 @@ namespace ymcc::taskView {
 inline constexpr DWORD callBudgetMs=3000,cleanupBudgetMs=500;
 inline constexpr ULONGLONG requestBudgetMs=4500;
 inline constexpr DWORD cancelledExit=0xE0000042u;
-enum class Status { Requested,Busy,Expired,MissingHelper,JobFailed,StartFailed,
+enum class Status { Requested,Busy,Expired,Cancelled,MissingHelper,JobFailed,StartFailed,
     AssignFailed,ForegroundGrantFailed,ResumeFailed,ReadyFailed,ReleaseFailed,WaitFailed,TimedOut,ExitQueryFailed,ApiFailed,CleanupUnproven };
 inline const char* statusName(Status s) noexcept {
     switch(s){
     case Status::Requested:return "requested";case Status::Busy:return "busy";
-    case Status::Expired:return "request-expired";case Status::MissingHelper:return "helper-missing";
+    case Status::Expired:return "request-expired";case Status::Cancelled:return "request-context-cancelled";case Status::MissingHelper:return "helper-missing";
     case Status::JobFailed:return "job-failed";case Status::StartFailed:return "start-failed";
     case Status::AssignFailed:return "job-assignment-failed";
     case Status::ForegroundGrantFailed:return "foreground-grant-failed";case Status::ResumeFailed:return "resume-failed";
@@ -38,16 +39,24 @@ struct Result {
     bool helperExitKnown=false,helperStarted=false,helperResumed=false,helperReady=false,executionReleased=false,waitTimedOut=false,foregroundGrantAttempted=false,foregroundGrantAccepted=false;
     bool terminationAttempted=false,terminationAccepted=false,cleanupVerified=false,cleanupRetained=false;
 };
+// A failed privilege transfer is not a Shell method result. Only a completed
+// Windows API rejection may continue to the original one-shot Shell request;
+// transport uncertainty, invalid owners and cancelled grants remain blocking.
+inline bool foregroundGrantWasExplicitlyRejected(const foreground::DeliveryReceipt& receipt) noexcept {
+    return (receipt.stage==foreground::DeliveryStage::ApiRejected&&receipt.error!=ERROR_SUCCESS) ||
+        (receipt.stage==foreground::DeliveryStage::ApiRejectedNoError&&receipt.error==ERROR_ACCESS_DENIED);
+}
 struct WindowsOps {
     HWND foregroundOwner = nullptr;
     foreground::DeliveryReceipt foregroundReceipt;
     HANDLE readyEvent=nullptr,executeEvent=nullptr;
+    HANDLE helperProcess=nullptr; // borrowed from this request's PROCESS_INFORMATION
     ~WindowsOps()noexcept{finishHandshake();}
     void finishHandshake()noexcept{
         const DWORD savedError=GetLastError();
         if(readyEvent)CloseHandle(readyEvent);
         if(executeEvent)CloseHandle(executeEvent);
-        readyEvent=executeEvent=nullptr;
+        readyEvent=executeEvent=nullptr;helperProcess=nullptr;
         SetLastError(savedError);
     }
     DWORD ready(HANDLE process,DWORD ms)const noexcept{
@@ -81,13 +90,14 @@ struct WindowsOps {
             const std::wstring guarded=std::wstring(command)+L" "+readyName+L" "+executeName;
             std::wstring mutableCommand=guarded;
             STARTUPINFOW si{};si.cb=sizeof(si);si.dwFlags=STARTF_USESHOWWINDOW;si.wShowWindow=SW_HIDE;
-            return CreateProcessW(helper,mutableCommand.data(),nullptr,nullptr,FALSE,
-                CREATE_SUSPENDED|CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi)!=FALSE;
+            if(!CreateProcessW(helper,mutableCommand.data(),nullptr,nullptr,FALSE,
+                CREATE_SUSPENDED|CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi))return false;
+            helperProcess=pi.hProcess;return true;
         }catch(...){finishHandshake();SetLastError(ERROR_NOT_ENOUGH_MEMORY);return false;}
     }
     bool assign(HANDLE job,HANDLE process)const noexcept{return AssignProcessToJobObject(job,process)!=FALSE;}
     bool allowForeground(DWORD pid) noexcept {
-        if (foregroundOwner) return foreground::request(foregroundOwner,pid,&foregroundReceipt);
+        if (foregroundOwner) return foreground::request(foregroundOwner,pid,&foregroundReceipt,helperProcess);
         SetLastError(ERROR_SUCCESS);
         const bool accepted = AllowSetForegroundWindow(pid)!=FALSE;
         const auto error = accepted ? ERROR_SUCCESS : GetLastError();
@@ -95,6 +105,9 @@ struct WindowsOps {
             accepted ? ERROR_SUCCESS : (error ? error : ERROR_ACCESS_DENIED)};
         SetLastError(foregroundReceipt.error);
         return accepted;
+    }
+    bool foregroundGrantKnownRejected()const noexcept {
+        return foregroundGrantWasExplicitlyRejected(foregroundReceipt);
     }
     bool resume(HANDLE thread)const noexcept{return ResumeThread(thread)!=static_cast<DWORD>(-1);}
     DWORD wait(HANDLE process,DWORD ms)const noexcept{return WaitForSingleObject(process,ms);}
@@ -123,7 +136,7 @@ public:
     // Args are prepared before acquiring the one-request lease. Ops must not
     // throw. No wait is made for another caller's lease; Busy is explicit.
     template<class Ops> Result request(Ops& ops,const wchar_t* helper,wchar_t* command,
-            ULONGLONG deadline) noexcept {
+            ULONGLONG deadline,const std::function<bool()>& current={}) noexcept {
         Result r;
         if(busy_.test_and_set(std::memory_order_acquire)){r.status=Status::Busy;return r;}
         Lease lease{busy_};const auto started=ops.now();
@@ -133,6 +146,8 @@ public:
             if(!retire(ops,process,job,false,r))return finish();
             r.terminationAttempted=r.terminationAccepted=false;r.cleanupVerified=false;
         }
+        const auto contextCurrent=[&]()noexcept{try{return !current||current();}catch(...){return false;}};
+        if(!contextCurrent()){r.status=Status::Cancelled;r.errorHint=ERROR_CANCELLED;return finish();}
         if(deadline<=ops.now()){r.status=Status::Expired;return finish();}
         const auto attributes=ops.attributes(helper);
         if(attributes==INVALID_FILE_ATTRIBUTES||(attributes&FILE_ATTRIBUTE_DIRECTORY)){
@@ -150,6 +165,7 @@ public:
             retire(ops,pi.hProcess,job,false,r);return finish();
         };
         if(!ops.assign(job,pi.hProcess))return failChild(Status::AssignFailed);
+        if(!contextCurrent()){r.status=Status::Cancelled;r.errorHint=ERROR_CANCELLED;ops.close(pi.hThread);retire(ops,pi.hProcess,job,false,r);return finish();}
         if(deadline<=ops.now())return failChild(Status::Expired);
         // User32 cannot reliably grant foreground rights to a suspended,
         // uninitialized process. Resume only its bootstrap, then wait for its
@@ -170,16 +186,22 @@ public:
             retire(ops,pi.hProcess,job,false,r);return finish();
         }
         r.helperReady=true;
+        if(!contextCurrent()){r.status=Status::Cancelled;r.errorHint=ERROR_CANCELLED;retire(ops,pi.hProcess,job,false,r);return finish();}
         if(!remainingBudget())return failChild(Status::Expired);
         r.foregroundGrantAttempted=true;
         r.foregroundGrantAccepted=ops.allowForeground(pi.dwProcessId);
         if(!r.foregroundGrantAccepted){
             r.foregroundGrantError=ops.error();
-            r.errorHint=r.foregroundGrantError;
-            r.status=Status::ForegroundGrantFailed;
-            retire(ops,pi.hProcess,job,false,r);
-            return finish();
+            if(!ops.foregroundGrantKnownRejected()){
+                r.errorHint=r.foregroundGrantError;
+                r.status=Status::ForegroundGrantFailed;
+                retire(ops,pi.hProcess,job,false,r);
+                return finish();
+            }
+            // Keep the denial as evidence, then let Shell decide this explicit
+            // request. This grants no privilege and sends no keyboard input.
         }
+        if(!contextCurrent()){r.status=Status::Cancelled;r.errorHint=ERROR_CANCELLED;retire(ops,pi.hProcess,job,false,r);return finish();}
         if(!remainingBudget())return failChild(Status::Expired);
         if(!ops.release())return failChild(Status::ReleaseFailed);
         r.executionReleased=true;

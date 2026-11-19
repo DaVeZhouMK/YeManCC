@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {getFixedArtifactPipeAdapters} from './r3-terminal26-artifact-adapter.mjs';
 import path from 'node:path';
 import {REPO,WORKSPACE} from '../controller-coordinator-lifecycle/adapter.mjs';
 import {runtimeTools} from '../controller-lifecycle-pipe/adapter.mjs';
@@ -45,6 +46,12 @@ export function artifacts(key='positive'){
 export function getControllerCoordinatorPipeAdapters({readSources=sources,readArtifacts=artifacts,selectedIds}={}){
  if(selectedIds!==undefined&&(!Array.isArray(selectedIds)||!selectedIds.every(id=>typeof id==='string'&&id.length>0)))throw Error('COORDINATOR_SELECTION_SHAPE');
  const requested=selectedIds===undefined?null:new Set(selectedIds);
+ // Explicit reviewed C++ artifact profile owns only these same four IDs.
+ // Injected legacy source/artifact readers retain their original test contract.
+ if(readSources===sources&&readArtifacts===artifacts){
+  const fixed=getFixedArtifactPipeAdapters({repo:REPO,specs:CASE_SPECS,selectedIds});
+  if(fixed)return fixed;
+ }
  return CASE_SPECS.map(spec=>{
   let actualB54=false;
   let registration;

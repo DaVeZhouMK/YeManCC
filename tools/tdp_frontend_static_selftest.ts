@@ -1,15 +1,19 @@
 // Real frontend entry points + isolated IPC responders. No commands reach Windows hardware.
 import 'vue';
+import { emitMockIpcEvent } from './mock-shell';
 import { hasScheduledTask } from '../src/scheduler';
-import './mock-shell';
+import { startForegroundPowerSourceRefresh } from '../src/bridge/powerSource';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { setTdp, setTdpCurrentMode, setPowerControlDir, resumeTdpDaemonAfterWake, stopTdpDaemon, primeTdpSession, reconcileTdpPowerSession, invalidateTdpPowerSession, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, setActiveScheme, applyFloatPowerParams, applyManualPowerParams, PW } from '../src/bridge/yeman';
+import { setTdp, setTdpCurrentMode, setPowerControlDir, ensureTdpDaemon, resumeTdpDaemonAfterWake, stopTdpDaemon, primeTdpSession, reconcileTdpPowerSession, invalidateTdpPowerSession, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, detectVendor, setActiveScheme, applyFloatPowerParams, applyManualPowerParams, PW } from '../src/bridge/yeman';
 import { resetTdpCapabilityState } from '../src/bridge/tdpCircuitBreaker';
 import { tdpRuntimeStore } from '../src/bridge/tdpRuntimeState';
-import { tdpDiagnosticDeliveryFailures, markTdpOperatorMode } from '../src/bridge/tdpStaticDiagnostics';
+import { tdpDiagnosticDeliveryFailures, tdpDiagnosticDeliveryEvidence, beginTdpObservation, markTdpOperatorMode } from '../src/bridge/tdpStaticDiagnostics';
 const base=resolve(process.argv[2]);mkdirSync(base,{recursive:true});
 const checks:Array<{name:string;pass:boolean}>=[];let scenario='cli',selected=false,floating=false,ready=true,logFails=false,phase='ready';
+let sourceRevision=0;
+const sourceReceipt=(state:Record<string,unknown>)=>({...state,generation:1,revision:++sourceRevision});
+const emitSource=(state:Record<string,unknown>)=>emitMockIpcEvent('power.sourceChanged',sourceReceipt(state));
 let calls:Array<{cmd:string;args:any}>=[],rows:Array<{event:string;detail:any}>=[];let resumedGeneration=0;let powerGeneration=1;let holdPower:((value:any)=>void)|null=null;let holdResume:((value:any)=>void)|null=null;let holdSet:((value:any)=>void)|null=null;
 (globalThis as any).__mockShellDryRun=true;
 (globalThis as any).__mockIpcResponder=(cmd:string,args:any)=>{
@@ -17,8 +21,8 @@ let calls:Array<{cmd:string;args:any}>=[],rows:Array<{event:string;detail:any}>=
  if(cmd==='tdp.observe'){rows.push(...structuredClone(args.events ?? [args]));if(logFails)throw new Error('fixture-log-delivery-failed');return {ok:true};}
  if(cmd==='tdp.capability'){if(scenario==='capability-throws')throw Error('fixture-capability-not-ready');return {provider:selected?'msi-g3e-wmi':'default',selected,ready,minPL1:selected?8:2,maxPL1:selected?35:200,cpuFamily:selected?'intel-arc-g3-extreme':'other-or-unverified',generation:1,deadlineTick:123456};}
  if(cmd==='power.setActiveScheme'){if(scenario==='activation-old')throw Error('unknown: power.setActiveScheme');if(scenario==='activation-timeout')throw Error('operation observer timed out');return {ok:scenario!=='activation-failed',code:scenario==='activation-failed'?5:0};}
- if(cmd==='power.sourceSnapshot'){if(scenario==='power-held')return new Promise(resolve=>{holdPower=resolve;});return scenario==='power-unknown'?{known:false,acLine:255}:{known:true,acLine:1};}
- if(cmd==='power.lifecycle')return {phase,generation:powerGeneration,hardwareWritesAllowed:phase==='ready',inputReady:phase==='ready'};
+ if(cmd==='power.sourceSnapshot'){if(scenario==='power-held')return new Promise(resolve=>{const stamp=sourceReceipt({});holdPower=value=>resolve({...value,...stamp});});return sourceReceipt(scenario==='power-unknown'?{known:false,acLine:255}:{known:true,acLine:1});}
+ if(cmd==='power.lifecycle')return {known:true,phase,generation:powerGeneration,hardwareWritesAllowed:phase==='ready',inputReady:phase==='ready'};
  if(cmd==='registry.writePowerBatch'){
   if(scenario==='cpu-lease')throw Error('hardware writes are blocked during power transition');
   if(scenario==='cpu-malformed')return {ok:false,written:0,failed:[]};
@@ -45,11 +49,50 @@ let calls:Array<{cmd:string;args:any}>=[],rows:Array<{event:string;detail:any}>=
  return undefined;
 };
 function check(name:string,pass:unknown){checks.push({name,pass:!!pass});}
-async function reset(name:string){scenario=name;selected=name.startsWith('msi');floating=name.startsWith('daemon');ready=true;phase='ready';logFails=false;resumedGeneration=0;powerGeneration=1;holdResume=null;holdSet=null;holdPower=null;calls=[];rows=[];resetTdpCapabilityState();tdpRuntimeStore.invalidatePower();setPowerControlDir(join(base,name));await Promise.resolve();}
+async function reset(name:string){scenario=name;selected=name.startsWith('msi');floating=name.startsWith('daemon');ready=true;phase='ready';logFails=false;resumedGeneration=0;powerGeneration=1;holdResume=null;holdSet=null;holdPower=null;calls=[];rows=[];resetTdpCapabilityState();emitSource({known:false,acLine:255});tdpRuntimeStore.invalidatePower();setPowerControlDir(join(base,name));await Promise.resolve();}
 async function settle(){await new Promise(r=>setImmediate(r));}
 function terminals(){return rows.filter(r=>['tdp.completed','tdp.failed','tdp.skipped'].includes(r.event));}
 function correlated(){const request=rows.find(r=>r.event==='tdp.request');return !!request&&rows.every(r=>r.detail.operationId===request.detail.operationId);}
 async function main(){
+ const identityResponder=(globalThis as any).__mockIpcResponder;
+ let nativeIdentity:unknown=undefined,registryIdentity:unknown='GenuineIntel',oldAmd=true,oldIntel=false;
+ (globalThis as any).__mockIpcResponder=(cmd:string,args:any)=>{
+  if(cmd==='tdp.capability'){
+   const value=identityResponder(cmd,args);
+   return nativeIdentity===undefined ? value : {...value,cpuVendorIdentity:nativeIdentity};
+  }
+  if(cmd==='registry.read'&&args.name==='VendorIdentifier'){calls.push({cmd,args});return registryIdentity;}
+  if(cmd==='fs.exists'&&/\\(?:AMD|intel)\.txt$/i.test(args.path)){
+   calls.push({cmd,args});return /\\AMD\.txt$/i.test(args.path)?oldAmd:oldIntel;
+  }
+  return identityResponder(cmd,args);
+ };
+ await settle(); // Finish the original shared startup observation before a write scenario.
+ try {
+  nativeIdentity='GenuineIntel';await reset('cli-stale-amd-marker');
+  const intel=await setTdp('ac',25,{apply:true,save:false,vendor:'amd',source:'ui'});await settle();
+  check('current-native-Intel-identity-overrides-stale-AMD-option-and-install-marker',intel&&calls.some(c=>c.cmd==='shell.run'&&c.args.args.join(' ')==='set 25 --vendor intel')&&!calls.some(c=>c.cmd==='registry.read'||c.cmd==='fs.exists'&&/\.txt$/i.test(c.args.path)));
+  nativeIdentity='AuthenticAMD\0';oldAmd=false;oldIntel=true;await reset('cli-stale-intel-marker');
+  const amd=await setTdp('dc',26,{apply:true,save:false,vendor:'intel',source:'ui'});await settle();
+  check('current-native-AMD-identity-overrides-stale-Intel-option-and-install-marker',amd&&calls.some(c=>c.cmd==='shell.run'&&c.args.args.join(' ')==='set 26 --vendor amd --verify-tdp')&&!calls.some(c=>c.cmd==='registry.read'));
+  for(const invalid of ['GenuineIntel-extra','AuthenticAMD\0extra',true]){
+   nativeIdentity=invalid;await reset('cli-invalid-vendor');let rejected=false;
+   try{await setTdp('ac',25,{apply:true,save:false,vendor:'intel',source:'ui'});}catch{rejected=true;}
+   check('malformed-current-vendor-cannot-fall-through-to-legacy-authority-'+String(invalid),rejected&&!calls.some(c=>c.cmd==='shell.run'||c.cmd==='tdpDaemon.start'||c.cmd==='tdpDaemon.request'));
+  }
+  await reset('legacy-current-registry');nativeIdentity=undefined;registryIdentity='GenuineIntel';oldAmd=true;oldIntel=false;
+  check('current-registry-identity-wins-before-stale-AMD-marker',await detectVendor()==='intel'&&!calls.some(c=>c.cmd==='fs.exists'&&/\.txt$/i.test(c.args.path)));
+  registryIdentity='AuthenticAMD\0';calls=[];
+  check('current-registry-AMD-with-terminal-NUL-wins-before-stale-Intel-marker',await detectVendor()==='amd');
+  registryIdentity=null;oldAmd=true;oldIntel=true;calls=[];
+  check('ambiguous-legacy-install-markers-do-not-silently-choose-AMD',await detectVendor()==='unknown'&&calls.filter(c=>c.cmd==='fs.exists').length===2);
+  oldAmd=false;calls=[];check('legacy-single-Intel-marker-remains-compatible-with-unreadable-identity',await detectVendor()==='intel');
+  registryIdentity='GenuineIntel-extra';calls=[];
+  check('invalid-nonempty-registry-identity-is-not-replaced-with-an-old-marker',await detectVendor()==='unknown'&&!calls.some(c=>c.cmd==='fs.exists'));
+  nativeIdentity='GenuineIntel';await reset('daemon-native-current-identity');calls=[];
+  for(let i=0;i<1000;i++)await setTdp('ac',30,{apply:true,save:false,source:'autofloat'});await settle();
+  check('current-identity-is-cached-for-1000-float-writes-without-marker-or-registry-probes',calls.filter(c=>c.cmd==='tdp.capability').length===1&&calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set').length===1000&&!calls.some(c=>c.cmd==='registry.read'||c.cmd==='power.sourceSnapshot'||c.cmd==='fs.exists'&&/\.txt$/i.test(c.args.path)));
+ } finally {(globalThis as any).__mockIpcResponder=identityResponder;}
  await reset('save-only');const saved=await setTdp('ac',30,{apply:false,save:true,source:'ui'});await settle();
  check('save-only-terminal-config-saved-no-helper',saved&&terminals().length===1&&terminals()[0].detail.configSaved===true&&!calls.some(c=>['shell.run','tdpMsi.set','tdpDaemon.start','tdpDaemon.request'].includes(c.cmd)));
  for(const source of ['ui','decky','hotkey','schedule','startup','resume','autofloat'] as const){
@@ -76,9 +119,9 @@ async function main(){
  await reset('log-fails');logFails=true;const failures=tdpDiagnosticDeliveryFailures();const success=await setTdp('ac',30,{apply:true,save:false,vendor:'intel',source:'ui'});await settle();check('log-delivery-failure-never-changes-control-result',success&&tdpDiagnosticDeliveryFailures()>failures&&calls.filter(c=>c.cmd==='shell.run').length===1);
  await reset('operator-marker');markTdpOperatorMode('MSI Center M 智能模式');await settle();check('operator-marker-never-changes-mode-or-hardware',calls.length===1&&calls[0].cmd==='tdp.observe'&&rows[0].event==='tdp.operator-marker');
  await reset('resume-no-owner');await stopTdpDaemon();calls=[];rows=[];const resumed=await resumeTdpDaemonAfterWake(false);await settle();check('manual-resume-no-daemon-owner-explicit-skip',resumed&&rows.some(r=>r.event==='tdp.skipped')&&!calls.some(c=>c.cmd==='tdpDaemon.start'||c.cmd==='shell.run'));
- await reset('power-known');tdpRuntimeStore.powerMode('ac');calls=[];for(let i=0;i<1000;i++)await detectPowerModeReliable();const stableAc=await detectPowerModeStable();check('known-source-event-serves-1000-calls-with-zero-IO',stableAc==='ac'&&calls.length===0);
- tdpRuntimeStore.powerMode('dc');check('source-event-immediately-selects-DC-without-query',await detectPowerMode()==='dc'&&await detectPowerModeReliable()==='dc'&&calls.length===0);
- await reset('power-held');const cold=detectPowerModeReliable();await settle();tdpRuntimeStore.powerMode('dc');(holdPower as unknown as ((value:any)=>void))({known:true,acLine:1});const currentPower=await cold;check('late-startup-source-read-cannot-overwrite-newer-event',currentPower==='dc'&&tdpRuntimeStore.get().mode==='dc'&&calls.filter(c=>c.cmd==='power.sourceSnapshot').length===1);
+ await reset('power-known');emitSource({known:true,acLine:1});calls=[];for(let i=0;i<1000;i++)await detectPowerModeReliable();const stableAc=await detectPowerModeStable();check('known-source-event-serves-1000-calls-with-zero-IO',stableAc==='ac'&&calls.length===0);
+ emitSource({known:true,acLine:0});check('source-event-immediately-selects-DC-without-query',await detectPowerMode()==='dc'&&await detectPowerModeReliable()==='dc'&&calls.length===0);
+ await reset('power-held');const cold=detectPowerModeReliable();await settle();emitSource({known:true,acLine:0});(holdPower as unknown as ((value:any)=>void))({known:true,acLine:1});const currentPower=await cold;check('late-startup-source-read-cannot-overwrite-newer-event',currentPower==='dc'&&tdpRuntimeStore.get().mode==='dc'&&calls.filter(c=>c.cmd==='power.sourceSnapshot').length===1);
  await reset('power-unknown');let unknown=true;for(let i=0;i<1000;i++)unknown=unknown&&(await detectPowerModeReliable())===null;check('unknown-source-caches-refusal-without-per-adjustment-probe',unknown&&calls.filter(c=>c.cmd==='power.sourceSnapshot').length===1&&!calls.some(c=>c.cmd==='shell.run'));
  await reset('power-held');const concurrent=Array.from({length:12},()=>detectPowerModeReliable());await settle();const sourceCalls=calls.filter(c=>c.cmd==='power.sourceSnapshot').length;(holdPower as unknown as ((value:any)=>void))({known:true,acLine:1});const answers=await Promise.all(concurrent);check('concurrent-cold-callers-share-one-existing-source-snapshot',sourceCalls===1&&answers.every(side=>side==='ac'));
  await reset('activation-ok');for(let i=0;i<100;i++)await setActiveScheme(PW.YEMAN);check('CPU-policy-reapply-uses-native-without-process-or-source-query',calls.filter(c=>c.cmd==='power.setActiveScheme').length===100&&!calls.some(c=>c.cmd==='shell.run'||c.cmd==='power.sourceSnapshot'||c.cmd==='system.info'));
@@ -92,7 +135,7 @@ async function main(){
  await reset('cpu-optional');check('floating-optional-unsupported-setting-keeps-original-compatibility',await applyFloatPowerParams(cpuPacket)&&calls.filter(c=>c.cmd==='registry.writePowerBatch').length===1);
  await reset('cpu-lease');error='';try{await applyFloatPowerParams(cpuPacket)}catch(e){error=String(e)}check('floating-CPU-power-lease-refusal-reaches-existing-controller-backoff',error.includes('power transition')&&calls.filter(c=>c.cmd==='registry.writePowerBatch').length===1);
  await reset('cpu-malformed');error='';try{await applyFloatPowerParams(cpuPacket)}catch(e){error=String(e)}check('floating-negative-batch-without-failure-detail-stays-unconfirmed',!!error&&calls.filter(c=>c.cmd==='registry.writePowerBatch').length===1);
- await reset('cpu-required');check('explicit-manual-CPU-retains-original-best-effort-policy',await applyManualPowerParams(cpuPacket));
+ await reset('cpu-required');error='';try{await applyManualPowerParams(cpuPacket)}catch(e){error=String(e)}check('explicit-manual-CPU-required-failure-stays-unconfirmed',error.includes(':5'));
  for(const side of ['ac','dc'] as const){
   await reset('cpu-lease');error='';try{await applyManualPowerParams({...cpuPacket,sides:[side]});}catch(e){error=String(e);}
   check('manual-CPU-'+side+'-lease-refusal-is-not-success-or-CLI-replay',error.includes('power transition')&&calls.filter(c=>c.cmd==='registry.writePowerBatch').length===1&&!calls.some(c=>c.cmd==='shell.run'||c.cmd==='power.setActiveScheme'));
@@ -100,6 +143,17 @@ async function main(){
   check('manual-CPU-'+side+'-recovered-submit-retains-original-values',applied&&calls.filter(c=>c.cmd==='registry.writePowerBatch').length===1&&calls[0].args.valueName===(side==='ac'?'ACSettingIndex':'DCSettingIndex')&&calls[0].args.entries.some((e:any)=>e.setting===PW.G_FREQ1&&e.value===(side==='ac'?2800:1600))&&!calls.some(c=>c.cmd==='power.lifecycle'||c.cmd==='power.sourceSnapshot'||c.cmd==='shell.run'));
  }
 
+
+ await reset('cpu-ok');let rejectedCpu=0;for(const value of [null,NaN,Infinity,-1]){try{await applyManualPowerParams({...cpuPacket,acFreq:value as number});}catch{rejectedCpu++;}}
+ check('CPU-invalid-frequency-never-enters-native-or-falls-back-unlimited',rejectedCpu===4&&!calls.some(c=>c.cmd==='registry.writePowerBatch'));
+ await reset('cpu-ok');let overCpu=0;for(const value of [0,3000]){try{await applyFloatPowerParams({...cpuPacket,acFreq:value},{maxMHz:1800});}catch{overCpu++;}}
+ check('CPU-final-bounded-admission-rejects-unlimited-and-over-ceiling',overCpu===2&&!calls.some(c=>c.cmd==='registry.writePowerBatch'));
+ await reset('cpu-ok');const cancelledCpu=await applyManualPowerParams(cpuPacket,{isCurrent:()=>false,maxMHz:2800});
+ check('CPU-revoked-owner-does-not-dispatch-or-report-success',!cancelledCpu&&!calls.some(c=>c.cmd==='registry.writePowerBatch'));
+ await reset('cpu-ok');const lowCpu=await applyManualPowerParams({...cpuPacket,acFreq:1800,acTurbo:true},{maxMHz:1800});const lowEntries=calls.find(c=>c.cmd==='registry.writePowerBatch')?.args.entries;
+ check('CPU-low-finite-selection-cannot-retain-boost-above-request',lowCpu&&lowEntries?.some((e:any)=>e.setting===PW.G_TURBO&&e.value===0)&&[PW.G_FREQ1,PW.G_FREQ2,PW.G_FREQ3].every(id=>lowEntries.some((e:any)=>e.setting===id&&e.value===1800)));
+ await reset('cpu-ok');let admissionChecks=0;const bothCpu=await applyManualPowerParams({...cpuPacket,sides:['ac','dc']},{isCurrent:()=>++admissionChecks===1});
+ check('CPU-owner-revoked-between-banks-skips-old-second-side',!bothCpu&&calls.filter(c=>c.cmd==='registry.writePowerBatch').length===1&&calls[0].args.valueName==='ACSettingIndex');
  await reset('daemon-missed-ready');await primeTdpSession();powerGeneration=2;invalidateTdpPowerSession('resuming',2);calls=[];
  phase='resuming';check('reconcile-cannot-admit-real-native-transition',!await reconcileTdpPowerSession()&&!calls.some(c=>c.cmd==='tdpDaemon.request'||c.cmd==='shell.run'));
  phase='ready';calls=[];check('missed-ready-native-snapshot-heals-without-hardware-replay',await reconcileTdpPowerSession()&&calls.filter(c=>c.cmd==='power.lifecycle').length===1&&calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='resume').length===1&&!calls.some(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set'||c.cmd==='shell.run'));
@@ -131,6 +185,50 @@ async function main(){
  check('helper-not-ready-recovers-handles-without-replaying-old-watts',helperHealed&&calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='resume').length===1&&!calls.some(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set'||c.cmd==='shell.run')&&!hasScheduledTask('tdp-session-recovery'));
  await reset('daemon-pending-resume');await primeTdpSession();powerGeneration=2;invalidateTdpPowerSession('resuming',2);invalidateTdpPowerSession('ready',2);const stoppedRecovery=reconcileTdpPowerSession();await settle();const stoppedRelease=holdResume as unknown as ((value:any)=>void);if(!stoppedRelease)throw Error('fixture recovery did not reach owned resume');await stopTdpDaemon();calls=[];stoppedRelease({ok:true,rc:0,result:{reinitialized:true,resumeGeneration:2}});const stoppedResult=await stoppedRecovery;await settle();
  check('late-recovery-completion-after-explicit-OFF-cannot-revive-session',!stoppedResult&&!hasScheduledTask('tdp-session-recovery')&&!calls.some(c=>c.cmd==='tdpDaemon.start'||c.cmd==='tdpDaemon.request'&&c.args.op==='set'));
+ await reset('daemon-late-startup');let releaseStartup!: (state:any)=>void;
+ const oldStartup=primeTdpSession(new Promise(resolve=>{releaseStartup=resolve;}));await settle();await stopTdpDaemon();calls=[];
+ releaseStartup({phase:'ready',generation:powerGeneration,hardwareWritesAllowed:true,inputReady:true});const lateStartup=await oldStartup;await settle();
+ check('late-startup-lifecycle-after-explicit-OFF-cannot-acquire-daemon',!lateStartup&&!hasScheduledTask('tdp-session-recovery')&&!calls.some(c=>c.cmd==='tdpDaemon.start'||c.cmd==='tdpDaemon.request'));
+ await reset('daemon-late-capability');let releaseCapability!: (state:any)=>void;let capabilityHeld=false;
+ const normalResponder=(globalThis as any).__mockIpcResponder;
+ (globalThis as any).__mockIpcResponder=(cmd:string,args:any)=>{if(cmd==='tdp.capability'&&!capabilityHeld){capabilityHeld=true;calls.push({cmd,args});return new Promise(resolve=>{releaseCapability=resolve;});}return normalResponder(cmd,args);};
+ try {
+  const oldEnsure=ensureTdpDaemon();await settle();const stopping=stopTdpDaemon();await settle();
+  releaseCapability({provider:'default',selected:false,ready:true,minPL1:2,maxPL1:200,cpuFamily:'other-or-unverified'});
+  const [lateEnsure]=await Promise.all([oldEnsure,stopping]);await settle();
+  check('late-capability-after-explicit-OFF-cannot-acquire-daemon',!lateEnsure&&calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='ping').length===1&&!calls.some(c=>c.cmd==='tdpDaemon.start')&&!hasScheduledTask('tdp-session-recovery'));
+ } finally {(globalThis as any).__mockIpcResponder=normalResponder;}
+ await reset('daemon-pending-stop');await primeTdpSession();let releaseStopPing!: (state:any)=>void;let stopPingHeld=false;let helperAlive=true;
+ const stopResponder=(globalThis as any).__mockIpcResponder;
+ (globalThis as any).__mockIpcResponder=(cmd:string,args:any)=>{
+  if(cmd==='tdpDaemon.start'){calls.push({cmd,args});helperAlive=true;return {ok:true};}
+  if(cmd==='tdpDaemon.request'){
+   if(args.op==='ping'&&!stopPingHeld){stopPingHeld=true;calls.push({cmd,args});return new Promise(resolve=>{releaseStopPing=resolve;});}
+   if(args.op==='ping'&&!helperAlive){calls.push({cmd,args});return {ok:false,rc:7};}
+   if(args.op==='quit')helperAlive=false;
+   if(args.op==='set'&&!helperAlive){calls.push({cmd,args});return {ok:false,rc:7,error:'fixture-daemon-already-stopped'};}
+  }
+  return stopResponder(cmd,args);
+ };
+ try {
+  const oldStop=stopTdpDaemon();await settle();const sharedStop=stopTdpDaemon();calls=[];const newRequest=setTdp('ac',25,{apply:true,save:false,source:'ui'});await settle();
+  releaseStopPing({ok:true,rc:0});const [,,newApplied]=await Promise.all([oldStop,sharedStop,newRequest]);await settle();
+  const quitAt=calls.findIndex(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='quit'),setAt=calls.findIndex(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set');
+  check('new-request-waits-for-owned-stop-before-acquiring-daemon',newApplied&&helperAlive&&quitAt>=0&&setAt>quitAt&&calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='quit').length===1&&calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set').length===1);
+ } finally {(globalThis as any).__mockIpcResponder=stopResponder;}
+ await reset('daemon-pending-start');let releaseStart!: (state:any)=>void;let startedHelper=false;let stopCompleted=false;
+ const startResponder=(globalThis as any).__mockIpcResponder;
+ (globalThis as any).__mockIpcResponder=(cmd:string,args:any)=>{
+  if(cmd==='tdpDaemon.start'){calls.push({cmd,args});return new Promise(resolve=>{releaseStart=resolve;});}
+  if(cmd==='tdpDaemon.request'&&args.op==='ping'){calls.push({cmd,args});return {ok:startedHelper,rc:startedHelper?0:7};}
+  if(cmd==='tdpDaemon.request'&&args.op==='quit')startedHelper=false;
+  return startResponder(cmd,args);
+ };
+ try {
+  const acquiring=ensureTdpDaemon();await settle();const retiring=stopTdpDaemon().then(()=>{stopCompleted=true;});await settle();const stoppedTooSoon=stopCompleted;
+  startedHelper=true;releaseStart({ok:true});const [acquired]=await Promise.all([acquiring,retiring]);await settle();
+  check('submitted-start-is-retired-before-stop-reports-complete',!stoppedTooSoon&&!acquired&&stopCompleted&&!startedHelper&&calls.filter(c=>c.cmd==='tdpDaemon.start').length===1&&calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='quit').length===1&&!calls.some(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set'));
+ } finally {(globalThis as any).__mockIpcResponder=startResponder;}
  await reset('daemon-invalid-command');let invalidRefusals=0;for(const value of [0,-1,NaN,Infinity,201]){try{await setTdp('ac',value,{apply:true,save:true,source:'autofloat'});}catch{invalidRefusals++;}}await settle();
  check('invalid-floating-command-never-clamps-to-2W-or-writes-config',invalidRefusals===5&&!calls.some(c=>['tdp.capability','shell.run','tdpDaemon.request','tdpMsi.set','fs.write','fs.writeText'].includes(c.cmd)));
  calls=[];await setTdp('ac',2,{apply:true,save:false,source:'autofloat'});await setTdp('ac',30,{apply:true,save:false,source:'autofloat'});await settle();
@@ -141,8 +239,8 @@ async function main(){
  check('superseded-queued-low-target-never-reaches-hardware-or-poisons-next',queuedResults[1]===false&&queuedResults[2]===true&&calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set').map(c=>c.args.args.watts).join(',')==='30,32');
  await reset('daemon-invalid-hotkey');let invalidHotkeys=0;for(const value of [0,-1,NaN,Infinity,201]){try{await setTdpCurrentMode(value);}catch{invalidHotkeys++;}}await settle();
  check('invalid-current-mode-command-is-rejected-before-clamp-probes-or-write',invalidHotkeys===5&&!calls.some(c=>['power.sourceSnapshot','tdp.capability','shell.run','tdpDaemon.request','tdpMsi.set','fs.write','fs.writeText'].includes(c.cmd)));
- calls=[];await setTdpCurrentMode(2);await setTdpCurrentMode(30);await settle();
- check('invalid-current-mode-command-keeps-legitimate-low-and-normal-targets-usable',calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set').map(c=>c.args.args.watts).join(',')==='2,30');
+ calls=[];await setTdp('ac',2,{apply:true,save:false,source:'hotkey'});await setTdp('ac',30,{apply:true,save:false,source:'hotkey'});await settle();
+ check('low-level-targets-remain-usable-after-invalid-current-mode-command',calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set').map(c=>c.args.args.watts).join(',')==='2,30');
  await reset('daemon-held-set');const staleSession=setTdp('ac',30,{apply:true,save:false,source:'ui'});await settle();const staleSessionRelease=holdSet as unknown as ((value:any)=>void);if(!staleSessionRelease)throw Error('fixture stale session did not reach held daemon');
  setPowerControlDir(join(base,'reset-during-old-write'));scenario='daemon-recovered';calls=[];staleSessionRelease({ok:false,rc:7,error:'TDP unsupported on this old transport'});const staleSessionResult=await staleSession;await settle();
  const newSessionResult=await setTdp('ac',32,{apply:true,save:false,source:'ui'});await settle();
@@ -178,4 +276,89 @@ async function main(){
  compatibilityBoundaries.push('float-stays-watts-only-no-extra-read-or-power-probe');Date.now=compatibilityRealNow;
  const report={checks,compatibilityBoundaries,failures:checks.filter(c=>!c.pass).length,scope:'REAL_FRONTEND_UNIFIED_ENTRY_WITH_OFFLINE_IPC_NO_PRODUCT_OR_HARDWARE',realHardwareExecuted:false};writeFileSync(join(base,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));process.exitCode=report.failures?1:0;
 }
-main().catch(e=>{console.error(e);process.exitCode=1;});
+
+async function sharedSleepMain(){
+ await settle();
+ const originalResponder=(globalThis as any).__mockIpcResponder;
+ let lifecycleFails=false,lifecycleUnknown=false;
+ (globalThis as any).__mockIpcResponder=(command:string,args:any)=>{
+  if(command==='power.lifecycle'&&lifecycleFails)throw Error('fixture-current-power-reader-unavailable');
+  if(command==='power.lifecycle'&&lifecycleUnknown)return {known:false,phase:'ready',generation:powerGeneration,hardwareWritesAllowed:false,inputReady:false};
+  return originalResponder(command,args);
+ };
+ const sentControl=()=>calls.some(c=>c.cmd==='shell.run'||c.cmd==='tdpMsi.set'||c.cmd==='tdpDaemon.request'&&c.args.op==='set');
+ try{
+  await reset('daemon-shared-reader-unavailable');lifecycleFails=true;calls=[];let error='';
+  try{await setTdp('ac',29,{apply:true,save:false,source:'ui'});}catch(e){error=String(e);}await settle();
+  check('shared-sleep-unavailable-reader-cannot-dispatch-watts',!!error&&!sentControl());
+  lifecycleFails=false;calls=[];const healed=await reconcileTdpPowerSession();await settle();
+  check('shared-sleep-fresh-ready-heals-without-replaying-old-watts',healed&&!sentControl()&&!hasScheduledTask('tdp-session-recovery'));
+  calls=[];let applied=false;for(let i=0;i<10;i++)applied=await setTdp('ac',30,{apply:true,save:false,source:'autofloat'});await settle();
+  check('shared-sleep-healed-new-requests-retain-cached-power-read',applied&&calls.filter(c=>c.cmd==='tdpDaemon.request'&&c.args.op==='set').length===10&&!calls.some(c=>c.cmd==='power.lifecycle'||c.cmd==='power.sourceSnapshot'));
+  await reset('daemon-shared-explicit-unknown');lifecycleUnknown=true;calls=[];error='';try{await setTdp('ac',31,{apply:true,save:false,source:'ui'});}catch(e){error=String(e);}await settle();
+  check('shared-sleep-explicit-unknown-remains-blocked',!!error&&!sentControl());
+ }finally{lifecycleFails=lifecycleUnknown=false;(globalThis as any).__mockIpcResponder=originalResponder;await stopTdpDaemon();}
+ const report={checks,failures:checks.filter(c=>!c.pass).length,selection:'shared-sleep-only',scope:'REAL_FRONTEND_UNIFIED_ENTRY_WITH_OFFLINE_IPC_NO_PRODUCT_OR_HARDWARE',realHardwareExecuted:false};writeFileSync(join(base,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));process.exitCode=report.failures?1:0;
+}
+
+async function diagnosticDeliveryMain(){
+ await settle();
+ // The two original logging/control-boundary assertions are reused verbatim.
+ await reset('log-fails');logFails=true;const failures=tdpDiagnosticDeliveryFailures();const success=await setTdp('ac',30,{apply:true,save:false,vendor:'intel',source:'ui'});await settle();check('log-delivery-failure-never-changes-control-result',success&&tdpDiagnosticDeliveryFailures()>failures&&calls.filter(c=>c.cmd==='shell.run').length===1);
+ await reset('operator-marker');markTdpOperatorMode('MSI Center M 智能模式');await settle();check('operator-marker-never-changes-mode-or-hardware',calls.length===1&&calls[0].cmd==='tdp.observe'&&rows[0].event==='tdp.operator-marker');
+ const originalResponder=(globalThis as any).__mockIpcResponder;
+ const replyWith=(value:unknown)=>{(globalThis as any).__mockIpcResponder=(cmd:string,args:any)=>{
+   if(cmd!=='tdp.observe')return originalResponder(cmd,args);
+   calls.push({cmd,args});rows.push(...structuredClone(args.events??[args]));return value;
+ };};
+ let before=tdpDiagnosticDeliveryEvidence();replyWith({ok:false});markTdpOperatorMode('YMCC 自动优化');await settle();
+ let after=tdpDiagnosticDeliveryEvidence();
+ check('operator-marker-native-not-ok-receipt-is-counted',after.nativeNotOkRequests===before.nativeNotOkRequests+1&&after.nativeNotOkRows===before.nativeNotOkRows+1&&after.unconfirmedRows===before.unconfirmedRows+1&&after.inFlightRequests===0);
+ before=after;
+ for(const value of [null,{},true,{ok:null},{ok:1},{ok:'true'}]){replyWith(value);markTdpOperatorMode('YMCC 自动优化');await settle();}
+ after=tdpDiagnosticDeliveryEvidence();
+ check('unrecognized-replies-never-count-as-accepted-ingress',after.unrecognizedReplyRequests===before.unrecognizedReplyRequests+6&&after.unconfirmedRows===before.unconfirmedRows+6&&after.ackAcceptedRequests===before.ackAcceptedRequests);
+ before=after;replyWith({ok:true});calls=[];rows=[];
+ const trace=beginTdpObservation({source:'ui',requestedW:30,clampedW:null,requestedMode:'ac',observedMode:'ac',apply:true,save:false});
+ for(let i=0;i<16;i++)trace.emit('tdp.route-selected',{route:'fixture-only',ordinal:i});
+ trace.emit('tdp.completed',{hardwareCommandReturned:'not-observed',readbackMatched:'not-observed'});await settle();after=tdpDiagnosticDeliveryEvidence();
+ check('original-sixteen-row-batches-and-causal-order-unchanged',calls.length===3&&calls[1].args.events.length===16&&rows.length===18&&rows[0].event==='tdp.request'&&rows[17].event==='tdp.completed'&&rows.every(r=>r.detail.operationId===trace.context.operationId));
+ check('accepted-ingress-counts-rows-separately-from-requests',after.ackAcceptedRequests===before.ackAcceptedRequests+3&&after.ackAcceptedRows===before.ackAcceptedRows+18&&after.inFlightRows===0&&after.nativeWriteOutcome==='UNKNOWN');
+ before=after;
+ (globalThis as any).__mockIpcResponder=(cmd:string,args:any)=>{if(cmd!=='tdp.observe')return originalResponder(cmd,args);calls.push({cmd,args});throw Error('fixture-diagnostic-rejected');};
+ markTdpOperatorMode('YMCC 自动优化');await settle();after=tdpDiagnosticDeliveryEvidence();
+ check('invoke-rejection-isolated-from-control-and-releases-admission',after.invokeRejectedRequests===before.invokeRejectedRequests+1&&after.unconfirmedRows===before.unconfirmedRows+1&&after.inFlightRequests===0);
+ const view=(globalThis as any).window.chrome.webview,post=view.postMessage;
+ const held:Array<{id:number;cmd:string;args:unknown}>=[];
+ const pendingProbe=(globalThis as any).__tdpLoggingFixturePendingCount as (()=>number)|undefined;
+ check('diagnostic-admission-is-quiescent-before-lost-reply-boundary',after.inFlightRequests===0&&(!pendingProbe||pendingProbe()===0));
+ before=after;calls=[];
+ view.postMessage=(message:{id:number;cmd:string;args:unknown})=>{if(message.cmd==='tdp.observe'){held.push(message);return;}post.call(view,message);};
+ let timerCalls=0;const oldTimeout=globalThis.setTimeout,oldInterval=globalThis.setInterval;
+ (globalThis as any).setTimeout=(...args:any[])=>{++timerCalls;return (oldTimeout as any)(...args);};
+ (globalThis as any).setInterval=(...args:any[])=>{++timerCalls;return (oldInterval as any)(...args);};
+ try{for(let i=0;i<32+50000;i++)markTdpOperatorMode('YMCC 自动优化');}
+ finally{globalThis.setTimeout=oldTimeout;globalThis.setInterval=oldInterval;}
+ after=tdpDiagnosticDeliveryEvidence();
+ check('lost-replies-bound-native-posts-and-bridge-pending-without-timers',held.length===32&&after.maxInFlightRequests===32&&after.inFlightRequests===32&&after.inFlightRows===32&&timerCalls===0&&(!pendingProbe||pendingProbe()===32));
+ check('capacity-rejection-is-counted-without-adding-promises-or-requests',after.capacityRejectedRequests===before.capacityRejectedRequests+50000&&after.capacityRejectedRows===before.capacityRejectedRows+50000&&after.unconfirmedRows===before.unconfirmedRows+50000&&after.highWaterRequests===32&&calls.length===0);
+ const snapshot=tdpDiagnosticDeliveryEvidence();snapshot.capacityRejectedRows=0;
+ check('export-snapshot-is-a-copy-and-does-not-reset-sender-capacity',tdpDiagnosticDeliveryEvidence().capacityRejectedRows===after.capacityRejectedRows&&tdpDiagnosticDeliveryEvidence().inFlightRequests===32);
+ view.postMessage=post;replyWith({ok:true});
+ emitMockIpcEvent('webview.recovering',{reason:'fixture-existing-recovery-rejection'});await settle();after=tdpDiagnosticDeliveryEvidence();
+ check('existing-WebView-rejection-settles-all-borrowed-diagnostic-promises',after.inFlightRequests===0&&after.inFlightRows===0&&after.invokeRejectedRows===before.invokeRejectedRows+32&&(!pendingProbe||pendingProbe()===0));
+ const recoveryEventCommands=calls.map(c=>c.cmd);calls=[];
+ before=after;markTdpOperatorMode('YMCC 自动优化');await settle();after=tdpDiagnosticDeliveryEvidence();
+ check('later-explicit-diagnostic-admitted-without-replay-or-counter-refund',after.ackAcceptedRequests===before.ackAcceptedRequests+1&&after.unconfirmedRows===before.unconfirmedRows&&after.capacityRejectedRows===before.capacityRejectedRows&&after.inFlightRequests===0&&calls.length===1);
+ check('diagnostic-only-burst-never-sends-hardware-probe-or-control-command',calls.every(c=>c.cmd==='tdp.observe')&&after.requestRecoveryTriggered===false&&after.snapshotAtomicWithNative===false);
+ check('legacy-failure-counter-keeps-current-unconfirmed-row-total',tdpDiagnosticDeliveryFailures()===after.unconfirmedRows&&JSON.stringify(after).length<2048);
+ (globalThis as any).__mockIpcResponder=originalResponder;
+ const report={checks,failures:checks.filter(c=>!c.pass).length,selection:'diagnostic-delivery-only',bridgePendingProbeUsed:!!pendingProbe,
+   evidence:after,recoveryEventCommands,scope:'REAL_TDP_DIAGNOSTIC_SENDER_AND_TWO_ORIGINAL_CONTROL_BOUNDARIES_WITH_INERT_IPC',realHardwareExecuted:false};
+ writeFileSync(join(base,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));process.exitCode=report.failures?1:0;
+}
+
+const diagnosticDeliveryOnly=process.argv.includes('--diagnostic-delivery-only');
+if(diagnosticDeliveryOnly&&process.argv.includes('--shared-sleep-only'))throw Error('Incompatible diagnostic selection');
+const stopPowerSource = diagnosticDeliveryOnly ? () => {} : startForegroundPowerSourceRefresh(() => {});
+(diagnosticDeliveryOnly?diagnosticDeliveryMain():process.argv.includes('--shared-sleep-only')?sharedSleepMain():main()).catch(e=>{console.error(e);process.exitCode=1;}).finally(stopPowerSource);

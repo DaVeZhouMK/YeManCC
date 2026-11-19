@@ -1,0 +1,491 @@
+{
+  "schema": 1,
+  "primary": {
+    "artifact": "Steam shipped sp.js Scope1043",
+    "bytes": 16224005,
+    "sha256": "4b818cd371388e06c66fe8c0bb592b7dfd4a6fb55eb56844d1b360b64aec3046",
+    "scope": 1043
+  },
+  "provenance": {
+    "classification": "primary shipped whole bundle, exact original excerpts",
+    "sourceObservationSha256": "25001d9b879a7554b27c6ad620e0f1199b986e7bdc2b73cff6364009a30ce6a8",
+    "independentReviewSha256": "f8678d57dac2eaf68d13fbd0b7e818add233c07685af72b2708ceb853e97145a",
+    "extraction": "Exact UTF-16 range; UTF-8 excerpt byte hash; no rewritten method algorithms."
+  },
+  "methods": {
+    "EnsureCorrectComposition": "EnsureCorrectComposition(){const P=this.m_Instance.MainRunningAppID,O=this.ComputeOverallMinimumRequestedComposition(),z=this.GetOverridingComposition()??O,p=[],C=P&&a.tw.GetAppOverviewByAppID(P);let k=0;if(P==c.U5N?p.push(P):C&&(C.shortcut_override_appid?p.push(C.shortcut_override_appid):p.push(C.appid),k=g.oy.WindowStore.GetAppFocusedWindowID(P)),z===s.I5.Opaque?(p.unshift(I),k=0):p.push(I),z!=null&&(this.m_eLastPushedToWebHelperCompositionState.eCompositionMode!=z||this.m_eLastPushedToWebHelperCompositionState.windowID!=k||!this.BNumberArraysEqual(this.m_eLastPushedToWebHelperCompositionState.appidCompositionQueue,p))){let H=s.I5[this.m_eLastPushedToWebHelperCompositionState.eCompositionMode],q=s.I5[z];if(D(`${this.GetName()}: SetComposition`,`${H}(${this.m_eLastPushedToWebHelperCompositionState.eCompositionMode}) => ${q}(${z})`,`[${p.join(\",\")}], `,`Window: ${k?.toString(16)}`),this.m_Instance.BrowserWindow?.SteamClient.Window.SetComposition(z,p,k),C){let U=z;z==s.I5.Hidden?(!this.m_bPushedOverlayUISinceHidden&&this.m_eLastPushedToWebHelperCompositionState.eCompositionMode!=null&&(U=s.I5.Notification),this.m_bPushedOverlayUISinceHidden=!1):z==s.I5.Notification||z==s.I5.VirtualMenu?this.m_bPushedOverlayUISinceHidden&&(z==s.I5.VirtualMenu?(D(`${this.GetName()}: SetOverlayState`,`Hidden(${s.I5.Hidden})`,\"before VirtualMenu\"),SteamClient.Overlay.SetOverlayState(C.gameid,s.I5.Hidden)):U=s.I5.Hidden,this.m_bPushedOverlayUISinceHidden=!1):this.m_bPushedOverlayUISinceHidden=!0,D(`${this.GetName()}: SetOverlayState`,`${s.I5[U]}(${U})`,`overlayUIShown: ${this.m_bPushedOverlayUISinceHidden}`),SteamClient.Overlay.SetOverlayState(C.gameid,U)}this.m_eLastPushedToWebHelperCompositionState.eCompositionMode=z,this.m_eLastPushedToWebHelperCompositionState.appidCompositionQueue=p,this.m_eLastPushedToWebHelperCompositionState.windowID=k}else z==null&&this.m_eLatestCompositionState!=null&&D(`${this.GetName()}: SetComposition skipped, eCurrentComposition = null`);this.m_eLatestCompositionState=z,this.EnsureCorrectGameOverlayState()}",
+    "GetAppFocusedWindowID": "GetAppFocusedWindowID(Zt){let sr=0;return Zt&&(sr=this.m_mapAppWindows.get(Zt)?.focusedWindowID),sr??0}",
+    "EnsureCorrectGameOverlayState": "EnsureCorrectGameOverlayState(){if(!(0,A.j3)(!0).IN_GAMESCOPE)return;const P=this.m_Instance.MainRunningAppID;let O=this.m_eLatestCompositionState,v=!1,z=\"\";O==s.I5.OverlayKeyboard?(v=!1,z=\"overlay keyboard\"):O==s.I5.Opaque?(v=!0,z=\"opaque\"):O==s.I5.Overlay&&(!(0,A.j3)(!0).IN_GAMESCOPE||this.m_Instance.MenuStore.GetOpenSideMenu()==m.Ez.Main||this.m_Instance.BRouteMatch(e.BV.GamepadUI.Chat()))&&(v=!0,z=\"overlay\"),P!=null&&(v!=this.m_bLatestAppOverlayStateActive||P!=this.m_nLatestAppID)&&(D(`${this.GetName()}: NotifyGameOverlayStateChanged - `,v,P,z),SteamClient.System.NotifyGameOverlayStateChanged(v,P)),this.m_bLatestAppOverlayStateActive=v,this.m_nLatestAppID=P}",
+    "BNumberArraysEqual": "BNumberArraysEqual(P,O){if(P.length!=O.length)return!1;for(let v=0;v<P.length;++v)if(P[v]!=O[v])return!1;return!0}",
+    "GetCompositionState": "GetCompositionState(){return this.m_eLatestCompositionState}"
+  },
+  "lookup": {
+    "single": "GetOverlayInstance(Zt,sr){return Array.from(this.m_mapOverlayPopupByPID.values()).reverse().find(Ai=>Ai.params.browserInfo.m_unAppID==Zt&&(sr==0||Ai.params.browserInfo.m_unPID==sr))}",
+    "plural": "GetOverlayInstances(Zt){let sr=Array.from(this.m_mapOverlayPopupByPID.values()).reverse();return sr=sr.filter(lr=>lr.params.browserInfo.m_unAppID==Zt),sr}",
+    "fallback": "GetOverlayInstanceWithFallback(Zt,sr){let lr=this.GetOverlayInstance(Zt,sr);return $.qL.IsSteamVRRunningAndHMDAwake&&(!lr||!lr?.IsVRGamepadUIOverlayWindow())&&(lr=this.VRGamepadUIMainWindowInstance),lr??this.MainWindowInstance}",
+    "active": "get ActiveWindowInstance(){let Zt=this.GetFocusedWindowInstance();if(Zt&&(Zt.IsMainGamepadUIWindow()||Zt.IsGamepadUIOverlayWindow()||Zt.IsMainDesktopWindow()||Zt.IsSteamChinaReviewLauncher()||Zt.IsDesktopOverlayWindow()||Zt.IsAnyVRWindow()))return Zt;let sr=Re.iP.GetFocusedOverlayAppID();return sr?this.m_WindowStore.GetOverlayInstanceWithFallback(sr,Re.iP.GetFocusedOverlayPID()):this.m_WindowStore.MainWindowInstance}",
+    "activated": "OnOverlayActivated(Zt,sr,lr,Rr){const Ai=fn.WindowStore.GetOverlayInstance(sr,Zt);if(Ai){if(Ai.IsGamepadUIOverlayWindow()&&this.m_mainInstanceUIMode!=r.$l2&&SteamClient.Input.ForceConfiguratorFocus(lr),Ai.IsDesktopOverlayWindow()){Ai.DesktopOverlay.SetIsOverlayActive(lr);return}Rr&&lr?Ai.MenuStore.OpenMainMenu():lr||(Ai.BRouteMatch(Le.BV.GamepadUI.GameAPIOSK())?Ai.NavigateBack():Ai.BIsOverlayPath()||(Qi.Debug(`${Ai.BrowserWindow?.document?.title}: overlay deactivated, navigate ${Ai.LocationPathName} => ${Le.BV.GamepadUI.AppRunning()}`),Ai.Navigate(Le.BV.GamepadUI.AppRunning())))}}",
+    "target": "GetEventTarget(Zt,sr,lr=!1){let Rr=this.GetActiveContext();if(this.m_nSystemKeyAppIDHint&&!Rr?.FindNavTreeInFocusedWindow()){const mi=this.m_fnSystemKeyContextResolver?.(this.m_nSystemKeyAppIDHint);mi&&mi!=Rr&&this.BCanActivateContext(mi)&&(he(`GetEventTarget: using ${mi.LogName()} for system key AppID ${this.m_nSystemKeyAppIDHint} instead of ${Rr?.LogName()??\"no context\"}`),Rr?.ActiveWindow&&Rr.OnDeactivate(Rr.ActiveWindow),mi.OnActivate(mi.m_LastActiveFocusNavTree?.Window??mi.RootWindow),Rr=mi)}!Rr&&lr&&(Rr=this.FindAnActiveContext());let Ai=Rr?.ActiveWindow?.document.activeElement;if(Rr?.m_LastActiveNavTree){if(sr||(sr=this.m_navigationSource?.Value?.eActivationSourceType),!Rr.m_LastActiveNavTree.GetLastFocusedNode()&&(0,n.UE)(sr)&&(he(`GetEventTarget: Context ${Rr.LogName()} tree ${Rr.m_LastActiveNavTree.id} has no focused node, ${lr?\"finding one\":\"will not find one\"}`),lr&&Rr.m_LastActiveNavTree.TakeFocus(w.D$.GAMEPAD,!0),!this.BGlobalGamepadButton(Zt)))return[void 0,Rr];Rr.m_LastActiveNavTree.GetLastFocusedNode()?Ai=Rr.m_LastActiveNavTree?.GetLastFocusedNode()?.Element:he(`GetEventTarget: Context ${Rr.LogName()} tree ${Rr.m_LastActiveNavTree.id} still has no focused node - will fall back to document.activeElement`)}return[Ai,Rr]}"
+  },
+  "profile": {
+    "GetEventTarget": "GetEventTarget(Zt,sr,lr=!1){let Rr=this.GetActiveContext();if(this.m_nSystemKeyAppIDHint&&!Rr?.FindNavTreeInFocusedWindow()){const mi=this.m_fnSystemKeyContextResolver?.(this.m_nSystemKeyAppIDHint);mi&&mi!=Rr&&this.BCanActivateContext(mi)&&(he(`GetEventTarget: using ${mi.LogName()} for system key AppID ${this.m_nSystemKeyAppIDHint} instead of ${Rr?.LogName()??\"no context\"}`),Rr?.ActiveWindow&&Rr.OnDeactivate(Rr.ActiveWindow),mi.OnActivate(mi.m_LastActiveFocusNavTree?.Window??mi.RootWindow),Rr=mi)}!Rr&&lr&&(Rr=this.FindAnActiveContext());let Ai=Rr?.ActiveWindow?.document.activeElement;if(Rr?.m_LastActiveNavTree){if(sr||(sr=this.m_navigationSource?.Value?.eActivationSourceType),!Rr.m_LastActiveNavTree.GetLastFocusedNode()&&(0,n.UE)(sr)&&(he(`GetEventTarget: Context ${Rr.LogName()} tree ${Rr.m_LastActiveNavTree.id} has no focused node, ${lr?\"finding one\":\"will not find one\"}`),lr&&Rr.m_LastActiveNavTree.TakeFocus(w.D$.GAMEPAD,!0),!this.BGlobalGamepadButton(Zt)))return[void 0,Rr];Rr.m_LastActiveNavTree.GetLastFocusedNode()?Ai=Rr.m_LastActiveNavTree?.GetLastFocusedNode()?.Element:he(`GetEventTarget: Context ${Rr.LogName()} tree ${Rr.m_LastActiveNavTree.id} still has no focused node - will fall back to document.activeElement`)}return[Ai,Rr]}",
+    "SetSystemKeyAppIDHint": "SetSystemKeyAppIDHint(Zt){this.m_nSystemKeyAppIDHint=Zt}",
+    "GetActiveContext": "GetActiveContext(){return this.m_ActiveContext}",
+    "BCanActivateContext": "BCanActivateContext(Zt){return!(!Zt||this.BHasVRGamepadNavigationContext()&&!Zt.BIsVR())}",
+    "GetFocusNavContext": "GetFocusNavContext(){return this.IsVRGamepadUIOverlayWindow()?l.oy.WindowStore.VRGamepadUIMainWindowInstance.GetFocusNavContext():l.oy.NavigationManager.FindContextForRootWindow(this.m_BrowserWindow)}",
+    "resolver": "sr=>this.WindowStore.GetOverlayInstances(sr).find(lr=>lr.IsGamepadUIOverlayWindow())?.GetFocusNavContext()"
+  },
+  "activation": {
+    "activate": "OnActivate(Zt){this.BIsActive()&&this.m_activeWindow==Zt&&this.m_activeBrowserView===void 0||(H(`${this.LogName(Zt)} Activating context, there are ${this.m_rgGamepadNavigationTrees.length} trees in this context`),this.SetActive(!0,Zt))}",
+    "set": "SetActive(Zt,sr,lr=void 0){this.m_controller.BatchedUpdate(()=>{if(Zt&&!this.m_controller.BCanActivateContext(this)){H(`${this.LogName(sr)} Skipping context activation due to CFocusNavWindowContext`);return}const Rr=this.m_valueIsActive.Value!=Zt;Zt?(this.m_activeWindow=sr,this.m_activeBrowserView=lr,this.m_controller.OnContextActivated(this)):(this.m_activeBrowserView=void 0,this.m_controller.OnContextDeactivated(this,!1)),this.m_valueIsActive.Set(Zt),Rr&&this.m_LastActiveFocusNavTree?.OnContextActiveStateChanged(Zt);const Ai=this.m_LastActiveFocusNavTree;if(Zt&&lr===void 0&&Ai?.Window==(sr??this.m_rootWindow)){const mi=Ai?.GetLastFocusedNode()?.Element,dn=mi?.ownerDocument.activeElement;mi&&Ai?.BIsActiveFocus()&&(!dn||dn==mi.ownerDocument.body)&&queueMicrotask(()=>{const qi=mi.ownerDocument.activeElement;mi.isConnected&&Ai.BIsActiveFocus()&&(!qi||qi==mi.ownerDocument.body)&&mi.focus({preventScroll:!0})})}})}",
+    "active": "BIsActive(){return this.m_valueIsActive.Value}",
+    "context": "OnContextActivated(Zt){this.m_ActiveContext=Zt,this.m_LastActiveContext=Zt}",
+    "batch": "BatchedUpdate(Zt){this.m_fnGamepadEventUpdateBatcher(Zt)}"
+  },
+  "focusCacheSourceBundles": [
+    {
+      "member": "steamui/libraries/libraries~00299a408.js",
+      "bytes": 657187,
+      "sha256": "c1effbd9256be0e2b161756e5c49fb067c1437e8a2a6e683b6f1dc3c0529f4dd"
+    }
+  ],
+  "focusCache": {
+    "observableFieldGetter": "function(){return this[W].getObservablePropValue_(g)}",
+    "mainMode": "get MainInstanceUIMode(){return this.m_mainInstanceUIMode}",
+    "appid": "GetFocusedAppID(){return this.m_unFocusedAppID}",
+    "windowID": "GetFocusedWindowID(){return this.m_nFocusedWindowID}"
+  },
+  "excerpts": [
+    {
+      "key": "EnsureCorrectComposition",
+      "text": "EnsureCorrectComposition(){const P=this.m_Instance.MainRunningAppID,O=this.ComputeOverallMinimumRequestedComposition(),z=this.GetOverridingComposition()??O,p=[],C=P&&a.tw.GetAppOverviewByAppID(P);let k=0;if(P==c.U5N?p.push(P):C&&(C.shortcut_override_appid?p.push(C.shortcut_override_appid):p.push(C.appid),k=g.oy.WindowStore.GetAppFocusedWindowID(P)),z===s.I5.Opaque?(p.unshift(I),k=0):p.push(I),z!=null&&(this.m_eLastPushedToWebHelperCompositionState.eCompositionMode!=z||this.m_eLastPushedToWebHelperCompositionState.windowID!=k||!this.BNumberArraysEqual(this.m_eLastPushedToWebHelperCompositionState.appidCompositionQueue,p))){let H=s.I5[this.m_eLastPushedToWebHelperCompositionState.eCompositionMode],q=s.I5[z];if(D(`${this.GetName()}: SetComposition`,`${H}(${this.m_eLastPushedToWebHelperCompositionState.eCompositionMode}) => ${q}(${z})`,`[${p.join(\",\")}], `,`Window: ${k?.toString(16)}`),this.m_Instance.BrowserWindow?.SteamClient.Window.SetComposition(z,p,k),C){let U=z;z==s.I5.Hidden?(!this.m_bPushedOverlayUISinceHidden&&this.m_eLastPushedToWebHelperCompositionState.eCompositionMode!=null&&(U=s.I5.Notification),this.m_bPushedOverlayUISinceHidden=!1):z==s.I5.Notification||z==s.I5.VirtualMenu?this.m_bPushedOverlayUISinceHidden&&(z==s.I5.VirtualMenu?(D(`${this.GetName()}: SetOverlayState`,`Hidden(${s.I5.Hidden})`,\"before VirtualMenu\"),SteamClient.Overlay.SetOverlayState(C.gameid,s.I5.Hidden)):U=s.I5.Hidden,this.m_bPushedOverlayUISinceHidden=!1):this.m_bPushedOverlayUISinceHidden=!0,D(`${this.GetName()}: SetOverlayState`,`${s.I5[U]}(${U})`,`overlayUIShown: ${this.m_bPushedOverlayUISinceHidden}`),SteamClient.Overlay.SetOverlayState(C.gameid,U)}this.m_eLastPushedToWebHelperCompositionState.eCompositionMode=z,this.m_eLastPushedToWebHelperCompositionState.appidCompositionQueue=p,this.m_eLastPushedToWebHelperCompositionState.windowID=k}else z==null&&this.m_eLatestCompositionState!=null&&D(`${this.GetName()}: SetComposition skipped, eCurrentComposition = null`);this.m_eLatestCompositionState=z,this.EnsureCorrectGameOverlayState()}",
+      "sha256": "82b37309d9b584077987e0b50425b4e1ce66e3d3c95a7c16ac19dafd095cd8aa",
+      "bytes": 2050,
+      "utf16Offset": 11288658,
+      "utf16Length": 2050
+    },
+    {
+      "key": "GetAppFocusedWindowID",
+      "text": "GetAppFocusedWindowID(Zt){let sr=0;return Zt&&(sr=this.m_mapAppWindows.get(Zt)?.focusedWindowID),sr??0}",
+      "sha256": "961185ea96b23fc98f52405983505c6ca332a115a99715d3d271372a911ef337",
+      "bytes": 103,
+      "utf16Offset": 12484725,
+      "utf16Length": 103
+    },
+    {
+      "key": "EnsureCorrectGameOverlayState",
+      "text": "EnsureCorrectGameOverlayState(){if(!(0,A.j3)(!0).IN_GAMESCOPE)return;const P=this.m_Instance.MainRunningAppID;let O=this.m_eLatestCompositionState,v=!1,z=\"\";O==s.I5.OverlayKeyboard?(v=!1,z=\"overlay keyboard\"):O==s.I5.Opaque?(v=!0,z=\"opaque\"):O==s.I5.Overlay&&(!(0,A.j3)(!0).IN_GAMESCOPE||this.m_Instance.MenuStore.GetOpenSideMenu()==m.Ez.Main||this.m_Instance.BRouteMatch(e.BV.GamepadUI.Chat()))&&(v=!0,z=\"overlay\"),P!=null&&(v!=this.m_bLatestAppOverlayStateActive||P!=this.m_nLatestAppID)&&(D(`${this.GetName()}: NotifyGameOverlayStateChanged - `,v,P,z),SteamClient.System.NotifyGameOverlayStateChanged(v,P)),this.m_bLatestAppOverlayStateActive=v,this.m_nLatestAppID=P}",
+      "sha256": "ccbc9c0487090009bda00698db7d5108ec3aa5c861d07a216a083197da095623",
+      "bytes": 670,
+      "utf16Offset": 11290708,
+      "utf16Length": 670
+    },
+    {
+      "key": "BNumberArraysEqual",
+      "text": "BNumberArraysEqual(P,O){if(P.length!=O.length)return!1;for(let v=0;v<P.length;++v)if(P[v]!=O[v])return!1;return!0}",
+      "sha256": "d6c461420de89d30932c918001ef7e1e5bfe2e0250a7164afbcbc4dd7e4d66d0",
+      "bytes": 114,
+      "utf16Offset": 11288544,
+      "utf16Length": 114
+    },
+    {
+      "key": "GetCompositionState",
+      "text": "GetCompositionState(){return this.m_eLatestCompositionState}",
+      "sha256": "a60a6a753e3291226e9e606e8506208f27cad2fda8584a14c28bc36764b94f2b",
+      "bytes": 60,
+      "utf16Offset": 11284381,
+      "utf16Length": 60
+    },
+    {
+      "key": "lookup.single",
+      "text": "GetOverlayInstance(Zt,sr){return Array.from(this.m_mapOverlayPopupByPID.values()).reverse().find(Ai=>Ai.params.browserInfo.m_unAppID==Zt&&(sr==0||Ai.params.browserInfo.m_unPID==sr))}",
+      "sha256": "7aa6b7f04f0a0bc4f2cc1370760788c2d9a919be48fa7a944d375fe7cdf9b05c",
+      "bytes": 182,
+      "utf16Offset": 12483610,
+      "utf16Length": 182
+    },
+    {
+      "key": "lookup.plural",
+      "text": "GetOverlayInstances(Zt){let sr=Array.from(this.m_mapOverlayPopupByPID.values()).reverse();return sr=sr.filter(lr=>lr.params.browserInfo.m_unAppID==Zt),sr}",
+      "sha256": "422c64748131a0b057adb4e33f5f2814655445560e128ab5e48fad281be0a29d",
+      "bytes": 154,
+      "utf16Offset": 12483792,
+      "utf16Length": 154
+    },
+    {
+      "key": "lookup.fallback",
+      "text": "GetOverlayInstanceWithFallback(Zt,sr){let lr=this.GetOverlayInstance(Zt,sr);return $.qL.IsSteamVRRunningAndHMDAwake&&(!lr||!lr?.IsVRGamepadUIOverlayWindow())&&(lr=this.VRGamepadUIMainWindowInstance),lr??this.MainWindowInstance}",
+      "sha256": "2b8036c21d40691d0bea306599c7ff1ee459c4ec55439bf71f84aed5b9e4fe81",
+      "bytes": 227,
+      "utf16Offset": 12483946,
+      "utf16Length": 227
+    },
+    {
+      "key": "lookup.active",
+      "text": "get ActiveWindowInstance(){let Zt=this.GetFocusedWindowInstance();if(Zt&&(Zt.IsMainGamepadUIWindow()||Zt.IsGamepadUIOverlayWindow()||Zt.IsMainDesktopWindow()||Zt.IsSteamChinaReviewLauncher()||Zt.IsDesktopOverlayWindow()||Zt.IsAnyVRWindow()))return Zt;let sr=Re.iP.GetFocusedOverlayAppID();return sr?this.m_WindowStore.GetOverlayInstanceWithFallback(sr,Re.iP.GetFocusedOverlayPID()):this.m_WindowStore.MainWindowInstance}",
+      "sha256": "9629af78e55ce3e165d10a88ea0ddf1f03f88f995627ee04a683fa0f39386715",
+      "bytes": 420,
+      "utf16Offset": 12493643,
+      "utf16Length": 420
+    },
+    {
+      "key": "lookup.activated",
+      "text": "OnOverlayActivated(Zt,sr,lr,Rr){const Ai=fn.WindowStore.GetOverlayInstance(sr,Zt);if(Ai){if(Ai.IsGamepadUIOverlayWindow()&&this.m_mainInstanceUIMode!=r.$l2&&SteamClient.Input.ForceConfiguratorFocus(lr),Ai.IsDesktopOverlayWindow()){Ai.DesktopOverlay.SetIsOverlayActive(lr);return}Rr&&lr?Ai.MenuStore.OpenMainMenu():lr||(Ai.BRouteMatch(Le.BV.GamepadUI.GameAPIOSK())?Ai.NavigateBack():Ai.BIsOverlayPath()||(Qi.Debug(`${Ai.BrowserWindow?.document?.title}: overlay deactivated, navigate ${Ai.LocationPathName} => ${Le.BV.GamepadUI.AppRunning()}`),Ai.Navigate(Le.BV.GamepadUI.AppRunning())))}}",
+      "sha256": "5370d1cf4650a645fcdf5a946fb55f10b9cd751e2cb43355cddfe4aa7aa4664f",
+      "bytes": 587,
+      "utf16Offset": 12508035,
+      "utf16Length": 587
+    },
+    {
+      "key": "lookup.target",
+      "text": "GetEventTarget(Zt,sr,lr=!1){let Rr=this.GetActiveContext();if(this.m_nSystemKeyAppIDHint&&!Rr?.FindNavTreeInFocusedWindow()){const mi=this.m_fnSystemKeyContextResolver?.(this.m_nSystemKeyAppIDHint);mi&&mi!=Rr&&this.BCanActivateContext(mi)&&(he(`GetEventTarget: using ${mi.LogName()} for system key AppID ${this.m_nSystemKeyAppIDHint} instead of ${Rr?.LogName()??\"no context\"}`),Rr?.ActiveWindow&&Rr.OnDeactivate(Rr.ActiveWindow),mi.OnActivate(mi.m_LastActiveFocusNavTree?.Window??mi.RootWindow),Rr=mi)}!Rr&&lr&&(Rr=this.FindAnActiveContext());let Ai=Rr?.ActiveWindow?.document.activeElement;if(Rr?.m_LastActiveNavTree){if(sr||(sr=this.m_navigationSource?.Value?.eActivationSourceType),!Rr.m_LastActiveNavTree.GetLastFocusedNode()&&(0,n.UE)(sr)&&(he(`GetEventTarget: Context ${Rr.LogName()} tree ${Rr.m_LastActiveNavTree.id} has no focused node, ${lr?\"finding one\":\"will not find one\"}`),lr&&Rr.m_LastActiveNavTree.TakeFocus(w.D$.GAMEPAD,!0),!this.BGlobalGamepadButton(Zt)))return[void 0,Rr];Rr.m_LastActiveNavTree.GetLastFocusedNode()?Ai=Rr.m_LastActiveNavTree?.GetLastFocusedNode()?.Element:he(`GetEventTarget: Context ${Rr.LogName()} tree ${Rr.m_LastActiveNavTree.id} still has no focused node - will fall back to document.activeElement`)}return[Ai,Rr]}",
+      "sha256": "4614fb7c5c28535d42632cd8630882aaaae8bf9666f1dd5c5f9d3d6015644265",
+      "bytes": 1255,
+      "utf16Offset": 12456864,
+      "utf16Length": 1255
+    },
+    {
+      "key": "profile.GetEventTarget",
+      "text": "GetEventTarget(Zt,sr,lr=!1){let Rr=this.GetActiveContext();if(this.m_nSystemKeyAppIDHint&&!Rr?.FindNavTreeInFocusedWindow()){const mi=this.m_fnSystemKeyContextResolver?.(this.m_nSystemKeyAppIDHint);mi&&mi!=Rr&&this.BCanActivateContext(mi)&&(he(`GetEventTarget: using ${mi.LogName()} for system key AppID ${this.m_nSystemKeyAppIDHint} instead of ${Rr?.LogName()??\"no context\"}`),Rr?.ActiveWindow&&Rr.OnDeactivate(Rr.ActiveWindow),mi.OnActivate(mi.m_LastActiveFocusNavTree?.Window??mi.RootWindow),Rr=mi)}!Rr&&lr&&(Rr=this.FindAnActiveContext());let Ai=Rr?.ActiveWindow?.document.activeElement;if(Rr?.m_LastActiveNavTree){if(sr||(sr=this.m_navigationSource?.Value?.eActivationSourceType),!Rr.m_LastActiveNavTree.GetLastFocusedNode()&&(0,n.UE)(sr)&&(he(`GetEventTarget: Context ${Rr.LogName()} tree ${Rr.m_LastActiveNavTree.id} has no focused node, ${lr?\"finding one\":\"will not find one\"}`),lr&&Rr.m_LastActiveNavTree.TakeFocus(w.D$.GAMEPAD,!0),!this.BGlobalGamepadButton(Zt)))return[void 0,Rr];Rr.m_LastActiveNavTree.GetLastFocusedNode()?Ai=Rr.m_LastActiveNavTree?.GetLastFocusedNode()?.Element:he(`GetEventTarget: Context ${Rr.LogName()} tree ${Rr.m_LastActiveNavTree.id} still has no focused node - will fall back to document.activeElement`)}return[Ai,Rr]}",
+      "sha256": "4614fb7c5c28535d42632cd8630882aaaae8bf9666f1dd5c5f9d3d6015644265",
+      "bytes": 1255,
+      "utf16Offset": 12456864,
+      "utf16Length": 1255
+    },
+    {
+      "key": "profile.SetSystemKeyAppIDHint",
+      "text": "SetSystemKeyAppIDHint(Zt){this.m_nSystemKeyAppIDHint=Zt}",
+      "sha256": "5af3b8da26337d2722cb6bd61be2b8dd5732581c0a9ab1e58a44df32f9f2b590",
+      "bytes": 56,
+      "utf16Offset": 12461916,
+      "utf16Length": 56
+    },
+    {
+      "key": "profile.GetActiveContext",
+      "text": "GetActiveContext(){return this.m_ActiveContext}",
+      "sha256": "41e60adf3656c5617cdbdae1e851c0f784170be8ed266faa0d03e972d948bf5f",
+      "bytes": 47,
+      "utf16Offset": 12453865,
+      "utf16Length": 47
+    },
+    {
+      "key": "profile.BCanActivateContext",
+      "text": "BCanActivateContext(Zt){return!(!Zt||this.BHasVRGamepadNavigationContext()&&!Zt.BIsVR())}",
+      "sha256": "50c177805ee82ba43d2f376f82a586ea4611efcc4fff70d83b7cbcb13ddd1ca4",
+      "bytes": 89,
+      "utf16Offset": 12454114,
+      "utf16Length": 89
+    },
+    {
+      "key": "profile.GetFocusNavContext",
+      "text": "GetFocusNavContext(){return this.IsVRGamepadUIOverlayWindow()?l.oy.WindowStore.VRGamepadUIMainWindowInstance.GetFocusNavContext():l.oy.NavigationManager.FindContextForRootWindow(this.m_BrowserWindow)}",
+      "sha256": "0a62f499fcc03825f66956cd4349a3c67fc83ded3efcf21403095b7251bc56e1",
+      "bytes": 200,
+      "utf16Offset": 12586063,
+      "utf16Length": 200
+    },
+    {
+      "key": "profile.resolver",
+      "text": "sr=>this.WindowStore.GetOverlayInstances(sr).find(lr=>lr.IsGamepadUIOverlayWindow())?.GetFocusNavContext()",
+      "sha256": "4c5fdc63b161e10818f24a06ab5126a9e7ad78722c78d9c606eb27d11a60c3ab",
+      "bytes": 106,
+      "utf16Offset": 12490829,
+      "utf16Length": 106
+    },
+    {
+      "key": "activation.activate",
+      "text": "OnActivate(Zt){this.BIsActive()&&this.m_activeWindow==Zt&&this.m_activeBrowserView===void 0||(H(`${this.LogName(Zt)} Activating context, there are ${this.m_rgGamepadNavigationTrees.length} trees in this context`),this.SetActive(!0,Zt))}",
+      "sha256": "fec28d4a4bb1e38b9f20d916677359eddcec38ed50d2dcdd0a5fd5a31f8bd8e6",
+      "bytes": 236,
+      "utf16Offset": 12448141,
+      "utf16Length": 236
+    },
+    {
+      "key": "activation.set",
+      "text": "SetActive(Zt,sr,lr=void 0){this.m_controller.BatchedUpdate(()=>{if(Zt&&!this.m_controller.BCanActivateContext(this)){H(`${this.LogName(sr)} Skipping context activation due to CFocusNavWindowContext`);return}const Rr=this.m_valueIsActive.Value!=Zt;Zt?(this.m_activeWindow=sr,this.m_activeBrowserView=lr,this.m_controller.OnContextActivated(this)):(this.m_activeBrowserView=void 0,this.m_controller.OnContextDeactivated(this,!1)),this.m_valueIsActive.Set(Zt),Rr&&this.m_LastActiveFocusNavTree?.OnContextActiveStateChanged(Zt);const Ai=this.m_LastActiveFocusNavTree;if(Zt&&lr===void 0&&Ai?.Window==(sr??this.m_rootWindow)){const mi=Ai?.GetLastFocusedNode()?.Element,dn=mi?.ownerDocument.activeElement;mi&&Ai?.BIsActiveFocus()&&(!dn||dn==mi.ownerDocument.body)&&queueMicrotask(()=>{const qi=mi.ownerDocument.activeElement;mi.isConnected&&Ai.BIsActiveFocus()&&(!qi||qi==mi.ownerDocument.body)&&mi.focus({preventScroll:!0})})}})}",
+      "sha256": "1a0c60fc5550d204992c3eb143a60bef49f60e2cb3f422bfdfd8b7109c7689fc",
+      "bytes": 923,
+      "utf16Offset": 12447218,
+      "utf16Length": 923
+    },
+    {
+      "key": "activation.active",
+      "text": "BIsActive(){return this.m_valueIsActive.Value}",
+      "sha256": "08f774a0d98467ea4dcfdc4d1bdcaaeba185eef191c7b9bfb5e89876664d8908",
+      "bytes": 46,
+      "utf16Offset": 12449113,
+      "utf16Length": 46
+    },
+    {
+      "key": "activation.context",
+      "text": "OnContextActivated(Zt){this.m_ActiveContext=Zt,this.m_LastActiveContext=Zt}",
+      "sha256": "68493d9b6f0fe3eed8f99a777c474d0a895cb2b99ca19b2362316d7e68a91504",
+      "bytes": 75,
+      "utf16Offset": 12462742,
+      "utf16Length": 75
+    },
+    {
+      "key": "activation.batch",
+      "text": "BatchedUpdate(Zt){this.m_fnGamepadEventUpdateBatcher(Zt)}",
+      "sha256": "67dee1041898cbfea5c3c8ef817a1beac0db00c913e1c8ba14db95d13d0eaee0",
+      "bytes": 57,
+      "utf16Offset": 12459719,
+      "utf16Length": 57
+    },
+    {
+      "key": "focusCache.mainMode",
+      "text": "get MainInstanceUIMode(){return this.m_mainInstanceUIMode}",
+      "sha256": "14b564ede0fdf40cd59e48303569e25613038ebb81da713be572d23fffba00d2",
+      "bytes": 58,
+      "utf16Offset": 12497308,
+      "utf16Length": 58
+    },
+    {
+      "key": "focusCache.appid",
+      "text": "GetFocusedAppID(){return this.m_unFocusedAppID}",
+      "sha256": "2e59045934996b727da70080080106174fee6055e74e695e572d961aecd349aa",
+      "bytes": 47,
+      "utf16Offset": 11927158,
+      "utf16Length": 47
+    },
+    {
+      "key": "focusCache.windowID",
+      "text": "GetFocusedWindowID(){return this.m_nFocusedWindowID}",
+      "sha256": "bce3cfb3c75c3167acf214db25ad88e62603eb005ce82ec5623b15c8fc9af65f",
+      "bytes": 52,
+      "utf16Offset": 11927205,
+      "utf16Length": 52
+    },
+    {
+      "key": "focusCache.observableFieldGetter",
+      "text": "function(){return this[W].getObservablePropValue_(g)}",
+      "sha256": "aade09082f245a6f1fe942dfcfd16b940e948d0ffad2fa7e17bc5b99c3758aea",
+      "bytes": 53,
+      "utf16Offset": 364350,
+      "utf16Length": 53,
+      "sourceBundleSha256": "c1effbd9256be0e2b161756e5c49fb067c1437e8a2a6e683b6f1dc3c0529f4dd",
+      "zipMember": "steamui/libraries/libraries~00299a408.js"
+    },
+    {
+      "key": "activationSubscription.independentHook",
+      "text": "function F(A,b){const f=n.useCallback((M,D,I,y)=>{D==A&&!I&&y&&b()},[A,b]);n.useEffect(()=>{const M=SteamClient.Overlay.RegisterForOverlayActivated(f);return()=>M.unregister()},[f])}",
+      "bytes": 182,
+      "sha256": "c5fd10286bb92a61203736a7d2ea2ed7709d044046a7ac0b76764de3334fd32e",
+      "utf16Offset": 12219716,
+      "utf16Length": 182
+    },
+    {
+      "key": "activationSubscription.mainRegistration",
+      "text": "SteamClient.Overlay.RegisterForOverlayActivated(this.OnOverlayActivated),",
+      "bytes": 73,
+      "sha256": "2959bb3318c3dd003c3c1055114c85f68aa69cf497bbbf7a609c99ddac9275d6",
+      "utf16Offset": 12492338,
+      "utf16Length": 73
+    },
+    {
+      "key": "windowFocus.constructor",
+      "text": "class m{m_rgTrees=[];m_mapChildTreeCleanup=new Map;FindTree(M){return this.m_rgTrees.find(D=>D.tree==M)}FindTreeByName(M){return this.m_rgTrees.find(D=>D.name==M)}FindTreeByBrowser(M){return this.m_rgTrees.find(D=>D.browser==M)}RegisterNavTree(M,D,I){(0,n.wT)(!this.FindTreeByName(M),`Duplicate focus nav tree ${M}`),S(`Registering tree ${M}`);const y=new s.e0,x={name:M,tree:D,browserContext:I};return this.m_rgTrees.push(x),y.Push(()=>i.x9(this.m_rgTrees,x)),y.Push(D.OnActivateCallbacks.Register(this.OnTreeActivated).Unregister),y.Push(D.OnDeactivateCallbacks.Register(this.OnTreeDeactivated).Unregister),y.Push(D.OnChildTreesChangedCallbacks.Register((E,T)=>this.OnChildTreesChanged(M,I,E,T)).Unregister),y.Push(()=>D.ChildTrees.forEach(E=>this.UnregisterChildTree(E))),D.BIsActive()&&this.OnTreeActivated(D),y.GetUnregisterFunc()}OnChildTreesChanged(M,D,I,y){I==\"add\"?this.RegisterChildTree(M,D,y):I==\"remove\"&&this.UnregisterChildTree(y)}RegisterChildTree(M,D,I){const y=`${M}/${I.id}`;this.m_mapChildTreeCleanup.set(I,this.RegisterNavTree(y,I,D)),I.ChildTrees.forEach(x=>this.RegisterChildTree(y,D,x))}UnregisterChildTree(M){const D=this.m_mapChildTreeCleanup.get(M);D&&D(),this.m_mapChildTreeCleanup.delete(M)}SetBrowserViewFocus(M,D){const I=this.FindTree(D);g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Focusing browser view in ${I?.name}, ${I?\"blurring main window\":\"not changing main window focus\"}`),I&&(I.browser=M,A(I.browserContext)),M.SetFocus(!0)}SetBrowserViewBlurred(M,D){const I=this.FindTree(D);g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Blurring browser view in ${I?.name}, ${I?\"giving main window focus\":\"not changing main window focus\"}`),M.SetFocus(!1),I&&(delete I.browser,j(I.browserContext))}GetActiveBrowserViewWithinTree(M){return this.FindTree(M)?.browser}OnTreeActivated(M){const D=this.FindTree(M);D.browser?(g(D?.browserContext,`CBrowserViewWindowFocusCoordinator Activating tree ${D?.name} but browser view has focus`),D.browser.SetFocus(!0)):(b(D?.browserContext),M.BIsContextActive()?(g(D?.browserContext,`CBrowserViewWindowFocusCoordinator Activating tree ${D?.name} and giving main window focus`),j(D.browserContext)):g(D?.browserContext,`CBrowserViewWindowFocusCoordinator tree ${D?.name} was activated, but ignoring because the window is not active`))}OnTreeDeactivated(M,D){const I=this.FindTree(M),y=this.FindTree(D);if(y){g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Focus transfer from ${I?.name} to ${y?.name}, both within main window`);return}I.browser?(g(I?.browserContext,\"CBrowserViewWindowFocusCoordinator From tree had browser, blurring the browser\"),I.browser.SetFocus(!1)):(g(I?.browserContext,\"CBrowserViewWindowFocusCoordinator Blurring main window\"),A(I.browserContext))}}",
+      "utf16Offset": 9472645,
+      "utf16Length": 2766,
+      "bytes": 2766,
+      "sha256": "4dae8bbb228d889482fb9bf553563dc07db8c4675ee427293020817bc6ebb69c"
+    },
+    {
+      "key": "windowFocus.j",
+      "text": "function j(f){const M=f.ownerWindow??window;g(f,\"Invoking SteamClient.Window.SetKeyFocus( true )\"),M.SteamClient.Window.SetKeyFocus(!0)}",
+      "utf16Offset": 9476044,
+      "utf16Length": 136,
+      "bytes": 136,
+      "sha256": "5580e4bd26355a8ae1d2af6f917d6cbc6f55087b4bb225ad1d00aadb80400f23"
+    },
+    {
+      "key": "windowFocus.A",
+      "text": "function A(f){const M=f.ownerWindow??window;g(f,\"Invoking SteamClient.Window.SetKeyFocus( false )\"),M.SteamClient.Window.SetKeyFocus(!1)}",
+      "utf16Offset": 9476180,
+      "utf16Length": 137,
+      "bytes": 137,
+      "sha256": "48e2a26a89b1f014c389ba7bc0007b3a6726cea97a8b640f50246162c73293b2"
+    },
+    {
+      "key": "windowFocus.b",
+      "text": "function b(f){const M=f?.ownerWindow??window;g(f,\"Invoking SteamClient.Window.MarkLastFocused()\"),M.SteamClient.Window.MarkLastFocused()}",
+      "utf16Offset": 9476317,
+      "utf16Length": 137,
+      "bytes": 137,
+      "sha256": "1796b627f0f2838a718aba3eaa6139dcf340688a5e6d775d60cefc81d26532df"
+    },
+    {
+      "key": "windowFocus.treeActive",
+      "text": "BIsActive(){return this.m_valueIsMounted.Value&&(this.m_Controller.IsActiveNavTree(this)||this.m_Controller.IsActiveFocusNavTree(this))}",
+      "utf16Offset": 12440113,
+      "utf16Length": 136,
+      "bytes": 136,
+      "sha256": "ae1cf0eb3abf1248d3a38710324c013e574c6c7b07214fe111c14602e7528742"
+    },
+    {
+      "key": "windowFocus.treeContextActive",
+      "text": "BIsContextActive(){return this.m_Controller.BIsInActiveContext(this)}",
+      "utf16Offset": 12438156,
+      "utf16Length": 69,
+      "bytes": 69,
+      "sha256": "bb328618806b3134a7676d5368428dbe27adbdd5ff314e37dfd3a6bcff4f2d1d"
+    },
+    {
+      "key": "windowFocus.treeWindowContext",
+      "text": "get WindowContext(){return this.m_context}",
+      "utf16Offset": 12437816,
+      "utf16Length": 42,
+      "bytes": 42,
+      "sha256": "9ccf294d7d55e83b64a007d0b2caee01d7d383df119a054b6d6494fe0565e0da"
+    },
+    {
+      "key": "windowFocus.treeWindow",
+      "text": "get Window(){return this.m_window}",
+      "utf16Offset": 12437858,
+      "utf16Length": 34,
+      "bytes": 34,
+      "sha256": "be869ed0130caf9863601bd524ddad898f252891186032e8e956d57e4e2dbeff"
+    },
+    {
+      "key": "popupTree.OnActivate",
+      "text": "OnActivate(Zt){this.m_tsLastActivated=performance.now(),this.m_onActivateCallbacks.Dispatch(this,Zt),this.m_onActiveFocusStateChangedCallbacks.Dispatch(!0,this);for(let sr=this.m_lastFocusNode;sr;sr=sr.Parent)sr.SetFocusWithin(!0)}",
+      "bytes": 231,
+      "sha256": "5853df2d11663107da15b33135516ec8df782694aeadd7b5e255bb6d3238c62a",
+      "utf16Length": 231,
+      "utf16Offset": 12439027,
+      "byteOffset": 12439052
+    },
+    {
+      "key": "popupTree.BIsActive",
+      "text": "BIsActive(){return this.m_valueIsMounted.Value&&(this.m_Controller.IsActiveNavTree(this)||this.m_Controller.IsActiveFocusNavTree(this))}",
+      "bytes": 136,
+      "sha256": "ae1cf0eb3abf1248d3a38710324c013e574c6c7b07214fe111c14602e7528742",
+      "utf16Length": 136,
+      "utf16Offset": 12440113,
+      "byteOffset": 12440138
+    },
+    {
+      "key": "popupTree.BIsContextActive",
+      "text": "BIsContextActive(){return this.m_Controller.BIsInActiveContext(this)}",
+      "bytes": 69,
+      "sha256": "bb328618806b3134a7676d5368428dbe27adbdd5ff314e37dfd3a6bcff4f2d1d",
+      "utf16Length": 69,
+      "utf16Offset": 12438156,
+      "byteOffset": 12438181
+    },
+    {
+      "key": "popupTree.BIsEnabled",
+      "text": "BIsEnabled(){return this.m_bIsEnabled}",
+      "bytes": 38,
+      "sha256": "004389957d0a10a6930b9f1f6ac00037ee3cc5a262b55b180f07b43a362f29c1",
+      "utf16Length": 38,
+      "utf16Offset": 12440018,
+      "byteOffset": 12440043
+    },
+    {
+      "key": "original-menu-browser-view-hook",
+      "text": "function S(F,j,A,b){const f=(0,e.ch)(),D=(0,a.$2)().BrowserWindow;r.useEffect(()=>{j&&j.GetBrowserView().SetTouchGesturesToCancel([s.xw,s.xS])},[j]),r.useEffect(()=>{if(j&&A){const T=j.GetViewWindow();return l.BR.RegisterModalManager(A,T)}},[j,A]),r.useEffect(()=>{if(j){const T=j.GetViewWindow();return b?(o.XX.SetMenuManager(T,b),()=>o.XX.SetMenuManager(T,void 0)):o.XX.RegisterChildWindow(D,T)}},[j,D,b]);const I=(0,u.Fx)(j?.GetBrowserView(),c.wy),y=(0,n.nN)(),x=r.useCallback(()=>{j?.GetBrowserView().SetFocus(!0);const T=j?.GetViewWindow();T&&y?.OnActivate(T),I(),f.ToggleSideMenu(F,!0)},[f,F,j,I,y]),E=r.useCallback(()=>{j?.GetBrowserView().SetFocus(!1),f.OnMenuDeactivated(F);const T=j?.GetViewWindow();if(T){const L=()=>{if(f.GetOpenSideMenu()==F)return;const R=T.document.activeElement;R&&R!=T.document.body&&R.blur()};T.document.hasFocus()?T.addEventListener(\"blur\",L,{once:!0}):L()}},[f,F,j]);return{fnOnFocusNavActivated:x,fnOnFocusNavDeactivated:E}}",
+      "bytes": 962,
+      "sha256": "090cd3dc167a34d8a7adaab49cd1f2fc3d0ccacc7259e684222d6f4a9958bc0d",
+      "utf16Length": 962,
+      "utf16Offset": 11086319,
+      "byteOffset": 11086323
+    },
+    {
+      "key": "popupOriginalActivatedCallback",
+      "text": "($r,ti)=>{for(let or=ti;!zt&&or;or=or.Parent)if(or===$r)return;Tr?.()}",
+      "bytes": 70,
+      "sha256": "e74528483d43862ddecb44c5b8c3bbe728f80ac60a89eb6852c5f39457004de9",
+      "utf16Length": 70,
+      "utf16Offset": 11133882,
+      "byteOffset": 11133886
+    },
+    {
+      "key": "popupNativeFocus.ye",
+      "text": "function Ye(nr){const{active:zt,embeddedView:ue,expanded:Qe,visible:mt,vr:Dt}=nr,$t=m.useRef(void 0),vr=(0,C.Dt)(nr.onFocusNavDeactivated),{onFocusNavActivated:Tr}=nr,Jr=m.useCallback(($r,ti)=>{for(let or=ti;!zt&&or;or=or.Parent)if(or===$r)return;Tr?.()},[zt,Tr]),Dr=m.useRef(void 0),Br=m.useRef(void 0),zr=(0,g.q3)(()=>Br.current?.BFocusWithin()??!1),pr=m.useCallback($r=>{zr&&ue&&Br.current.Node()?.GetLastFocusElement()?.scrollIntoView({behavior:\"auto\",inline:\"end\"})},[zr,ue,Br]),Wr=(0,ht.wY)(pr),kr=(0,C.Y$)(c.Ez.QuickAccess),xr=(0,He.fe)();m.useEffect(()=>{Dt||(zt?$t.current.Activate(!0):$t.current?.BIsActive()&&$t.current.Deactivate())},[zt,Dt]);const Ge=m.useCallback(()=>(Br.current.TakeFocus(),!0),[]),ie=m.useCallback(()=>(Dr.current.TakeFocus(),!0),[]),Re=(0,o.ch)(),Vt=(0,g.q3)(()=>Re.BQuickAccessContentFocusRequested());m.useEffect(()=>{if(!zt||!Vt)return;Re.SetQuickAccessContentFocusRequested(!1);const $r=Dr.current?.Node();$r?.Tree.DeferredFocus.RequestFocus($r,{bFocusDescendant:!0})},[zt,Vt,Re]);const Ct=ot(\"quick-access-menu\");let Pt=(0,c.i4)();const wt=(0,ct.Eb)();Pt=(0,g.q3)(()=>Ct.some(ti=>ti.key===Pt&&!jt(ti))?Pt:Ct.length>0?Ct[0].key:void 0);const dr=(0,O.A)(\"BasicUI\",xr,Z().Container,nr.visible&&Z().Open,Dt&&Z().BottomTabs,Dt&&Z().VR,wt&&Z().OOBE,Qe&&\"QAMFriendExpanded\",Qe&&Z().Expanded,nr.showHeaderAndFooter&&Z().HeaderAndFooterVisible);let ir=m.useCallback($r=>{$r.stopPropagation(),$r.preventDefault()},[]);const Kt=m.useCallback(()=>(Ge(),!0),[Ge]),Ir=(0,n.K1)();let Hr=(0,d.Qu)();const pi=(0,h.W6)(),Ei=m.useCallback(()=>{pi.replace(a.BV.GamepadUI.Keyboard())},[pi]),yi=m.useCallback(()=>{Ir(),Ei()},[Ir,Ei]);m.useEffect(()=>{Ge()},[Pt,Ge]);const Qi=(0,C.on)(),Xi=(0,O.A)(Z().QuickAccessMenu,nr.showHeaderAndFooter&&Z().HeaderAndFooterVisible),cn=(0,O.A)(Z().Tabs,nr.showHeaderAndFooter&&Z().TabsWithFooter),ln=(0,Xt.uw)(\"frame\"),Qr=(0,e.jsxs)(K.SR,{children:[(0,e.jsx)(st,{bQuickAccessMenuVisible:mt}),(0,e.jsxs)(M.g,{children:[(0,e.jsxs)(D.Z,{id:\"QuickAccess-Menu\",className:Xi,onClick:ir,children:[(0,e.jsx)(\"div\",{className:Z().HeaderContainer,children:(0,e.jsx)(i.hB,{quickAccessHeader:!0,visible:nr.showHeaderAndFooter})}),(0,e.jsxs)(D.Z,{className:Z().Menu,children:[(0,e.jsxs)(D.Z,{className:cn,ref:Wr,navRef:Br,autoFocus:!0,focusable:!1,onCancel:Dt?void 0:Ir,onActivate:ie,onMoveRight:ie,navEntryPreferPosition:y.iU.PREFERRED_CHILD,children:[(0,e.jsx)(cr,{tabs:Ct,activeTab:Pt,vr:Dt}),Hr&&!Dt&&(0,e.jsx)(D.Z,{className:Z().KeyboardButton,focusable:!0,onActivate:yi,children:(0,e.jsx)(R.ShowKeyboard,{})})]}),(0,e.jsx)(D.Z,{className:Z().PanelOuterNav,onMoveLeft:Dt?void 0:Kt,onMoveDown:Dt?Kt:void 0,onCancelButton:Dt?Ge:void 0,navRef:Dr,children:(0,e.jsx)(tt,{tabs:Ct,activeTab:Pt,bMenuVisible:mt})})]}),nr.showHeaderAndFooter&&(0,e.jsx)(Gt.w,{className:Z().Footer,location:\"quick-access\"})]}),!Dt&&(0,e.jsx)(Je.i,{bQAMVersion:!0})]})]});return Dt?(0,e.jsx)(D.Z,{className:dr,onMoveLeft:E.ru,onMoveRight:E.ru,children:Qr}):(0,e.jsx)(f.B2,{navID:\"QuickAccess-NA\",enabled:zt||kr,navTreeRef:$t,onActivated:Jr,onDeactivated:vr,autoFocus:!0,className:dr,onCancelButton:Ge,onGlobalButtonDown:Qi,...ln,children:nr.refModalManager?(0,e.jsx)(J,{refModalManager:nr.refModalManager,refContextMenuManager:nr.refContextMenuManager,children:Qr}):Qr})}",
+      "bytes": 3288,
+      "sha256": "94980ba466ae4e920309f90af5af9bb397913fb4c6e584ceb71e641d9c53fb7a",
+      "utf16Length": 3288,
+      "utf16Offset": 11133698
+    },
+    {
+      "key": "popupNativeFocus.owner",
+      "text": "class Id{m_viewWindow;m_rootElement;m_renderWhenReady;m_bMounted=!1;m_browserView;m_browserViewName;m_DynamicCSSObserver;constructor(){}CreateView(E,T,L){const{name:R,strVROverlayKey:P,eCreationFlags:O}=T;this.m_browserView&&this.DestroyView();let v=L?.ownerWindow?.SteamClient.Browser.GetBrowserID(),z=\"BrowserViewPopup\";R?.length>0&&(z=R),v&&(z+=\"_uid\"+v),z=Id.GetUniqueBrowserViewName(z);const p={parentPopupBrowserID:v,strVROverlayKey:P,strName:z};let{strCreateURL:C,browserView:k}=SteamClient.BrowserView.CreatePopup(p);O&&(C+=\"&createflags=\"+O);let q=window.open(C,z,\"top=0,left=0,width=540,height=700,resizable=yes,status=0,toolbar=0,menubar=0,location=0\");if(!q){console.error(`Failed to create popup, browser/CEF may be blocking popups for \"${window.location.origin}\"`);return}q.document.write('<!DOCTYPE html><html ><head><title></title></head><body  style=\"overflow: hidden\"><div id=\"browserview_target\"></div></body></html>'),q.document.title=z,q.document.close();let V=q.document.getElementById(\"browserview_target\");q.addEventListener(\"unload\",this.OnUnload),this.m_viewWindow=q,this.m_rootElement=V,this.m_browserView=k,this.m_browserViewName=z,o.Oe(this.m_viewWindow,o.yU()),this.m_renderWhenReady=new n.Q(q.document,V),this.m_renderWhenReady.SetTarget(E)}DestroyView(){this.m_browserView&&(Id.DelayedReleaseBrowserViewName(this.m_browserViewName),SteamClient.BrowserView.Destroy(this.m_browserView),this.m_browserView=void 0),this.m_DynamicCSSObserver&&(this.m_DynamicCSSObserver.disconnect(),this.m_DynamicCSSObserver=void 0)}GetBrowserView(){return this.m_browserView}GetRenderElement(){return this.m_rootElement}GetViewWindow(){return this.m_viewWindow}OnUnload(){}static m_setActiveBrowserViewNames=new Set;static GetUniqueBrowserViewName(E){let T=E,L=0;for(;Id.m_setActiveBrowserViewNames.has(T);)T=`${E}_${L++}`;return Id.m_setActiveBrowserViewNames.add(T),T}static DelayedReleaseBrowserViewName(E){window.setTimeout(()=>Id.m_setActiveBrowserViewNames.delete(E),100)}}",
+      "bytes": 1991,
+      "sha256": "a89751f5ec329f229ebf16c5b745539d668cc67d35069aed47803c083973553d",
+      "utf16Length": 1991,
+      "utf16Offset": 6689003
+    },
+    {
+      "key": "popupNativeFocus.focus",
+      "text": "()=>{j?.GetBrowserView().SetFocus(!0);const T=j?.GetViewWindow();T&&y?.OnActivate(T),I(),f.ToggleSideMenu(F,!0)}",
+      "bytes": 112,
+      "sha256": "98fe2e9a43c58f2f1567d0a2df67b11954cc4707fa7503ae1f63d65f96cffd2f",
+      "utf16Length": 112,
+      "utf16Offset": 11086799
+    },
+    {
+      "key": "popupNativeFocus.subscriber",
+      "text": "($r,ti)=>{for(let or=ti;!zt&&or;or=or.Parent)if(or===$r)return;Tr?.()}",
+      "bytes": 70,
+      "sha256": "e74528483d43862ddecb44c5b8c3bbe728f80ac60a89eb6852c5f39457004de9",
+      "utf16Length": 70,
+      "utf16Offset": 11133882
+    },
+    {
+      "key": "popupNativeFocus.parent",
+      "text": "function(zt){const{active:ue}=zt,[Qe,mt]=m.useState(ue),Dt=Qe||ue;m.useEffect(()=>mt(ue),[ue]);const $t=(0,z.OU)(a.BV.GamepadUI.AppRunning());(0,i.iW)(Dt&&!$t,\"QuickAccessMenuBrowserView\");const vr=(0,L.Jo)({name:\"QuickAccess\"});(0,re.kV)(vr?.GetRenderElement()?.ownerDocument.defaultView);const Jr=(0,c.i4)()==c.qE.Friends,Dr=(0,g.q3)(()=>s.LN.qamFriendsExpanded)&&Jr,[Br,zr]=m.useState(null),[pr,Wr]=m.useState(null),kr=W(pr??void 0),xr=Dr||kr,{fnOnFocusNavActivated:Ge,fnOnFocusNavDeactivated:ie}=(0,C.k6)(c.Ez.QuickAccess,vr,Br??zt.ModalManager,xr&&pr||void 0);m.useEffect(()=>{ue||(pr?.ActiveMenu?.OnCancel(),Br?.CloseLegacyModals())},[ue,Br,pr]);const Re=(0,n.K1)();(0,s.PG)(vr?.GetViewWindow());const Vt=(0,pe.u6)(),Ct=(0,g.q3)(()=>lt.O.BKeyboardIMEVisible);if((0,C.Vs)(vr,ue),!vr)return null;const Pt={nDuration:300,fnStep:Lt},wt={nDuration:200,fnStep:vt};let dr=$t?\"transparent\":\"darkblur\",ir=(0,O.A)(Z().ViewPlaceholder,$t&&Z().FullHeight,xr&&Z().Expanded,Vt&&Z().OSKActive,Ct&&Z().IMEVisible,$t&&Z().HeaderAndFooterVisible);return(0,e.jsxs)(r.H,{appearance:dr,visible:Dt,onClick:Re,children:[(0,e.jsx)(L.m4,{className:ir,browser:vr.GetBrowserView(),visible:Dt,animateIn:Pt,animateOut:wt}),(0,e.jsx)(b.b5,{ownerWindow:vr.GetViewWindow(),children:w.createPortal((0,e.jsx)(Ye,{active:ue,visible:Dt,expanded:xr,showHeaderAndFooter:$t,onFocusNavActivated:Ge,onFocusNavDeactivated:ie,refModalManager:zr,refContextMenuManager:Wr}),vr.GetRenderElement())})]})}",
+      "bytes": 1463,
+      "sha256": "e84c2dc450ad6463fd0d2bfbb103fb32475c2de7e112589adb6590a095693b27",
+      "utf16Length": 1463,
+      "utf16Offset": 11127804
+    },
+    {
+      "key": "popupNativeFocus.b2",
+      "text": "function B(w){const{navID:h,onActivated:F,onDeactivated:j,navTreeRef:A,enabled:b=!0,modal:f=!1,virtualFocus:M=!1,historyMode:D,children:I,parentEmbeddedNavTree:y,onGlobalButtonDown:x,disableFocusClasses:E=!1,disabledRoot:T=!1,excludeFromScrollRegionSearch:L=!1,\"flow-children\":R,...P}=w,{elemProps:O,navOptions:v,gamepadEvents:z}=(0,i.sl)(P),{refDiv:p,tree:C}=d({navID:h,parentEmbeddedNavTree:y,disabledRoot:T,enabled:b,onGlobalButtonDown:x,navTreeRef:A,virtualFocus:M,modal:f,historyMode:D,excludeFromScrollRegionSearch:L});(0,a.hL)(C.OnActivateCallbacks,F),(0,a.hL)(C.OnDeactivateCallbacks,j),(0,l.KF)(z,p,C),o.useLayoutEffect(()=>{const H=(0,n.O)(R);C.Root.SetProperties({...v,layout:H})});const k=(0,r.Ue)(p,I.props.ref);return(0,e.jsx)(g,{tree:T?null:C,disableFocusClasses:E||T,children:(0,e.jsx)(i.TJ.Provider,{value:T?null:C.Root,children:o.cloneElement(I,{id:h,\"data-react-nav-root\":h,ref:k})})})}",
+      "bytes": 905,
+      "sha256": "377a7cec72bdd3aa5c32627ead5a12a237b86f32cc83a4aabf531867d41844e3",
+      "utf16Length": 905,
+      "utf16Offset": 2217801
+    }
+  ],
+  "activationSubscription": {
+    "independentHook": "function F(A,b){const f=n.useCallback((M,D,I,y)=>{D==A&&!I&&y&&b()},[A,b]);n.useEffect(()=>{const M=SteamClient.Overlay.RegisterForOverlayActivated(f);return()=>M.unregister()},[f])}",
+    "mainRegistration": "SteamClient.Overlay.RegisterForOverlayActivated(this.OnOverlayActivated),"
+  },
+  "windowFocus": {
+    "constructor": "class m{m_rgTrees=[];m_mapChildTreeCleanup=new Map;FindTree(M){return this.m_rgTrees.find(D=>D.tree==M)}FindTreeByName(M){return this.m_rgTrees.find(D=>D.name==M)}FindTreeByBrowser(M){return this.m_rgTrees.find(D=>D.browser==M)}RegisterNavTree(M,D,I){(0,n.wT)(!this.FindTreeByName(M),`Duplicate focus nav tree ${M}`),S(`Registering tree ${M}`);const y=new s.e0,x={name:M,tree:D,browserContext:I};return this.m_rgTrees.push(x),y.Push(()=>i.x9(this.m_rgTrees,x)),y.Push(D.OnActivateCallbacks.Register(this.OnTreeActivated).Unregister),y.Push(D.OnDeactivateCallbacks.Register(this.OnTreeDeactivated).Unregister),y.Push(D.OnChildTreesChangedCallbacks.Register((E,T)=>this.OnChildTreesChanged(M,I,E,T)).Unregister),y.Push(()=>D.ChildTrees.forEach(E=>this.UnregisterChildTree(E))),D.BIsActive()&&this.OnTreeActivated(D),y.GetUnregisterFunc()}OnChildTreesChanged(M,D,I,y){I==\"add\"?this.RegisterChildTree(M,D,y):I==\"remove\"&&this.UnregisterChildTree(y)}RegisterChildTree(M,D,I){const y=`${M}/${I.id}`;this.m_mapChildTreeCleanup.set(I,this.RegisterNavTree(y,I,D)),I.ChildTrees.forEach(x=>this.RegisterChildTree(y,D,x))}UnregisterChildTree(M){const D=this.m_mapChildTreeCleanup.get(M);D&&D(),this.m_mapChildTreeCleanup.delete(M)}SetBrowserViewFocus(M,D){const I=this.FindTree(D);g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Focusing browser view in ${I?.name}, ${I?\"blurring main window\":\"not changing main window focus\"}`),I&&(I.browser=M,A(I.browserContext)),M.SetFocus(!0)}SetBrowserViewBlurred(M,D){const I=this.FindTree(D);g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Blurring browser view in ${I?.name}, ${I?\"giving main window focus\":\"not changing main window focus\"}`),M.SetFocus(!1),I&&(delete I.browser,j(I.browserContext))}GetActiveBrowserViewWithinTree(M){return this.FindTree(M)?.browser}OnTreeActivated(M){const D=this.FindTree(M);D.browser?(g(D?.browserContext,`CBrowserViewWindowFocusCoordinator Activating tree ${D?.name} but browser view has focus`),D.browser.SetFocus(!0)):(b(D?.browserContext),M.BIsContextActive()?(g(D?.browserContext,`CBrowserViewWindowFocusCoordinator Activating tree ${D?.name} and giving main window focus`),j(D.browserContext)):g(D?.browserContext,`CBrowserViewWindowFocusCoordinator tree ${D?.name} was activated, but ignoring because the window is not active`))}OnTreeDeactivated(M,D){const I=this.FindTree(M),y=this.FindTree(D);if(y){g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Focus transfer from ${I?.name} to ${y?.name}, both within main window`);return}I.browser?(g(I?.browserContext,\"CBrowserViewWindowFocusCoordinator From tree had browser, blurring the browser\"),I.browser.SetFocus(!1)):(g(I?.browserContext,\"CBrowserViewWindowFocusCoordinator Blurring main window\"),A(I.browserContext))}}",
+    "j": "function j(f){const M=f.ownerWindow??window;g(f,\"Invoking SteamClient.Window.SetKeyFocus( true )\"),M.SteamClient.Window.SetKeyFocus(!0)}",
+    "A": "function A(f){const M=f.ownerWindow??window;g(f,\"Invoking SteamClient.Window.SetKeyFocus( false )\"),M.SteamClient.Window.SetKeyFocus(!1)}",
+    "b": "function b(f){const M=f?.ownerWindow??window;g(f,\"Invoking SteamClient.Window.MarkLastFocused()\"),M.SteamClient.Window.MarkLastFocused()}",
+    "treeActive": "BIsActive(){return this.m_valueIsMounted.Value&&(this.m_Controller.IsActiveNavTree(this)||this.m_Controller.IsActiveFocusNavTree(this))}",
+    "treeContextActive": "BIsContextActive(){return this.m_Controller.BIsInActiveContext(this)}",
+    "treeWindowContext": "get WindowContext(){return this.m_context}",
+    "treeWindow": "get Window(){return this.m_window}"
+  },
+  "windowFocusLibrary": {
+    "member": "steamui/library.js",
+    "bytes": 539533,
+    "sha256": "8539538428b2c7373f6a46c89b1f0c3b792cba3e3ce06505dea3cb5cc25f6c64",
+    "exportChain": "61484 l=t(16528) ->16528 oI:()=>E.o,E=B(81919) ->81919 o:()=>l",
+    "decorator": "function l(o,e,s){return{get(){let c=s.value.bind(this);return Object.prototype.hasOwnProperty.call(this,e)||Object.defineProperty(this,e,{value:c}),c}}}",
+    "decoratorOffset": 32238,
+    "decoratorSha256": "1d7b18ec8ec1e77156c06e5ad2e0e984f568215d22f1ec7521931cc16fd1ac75"
+  },
+  "popupTree": {
+    "OnActivate": "OnActivate(Zt){this.m_tsLastActivated=performance.now(),this.m_onActivateCallbacks.Dispatch(this,Zt),this.m_onActiveFocusStateChangedCallbacks.Dispatch(!0,this);for(let sr=this.m_lastFocusNode;sr;sr=sr.Parent)sr.SetFocusWithin(!0)}",
+    "BIsActive": "BIsActive(){return this.m_valueIsMounted.Value&&(this.m_Controller.IsActiveNavTree(this)||this.m_Controller.IsActiveFocusNavTree(this))}",
+    "BIsContextActive": "BIsContextActive(){return this.m_Controller.BIsInActiveContext(this)}",
+    "BIsEnabled": "BIsEnabled(){return this.m_bIsEnabled}"
+  },
+  "popupBrowserViewHook": "function S(F,j,A,b){const f=(0,e.ch)(),D=(0,a.$2)().BrowserWindow;r.useEffect(()=>{j&&j.GetBrowserView().SetTouchGesturesToCancel([s.xw,s.xS])},[j]),r.useEffect(()=>{if(j&&A){const T=j.GetViewWindow();return l.BR.RegisterModalManager(A,T)}},[j,A]),r.useEffect(()=>{if(j){const T=j.GetViewWindow();return b?(o.XX.SetMenuManager(T,b),()=>o.XX.SetMenuManager(T,void 0)):o.XX.RegisterChildWindow(D,T)}},[j,D,b]);const I=(0,u.Fx)(j?.GetBrowserView(),c.wy),y=(0,n.nN)(),x=r.useCallback(()=>{j?.GetBrowserView().SetFocus(!0);const T=j?.GetViewWindow();T&&y?.OnActivate(T),I(),f.ToggleSideMenu(F,!0)},[f,F,j,I,y]),E=r.useCallback(()=>{j?.GetBrowserView().SetFocus(!1),f.OnMenuDeactivated(F);const T=j?.GetViewWindow();if(T){const L=()=>{if(f.GetOpenSideMenu()==F)return;const R=T.document.activeElement;R&&R!=T.document.body&&R.blur()};T.document.hasFocus()?T.addEventListener(\"blur\",L,{once:!0}):L()}},[f,F,j]);return{fnOnFocusNavActivated:x,fnOnFocusNavDeactivated:E}}",
+  "popupOriginalActivatedCallback": "($r,ti)=>{for(let or=ti;!zt&&or;or=or.Parent)if(or===$r)return;Tr?.()}",
+  "popupNativeFocus": {
+    "ye": "function Ye(nr){const{active:zt,embeddedView:ue,expanded:Qe,visible:mt,vr:Dt}=nr,$t=m.useRef(void 0),vr=(0,C.Dt)(nr.onFocusNavDeactivated),{onFocusNavActivated:Tr}=nr,Jr=m.useCallback(($r,ti)=>{for(let or=ti;!zt&&or;or=or.Parent)if(or===$r)return;Tr?.()},[zt,Tr]),Dr=m.useRef(void 0),Br=m.useRef(void 0),zr=(0,g.q3)(()=>Br.current?.BFocusWithin()??!1),pr=m.useCallback($r=>{zr&&ue&&Br.current.Node()?.GetLastFocusElement()?.scrollIntoView({behavior:\"auto\",inline:\"end\"})},[zr,ue,Br]),Wr=(0,ht.wY)(pr),kr=(0,C.Y$)(c.Ez.QuickAccess),xr=(0,He.fe)();m.useEffect(()=>{Dt||(zt?$t.current.Activate(!0):$t.current?.BIsActive()&&$t.current.Deactivate())},[zt,Dt]);const Ge=m.useCallback(()=>(Br.current.TakeFocus(),!0),[]),ie=m.useCallback(()=>(Dr.current.TakeFocus(),!0),[]),Re=(0,o.ch)(),Vt=(0,g.q3)(()=>Re.BQuickAccessContentFocusRequested());m.useEffect(()=>{if(!zt||!Vt)return;Re.SetQuickAccessContentFocusRequested(!1);const $r=Dr.current?.Node();$r?.Tree.DeferredFocus.RequestFocus($r,{bFocusDescendant:!0})},[zt,Vt,Re]);const Ct=ot(\"quick-access-menu\");let Pt=(0,c.i4)();const wt=(0,ct.Eb)();Pt=(0,g.q3)(()=>Ct.some(ti=>ti.key===Pt&&!jt(ti))?Pt:Ct.length>0?Ct[0].key:void 0);const dr=(0,O.A)(\"BasicUI\",xr,Z().Container,nr.visible&&Z().Open,Dt&&Z().BottomTabs,Dt&&Z().VR,wt&&Z().OOBE,Qe&&\"QAMFriendExpanded\",Qe&&Z().Expanded,nr.showHeaderAndFooter&&Z().HeaderAndFooterVisible);let ir=m.useCallback($r=>{$r.stopPropagation(),$r.preventDefault()},[]);const Kt=m.useCallback(()=>(Ge(),!0),[Ge]),Ir=(0,n.K1)();let Hr=(0,d.Qu)();const pi=(0,h.W6)(),Ei=m.useCallback(()=>{pi.replace(a.BV.GamepadUI.Keyboard())},[pi]),yi=m.useCallback(()=>{Ir(),Ei()},[Ir,Ei]);m.useEffect(()=>{Ge()},[Pt,Ge]);const Qi=(0,C.on)(),Xi=(0,O.A)(Z().QuickAccessMenu,nr.showHeaderAndFooter&&Z().HeaderAndFooterVisible),cn=(0,O.A)(Z().Tabs,nr.showHeaderAndFooter&&Z().TabsWithFooter),ln=(0,Xt.uw)(\"frame\"),Qr=(0,e.jsxs)(K.SR,{children:[(0,e.jsx)(st,{bQuickAccessMenuVisible:mt}),(0,e.jsxs)(M.g,{children:[(0,e.jsxs)(D.Z,{id:\"QuickAccess-Menu\",className:Xi,onClick:ir,children:[(0,e.jsx)(\"div\",{className:Z().HeaderContainer,children:(0,e.jsx)(i.hB,{quickAccessHeader:!0,visible:nr.showHeaderAndFooter})}),(0,e.jsxs)(D.Z,{className:Z().Menu,children:[(0,e.jsxs)(D.Z,{className:cn,ref:Wr,navRef:Br,autoFocus:!0,focusable:!1,onCancel:Dt?void 0:Ir,onActivate:ie,onMoveRight:ie,navEntryPreferPosition:y.iU.PREFERRED_CHILD,children:[(0,e.jsx)(cr,{tabs:Ct,activeTab:Pt,vr:Dt}),Hr&&!Dt&&(0,e.jsx)(D.Z,{className:Z().KeyboardButton,focusable:!0,onActivate:yi,children:(0,e.jsx)(R.ShowKeyboard,{})})]}),(0,e.jsx)(D.Z,{className:Z().PanelOuterNav,onMoveLeft:Dt?void 0:Kt,onMoveDown:Dt?Kt:void 0,onCancelButton:Dt?Ge:void 0,navRef:Dr,children:(0,e.jsx)(tt,{tabs:Ct,activeTab:Pt,bMenuVisible:mt})})]}),nr.showHeaderAndFooter&&(0,e.jsx)(Gt.w,{className:Z().Footer,location:\"quick-access\"})]}),!Dt&&(0,e.jsx)(Je.i,{bQAMVersion:!0})]})]});return Dt?(0,e.jsx)(D.Z,{className:dr,onMoveLeft:E.ru,onMoveRight:E.ru,children:Qr}):(0,e.jsx)(f.B2,{navID:\"QuickAccess-NA\",enabled:zt||kr,navTreeRef:$t,onActivated:Jr,onDeactivated:vr,autoFocus:!0,className:dr,onCancelButton:Ge,onGlobalButtonDown:Qi,...ln,children:nr.refModalManager?(0,e.jsx)(J,{refModalManager:nr.refModalManager,refContextMenuManager:nr.refContextMenuManager,children:Qr}):Qr})}",
+    "owner": "class Id{m_viewWindow;m_rootElement;m_renderWhenReady;m_bMounted=!1;m_browserView;m_browserViewName;m_DynamicCSSObserver;constructor(){}CreateView(E,T,L){const{name:R,strVROverlayKey:P,eCreationFlags:O}=T;this.m_browserView&&this.DestroyView();let v=L?.ownerWindow?.SteamClient.Browser.GetBrowserID(),z=\"BrowserViewPopup\";R?.length>0&&(z=R),v&&(z+=\"_uid\"+v),z=Id.GetUniqueBrowserViewName(z);const p={parentPopupBrowserID:v,strVROverlayKey:P,strName:z};let{strCreateURL:C,browserView:k}=SteamClient.BrowserView.CreatePopup(p);O&&(C+=\"&createflags=\"+O);let q=window.open(C,z,\"top=0,left=0,width=540,height=700,resizable=yes,status=0,toolbar=0,menubar=0,location=0\");if(!q){console.error(`Failed to create popup, browser/CEF may be blocking popups for \"${window.location.origin}\"`);return}q.document.write('<!DOCTYPE html><html ><head><title></title></head><body  style=\"overflow: hidden\"><div id=\"browserview_target\"></div></body></html>'),q.document.title=z,q.document.close();let V=q.document.getElementById(\"browserview_target\");q.addEventListener(\"unload\",this.OnUnload),this.m_viewWindow=q,this.m_rootElement=V,this.m_browserView=k,this.m_browserViewName=z,o.Oe(this.m_viewWindow,o.yU()),this.m_renderWhenReady=new n.Q(q.document,V),this.m_renderWhenReady.SetTarget(E)}DestroyView(){this.m_browserView&&(Id.DelayedReleaseBrowserViewName(this.m_browserViewName),SteamClient.BrowserView.Destroy(this.m_browserView),this.m_browserView=void 0),this.m_DynamicCSSObserver&&(this.m_DynamicCSSObserver.disconnect(),this.m_DynamicCSSObserver=void 0)}GetBrowserView(){return this.m_browserView}GetRenderElement(){return this.m_rootElement}GetViewWindow(){return this.m_viewWindow}OnUnload(){}static m_setActiveBrowserViewNames=new Set;static GetUniqueBrowserViewName(E){let T=E,L=0;for(;Id.m_setActiveBrowserViewNames.has(T);)T=`${E}_${L++}`;return Id.m_setActiveBrowserViewNames.add(T),T}static DelayedReleaseBrowserViewName(E){window.setTimeout(()=>Id.m_setActiveBrowserViewNames.delete(E),100)}}",
+    "focus": "()=>{j?.GetBrowserView().SetFocus(!0);const T=j?.GetViewWindow();T&&y?.OnActivate(T),I(),f.ToggleSideMenu(F,!0)}",
+    "subscriber": "($r,ti)=>{for(let or=ti;!zt&&or;or=or.Parent)if(or===$r)return;Tr?.()}",
+    "parent": "function(zt){const{active:ue}=zt,[Qe,mt]=m.useState(ue),Dt=Qe||ue;m.useEffect(()=>mt(ue),[ue]);const $t=(0,z.OU)(a.BV.GamepadUI.AppRunning());(0,i.iW)(Dt&&!$t,\"QuickAccessMenuBrowserView\");const vr=(0,L.Jo)({name:\"QuickAccess\"});(0,re.kV)(vr?.GetRenderElement()?.ownerDocument.defaultView);const Jr=(0,c.i4)()==c.qE.Friends,Dr=(0,g.q3)(()=>s.LN.qamFriendsExpanded)&&Jr,[Br,zr]=m.useState(null),[pr,Wr]=m.useState(null),kr=W(pr??void 0),xr=Dr||kr,{fnOnFocusNavActivated:Ge,fnOnFocusNavDeactivated:ie}=(0,C.k6)(c.Ez.QuickAccess,vr,Br??zt.ModalManager,xr&&pr||void 0);m.useEffect(()=>{ue||(pr?.ActiveMenu?.OnCancel(),Br?.CloseLegacyModals())},[ue,Br,pr]);const Re=(0,n.K1)();(0,s.PG)(vr?.GetViewWindow());const Vt=(0,pe.u6)(),Ct=(0,g.q3)(()=>lt.O.BKeyboardIMEVisible);if((0,C.Vs)(vr,ue),!vr)return null;const Pt={nDuration:300,fnStep:Lt},wt={nDuration:200,fnStep:vt};let dr=$t?\"transparent\":\"darkblur\",ir=(0,O.A)(Z().ViewPlaceholder,$t&&Z().FullHeight,xr&&Z().Expanded,Vt&&Z().OSKActive,Ct&&Z().IMEVisible,$t&&Z().HeaderAndFooterVisible);return(0,e.jsxs)(r.H,{appearance:dr,visible:Dt,onClick:Re,children:[(0,e.jsx)(L.m4,{className:ir,browser:vr.GetBrowserView(),visible:Dt,animateIn:Pt,animateOut:wt}),(0,e.jsx)(b.b5,{ownerWindow:vr.GetViewWindow(),children:w.createPortal((0,e.jsx)(Ye,{active:ue,visible:Dt,expanded:xr,showHeaderAndFooter:$t,onFocusNavActivated:Ge,onFocusNavDeactivated:ie,refModalManager:zr,refContextMenuManager:Wr}),vr.GetRenderElement())})]})}",
+    "b2": "function B(w){const{navID:h,onActivated:F,onDeactivated:j,navTreeRef:A,enabled:b=!0,modal:f=!1,virtualFocus:M=!1,historyMode:D,children:I,parentEmbeddedNavTree:y,onGlobalButtonDown:x,disableFocusClasses:E=!1,disabledRoot:T=!1,excludeFromScrollRegionSearch:L=!1,\"flow-children\":R,...P}=w,{elemProps:O,navOptions:v,gamepadEvents:z}=(0,i.sl)(P),{refDiv:p,tree:C}=d({navID:h,parentEmbeddedNavTree:y,disabledRoot:T,enabled:b,onGlobalButtonDown:x,navTreeRef:A,virtualFocus:M,modal:f,historyMode:D,excludeFromScrollRegionSearch:L});(0,a.hL)(C.OnActivateCallbacks,F),(0,a.hL)(C.OnDeactivateCallbacks,j),(0,l.KF)(z,p,C),o.useLayoutEffect(()=>{const H=(0,n.O)(R);C.Root.SetProperties({...v,layout:H})});const k=(0,r.Ue)(p,I.props.ref);return(0,e.jsx)(g,{tree:T?null:C,disableFocusClasses:E||T,children:(0,e.jsx)(i.TJ.Provider,{value:T?null:C.Root,children:o.cloneElement(I,{id:h,\"data-react-nav-root\":h,ref:k})})})}"
+  }
+}

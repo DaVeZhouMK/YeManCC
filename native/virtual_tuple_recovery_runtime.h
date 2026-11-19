@@ -18,6 +18,19 @@ static bool inputHostTupleRecoveryCurrentLocked(const InputHostTupleRecoveryToke
     }
     return true;
 }
+// The accepted order is evidence only; another owner or a later read is not an ACK.
+static bool inputHostTupleRecoverySupersededLocked(const InputHostTupleRecoveryToken& token) {
+    return g_inputHostTupleAccepted.epoch==token.epoch && g_inputHostTupleAccepted.power==token.power &&
+        g_inputHostTupleAccepted.requestId==token.requestId &&
+        g_inputHostTupleAccepted.acceptedSerial>token.acceptedSerial;
+}
+static void inputHostTupleRecoveryResolvedLocked(const InputHostTupleRecoveryToken& token,const char* via) noexcept {
+    try{appendNativeLifecycleLog("input-host-tuple-recovery",{
+        {"stage","resolved"},{"reason","newer-current-source-report-accepted"},{"via",via},
+        {"queuedHostEpoch",token.epoch},{"queuedPower",token.power},{"queuedRequestId",token.requestId},
+        {"faultAcceptedSerial",token.acceptedSerial},{"acceptedSerial",g_inputHostTupleAccepted.acceptedSerial},
+        {"queuedProtectedCycle",token.protectedCycle},{"stopInvoked",false},{"charged",false}});}catch(...){}
+}
 static bool inputHostTupleFaultCurrentLocked(const ymcc::VirtualStartProtection::View& view) {
     return g_inputHostTupleFault.protectedCycle && g_inputHostTupleFault.requestId==view.requestId &&
         inputHostTupleRecoveryCurrentLocked(g_inputHostTupleFault);
@@ -32,6 +45,38 @@ static bool inputHostTupleReturnOwnedLocked(std::uint64_t epoch) {
 static InputHostTupleRecoveryToken inputHostTupleRecoveryTokenLocked(std::uint64_t epoch,std::uint64_t sequence) {
     const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
     return {epoch,currentPowerGeneration(),view.requestId,sequence,g_inputHostTupleAccepted.acceptedSerial,view.locked};
+}
+// Capture immediately before the existing real SUBMIT, then validate only inside
+// its accepted branch. Healthy idle adds scalar flag reads, no source lock or IO.
+struct InputHostTupleReportObservation {InputHostTupleRecoveryToken owner{};std::uint64_t msiMode=0,intent=0;};
+static InputHostTupleReportObservation inputHostTupleRecoveryObserveReportLocked(
+        bool eligible,const InputCaptureGamepadSnapshot* source) {
+    if(!eligible || (!g_inputHostRecoveryPending.load(std::memory_order_acquire) &&
+            !g_inputHostLifecycleWorkRequested.load(std::memory_order_acquire)))return {};
+    const auto token=inputHostTupleRecoveryTokenLocked(g_inputHostEpoch,g_inputHostSequence+1);
+    if(token.protectedCycle || !token.epoch || inputHostTupleReturnOwnedLocked(token.epoch))return {};
+    return {token,source?source->readMsiModeGeneration:0,g_inputHostVirtualIntentRevision.load(std::memory_order_acquire)};
+}
+static bool inputHostTupleRecoveryReportAcceptedLocked(const InputHostTupleReportObservation& report,
+        const ymcc::input::recoveryHealth::Context& submittedContext,
+        const ymcc::input::recoveryHealth::Source& submitted) {
+    if(!report.owner.epoch || report.owner.protectedCycle ||
+        !inputHostTupleRecoveryCurrentLocked(report.owner) || inputHostTupleReturnOwnedLocked(report.owner.epoch) ||
+        !g_inputHostRequestedPersonaMatchesBound.load(std::memory_order_acquire) ||
+        g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) ||
+        report.intent!=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire) ||
+        inputHostBoundPersonaValue()!=inputHostConfiguredPersona())return false;
+    using namespace ymcc::input::recoveryHealth;
+    if(submitted.route==Route::MsiDinput && report.msiMode!=g_msiFeedbackModeGeneration.load(std::memory_order_acquire))return false;
+    const auto context=inputHostRecoveryHealthContextLocked(false);
+    if(!(submittedContext==context))return false;
+    const auto latest=inputHostRecoveryHealthLatestSourceLocked();const auto now=GetTickCount64();
+    const auto current=[&](const Source& value){return context.allowed && context.host && context.power &&
+        value.live && value.stable && value.incarnation && value.continuity &&
+        value.continuity!=(std::numeric_limits<std::uint64_t>::max)() && value.identity==context.identity &&
+        fresh(value,now,context.power,context.topology);};
+    return current(submitted) && current(latest) && sameSource(submitted,latest) &&
+        submitted.continuity==latest.continuity && submitted.sequence<=latest.sequence && submitted.completed<=latest.completed;
 }
 static std::string inputHostTupleRecoveryReason(const InputHostTupleRecoveryToken& token) {
     return "tuple-mismatch-reopen:"+std::to_string(token.epoch)+":"+std::to_string(token.power)+":"+
@@ -69,6 +114,11 @@ static bool inputHostTupleRecoveryMaintenanceLocked(std::string& reason) {
         g_inputHostDeferredTuple={};g_inputHostRecoveryPending.store(false,std::memory_order_release);
         g_inputHostRecoveryDeferredUntil.store(0,std::memory_order_release);return false;
     }
+    if(inputHostTupleRecoverySupersededLocked(g_inputHostDeferredTuple)) {
+        inputHostTupleRecoveryResolvedLocked(g_inputHostDeferredTuple,"deferred-maintenance");
+        g_inputHostDeferredTuple={};g_inputHostRecoveryPending.store(false,std::memory_order_release);
+        g_inputHostRecoveryDeferredUntil.store(0,std::memory_order_release);return false;
+    }
     const auto now=GetTickCount64();
     const auto due=g_inputHostRecoveryDeferredUntil.load(std::memory_order_acquire);
     const auto last=g_inputHostRecoveryLastStartTick.load(std::memory_order_acquire);
@@ -102,9 +152,9 @@ static void inputHostPerformTupleRecovery(const std::string& reason) {
     }
     if(inputHostTupleReturnOwnedLocked(token.epoch))return;
     if(!inputHostProcessAliveLocked())return;
-    if(full && token.protectedCycle && g_inputHostTupleAccepted.epoch==token.epoch &&
-            g_inputHostTupleAccepted.power==token.power && g_inputHostTupleAccepted.requestId==token.requestId &&
-            g_inputHostTupleAccepted.acceptedSerial>token.acceptedSerial)return;
+    if(inputHostTupleRecoverySupersededLocked(token)) {
+        inputHostTupleRecoveryResolvedLocked(token,"queued-consumer");return;
+    }
     if(token.protectedCycle) {
         g_inputHostTupleFault=token;
         inputHostSwitchRecoveryOfferLocked(token.requestId,token.power,ERROR_SUCCESS,true);

@@ -268,6 +268,28 @@ try {
           console.log((entry.pass ? 'PASS ' : 'FAIL ') + height + ' ' + name + (entry.error ? ': ' + entry.error.split('\n')[0] : ''));
         }
       }
+      await test('tdp-target-receipt-and-invalid-cpu-status',async page=>{
+        await page.evaluate(()=>{const b=window.__fixture.controls.ac;b.tdp=30;b.tdpCeiling=30;b.cpuValid=false;window.__refresh();});await settle(page);
+        const status=page.locator('[data-performance-status]');
+        assert.match(await status.innerText(),/TDP 目标 30 W/);assert.match(await status.innerText(),/当前写入未确认/);assert.match(await status.innerText(),/自动浮动暂停/);
+        const before=(await writes(page)).length;
+        for(const watts of [55,30]){
+          await page.evaluate(watts=>{for(const fn of window.__tdpRuntimeListeners||[])fn({status:'applied',mode:'ac',watts});},watts);await settle(page);
+          assert.match(await status.innerText(),new RegExp('当前写入回执 '+watts+' W'));
+          assert.equal(await value(page),30,'Receipt must not move the saved slider');
+        }
+        await page.evaluate(()=>{for(const fn of window.__tdpRuntimeListeners||[])fn({status:'failed',mode:'ac',watts:null});});await settle(page);
+        assert.match(await status.innerText(),/当前写入未确认/);assert.equal((await writes(page)).length,before,'Status updates must be read-only');
+        const dropdown=page.getByRole('button',{name:'最大 TDP',exact:true});await dropdown.scrollIntoViewIfNeeded();await dropdown.focus();await press(page,'confirm');
+        await page.getByRole('option',{name:'最大 16 W',exact:true}).click();await settle(page);assert.equal(await value(page),16);assert.match(await status.innerText(),/TDP 目标 16 W/);assert.match(await status.innerText(),/当前写入未确认/);
+        assert.equal((await writes(page)).length,before+1,'Dropdown selection commits exactly once');
+        const input=page.locator(tdpSelector);await input.scrollIntoViewIfNeeded();await input.focus();await press(page,'confirm');await press(page,'left');await press(page,'back');
+        assert.equal(await value(page),16,'B cancels only the draft');assert.equal((await writes(page)).length,before+1);
+        await status.scrollIntoViewIfNeeded();const box=await status.boundingBox();assert(box.x>=0&&box.x+box.width<=1280&&box.y>=0&&box.y+box.height<=height,'Status is fully readable after scroll');
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+        await page.screenshot({path:path.join(out,height+'-tdp-consistency.png'),fullPage:true,animations:'disabled'});
+        return {status:await status.innerText(),savedTdp:await value(page),actualWrites:(await writes(page)).length-before};
+      });
       for (const scope of ['global','dedicated']) await test('smt-switch-'+scope+'-default-and-game-transition',async page=>{
         const control=page.getByRole('switch',{name:'超线程',exact:true});
         assert.equal(await control.count(),1);assert.equal(await control.getAttribute('aria-checked'),'true');

@@ -8,6 +8,7 @@
 #include "decky_sidebar_launch.h"
 #include "json.hpp"
 #include <atomic>
+#include "sleep_power_state.h"
 #include <mutex>
 #include <fstream>
 namespace fixtureStage {
@@ -52,6 +53,8 @@ static bool flush(const char* checkpoint) noexcept {
 // successful create: observation failure cannot strand its returned handles.
 #define FIXTURE_STAGE(...) fixtureStage::safely([&]{fixtureStage::record(__VA_ARGS__);})
 namespace ymcc::fixtureStageLaunch {
+// Forward the actual read-only token observation; only create() is observed here.
+using ymcc::deckylaunch::ordinarySourceObserved;
 inline ymcc::deckylaunch::Result create(const std::wstring& executable,std::wstring& command,wchar_t* environment,
         const std::wstring& directory,STARTUPINFOW& startup,PROCESS_INFORMATION& child){
     if(!fixtureStage::active.load())return ymcc::deckylaunch::create(executable,command,environment,directory,startup,child);
@@ -92,7 +95,10 @@ static std::atomic<int> fixtureSteamPresence{1};
 struct SessionFixture{Session sessionSnapshot(){return steam;}int steamPresence(){return fixtureSteamPresence.load();}}g_steamSettingsObserver;
 static struct {bool isolated=false;}g_aiFanMockSession;
 namespace ymcc::steamcss {enum class UiMode {BigPicture,Desktop};struct Mode{UiMode value;std::string epoch;};}
-struct CssFixture{void observeMode(const Session&,const ymcc::steamcss::Mode&){} }g_steamCssGuard;
+struct CssFixture{void observeMode(const Session&,const ymcc::steamcss::Mode&,bool=false){} }g_steamCssGuard;
+// CSS and wallpaper remain inert external ports in the original Decky fixture.
+namespace ymcc::steamcss {static bool appearanceModeReady(const Session&,const json&){return true;}}
+static void steamWallpaperForegroundWake(){}
 static std::atomic<bool>g_exitRequested{false};
 static std::wstring POWER_CONTROL_DIR;
 static ymcc::steamlink::Admission g_steamLinkAdmission{134369000000000000ULL};
@@ -102,21 +108,39 @@ static ymcc::steamui::ModeObserver g_steamModeObserver;
 static std::atomic<unsigned> launches{0},signals{0},preflights{0};
 enum class PowerLifecycle{Suspending,Suspended,Resuming,Ready};
 static std::atomic<PowerLifecycle>g_powerLifecycle{PowerLifecycle::Ready};
+static struct {bool pendingSuspend()const{return false;}} g_sleepPowerDispatch;
+static void appendNativeLifecycleLog(const char*,const json&){}
 static std::atomic<bool>g_inputReady{false};
 static unsigned long long fixtureWakeGeneration=0;
 static unsigned fixtureWakeStops=0,fixtureWakeInputPosts=0;
 static json fixtureWakeEvents=json::array(),fixtureWakeDiagnostics=json::array();
 static unsigned long long currentPowerGeneration(){return fixtureWakeGeneration;}
+// Explicit memory-only shared-power Reader port. Production sender and admission predicate stay complete.
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* output,std::uint32_t bytes) noexcept {
+ if(!output||bytes<sizeof(*output))return 0;
+ *output={};output->generation=fixtureWakeGeneration;output->suspendSerial=fixtureWakeGeneration;output->publicationRevision=1;
+ output->phase=g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready?0u:3u;
+ output->flags=ymcc::sleeppower::kKnown;
+ if(output->phase==0&&!g_exitRequested.load(std::memory_order_acquire))output->flags|=ymcc::sleeppower::kHardwareAllowed;
+ if(g_sleepPowerDispatch.pendingSuspend())output->flags|=ymcc::sleeppower::kNotificationPending;
+ return 1;
+}
+
 // The CSS consumer of this shared Ready body is an explicit inert external
 // port here. Its exact production callback and real worker run separately in
 // steam_cssloader_resume_selftest; this Decky fixture never claims CSS recovery.
 static std::atomic<unsigned> fixtureCssReadyHints{0};
 static bool steamAppearanceResumeCommitted(unsigned long long){++fixtureCssReadyHints;return false;}
+// Shared Ready consumers outside this Decky scenario stay inert external ports.
+// Power-source recovery and physical Aya lighting require their own consumers.
+static void beginPowerSourceRecovery(HWND){}
+static void nativeAyaLightingResume(){}
 static void stopPowerResumeWatchdog(){++fixtureWakeStops;}
 static void ipc_emit(const std::string& event,const json& data){fixtureWakeEvents.push_back({{"event",event},{"data",data}});}
 static std::atomic<unsigned> fixturePreparations{0},fixturePrepared{0};
 static std::atomic<bool> fixtureResourceValid{true};
-static void deckySidebarDiagnostic(const char* event,const json& data,bool=false){++signals;if(std::string(event)=="wake-connection-check")fixtureWakeDiagnostics.push_back(data);if(std::string(event)=="prewarm"){++fixturePreparations;if(data.value("ready",false))++fixturePrepared;}}
+static thread_local std::string fixtureModeRecoveryReason;
+static void deckySidebarDiagnostic(const char* event,const json& data,bool=false){++signals;if(std::string(event)=="wake-connection-check")fixtureWakeDiagnostics.push_back(data);if(std::string(event)=="prewarm"){++fixturePreparations;if(data.value("ready",false))++fixturePrepared;}if(std::string_view(event)=="update-recovery")fixtureModeRecoveryReason=data.at("reason").get<std::string>();}
 static json deckySidebarEnvironment(bool prepare,const std::function<bool()>& mayPrepare={}) {
     const auto root=std::filesystem::path(POWER_CONTROL_DIR),steamRoot=root/L"fixture-steam",home=root/L"decky";
     const auto digest=[](const std::wstring&){return fixtureResourceValid.load()?std::string(ymcc::deckysetup::loaderSha):std::string(64,'0');};
@@ -125,12 +149,27 @@ static json deckySidebarEnvironment(bool prepare,const std::function<bool()>& ma
 /*__PREPARE_ENVIRONMENT__*/
 /*__WAKE_READY__*/
 /*__WAKE_MESSAGE__*/
-static BOOL fixtureWakePost(HWND,UINT message,WPARAM generation,LPARAM){if(message!=WM_POWER_INPUT_RECOVER||generation!=fixtureWakeGeneration)throw std::runtime_error("wrong wake follow-up boundary");++fixtureWakeInputPosts;return TRUE;}
+static unsigned fixtureWakeCommitPosts=0,fixtureWakeInputDeliveries=0,fixtureWakeRepairArms=0;
+static bool fixtureWakeFailCommit=false,fixtureWakeFailInput=false;
+static std::atomic<bool> g_sleepPowerRedeliveryArmed{false};
+static void sleepPowerArmRedelivery(HWND){++fixtureWakeRepairArms;}
+static LRESULT productionWakeCommit(WPARAM,LPARAM);
+static BOOL fixtureWakePost(HWND,UINT message,WPARAM w,LPARAM l){
+    if(message==WM_POWER_RESUME_COMMIT){if(w||static_cast<unsigned long long>(l)!=fixtureWakeGeneration)throw std::runtime_error("wrong committed follow-up ownership");if(fixtureWakeFailCommit)return FALSE;++fixtureWakeCommitPosts;return TRUE;}
+    if(message!=WM_POWER_INPUT_RECOVER||w!=fixtureWakeGeneration||l)throw std::runtime_error("wrong wake follow-up boundary");if(fixtureWakeFailInput)return FALSE;++fixtureWakeInputPosts;return TRUE;
+}
+static LRESULT fixtureWakeSend(HWND,UINT message,WPARAM w,LPARAM l){
+    if(message==WM_POWER_RESUME_COMMIT)return productionWakeCommit(w,l);
+    if(message!=WM_POWER_INPUT_RECOVER||w!=fixtureWakeGeneration||l)throw std::runtime_error("wrong recovered input ownership");++fixtureWakeInputDeliveries;return 0;
+}
 #define PostMessageW fixtureWakePost
-static LRESULT productionWakeCommit(WPARAM w){HWND h=nullptr;
+#define SendMessageW fixtureWakeSend
+/*__WAKE_DELIVERY__*/
+static LRESULT productionWakeCommit(WPARAM w,LPARAM l=static_cast<LPARAM>(fixtureWakeGeneration)){HWND h=nullptr;
 /*__WAKE_COMMIT__*/
 }
 #undef PostMessageW
+#undef SendMessageW
 static void deckySidebarPost(const std::string&,const json&){}
 static void steamWallpaperForegroundSignal(){}
 static void deckySidebarResumeManagedMode(const Session&){}
@@ -139,8 +178,19 @@ static void deckySidebarResumeManagedMode(const Session&){}
 static ymcc::deckysidebar::LaunchAdmission productionAdmission(){
 /*__ADMISSION__*/
 }
+namespace ymcc::deckymirror {
+static thread_local unsigned fixtureModeBuildReads=0;
+static thread_local bool fixtureModeVetoOnRead=false;
+static std::string fixtureModeBuildId(const std::wstring& path){
+    ++fixtureModeBuildReads;
+    if(fixtureModeVetoOnRead)g_deckyUpdateRecovery.veto();
+    return frontendBuildId(path);
+}
+}
 static void productionModeChanged(const Session& session,const json& state){
+#define frontendBuildId fixtureModeBuildId
 /*__MODE_CHANGED__*/
+#undef frontendBuildId
 }
 static void productionStableBigPicture(const Session& session){
 /*__STABLE_BIGPICTURE__*/
@@ -156,6 +206,8 @@ int wmain(int argc,wchar_t** argv){
     throw std::runtime_error(s);}++checks;};
  const auto until=[](auto fn,unsigned ms=4000){const auto end=GetTickCount64()+ms;while(!fn()){if(GetTickCount64()>=end)return false;Sleep(3);}return true;};
  try{
+  const bool modeReads=argc==4&&std::wstring_view(argv[3])==L"--mode-update-reads";
+  check(argc==3||modeReads,"unknown original native fixed selector");
   const auto scope=std::filesystem::absolute(argv[1]).lexically_normal();wchar_t image[32768]{};GetModuleFileNameW(nullptr,image,32768);
   check(scope.filename()==L"recovery-fixture"&&scope.parent_path()==std::filesystem::path(image).parent_path(),"task-only fixture owned directory");
   POWER_CONTROL_DIR=scope.wstring();std::filesystem::create_directories(scope/L"home");std::filesystem::create_directories(scope/L"decky/plugins/ymcc-sidebar/dist");
@@ -163,6 +215,49 @@ int wmain(int argc,wchar_t** argv){
   std::ofstream(scope/L"decky/plugins/ymcc-sidebar/dist/index.js")<<"// YMCC_DECKY_FRONTEND_BUILD_ID="<<newId<<"\n";
   const json residue={{"protocol",1},{"active",true},{"bridgePresent",true},{"frontendBuildId",oldId}};
   const json healthyMode={{"known",true},{"running",true},{"pid",steam.pid},{"birth",std::to_string(steam.created)},{"mode","bigpicture"},{"modeEpoch","fixture-document:1"},{"deckyFrontendLoaded",true},{"deckyUpdateResidue",residue}};
+  if(modeReads){
+    json cases=json::array();bool passed=true;
+    const auto checkMode=[&](const char* name,const json& mode,bool allowed,const char* reason,unsigned expectedReads,unsigned repeats=1){
+      using ymcc::deckymirror::fixtureModeBuildReads;
+      const auto before=fixtureModeBuildReads;bool sameVerdict=true;
+      for(unsigned i=0;i<repeats;++i){
+        fixtureModeRecoveryReason.clear();productionModeChanged(steam,mode);
+        sameVerdict&=g_deckyUpdateRecovery.allows(steam)==allowed&&fixtureModeRecoveryReason==reason;
+      }
+      const auto reads=fixtureModeBuildReads-before;
+      cases.push_back({{"name",name},{"notifications",repeats},{"reads",reads},{"expectedReads",expectedReads},{"verdictPreserved",sameVerdict}});
+      passed&=sameVerdict&&reads==expectedReads;
+    };
+    auto noResidue=healthyMode;noResidue.erase("deckyUpdateResidue");
+    auto desktop=healthyMode;desktop["mode"]="desktop";
+    auto malformed=healthyMode;malformed["deckyUpdateResidue"]["frontendBuildId"]="invalid";
+    auto sameBuild=healthyMode;sameBuild["deckyUpdateResidue"]["frontendBuildId"]=newId;
+    auto loaderOnly=sameBuild;loaderOnly["deckyUpdateResidue"]["loaderVersion"]="v3.2.10";
+    checkMode("disabled-valid-residue",healthyMode,false,"",0);
+    check(g_deckySidebarRuntime.setEnabled(true),"directed Runtime enable without Steam observation");
+    checkMode("bigpicture-no-residue",noResidue,false,"",0,64);
+    checkMode("bigpicture-invalid-residue",malformed,false,"",0);
+    checkMode("same-build",sameBuild,false,"",1);
+    checkMode("changed-frontend",healthyMode,true,"updated-decky-frontend-pending",1);
+    checkMode("desktop-retires-grant",desktop,false,"",0);
+    checkMode("changed-loader-only",loaderOnly,true,"updated-decky-loader-pending",1);
+    checkMode("desktop-clears-loader-grant",desktop,false,"",0);
+    g_deckyUpdateRecovery.configure(ymcc::deckyupdate::ticket(steam));
+    checkMode("explicit-handoff-without-residue",noResidue,true,"updater-decky-handoff",0);
+    checkMode("desktop-clears-handoff-grant",desktop,false,"",0);
+    g_deckyUpdateRecovery.configure(ymcc::deckyupdate::ticket(steam));
+    checkMode("desktop-retires-unused-ticket",desktop,false,"",0);
+    checkMode("reentry-does-not-replay-ticket",noResidue,false,"",0);
+    {std::ofstream file(scope/L"decky/plugins/ymcc-sidebar/dist/index.js");file<<"// YMCC_DECKY_FRONTEND_BUILD_ID="<<oldId<<'\n';}
+    checkMode("fresh-file-not-cached",healthyMode,false,"",1);
+    ymcc::deckymirror::fixtureModeVetoOnRead=true;
+    checkMode("off-wins-during-read",sameBuild,false,"",1);
+    ymcc::deckymirror::fixtureModeVetoOnRead=false;
+    check(g_deckySidebarRuntime.setEnabled(false),"directed Runtime OFF");g_deckySidebarRuntime.shutdown();
+    check(!g_deckySidebarRuntime.snapshot().enabled&&!launches&&!preflights,"directed callback launches no processes");
+    std::cout<<json{{"variant","mode-update-reads"},{"passed",passed},{"cases",cases},{"realSteamActions",0},{"ownedChildLaunches",launches.load()}}.dump()<<'\n';
+    return passed?0:1;
+  }
   // 2026-10-22: the loaded module outlived its dead official backend. Replay
   // the exact product orchestrator; only process/transport IO is inert.
   {
@@ -489,6 +584,9 @@ int wmain(int argc,wchar_t** argv){
         g_powerLifecycle.store(phase);productionWakeCommit(0);
         check(fixtureWakeEvents.empty()&&fixtureWakeDiagnostics.empty()&&wakeBindings==0&&fixtureWakeInputPosts==0,"uncommitted power phase cannot emit Ready or renew Decky binding");
     }
+    g_powerLifecycle.store(PowerLifecycle::Ready);
+    productionWakeCommit(0,0);productionWakeCommit(0,176);
+    check(fixtureWakeEvents.empty()&&fixtureWakeDiagnostics.empty()&&wakeBindings==0&&fixtureWakeInputPosts==0&&fixtureWakeStops==0,"old committed message cannot impersonate the current power generation");
     g_powerLifecycle.store(PowerLifecycle::Ready);productionWakeCommit(0);
     check(until([&]{return wakeBindings==1;}),"actual committed wake reaches production Runtime binding refresh");
     check(fixtureWakeEvents.size()==1&&fixtureWakeEvents[0]["event"]=="power.resumed"&&fixtureWakeEvents[0]["data"]["generation"]==177&&fixtureWakeEvents[0]["data"]["degraded"]==false,"actual committed wake emits current generation Ready event");
@@ -505,6 +603,26 @@ int wmain(int argc,wchar_t** argv){
     const auto eventsForHost=fixtureWakeEvents;
     g_deckySidebarRuntime.setEnabled(false);fixtureWakeGeneration=179;productionWakeCommit(0);
     check(!g_deckySidebarRuntime.snapshot().enabled&&!g_deckySidebarRuntime.snapshot().pid&&wakeBindings==2&&fixtureWakeDiagnostics.size()==2,"OFF remains closed after a late actual Ready event");
+    // Actual failed PostMessage paths share the existing delivery timer; they
+    // retain one generation and do not replay the already delivered consumers.
+    fixtureWakeGeneration=180;fixtureWakeFailCommit=true;const auto eventsBeforePost=fixtureWakeEvents.size();
+    sleepPowerPostResumeCommit(nullptr,180);
+    check(g_powerResumeCommitRedelivery.load()==180&&fixtureWakeEvents.size()==eventsBeforePost&&fixtureWakeRepairArms==1,"failed commit post retains same-generation delivery debt");
+    fixtureWakeFailCommit=false;sleepPowerRedeliverCommitted(nullptr);
+    check(g_powerResumeCommitRedelivery.load()==0&&fixtureWakeEvents.size()==eventsBeforePost+1&&fixtureWakeInputPosts>0,"failed commit post is delivered by the original repair timer consumer");
+    auto eventsAfterPost=fixtureWakeEvents.size();sleepPowerRedeliverCommitted(nullptr);
+    check(fixtureWakeEvents.size()==eventsAfterPost,"completed commit delivery is not replayed");
+    fixtureWakeGeneration=181;fixtureWakeFailInput=true;productionWakeCommit(0);
+    check(g_powerInputRecoverRedelivery.load()==181,"failed input post retains same-generation recovery debt");
+    const auto commitsBeforeInputRetry=fixtureWakeEvents.size();fixtureWakeFailInput=false;sleepPowerRedeliverCommitted(nullptr);
+    check(fixtureWakeInputDeliveries==1&&g_powerInputRecoverRedelivery.load()==0&&fixtureWakeEvents.size()==commitsBeforeInputRetry,"input repair does not rerun committed fanout");
+    sleepPowerRedeliverCommitted(nullptr);check(fixtureWakeInputDeliveries==1,"completed input recovery delivery is not replayed");
+    fixtureWakeFailCommit=true;sleepPowerPostResumeCommit(nullptr,181);fixtureWakeFailCommit=false;fixtureWakeGeneration=182;
+    sleepPowerRedeliverCommitted(nullptr);check(fixtureWakeEvents.size()==commitsBeforeInputRetry&&g_powerResumeCommitRedelivery.load()==0,"old commit debt cannot impersonate a successor generation");
+    fixtureWakeFailInput=true;productionWakeCommit(0);fixtureWakeFailInput=false;g_powerLifecycle=PowerLifecycle::Suspended;
+    sleepPowerRedeliverCommitted(nullptr);check(fixtureWakeInputDeliveries==1&&g_powerInputRecoverRedelivery.load()==0,"new suspend cancels undelivered input recovery");
+    g_powerLifecycle=PowerLifecycle::Ready;fixtureWakeFailCommit=true;sleepPowerPostResumeCommit(nullptr,182);fixtureWakeFailCommit=false;g_exitRequested=true;
+    const auto atExit=fixtureWakeEvents.size();sleepPowerRedeliverCommitted(nullptr);check(fixtureWakeEvents.size()==atExit&&g_powerResumeCommitRedelivery.load()==0,"exit retires delivery debt without callbacks");g_exitRequested=false;
     const json wakeReport={{"schemaVersion",1},{"passed",true},{"productionBlockExtracted",true},{"rawResumeCannotCommit",true},{"actualWindowsSleep",false},{"actualSteamActions",0},{"ownedBackendPreserved",true},{"bindingCalls",wakeBindings.load()},{"preflights",wakePreflights.load()},{"events",eventsForHost}};
     std::ofstream(scope.parent_path()/L"native-wake-commit.json")<<wakeReport.dump(2);
     g_deckySidebarRuntime.shutdown();

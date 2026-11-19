@@ -100,6 +100,7 @@ static json inputHostCleanupEvidenceLocked() noexcept {
         check("msiPhysicalReturnDutyCleared",!msi || !msiOwed);
         const auto& history=ymcc::inputHost::targetReturnRuntime::state;
         check("coldReturnHistorySettledCached",!history.coldHistoryPending);
+        check("currentTargetProofSettledCached",history.proven.empty());
         auto* pipe=ymcc::inputHost::pipeTransport::existingProcessRuntime();
         json pipeEvidence={{"runtimePresent",pipe!=nullptr},{"snapshotAvailable",false},
             {"scope","existing-runtime-try-lock;no-maintenance-or-retirement"}};
@@ -141,7 +142,8 @@ static bool inputHostOwnedCleanupProvenLocked() {
         !g_inputHostPrepared && !g_inputHostPrepareMayHaveReachedHost && !g_inputHostNeutralized && !g_inputHostActive &&
         !g_hidHideVisibilityJournal.active && !g_inputHostReleaseQuarantined &&
         !g_msiSteamDeckReleaseDebt.required() && !g_psEndpointOwnership.retirementRequired() && msiReturnProven &&
-        inputHostTargetReturnHistorySettledLocked();
+        inputHostTargetReturnHistorySettledLocked() &&
+        !inputHostTargetReturnCurrentProofPendingLocked();
 }
 
 // Preserve the existing OFF predicate: configured OFF plus all owned duties done.
@@ -150,6 +152,16 @@ static bool inputHostDisabledCleanupProvenLocked() {
 }
 
 static void inputHostStopLocked(const char* reason) {
+    ymcc::inputHost::diagnostics::Scope criticalDiagnosticScope;
+    // A queued partial-Start fault owns its original tuple, never a successor.
+    // This is after HostMx acquisition and before any helper/pipe/visibility work.
+    const std::string_view partialCleanupReason=reason?std::string_view(reason):std::string_view{};
+    if(!ymcc::inputHost::partialStartCleanup::current(partialCleanupReason,g_inputHostEpoch,g_inputHostRunId)){
+        try{appendNativeLifecycleLog("input-host-lifecycle-work",{{"action","retired-cleanup"},
+            {"reason","partial-start-owner-retired-or-malformed"},{"queuedReason",std::string(partialCleanupReason.substr(0,256))},
+            {"currentHostEpoch",g_inputHostEpoch},{"stopInvoked",false},{"targetCommandsSent",false}});}catch(...){}
+        return;
+    }
     // Recheck at the final Host lock throat; the earlier dispatch check cannot
     // authorize cleanup of a different or already-published target.
     const std::string_view postHideCleanupReason=reason?std::string_view(reason):std::string_view{};
@@ -358,6 +370,17 @@ static void inputHostStopLocked(const char* reason) {
         {"hostInstanceId", g_inputHostHostInstanceId},
         {"keyboardModifiersAtStopBegin", keyboardModifiersAtStopBegin}
     });
+    // R103: after the final ordered command has failed/been skipped, EOF is
+    // the existing Host cleanup signal. Retire the pipe before diagnostic
+    // readback so it cannot send another request. Keep the process handle.
+    if (!shutdownAck) {
+        if (g_inputHostServerPipe) {
+            inputHostPipeCloseOwned(g_inputHostServerPipe);
+            g_inputHostServerPipe = nullptr;
+        }
+        g_inputHostPipeConnected = false;
+        g_inputHostPipeRetired = true;
+    }
     // 2026-09-23 W3 批 99（operator 授权）：**释放终态复核**。上一行只说"本地拆完、外部未证明"，
     // 而"YMCC 不在时消费者看到什么"在产品内部此前无话可说（现场判 B1 的死结）。这里在停止
     // 时刻用既有可见性原语复核一次并落**专用常开行**（每次停止 1 行，不把整片快照拉进常开区）。
@@ -372,6 +395,7 @@ static void inputHostStopLocked(const char* reason) {
             // 批107 / Q3：**本行是恢复之前的快照**（sweep/restore 在其后执行）——现场曾把这里的
             // physicalHiddenByHidHide:true 误读成"退出后仍隐藏"。最终真值读 input-host-stop-result
             // 的 visibilityRestored 与 hidhide.p-hid-restore 的 status。
+            // Host EOF cleanup may already be in progress. This is before Native restore.
             {"snapshotPhase", "before-restore"},
             {"readback", releaseReadback},
             {"cloakOn", releaseReadback && releaseSnap.cloaking},
@@ -383,17 +407,6 @@ static void inputHostStopLocked(const char* reason) {
             {"disposition", g_inputHostReleaseDisposition},
             {"reason", reason ? reason : "unknown"}
         });
-    }
-    // R103: after the final ordered command has failed/been skipped, EOF is
-    // the existing Host cleanup signal. Retire transport BEFORE waiting for
-    // exit; retain the process handle and never manufacture a release ACK.
-    if (!shutdownAck) {
-        if (g_inputHostServerPipe) {
-            inputHostPipeCloseOwned(g_inputHostServerPipe);
-            g_inputHostServerPipe = nullptr;
-        }
-        g_inputHostPipeConnected = false;
-        g_inputHostPipeRetired = true;
     }
     if (g_inputHostProcess) {
         // 批93（2026-09-12 回滚单）：v3 的温和退出（RELEASE 3s/SHUTDOWN 3s/
@@ -450,6 +463,15 @@ static void inputHostStopLocked(const char* reason) {
     // Explicit OFF/exit may reclaim legacy visibility only after this exact
     // old child exited. Player intent never overrides a still-live target owner.
     const bool explicitRestoreAfterExit = hostExitConfirmed && inputHostStopRestoresVisibilityWithoutProof(reason);
+    // Cancelling recovery transfers cleanup to OFF/exit, not proof of target
+    // removal. Preserve this exact local debt until the original read-only
+    // preflight and durable post-restore settlement both complete.
+    const bool knownRuntimeReturnRequired = explicitRestoreAfterExit && !releaseProven &&
+        inputHostTargetReturnRuntimeKnownTargetLocked(g_inputHostRunId,g_inputHostEpoch);
+    // MSI/PS-specific return gates below keep their original precedence.
+    // Query the common target only when execution reaches its own branch.
+    bool knownRuntimePreflight = !knownRuntimeReturnRequired;
+
     const bool psReturnRequired = g_psEndpointOwnership.retirementRequired();
     bool psReturnProven = !psReturnRequired;
     if (psReturnRequired && hostExitConfirmed) {
@@ -473,6 +495,10 @@ static void inputHostStopLocked(const char* reason) {
     } else if (psReturnRequired && !psReturnProven) {
         visibilityDecision = "ps-owned-return-unproven";
         g_inputHostReleaseQuarantined=true;g_inputHostStartBlocked=true;
+    } else if (knownRuntimeReturnRequired &&
+            !(knownRuntimePreflight=inputHostTargetReturnBeforeRuntimeRestoreLocked(g_inputHostRunId,g_inputHostEpoch))) {
+        visibilityDecision="known-owned-target-return-unproven";
+        g_inputHostReleaseQuarantined=true;g_inputHostStartBlocked=true;
     } else if (releaseProven && inputHostStopHoldsPhysicalVisibility(reason)) {
         visibilityDecision = "persona-held";
         visibilityHeld = hidHideHoldPhysicalTransaction(reason);
@@ -489,9 +515,12 @@ static void inputHostStopLocked(const char* reason) {
         visibilityDecision = "restore-attempted";
         visibilityRestored = hidHideRestorePhysicalTransaction(reason);
         visibilityDecision = visibilityRestored ? "restored" : "restore-failed";
-        if (!visibilityRestored) {
+        const bool knownRuntimeSettled = !knownRuntimeReturnRequired ||
+            (visibilityRestored && inputHostTargetReturnAfterRuntimeQuarantineLocked(g_inputHostRunId,g_inputHostEpoch));
+        if (!visibilityRestored || !knownRuntimeSettled) {
             g_inputHostReleaseQuarantined = true;
             g_inputHostStartBlocked = true;
+            if(visibilityRestored)visibilityDecision="restored-target-settlement-pending";
         }
         else g_inputHostReleaseQuarantined = false;
     } else {
@@ -550,7 +579,11 @@ static void inputHostStopLocked(const char* reason) {
         {"releaseDisposition", g_inputHostReleaseDisposition},
         {"quarantined", g_inputHostReleaseQuarantined},
         {"visibilityRestored", visibilityRestored},
+        {"visibilityRestoredScope", "current-owned-responsibility;not-selected-root-or-external-access"},
+        {"physicalReturnObserved", "UNKNOWN"},
+        {"externalAccess", "unverified"},
         {"visibilityDecision", visibilityDecision},
+        {"knownRuntimeReturnRequired",knownRuntimeReturnRequired},{"knownRuntimePreflight",knownRuntimePreflight},
         // 批118：切换期有意保持隐藏（本机不露）——与 visibilityRestored 互斥；判据按它取"有意"。
         {"visibilityHeld", visibilityHeld},
         {"holdReason", visibilityHeld ? "persona-changed" : ""},

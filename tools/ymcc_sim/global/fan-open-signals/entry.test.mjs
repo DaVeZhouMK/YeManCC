@@ -2,25 +2,77 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { simulationCorePath } from '../release-host-environment.mjs';
 import { resolveBaseline, resolveCecil, parseArgs, baselinePins, baselineRelativeRoot,
   cecilToolProject, BlockedInputError } from './inputs.mjs';
 import { execute } from './run.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../../..');
-const scratch = process.env.YMCC_FAN_OPEN_TEST_ROOT ?? os.tmpdir();
-fs.mkdirSync(scratch, { recursive: true });
-const root = fs.mkdtempSync(path.join(scratch, 'fan-open-entry-'));
-const fixtureRoot = path.join(repoRoot, baselineRelativeRoot);
-function relocatedRepo(name) {
-  const repo = path.join(root, name);
-  fs.mkdirSync(path.dirname(path.join(repo, baselineRelativeRoot)), { recursive: true });
-  fs.cpSync(fixtureRoot, path.join(repo, baselineRelativeRoot), { recursive: true });
-  return repo;
+const explicitScratch = process.env.YMCC_FAN_OPEN_TEST_ROOT;
+const prefix = 'fan-open-entry-';
+let scratch, baselineRepo;
+function directoryIdentity(dir) {
+  const identity = fs.lstatSync(dir, {bigint: true});
+  assert(identity.isDirectory() && !identity.isSymbolicLink() && path.relative(dir, fs.realpathSync.native(dir)) === '',
+    'Redirected fan-open test directory: ' + dir);
+  return identity;
 }
+function scratchRoot() {
+  if (!scratch) {
+    const parent = explicitScratch === undefined ? simulationCorePath('Workspace') : path.resolve(explicitScratch);
+    if (explicitScratch !== undefined) fs.mkdirSync(parent, {recursive: true});
+    const parentIdentity = directoryIdentity(parent);
+    const root = fs.mkdtempSync(path.join(parent, prefix));
+    scratch = {parent, parentIdentity, root, rootIdentity: directoryIdentity(root)};
+  }
+  return scratch.root;
+}
+const fixtureRoot = path.join(repoRoot, baselineRelativeRoot);
+function relocatedRepo() {
+  if (!baselineRepo) {
+    const repo = path.join(scratchRoot(), 'relocated with spaces');
+    const baseline = path.join(repo, baselineRelativeRoot);
+    fs.mkdirSync(baseline, {recursive: true});
+    for (const member of ['provenance.json', ...Object.keys(baselinePins)]) {
+      fs.copyFileSync(path.join(fixtureRoot, member), path.join(baseline, member), fs.constants.COPYFILE_EXCL);
+    }
+    baselineRepo = repo;
+  }
+  return baselineRepo;
+}
+function withMovedFiles(entries, run) {
+  const moved = [];
+  try {
+    for (const [source, target] of entries) {
+      assert(!fs.existsSync(target), 'Duplicate baseline scratch member: ' + target);
+      fs.renameSync(source, target);
+      moved.push([source, target]);
+    }
+    return run();
+  } finally {
+    for (const [source, target] of moved.reverse()) {
+      // A test may have placed a corrupt replacement at the original location.
+      if (fs.existsSync(source)) fs.unlinkSync(source);
+      fs.renameSync(target, source);
+    }
+  }
+}
+const withMissingFile = (file, run) => withMovedFiles([[file, file + '.saved-fixture-member']], run);
+test.after(() => {
+  if (baselineRepo) resolveBaseline({repoRoot: baselineRepo});
+  if (!scratch || explicitScratch !== undefined) return;
+  const {parent, parentIdentity, root, rootIdentity} = scratch;
+  assert.equal(path.relative(parent, path.dirname(root)), '');
+  assert(path.basename(root).startsWith(prefix));
+  for (const [dir, expected] of [[parent, parentIdentity], [root, rootIdentity]]) {
+    const identity = directoryIdentity(dir);
+    assert(identity.dev === expected.dev && identity.ino === expected.ino, 'Fixture directory identity changed: ' + dir);
+  }
+  fs.rmSync(root, {recursive: true});
+});
 function approvedProject(repo) {
   const project = path.join(repo, cecilToolProject);
   fs.mkdirSync(path.dirname(project), { recursive: true });
@@ -53,7 +105,7 @@ test('CLI rejects unknown flags, positional arguments, and absent required evide
   assert.throws(() => parseArgs([]), /--evidence-dir is required/);
 });
 test('actual CLI rejects before creating evidence', () => {
-  const evidence = path.join(root, 'must-not-exist');
+  const evidence = path.join(scratchRoot(), 'must-not-exist');
   for (const tail of [['--unknown', 'x'], ['--cecil-path'], ['--legacy-host-root', 'a', '--legacy-host-root', 'b']]) {
     const result = spawnSync(process.execPath, [path.join(here, 'run.mjs'), '--evidence-dir', evidence, ...tail],
       { windowsHide: true, encoding: 'utf8' });
@@ -78,41 +130,57 @@ test('static adapter import and export perform no synchronous filesystem access'
   assert.equal(result.stdout.trim(), 'PASS');
 });
 test('fixed baseline resolves after copying only the fixture to a different repo path', () => {
-  const moved = relocatedRepo('relocated with spaces');
+  const moved = relocatedRepo();
   const result = resolveBaseline({ repoRoot: moved });
   assert.equal(result.root, path.join(moved, baselineRelativeRoot));
   assert.equal(result.source, 'repository-fixed-fixture');
   assert.deepEqual(result.files.map(file => file.sha256), Object.values(baselinePins));
 });
 test('explicit legacy root overrides location but never the two pinned identities', () => {
-  const moved = relocatedRepo('explicit-valid');
-  const override = path.join(moved, baselineRelativeRoot);
-  assert.equal(resolveBaseline({ repoRoot, legacyHostRoot: override }).source, 'explicit-legacy-host-root');
-  fs.writeFileSync(path.join(override, 'YeManFanBackend.dll'), 'new or corrupted backend');
-  assert.throws(() => resolveBaseline({ repoRoot, legacyHostRoot: override }),
-    error => error.code === 'FAN_OPEN_BASELINE_IDENTITY' && /Backend/.test(error.message));
+  const moved = relocatedRepo(), baseline = path.join(moved, baselineRelativeRoot);
+  const override = path.join(scratchRoot(), 'explicit-valid');
+  fs.mkdirSync(override);
+  withMovedFiles(Object.keys(baselinePins).map(name => [path.join(baseline, name), path.join(override, name)]), () => {
+    assert.throws(() => resolveBaseline({ repoRoot: moved }), blocked('FAN_OPEN_BASELINE_MISSING'));
+    const result = resolveBaseline({ repoRoot: moved, legacyHostRoot: override });
+    assert.equal(result.source, 'explicit-legacy-host-root');
+    assert.equal(result.root, override);
+    assert.deepEqual(result.files.map(file => file.sha256), Object.values(baselinePins));
+    const backend = path.join(override, 'YeManFanBackend.dll');
+    withMissingFile(backend, () => {
+      fs.writeFileSync(backend, 'new or corrupted backend', {flag: 'wx'});
+      assert.throws(() => resolveBaseline({ repoRoot: moved, legacyHostRoot: override }),
+        error => error.code === 'FAN_OPEN_BASELINE_IDENTITY' && /Backend/.test(error.message));
+    });
+  });
 });
 test('new Host bytes cannot replace the fixed old negative control', () => {
-  const moved = relocatedRepo('wrong-host');
-  fs.writeFileSync(path.join(moved, baselineRelativeRoot, 'YeManFanHost.dll'), 'candidate-not-5e941');
-  assert.throws(() => resolveBaseline({ repoRoot: moved }), error => error.code === 'FAN_OPEN_BASELINE_IDENTITY');
+  const moved = relocatedRepo(), host = path.join(moved, baselineRelativeRoot, 'YeManFanHost.dll');
+  withMissingFile(host, () => {
+    fs.writeFileSync(host, 'candidate-not-5e941', {flag: 'wx'});
+    assert.throws(() => resolveBaseline({ repoRoot: moved }), error => error.code === 'FAN_OPEN_BASELINE_IDENTITY');
+  });
 });
 test('missing baseline DLL and missing provenance are explicitly BLOCKED', () => {
-  const moved = relocatedRepo('missing-baseline');
-  fs.unlinkSync(path.join(moved, baselineRelativeRoot, 'YeManFanBackend.dll'));
-  assert.throws(() => resolveBaseline({ repoRoot: moved }), blocked('FAN_OPEN_BASELINE_MISSING'));
-  fs.unlinkSync(path.join(moved, baselineRelativeRoot, 'provenance.json'));
-  assert.throws(() => resolveBaseline({ repoRoot: moved }), blocked('FAN_OPEN_BASELINE_MISSING'));
+  const moved = relocatedRepo();
+  for (const name of ['YeManFanBackend.dll', 'provenance.json']) {
+    withMissingFile(path.join(moved, baselineRelativeRoot, name), () => {
+      assert.throws(() => resolveBaseline({ repoRoot: moved }), blocked('FAN_OPEN_BASELINE_MISSING'));
+    });
+  }
 });
 test('changing provenance cannot authorize different baseline hashes', () => {
-  const moved = relocatedRepo('forged-provenance');
+  const moved = relocatedRepo();
   const manifestFile = path.join(moved, baselineRelativeRoot, 'provenance.json');
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8').replace(/^\uFEFF/, ''));
   manifest.files[0].sha256 = '0'.repeat(64);
-  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
-  assert.throws(() => resolveBaseline({ repoRoot: moved }), error => error.code === 'FAN_OPEN_BASELINE_IDENTITY');
+  withMissingFile(manifestFile, () => {
+    fs.writeFileSync(manifestFile, JSON.stringify(manifest), {flag: 'wx'});
+    assert.throws(() => resolveBaseline({ repoRoot: moved }), error => error.code === 'FAN_OPEN_BASELINE_IDENTITY');
+  });
 });
 test('Cecil discovery follows approved tool hint in relocated local package cache', () => {
+  const root = scratchRoot();
   const moved = path.join(root, 'cecil-repo');
   approvedProject(moved);
   const cache = path.join(root, 'nuget cache');
@@ -131,22 +199,23 @@ test('Cecil discovery follows approved tool hint in relocated local package cach
 test('Cecil explicit override is honored; missing explicit DLL never falls back', () => {
   const actual = resolveCecil({ repoRoot });
   assert.equal(resolveCecil({ repoRoot, cecilPath: actual.path }).source, 'explicit-cecil-path');
-  assert.throws(() => resolveCecil({ repoRoot, cecilPath: path.join(root, 'missing-Cecil.dll') }),
+  assert.throws(() => resolveCecil({ repoRoot, cecilPath: path.join(scratchRoot(), 'missing-Cecil.dll') }),
     blocked('FAN_OPEN_CECIL_MISSING'));
 });
 test('missing approved project or approved local package is explicitly BLOCKED', () => {
-  const moved = path.join(root, 'missing-cecil');
+  const moved = path.join(scratchRoot(), 'missing-cecil');
   assert.throws(() => resolveCecil({ repoRoot: moved, env: {}, userHome: '' }), blocked('FAN_OPEN_CECIL_MISSING'));
   approvedProject(moved);
   assert.throws(() => resolveCecil({ repoRoot: moved, env: {}, userHome: '' }), blocked('FAN_OPEN_CECIL_MISSING'));
 });
-for (const [kind, options, code] of [
-  ['baseline', { legacyHostRoot: path.join(root, 'missing-baseline-dir') }, 'FAN_OPEN_BASELINE_MISSING'],
-  ['Cecil', { cecilPath: path.join(root, 'missing-Cecil.dll') }, 'FAN_OPEN_CECIL_MISSING'],
+for (const [kind, option, missing, code] of [
+  ['baseline', 'legacyHostRoot', 'missing-baseline-dir', 'FAN_OPEN_BASELINE_MISSING'],
+  ['Cecil', 'cecilPath', 'missing-Cecil.dll', 'FAN_OPEN_CECIL_MISSING'],
 ]) {
   test(`actual runner writes BLOCKED ${kind} receipt before any build or target execution`, () => {
+    const root = scratchRoot();
     const evidenceDir = path.join(root, `blocked-${kind}`);
-    const result = execute({ evidenceDir, ...options });
+    const result = execute({ evidenceDir, [option]: path.join(root, missing) });
     assert.equal(result.status, 'BLOCKED');
     assert.equal(result.code, code);
     assert.equal(result.hostMainStarted, false);
@@ -155,6 +224,7 @@ for (const [kind, options, code] of [
   });
 }
 test('actual CLI preserves BLOCKED status and nonzero exit for missing prerequisite', () => {
+  const root = scratchRoot();
   const evidenceDir = path.join(root, 'blocked-cli');
   const result = spawnSync(process.execPath, [path.join(here, 'run.mjs'), '--evidence-dir', evidenceDir,
     '--cecil-path', path.join(root, 'missing-Cecil.dll')], { windowsHide: true, encoding: 'utf8' });
@@ -166,6 +236,7 @@ test('actual CLI preserves BLOCKED status and nonzero exit for missing prerequis
 
 
 test('existing global runner classifies missing baseline and Cecil as BLOCKED exit 3', async () => {
+  const root = scratchRoot();
   const { executeAdapter, validateAdapters } = await import('../runner.mjs');
   const { getFanOpenAdapters } = await import('./adapter.mjs');
   for (const [name, flag, code] of [

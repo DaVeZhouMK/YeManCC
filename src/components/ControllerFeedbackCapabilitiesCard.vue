@@ -12,6 +12,7 @@ import { loadSettings, saveSettingsSection } from '@/bridge/settingsRepository';
 import { EDIT_REPEAT_BASE_MS } from '@/gamepad/sliderRepeat';
 
 interface LightingSettings {
+  ownership: 'ymcc' | 'oem';
   enabled: boolean;
   off: boolean;
   mode: string;
@@ -28,7 +29,7 @@ interface FeedbackSettings {
 
 const DEFAULT_FEEDBACK: FeedbackSettings = {
   vibrationStrength: 70,
-  lighting: { enabled: false, off: false, mode: 'solid', presetId: '', color: '#2ea6ff', color2: '#9d7cff', speed: 55, brightness: 65 },
+  lighting: { ownership: 'ymcc', enabled: false, off: false, mode: 'solid', presetId: '', color: '#2ea6ff', color2: '#9d7cff', speed: 55, brightness: 65 },
 };
 
 const settings = ref<FeedbackSettings>(structuredClone(DEFAULT_FEEDBACK));
@@ -46,10 +47,80 @@ let capabilitiesRequest = 0;
 const currentFeedbackSession = (epoch: number) => feedbackActive && epoch === feedbackEpoch;
 const capsError = ref('');
 const status = ref('');
+const feedbackSaveIssue = ref<'' | 'failed' | 'unconfirmed'>('');
+const feedbackSaveMessage = computed(() => feedbackSaveIssue.value === 'failed'
+  ? '设置保存失败，重启后是否保留尚未确认。'
+  : feedbackSaveIssue.value === 'unconfirmed' ? '上次设置保存结果尚未确认，重新调整后会再次保存。' : '');
+let feedbackSaveRequest = 0;
+let feedbackSavePending = false;
+const ayaFeedback = computed(() => caps.value.machineFamily === 'ayanero');
+const oemLightingSelected = computed(() => ayaFeedback.value && settings.value.lighting.ownership === 'oem');
+const ownershipBusy = ref(false);
+const ownershipOptions = computed(() => [
+  { value: 'ymcc', label: 'YMCC 灯效' },
+  { value: 'oem', label: '原厂显示', disabled: caps.value.oemRestoreAvailable !== true },
+]);
+const vibrationTestBusy = ref(false);
+const vibrationTestMessage = ref('');
+const vibrationTestFailed = ref(false);
+let vibrationTestRequest = 0;
+function vibrationFailure(reason?: string): string {
+  if (reason === 'no-xinput-physical-source' || reason === 'source-pending') return '实体手柄震动源未就绪，请待手柄恢复后再试。';
+  if (reason === 'source-changed') return '实体手柄来源已变化，本次测试未完成。';
+  if (reason === 'power-transition' || reason === 'cancelled') return '电源或输入状态已变化，本次测试已停止。';
+  if (reason === 'write-failed' || reason === 'open-failed') return '实体手柄震动请求失败，请导出本次日志。';
+  if (reason === 'pulse-stop-unavailable' || reason === 'stop-unavailable') return '震动停止通路未就绪，本次测试未完成。';
+  if (reason === 'manual-pulse-active' || reason === 'queue-full' || reason === 'throttled') return '震动通路正忙，请稍后手动重试。';
+  return '震动请求未被确认，请导出本次日志。';
+}
+async function triggerVibration(): Promise<void> {
+  if (!feedbackActive || !vibrationAvailable.value || vibrationTestBusy.value) return;
+  const epoch = feedbackEpoch, request = ++vibrationTestRequest;
+  const strength = settings.value.vibrationStrength;
+  const current = () => currentFeedbackSession(epoch) && request === vibrationTestRequest;
+  vibrationTestBusy.value = true;
+  vibrationTestFailed.value = false;
+  vibrationTestMessage.value = '正在等待实体震动请求回执…';
+  try {
+    const first = await gamepadFeedback.vibrate(strength);
+    if (!current()) return;
+    if (first?.ok !== true) {
+      vibrationTestFailed.value = true;
+      vibrationTestMessage.value = vibrationFailure(first?.reason);
+      return;
+    }
+    await new Promise(resolve => window.setTimeout(resolve, 125));
+    if (!current()) return;
+    if (!vibrationAvailable.value) {
+      vibrationTestFailed.value = true;
+      vibrationTestMessage.value = '实体手柄状态已变化，本次测试未完成。';
+      return;
+    }
+    const second = await gamepadFeedback.vibrate(strength);
+    if (!current()) return;
+    vibrationTestFailed.value = second?.ok !== true;
+    vibrationTestMessage.value = second?.ok !== true
+      ? '后段请求未完成：' + vibrationFailure(second?.reason)
+      : strength === 0 ? '强度为 0，仅提交零强度请求，无法据此判断震感。' : '请求已受理，实际震感仍需手动确认。';
+  } catch {
+    if (!current()) return;
+    vibrationTestFailed.value = true;
+    vibrationTestMessage.value = '未取得震动回执，实际结果未确认；本次不会自动重试。';
+  } finally {
+    if (request === vibrationTestRequest) vibrationTestBusy.value = false;
+  }
+}
 // 能力探测进行中（首帧 capabilites 未返回）：灯光块显示"加载中"，控件禁用。
 const capsLoading = ref(true);
 const ledAvailable = computed(() => caps.value.ledAvailable);
 const vibrationAvailable = computed(() => caps.value.vibrationAvailable);
+const vibrationStateText = computed(() => {
+  if (capsLoading.value) return '加载中';
+  if (!vibrationAvailable.value) return '暂不可用';
+  if (vibrationTestBusy.value) return '测试中';
+  if (vibrationTestFailed.value) return '未完成';
+  return vibrationTestMessage.value ? '请求已受理' : '可请求';
+});
 // 卡片与两个 bubble 始终可见；HC DevicePage 能力门（IsDynamicLightingSupported）
 // 决定灯光控件是否可用，而非整卡隐藏。加载中显示"加载中"。
 // 常规副色能力位与效果的分区颜色分别判断。总库授予 ambilight 时，
@@ -132,6 +203,7 @@ async function loadFeedback(epoch: number): Promise<void> {
     settings.value = {
       vibrationStrength: clampInt(raw?.vibrationStrength, DEFAULT_FEEDBACK.vibrationStrength, 0, 100),
       lighting: {
+        ownership: lighting?.ownership === 'oem' ? 'oem' : 'ymcc',
         enabled: lighting?.enabled === true,
         off: lighting?.off === true,
         mode: typeof lighting?.mode === 'string' && effectLabels[lighting.mode] ? lighting.mode : DEFAULT_FEEDBACK.lighting.mode,
@@ -169,17 +241,27 @@ async function refreshCapabilities(showLoading = false, epoch = feedbackEpoch): 
   clampPresetToCaps();
 }
 
-async function saveFeedback(): Promise<void> {
+async function saveFeedback(): Promise<boolean> {
+  if (!feedbackActive) return false;
+  const epoch = feedbackEpoch, request = ++feedbackSaveRequest;
+  feedbackSavePending = true;
   try {
     await saveSettingsSection('gamepad', { feedback: settings.value });
+    if (currentFeedbackSession(epoch) && request === feedbackSaveRequest) feedbackSaveIssue.value = '';
+    return true;
   } catch {
-    // Durable write is best-effort; an apply failure is surfaced separately.
+    // Ordinary lighting still applies best-effort. A request receipt cannot
+    // confirm the separately failed settings write or silence its warning.
+    if (currentFeedbackSession(epoch) && request === feedbackSaveRequest) feedbackSaveIssue.value = 'failed';
+    return false;
+  } finally {
+    if (request === feedbackSaveRequest) feedbackSavePending = false;
   }
 }
 
 let applyTimer: number | undefined;
 function scheduleLedApply(): void {
-  if (!feedbackActive || !ledAvailable.value) return;
+  if (!feedbackActive || !ledAvailable.value || ownershipBusy.value || oemLightingSelected.value) return;
   if (applyTimer !== undefined) window.clearTimeout(applyTimer);
   const epoch = feedbackEpoch;
   applyTimer = window.setTimeout(() => {
@@ -208,11 +290,15 @@ async function applyLed(): Promise<void> {
   const epoch = feedbackEpoch;
   const request = ++ledApplyRequest;
   const light = settings.value.lighting;
+  if (oemLightingSelected.value && caps.value.oemRestoreAvailable !== true) {
+    status.value = '本机暂无经确认的原厂灯光归还通路，已保留原厂选择；未应用缓存灯效。';
+    return;
+  }
   try {
     // HC 语义分层（对比 DevicePage / DynamicLightingManager）：
     //  - enabled（启用控制 / UseDynamicLightingToggle）：YMCC 是否接管灯光（关=整灯熄灭）
     //  - off（灯光亮度关闭开关 / LEDBrightness=0）：接管中把亮度归零，效果仍保持
-    const result = await gamepadFeedback.setLed({
+    const result = await gamepadFeedback.setLed(oemLightingSelected.value ? { ownership: 'oem' } : {
       enabled: light.enabled && !light.off,
       mode: light.mode,
       presetId: light.mode === 'preset' ? light.presetId : undefined,
@@ -223,7 +309,15 @@ async function applyLed(): Promise<void> {
     });
     if (request !== ledApplyRequest) return;
     if (!currentFeedbackSession(epoch)) return;
-    status.value = result.ok ? '掌机灯光已应用。' : `灯光应用失败：${result.reason ?? '未知原因'}`;
+    status.value = oemLightingSelected.value
+      ? result.ok && result.ownershipRequestCompleted === true
+        ? '归还请求已完成，原厂灯光和充电显示仍需手动确认。'
+        : `原厂灯光归还未完成：${result.reason ?? '回执未确认'}`
+      : !result.ok
+      ? `灯光应用失败：${result.reason ?? '未知原因'}`
+      : result.physicalEffectVerified === true
+        ? '掌机灯光已应用并取得实体确认。'
+        : '灯光请求已完成，实体效果仍需手动确认。';
   } catch (error) {
     if (request !== ledApplyRequest) return;
     if (!currentFeedbackSession(epoch)) return;
@@ -231,6 +325,26 @@ async function applyLed(): Promise<void> {
   }
 }
 
+async function onOwnership(value: string | number): Promise<void> {
+  if (!feedbackActive || ownershipBusy.value || !ayaFeedback.value) return;
+  if (value !== 'ymcc' && value !== 'oem') return;
+  if (value === 'oem' && caps.value.oemRestoreAvailable !== true) return;
+  const epoch = feedbackEpoch, previous = settings.value.lighting.ownership;
+  if (applyTimer !== undefined) { window.clearTimeout(applyTimer); applyTimer = undefined; }
+  ++ledApplyRequest;
+  settings.value.lighting.ownership = value;
+  ownershipBusy.value = true;
+  try {
+    // Persist intent before applying. Unlike best-effort slider writes, failure
+    // here must not claim a policy that startup/recovery cannot restore.
+    if (!await saveFeedback()) throw new Error('feedback-save-unconfirmed');
+    if (!currentFeedbackSession(epoch)) return;
+    await applyLed();
+  } catch {
+    settings.value.lighting.ownership = previous;
+    if (currentFeedbackSession(epoch)) status.value = '灯光来源保存失败，未发送本次切换请求，请手动重试。';
+  } finally { ownershipBusy.value = false; }
+}
 async function onLightingChanged(): Promise<void> {
   if (!feedbackActive) return;
   const epoch = feedbackEpoch;
@@ -266,21 +380,6 @@ function commitStrength(): void {
 function onStrength(value: number): void {
   settings.value.vibrationStrength = value;
 }
-async function triggerVibration(): Promise<void> {
-  if (!feedbackActive || !vibrationAvailable.value) return;
-  const epoch = feedbackEpoch;
-  try {
-    // 双脉冲：HC Rumble 一次按下也会以默认延迟连续两次脉冲；
-    // 这里显式连发两次，中间隔 125ms（HC Rumble 默认脉冲时长）。
-    await gamepadFeedback.vibrate(settings.value.vibrationStrength);
-    await new Promise((resolve) => window.setTimeout(resolve, 125));
-    if (!currentFeedbackSession(epoch)) return;
-    await gamepadFeedback.vibrate(settings.value.vibrationStrength);
-  } catch {
-    // 诊断静默；UI 不再显示状态小字。
-  }
-}
-
 function activateFeedback(): void {
   // KeepAlive calls activated after the first mount as well. Keep one initial
   // capability/settings flow and revoke its continuation whenever we leave.
@@ -292,13 +391,22 @@ function activateFeedback(): void {
     if (!currentFeedbackSession(epoch)) return;
     if (initialize) await loadFeedback(epoch);
     if (!currentFeedbackSession(epoch)) return;
-    if (initialize && ledAvailable.value && settings.value.lighting.enabled) void applyLed();
+    if (initialize && oemLightingSelected.value && caps.value.oemRestoreAvailable !== true)
+      status.value = '本机暂无经确认的原厂灯光归还通路，未应用缓存灯效。';
+    if (initialize && ledAvailable.value && settings.value.lighting.enabled && !oemLightingSelected.value) void applyLed();
   });
 }
 function deactivateFeedback(): void {
   if (strengthRow.value) window.dispatchEvent(new CustomEvent('gp:slider-edit-invalidated', { detail: { panel: strengthRow.value, input: strengthRow.value.querySelector('input[type=range]') } }));
   cancelStrengthEdit();
+  if (feedbackSavePending) feedbackSaveIssue.value = 'unconfirmed';
+  feedbackSavePending = false;
+  ++feedbackSaveRequest;
   feedbackActive = false;
+  ++vibrationTestRequest;
+  vibrationTestBusy.value = false;
+  vibrationTestMessage.value = '';
+  vibrationTestFailed.value = false;
   ++feedbackEpoch;
   ++ledApplyRequest;
   ++capabilitiesRequest;
@@ -324,7 +432,7 @@ onBeforeUnmount(deactivateFeedback);
         <p class="card-subtitle">掌机灯光按设备能力执行；震动强度为发送力度。</p>
       </div>
       <span class="state-chip" :class="{ on: ledAvailable || vibrationAvailable }">
-        {{ ledAvailable || vibrationAvailable ? '已就绪' : '设备不可用' }}
+        {{ ledAvailable || vibrationAvailable ? '接口可用' : '设备不可用' }}
       </span>
     </div>
 
@@ -334,8 +442,8 @@ onBeforeUnmount(deactivateFeedback);
           <div>
             <strong>震动</strong>
           </div>
-          <span class="availability-chip" :class="vibrationAvailable ? 'available' : 'unavailable'">
-            {{ capsLoading ? '加载中' : (vibrationAvailable ? '可用' : '暂不可用') }}
+          <span class="availability-chip" :class="vibrationAvailable && !vibrationTestFailed ? 'available' : 'unavailable'">
+            {{ vibrationStateText }}
           </span>
         </div>
         <p v-if="!capsLoading && !vibrationAvailable && vibrationReasonText" class="unavailable-reason">{{ vibrationReasonText }}</p>
@@ -353,10 +461,11 @@ onBeforeUnmount(deactivateFeedback);
             @update:model-value="onStrength"
             @commit="commitStrength"
           />
-          <button type="button" class="vibrate-button" :disabled="!vibrationAvailable" @click="triggerVibration">
-            立即震动
+          <button type="button" class="vibrate-button" :disabled="!vibrationAvailable || vibrationTestBusy" @click="triggerVibration">
+            {{ vibrationTestBusy ? '测试中…' : '立即震动' }}
           </button>
         </div>
+        <p v-if="vibrationTestMessage" class="vibration-test-receipt" :class="{ failed: vibrationTestFailed }" role="status" aria-live="polite">{{ vibrationTestMessage }}</p>
       </div>
 
       <div
@@ -373,13 +482,24 @@ onBeforeUnmount(deactivateFeedback);
           </span>
         </div>
         <p v-if="!capsLoading && !ledAvailable && ledReasonText" class="unavailable-hint">{{ ledReasonText }}</p>
+        <div v-if="ayaFeedback" class="setting-field ownership-field">
+          <span class="field-label">灯光来源</span>
+          <Dropdown :model-value="settings.lighting.ownership" :options="ownershipOptions"
+            aria-label="灯光来源" :disabled="capsLoading || ownershipBusy || !ledAvailable"
+            color="accent" @update:model-value="onOwnership" />
+        </div>
+        <p v-if="oemLightingSelected" class="unavailable-hint">
+          {{ caps.sharedChargeIndicatorDeclared ? '本机手册声明摇杆灯兼作充电显示。' : '本机充电灯是否共用灯位尚未确认。' }}
+          原厂显示由固件或官方前端决定，归还请求不代表显示已恢复。
+        </p>
+        <template v-if="!oemLightingSelected">
         <div class="light-switch">
           <!-- 启用控制 = HC UseDynamicLightingToggle（LEDSettingsEnabled）：YMCC
                是否实际接管灯光能力。可交互；关 = 整灯熄灭。读取中标签显示"加载中"。 -->
           <Toggle
             :model-value="settings.lighting.enabled"
             :label="capsLoading ? '加载中' : '启用控制'"
-            :disabled="capsLoading || !ledAvailable"
+            :disabled="capsLoading || !ledAvailable || ownershipBusy"
             @update:model-value="onEnabled"
           />
         </div>
@@ -390,7 +510,7 @@ onBeforeUnmount(deactivateFeedback);
           <Toggle
             :model-value="!settings.lighting.off"
             label="灯光亮度"
-            :disabled="capsLoading || !ledAvailable || !settings.lighting.enabled"
+            :disabled="capsLoading || !ledAvailable || ownershipBusy || !settings.lighting.enabled"
             @update:model-value="onOff"
           />
         </div>
@@ -400,14 +520,14 @@ onBeforeUnmount(deactivateFeedback);
             <Dropdown
               :model-value="settings.lighting.mode"
               :options="effectOptions"
-              :disabled="!settings.lighting.enabled"
+              :disabled="ownershipBusy || !settings.lighting.enabled"
               color="accent"
               @update:model-value="onMode"
             />
           </div>
           <div v-if="settings.lighting.mode === 'preset'" class="setting-field preset-field" :class="{ muted: !settings.lighting.enabled }">
             <span class="field-label">灯光预设</span>
-            <Dropdown :model-value="settings.lighting.presetId" :options="presetOptions" :disabled="!settings.lighting.enabled" color="accent" @update:model-value="onPreset" />
+            <Dropdown :model-value="settings.lighting.presetId" :options="presetOptions" :disabled="ownershipBusy || !settings.lighting.enabled" color="accent" @update:model-value="onPreset" />
           </div>
           <p v-if="caps.presetDeclared && caps.presetImplemented === false" class="unavailable-hint">此机型的灯光预设暂不可用。</p>
           <div v-if="settings.lighting.mode !== 'preset'" class="setting-field color-field" :class="{ muted: !settings.lighting.enabled }">
@@ -415,7 +535,7 @@ onBeforeUnmount(deactivateFeedback);
             <Dropdown
               :model-value="settings.lighting.color"
               :options="colorOptions"
-              :disabled="!settings.lighting.enabled"
+              :disabled="ownershipBusy || !settings.lighting.enabled"
               color="accent"
               @update:model-value="onColor"
             />
@@ -425,7 +545,7 @@ onBeforeUnmount(deactivateFeedback);
             <Dropdown
               :model-value="settings.lighting.color2"
               :options="colorOptions"
-              :disabled="!settings.lighting.enabled"
+              :disabled="ownershipBusy || !settings.lighting.enabled"
               color="accent"
               @update:model-value="onColor2"
             />
@@ -442,7 +562,7 @@ onBeforeUnmount(deactivateFeedback);
               label="亮度"
               unit="%"
               :value-text="`${settings.lighting.brightness}%`"
-              :disabled="!settings.lighting.enabled || settings.lighting.off"
+              :disabled="ownershipBusy || !settings.lighting.enabled || settings.lighting.off"
               @update:model-value="onBrightness"
             />
             <Slider
@@ -453,17 +573,21 @@ onBeforeUnmount(deactivateFeedback);
               label="速度"
               unit="%"
               :value-text="`${settings.lighting.speed}%`"
-              :disabled="!settings.lighting.enabled || !speedRelevant"
+              :disabled="ownershipBusy || !settings.lighting.enabled || !speedRelevant"
               @update:model-value="onSpeed"
             />
           </div>
         </template>
+        </template>
       </div>
     </div>
+    <p v-if="feedbackSaveMessage" class="feedback-save-receipt" role="status" aria-live="polite">{{ feedbackSaveMessage }}</p>
     <p v-if="status" class="feedback-status" role="status" aria-live="polite">{{ status }}</p>
   </section>
 </template>
 
 <style scoped>
 .card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.card-head-actions{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px}.copy-button{min-height:24px;padding:0 8px;border:1px solid rgba(255,255,255,.12);border-radius:999px;background:color-mix(in srgb,var(--bg-input) 86%,transparent);color:var(--text-dim);font-size:10px;font-weight:700;cursor:pointer}.copy-button:hover{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}.card-title{margin:0}.card-subtitle{margin:4px 0 0;color:var(--text-dim);font-size:11px;line-height:1.45}.state-chip,.availability-chip{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;font-weight:700}.state-chip{flex:0 0 auto;min-height:24px;padding:0 8px;border:1px solid rgba(255,255,255,.12);background:color-mix(in srgb,var(--bg-input) 86%,transparent);color:#f4c76b;font-size:10px}.state-chip.on{border-color:color-mix(in srgb,var(--accent) 58%,transparent);background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}.feedback-grid{display:grid;grid-template-columns:1fr;gap:8px;margin-top:12px}.feedback-bubble{border:1px solid rgba(255,255,255,.07);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--bg-input) 88%,transparent);min-width:0;padding:10px}.feedback-bubble.dimmed{opacity:.45;pointer-events:none}.feedback-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:7px}.feedback-title-row strong{font-size:12px}.feedback-title-row p{margin:3px 0 0;color:var(--text-dim);font-size:10px;line-height:1.4}.availability-chip{flex:0 0 auto;min-height:19px;padding:0 6px;border:1px solid rgba(255,255,255,.1);color:var(--text-dim);font-size:9px}.availability-chip.available{border-color:color-mix(in srgb,var(--accent) 58%,transparent);color:var(--accent)}.availability-chip.unavailable{border-color:color-mix(in srgb,#f4c76b 45%,transparent);color:#f4c76b}.unavailable-reason{margin:8px 0 0;padding:6px 8px;border:1px solid rgba(244,199,107,.3);border-radius:calc(var(--radius-ctrl) - 2px);background:color-mix(in srgb,#f4c76b 8%,transparent);color:#f4c76b;font-size:10px;line-height:1.4}.unavailable-hint{margin:8px 0 0;color:var(--text-dim);font-size:10px;line-height:1.4}.sidebar-rc{border-radius:var(--radius-ctrl)}.rumble-row{display:flex;align-items:flex-end;gap:10px;margin-top:11px}.rumble-row :deep(.slider){flex:1 1 0;min-width:0;margin-top:0}.rumble-row :deep(.slider-label),.light-bubble :deep(.slider-label){font-size:10px}.rumble-row :deep(.slider-val),.light-bubble :deep(.slider-val){font-size:11px}.vibrate-button{flex:0 0 auto;min-height:32px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 14px;border:1px solid color-mix(in srgb,var(--accent) 55%,transparent);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);font-size:11px;font-weight:700;cursor:pointer}.vibrate-button:disabled{opacity:.45;cursor:not-allowed}.vibrate-button:hover:not(:disabled){background:color-mix(in srgb,var(--accent) 20%,transparent)}.light-switch{margin-top:9px}.light-switch :deep(.toggle-row){align-items:flex-start}.setting-field{margin-top:8px}.field-label{display:block;margin-bottom:5px;color:var(--text-dim);font-size:10px}.setting-field.muted{opacity:.55}.effect-field :deep(.seg){min-height:29px}.effect-field :deep(.seg-btn){min-height:25px;padding:4px 3px;font-size:10px}.light-slider-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:8px}.light-slider-grid :deep(.slider-head){margin-bottom:5px}.light-slider-grid :deep(.slider-track-wrap){height:17px}
+.vibration-test-receipt{margin:8px 0 0;color:var(--text-dim);font-size:10px;line-height:1.5;overflow-wrap:anywhere}.vibration-test-receipt.failed{color:#f4c76b}
+.feedback-save-receipt{margin:8px 0 0;color:#f4c76b;font-size:10px;line-height:1.5;overflow-wrap:anywhere}
 </style>

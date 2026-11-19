@@ -51,6 +51,7 @@ function endBrace(text, start) {
 }
 const sources = [
   'native/main.cpp',
+  'native/sleep_power_state.h',
   'native/msi_owned_return_runtime.h',
   'native/msi_owned_return_recovery.h',
   'native/virtual_output_status.h',

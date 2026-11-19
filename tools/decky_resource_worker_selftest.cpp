@@ -34,6 +34,63 @@ static bool childPeer(int& exit){
     try{
         const auto frame=channel.readFrame(3000);need(static_cast<bool>(frame),"fixture request missing");const auto request=Json::parse(frame.payload);
         const auto nonce=ymcc::deckybinding::worker::wide(request.at("home"));put(fs::path(nonce)/L"fixture-child-started",std::to_string(GetCurrentProcessId()));
+        if(behavior.starts_with(L"progress-optional-memory-")||behavior.starts_with(L"progress-optional-return-")){
+            const bool afterWrite=behavior==L"progress-optional-memory-after-inspect"||behavior==L"progress-optional-return-after-inspect"||behavior==L"progress-optional-memory-after-cache";
+            const bool returnFailure=behavior.starts_with(L"progress-optional-return-");
+            if(behavior==L"progress-optional-memory-void-inspect")return worker::tryRun(request,channel.cancelEvent(),[&](const Json& packet)->void{
+                if(packet.contains("progress")&&packet["progress"].value("stage",std::string{})=="inspect")throw std::bad_alloc{};
+                const auto bytes=packet.dump();need(bool(channel.writeFrame(std::vector<std::uint8_t>(bytes.begin(),bytes.end()),250)),"optional-progress-void-emit");
+            },exit);
+            const auto lostStage=behavior==L"progress-optional-memory-receipt"?"receipt":behavior==L"progress-optional-memory-reinspect"?"reinspect":(behavior==L"progress-optional-memory-cache"||behavior==L"progress-optional-memory-after-cache")?"cache":"inspect";
+            return worker::tryRun(request,channel.cancelEvent(),[&](const Json& packet){
+                const bool selected=packet.contains("progress")&&packet["progress"].value("stage",std::string{})==lostStage;
+                if(selected&&!afterWrite){if(returnFailure)return false;throw std::bad_alloc{};} // Before any bytes of this optional note.
+                const auto bytes=packet.dump();const auto sent=channel.writeFrame(std::vector<std::uint8_t>(bytes.begin(),bytes.end()),250);
+                if(selected&&afterWrite){if(returnFailure)return false;throw std::bad_alloc{};} // Already-delivered prefix is still valid.
+                return static_cast<bool>(sent);
+            },exit);
+        }
+        if(behavior==L"progress-stall"){
+            return worker::tryRun(request,channel.cancelEvent(),[&](const Json& packet){
+                const auto bytes=packet.dump();const auto written=channel.writeFrame(std::vector<std::uint8_t>(bytes.begin(),bytes.end()),250);
+                if(packet.contains("progress")&&packet["progress"].value("stage",std::string{})=="cache"){
+                    put(fs::path(nonce)/L"fixture-cache-stage-started","entered");
+                    std::mutex mutex;std::condition_variable wait;std::unique_lock lock(mutex);wait.wait(lock,[]{return false;});
+                }
+                return static_cast<bool>(written);
+            },exit);
+        }
+        if(behavior.starts_with(L"progress-invalid-")){
+            Json note={{"schema",worker::schema},{"id",request.at("id")},{"generation",request.at("generation")},{"progress",{{"stage","receipt"},{"elapsedMs",0u}}}};
+            if(behavior==L"progress-invalid-order")note["progress"]["stage"]="cache";
+            if(behavior==L"progress-invalid-type")note["progress"]["elapsedMs"]=-1;
+            if(behavior==L"progress-invalid-secret")note["progress"]["stage"]="secret-path";
+            if(behavior==L"progress-invalid-extra")note["progress"]["ready"]=true;
+            auto bytes=note.dump();
+            if(behavior==L"progress-invalid-duplicate")bytes.insert(1,"\"progress\":{\"stage\":\"receipt\",\"elapsedMs\":0},");
+            channel.writeFrame(std::vector<std::uint8_t>(bytes.begin(),bytes.end()),250);
+            if(behavior==L"progress-invalid-repeat")channel.writeFrame(std::vector<std::uint8_t>(bytes.begin(),bytes.end()),250);
+            exit=0;return true;
+        }
+        if(behavior==L"eof-held-endpoint"){
+            using ymcc::deckybinding::detail::Handle;
+            Handle pipe,cancel;
+            need(DuplicateHandle(GetCurrentProcess(),channel.pipeHandle(),GetCurrentProcess(),&pipe.value,0,TRUE,DUPLICATE_SAME_ACCESS)!=FALSE,"held-pipe-copy");
+            need(DuplicateHandle(GetCurrentProcess(),channel.cancelEvent(),GetCurrentProcess(),&cancel.value,0,TRUE,DUPLICATE_SAME_ACCESS)!=FALSE,"held-cancel-copy");
+            HANDLE inherited[]{pipe.value,cancel.value};ymcc::deckybinding::detail::Attributes attributes;need(attributes.initialize(inherited),"held-endpoint-attributes");
+            STARTUPINFOEXW startup{};startup.StartupInfo.cb=sizeof(startup);startup.StartupInfo.dwFlags=STARTF_USESHOWWINDOW;startup.StartupInfo.wShowWindow=SW_HIDE;startup.lpAttributeList=attributes.list;
+            const auto image=ymcc::deckybinding::detail::executable();
+            std::wstring command=L"\""+image+L"\" --fixture-resource-held-endpoint "+std::to_wstring(reinterpret_cast<UINT_PTR>(pipe.value))+L" "+std::to_wstring(reinterpret_cast<UINT_PTR>(cancel.value));
+            PROCESS_INFORMATION process{};need(CreateProcessW(image.c_str(),command.data(),nullptr,nullptr,TRUE,EXTENDED_STARTUPINFO_PRESENT|CREATE_NO_WINDOW,nullptr,nullptr,&startup.StartupInfo,&process)!=FALSE,"held-endpoint-start");
+            Handle leaf{process.hProcess},thread{process.hThread};
+            const Json proof={{"root",ymcc::deckybinding::worker::contextIdentity(GetCurrentProcess())},{"leaf",ymcc::deckybinding::worker::contextIdentity(leaf.value)}};
+            put(fs::path(nonce)/L"fixture-held-endpoint.json",proof.dump());
+            Handle ready{OpenEventW(EVENT_MODIFY_STATE,FALSE,env(L"YMCC_RESOURCE_EXIT_READY").c_str())};
+            Handle acknowledge{OpenEventW(SYNCHRONIZE,FALSE,env(L"YMCC_RESOURCE_EXIT_ACK").c_str())};
+            need(ready.value&&acknowledge.value&&SetEvent(ready.value),"held-endpoint-controls");
+            need(WaitForSingleObject(acknowledge.value,1500)==WAIT_OBJECT_0,"held-endpoint-acknowledgement");
+            exit=0;return true; // Leaf is never released; production Owner must revoke it.
+        }
         if(behavior==L"eof"){exit=0;return true;} // Peer closes without a result; never retry/spin.
         if(behavior==L"bad-reply"){
             const Json reply={{"schema",worker::schema},{"id",std::string(32,'f')},{"generation",request.at("generation")},{"detail",{{"ready",true},{"reason","forged"}}}};
@@ -45,8 +102,52 @@ static bool childPeer(int& exit){
     }catch(...){exit=92;return true;}
 }
 static DWORD handles(){DWORD n=0;need(GetProcessHandleCount(GetCurrentProcess(),&n)!=FALSE,"handle snapshot failed");return n;}
+static Json exitedResourceWait=Json::object();
+static void checkExitedResourceWait(const fs::path& steam,const fs::path& home,const fs::path& metadata){
+ using ymcc::deckybinding::detail::Handle;
+ struct Environment {
+  std::wstring mode=env(L"YMCC_RESOURCE_WORKER_FIXTURE"),ready=env(L"YMCC_RESOURCE_EXIT_READY"),ack=env(L"YMCC_RESOURCE_EXIT_ACK");
+  ~Environment(){SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",mode.empty()?nullptr:mode.c_str());SetEnvironmentVariableW(L"YMCC_RESOURCE_EXIT_READY",ready.empty()?nullptr:ready.c_str());SetEnvironmentVariableW(L"YMCC_RESOURCE_EXIT_ACK",ack.empty()?nullptr:ack.c_str());}
+ } restore;
+ const auto prefix=L"Local\\YMCC-ResourceExit-Fixture-"+std::to_wstring(GetCurrentProcessId());
+ const auto readyName=prefix+L"-ready",ackName=prefix+L"-ack";
+ Handle ready{CreateEventW(nullptr,TRUE,FALSE,readyName.c_str())},acknowledge{CreateEventW(nullptr,TRUE,FALSE,ackName.c_str())};need(ready.value&&acknowledge.value,"exit-wait-control-events");
+ need(SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",L"eof-held-endpoint")&&SetEnvironmentVariableW(L"YMCC_RESOURCE_EXIT_READY",readyName.c_str())&&SetEnvironmentVariableW(L"YMCC_RESOURCE_EXIT_ACK",ackName.c_str()),"exit-wait-environment");
+ const auto before=handles();const auto started=GetTickCount64();unsigned observations=0;ULONGLONG exitedAt=0;
+ Handle root,leaf;bool identityVerified=false;
+ FILETIME creation{},exit{},kernelBefore{},userBefore{},kernelAfter{},userAfter{};
+ need(GetThreadTimes(GetCurrentThread(),&creation,&exit,&kernelBefore,&userBefore)!=FALSE,"exit-wait-thread-counter-before");
+ const auto current=[&]{
+  ++observations;
+  if(!root.value&&WaitForSingleObject(ready.value,0)==WAIT_OBJECT_0){
+   std::ifstream file(home/L"fixture-held-endpoint.json");Json proof;file>>proof;
+   root.value=OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,proof.at("root").at("pid").get<DWORD>());
+   leaf.value=OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,proof.at("leaf").at("pid").get<DWORD>());need(root.value&&leaf.value,"exit-wait-observed-process-handles");
+   identityVerified=ymcc::deckybinding::worker::contextIdentity(root.value)==proof.at("root")&&ymcc::deckybinding::worker::contextIdentity(leaf.value)==proof.at("leaf");need(identityVerified&&SetEvent(acknowledge.value),"exit-wait-observed-identities");
+  }
+  const auto now=GetTickCount64();if(root.value&&!exitedAt&&WaitForSingleObject(root.value,0)==WAIT_OBJECT_0)exitedAt=now;
+  return exitedAt?now-exitedAt<180:now-started<1500;
+ };
+ const auto result=worker::prepare(steam,home,metadata,current,true);const auto elapsed=GetTickCount64()-started;
+ need(GetThreadTimes(GetCurrentThread(),&creation,&exit,&kernelAfter,&userAfter)!=FALSE,"exit-wait-thread-counter-after");
+ const bool rootExited=root.value&&WaitForSingleObject(root.value,0)==WAIT_OBJECT_0,leafExited=leaf.value&&WaitForSingleObject(leaf.value,0)==WAIT_OBJECT_0;
+ if(root.value){CloseHandle(root.value);root.value=nullptr;}if(leaf.value){CloseHandle(leaf.value);leaf.value=nullptr;}
+ const auto ticks=[](const FILETIME& v){return (static_cast<unsigned long long>(v.dwHighDateTime)<<32)|v.dwLowDateTime;};
+ exitedResourceWait={{"currentPredicateCalls",observations},{"maximumCalls",128},{"elapsedMs",elapsed},{"threadCpuMs",(ticks(kernelAfter)-ticks(kernelBefore)+ticks(userAfter)-ticks(userBefore))/10000.0},
+  {"rootExitObservedBeforeCancel",exitedAt!=0},{"identityVerified",identityVerified},{"rootExited",rootExited},{"leafExited",leafExited},{"manualLeafRelease",false},{"reason",result.value("reason",std::string{})},{"destroyed",result.value("resourceWorkerDestroyed",false)},{"beforeHandles",before},{"afterHandles",handles()}};
+ need(exitedAt&&identityVerified&&rootExited&&leafExited&&result.value("resourceWorkerDestroyed",false)&&result.value("reason",std::string{})=="preparation-cancelled"&&elapsed<=3200&&before==handles(),"exited resource peer lost cancellation or owned cleanup");
+ need(observations<=128,"exited resource process kept waking a pending pipe in a hot loop");
+}
+static Json optionalProgressLoss=Json::array();
+static Json optionalRepairProgressLoss=Json::array();
 static Json cases=Json::array();template<class F>static void check(const char* name,F&& work){try{work();cases.push_back({{"name",name},{"pass",true}});}catch(const std::exception& error){cases.push_back({{"name",name},{"pass",false},{"error",error.what()}});}}
-int wmain(int argc,wchar_t** argv){int code=0;if(childPeer(code))return code;try{
+int wmain(int argc,wchar_t** argv){
+ if(argc==4&&std::wstring_view(argv[1])==L"--fixture-resource-held-endpoint"){
+  const auto pipe=reinterpret_cast<HANDLE>(static_cast<UINT_PTR>(std::stoull(argv[2]))),cancel=reinterpret_cast<HANDLE>(static_cast<UINT_PTR>(std::stoull(argv[3])));
+  if(GetFileType(pipe)!=FILE_TYPE_PIPE||WaitForSingleObject(cancel,0)==WAIT_FAILED)return 93;
+  Sleep(INFINITE);return 0;
+ }
+ int code=0;if(childPeer(code))return code;try{
     need(argc==4,"explicit fixture result and official data file required");const auto base=fs::absolute(argv[1]);need(base.filename()==L"worker-fixture","scope rejected");const auto steam=base/L"Steam",home=base/L"PowerControl"/L"decky",metadata=base/L"YeManCC"/L"decky-package.json";put(steam/L"steam.exe","inert");put(steam/L".cef-enable-remote-debugging","");
     for(const auto* name:ymcc::deckysetup::managedFiles)put(home/name,"fixture-"+ymcc::deckysetup::pathText(fs::path(name)));
     fs::copy_file(argv[3],home/ymcc::deckysetup::managedFiles[0],fs::copy_options::overwrite_existing);
@@ -58,6 +159,15 @@ int wmain(int argc,wchar_t** argv){int code=0;if(childPeer(code))return code;try
         const auto r=worker::prepare(steam,home,metadata,[]{return true;},false);
         need(r.value("ready",false)&&r.value("managedPackageVerified",false)&&r.value("resourceWorkerDestroyed",false),"read-only launch lost complete live verification");
         need(!fs::exists(cache),"read-only launch performed noncritical cache IO");
+        const auto logged=ymcc::deckydiag::record("prepare",r);
+        need(logged.value("resourceWorkerChildStage",std::string{})=="inspect"&&logged.value("resourceWorkerProgressCount",0u)==2u&&logged.contains("resourceWorkerChildElapsedMs"),"read-only actual child progress was not retained");
+        need(logged.value("resourceWorkerChildCpuKnown",false)&&logged.contains("resourceWorkerChildCpuMs")&&logged["resourceWorkerChildCpuMs"].is_number_unsigned(),"actual child CPU counter facts were lost");
+        const auto unknownCpu=ymcc::deckydiag::record("prepare",{{"resourceWorkerChildCpuKnown",false},{"resourceWorkerChildCpuMs",12u}});
+        need(unknownCpu.contains("resourceWorkerChildCpuKnown")&&!unknownCpu["resourceWorkerChildCpuKnown"].get<bool>()&&!unknownCpu.contains("resourceWorkerChildCpuMs"),"unknown child CPU became an observed zero or rate");
+        need(logged.value("resourceWorkerReplyReceived",false)&&logged.value("resourceWorkerDestroyed",false)&&logged.value("resourceWorkerStage",std::string{})=="reply","successful resource framing facts were lost");
+        auto poison=Json{{"resourceWorkerChildStage","secret-path"},{"resourceWorkerProgressCount",5u},{"resourceWorkerChildElapsedMs",-1},{"resourceWorkerReadKind","secret-payload"},{"resourceWorkerReadError",-1},{"resourceWorkerChildExitCode",4294967296ull},{"resourceWorkerStage","secret-path"},{"resourceWorkerReplyReceived","true"},{"resourceWorkerElapsedMs",-1},{"resourceWorkerChildCpuKnown","true"},{"resourceWorkerChildCpuMs",-1},{"payload","private"}};
+        const auto filtered=ymcc::deckydiag::record("prepare",poison);
+        for(const auto* key:{"resourceWorkerChildStage","resourceWorkerProgressCount","resourceWorkerChildElapsedMs","resourceWorkerReadKind","resourceWorkerReadError","resourceWorkerChildExitCode","resourceWorkerStage","resourceWorkerReplyReceived","resourceWorkerElapsedMs","resourceWorkerChildCpuKnown","resourceWorkerChildCpuMs","payload"})need(!filtered.contains(key),"resource diagnostics leaked untyped or private content");
         need(r.value("resourceMaintenanceDeferred",false),"deferred maintenance was not reported");
         need(ymcc::deckydiag::record("prepare",r).value("resourceMaintenanceDeferred",false),"existing preparation log lost deferred-maintenance evidence");
     });
@@ -69,15 +179,58 @@ int wmain(int argc,wchar_t** argv){int code=0;if(childPeer(code))return code;try
         need(!fs::exists(home/L".ymcc-resource-cache"),"read-only rejection wrote repair cache");
         need(worker::digest(plugin.wstring(),[]{return true;})!=manifest["files"][2]["sha256"].get<std::string>(),"read-only rejection silently repaired user file");put(plugin,original);
     });
-    check("actual private early-entry child validates current official bytes and primes cache",[&]{const auto r=normal();need(r.value("ready",false)&&r.value("resourceCacheAvailable",false)&&r.value("resourceWorkerDestroyed",false),"real resource worker did not finish with zero resources");});
-    check("actual same-image child repairs missing Loader and confirms final identity",[&]{fs::remove(home/ymcc::deckysetup::managedFiles[0]);const auto r=normal();need(r.value("ready",false)&&r.value("resourcesRepaired",0u)==1&&r.value("resourceWorkerDestroyed",false),"real worker did not repair official bytes");});
+    check("actual private early-entry child validates current official bytes and primes cache",[&]{
+        const auto r=normal();need(r.value("ready",false)&&r.value("resourceCacheAvailable",false)&&r.value("resourceWorkerDestroyed",false),"real resource worker did not finish with zero resources");
+        for(const auto* mode:{L"progress-optional-memory-receipt",L"progress-optional-memory-inspect",L"progress-optional-memory-after-inspect",L"progress-optional-memory-void-inspect",L"progress-optional-return-inspect",L"progress-optional-return-after-inspect"}){
+            const auto before=handles();const auto previous=env(L"YMCC_RESOURCE_WORKER_FIXTURE");
+            need(SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",mode)!=FALSE,"optional-progress-fixture-mode");
+            const auto value=normal();
+            need(SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",previous.empty()?nullptr:previous.c_str())!=FALSE,"optional-progress-fixture-restore");
+            const auto modeName=ymcc::deckysetup::pathText(fs::path(mode));
+            const unsigned expected=std::wstring_view(mode)==L"progress-optional-memory-receipt"?0u:(std::wstring_view(mode)==L"progress-optional-memory-inspect"||std::wstring_view(mode)==L"progress-optional-memory-void-inspect"||std::wstring_view(mode)==L"progress-optional-return-inspect")?1u:2u;
+            optionalProgressLoss.push_back({{"mode",modeName},{"result",value},{"handlesBefore",before},{"handlesAfter",handles()},{"expectedPrefixCount",expected}});
+            need(value.value("ready",false)&&value.value("managedPackageVerified",false)&&value.value("resourceCacheAvailable",false)&&value.value("resourceWorkerDestroyed",false)&&value.value("resourceWorkerReplyReceived",false),"optional-progress-memory-failure-changed-real-preparation");
+            need(value.value("resourceWorkerProgressCount",99u)==expected&&value.value("resourceWorkerChildStage",std::string{})==(expected==0?"none":expected==1?"receipt":"inspect"),"optional-progress-memory-lost-or-invented-prefix");
+            need(handles()==before,"optional-progress-memory-failure-leaked-handles");
+        }
+    });
+    check("actual same-image child repairs missing Loader and confirms final identity",[&]{
+        if(!fs::exists(home/L".ymcc-resource-cache")){const auto seeded=normal();need(seeded.value("ready",false)&&seeded.value("resourceCacheAvailable",false)&&seeded.value("resourceWorkerDestroyed",false),"repair-fixture-cache-prime");}
+        fs::remove(home/ymcc::deckysetup::managedFiles[0]);const auto r=normal();need(r.value("ready",false)&&r.value("resourcesRepaired",0u)==1&&r.value("resourceWorkerDestroyed",false),"real worker did not repair official bytes");
+        for(const auto* mode:{L"progress-optional-memory-cache",L"progress-optional-memory-after-cache",L"progress-optional-memory-reinspect"}){
+            const auto before=handles();const auto previous=env(L"YMCC_RESOURCE_WORKER_FIXTURE");
+            need(fs::remove(home/ymcc::deckysetup::managedFiles[0]),"repair-progress-loader-must-start-missing");
+            need(SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",mode)!=FALSE,"repair-progress-fixture-mode");
+            const auto value=normal();
+            need(SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",previous.empty()?nullptr:previous.c_str())!=FALSE,"repair-progress-fixture-restore");
+            const auto restored=worker::digest((home/ymcc::deckysetup::managedFiles[0]).wstring(),[]{return true;});
+            const unsigned expected=std::wstring_view(mode)==L"progress-optional-memory-cache"?2u:3u;
+            optionalRepairProgressLoss.push_back({{"mode",ymcc::deckysetup::pathText(fs::path(mode))},{"result",value},{"handlesBefore",before},{"handlesAfter",handles()},{"expectedPrefixCount",expected},{"restoredLoaderSha256",restored}});
+            need(restored==ymcc::deckyidentity::sha256,"repair-progress-actual-loader-not-restored");
+            need(value.value("ready",false)&&value.value("managedPackageVerified",false)&&value.value("resourcesRepaired",0u)==1&&value.value("resourceCacheAvailable",false)&&value.value("resourceWorkerDestroyed",false)&&value.value("resourceWorkerReplyReceived",false),"optional-repair-progress-failure-lost-actual-restoration-success");
+            need(value.value("resourceWorkerProgressCount",99u)==expected&&value.value("resourceWorkerChildStage",std::string{})==(expected==2?"inspect":"cache"),"repair-progress-prefix-changed");
+            need(handles()==before,"repair-progress-lost-handles");
+        }
+    });
     check("actual owned worker preserves a legacy receipt when write admission is refused",[&]{put(home/L".ymcc-managed.json",manifest.dump());put(home/L"settings"/L".ymcc-managed.json","old-settings-copy");const auto r=worker::prepare(steam,home,metadata,[]{return true;},false);need(!r.value("ready",true)&&r.value("resourceWorkerDestroyed",false)&&fs::exists(home/L".ymcc-managed.json")&&!fs::exists(home/L".ymcc-managed.receipt"),"non-owner resource worker moved legacy receipt");});
     check("actual owned worker migrates duplicate root JSON before two official startup scans",[&]{const auto r=normal();need(r.value("ready",false)&&r.value("resourceWorkerDestroyed",false)&&!fs::exists(home/L".ymcc-managed.json")&&fs::exists(home/L".ymcc-managed.receipt"),"production worker did not retire conflicting root JSON");for(unsigned startup=0;startup<2;startup++)for(const auto& file:fs::directory_iterator(home))if(file.path().extension()==L".json")need(MoveFileW(file.path().c_str(),(home/L"settings"/file.path().filename()).c_str())!=FALSE,"official settings scan still hits receipt collision");const auto second=normal();need(second.value("ready",false)&&second.value("resourceWorkerDestroyed",false),"repeat worker startup broke receipt ownership");std::ifstream saved(home/L"settings"/L".ymcc-managed.json");std::string value;saved>>value;need(value=="old-settings-copy","worker changed settings-side user metadata");});
     const auto count=handles();
-    check("forged or stale child response cannot claim ready",[&]{SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",L"bad-reply");const auto r=normal();SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);need(!r.value("ready",true)&&r.value("resourceWorkerDestroyed",false),"forged resource reply accepted");need(handles()==count,"invalid reply leaked handles");});
-    check("child EOF before a result stops promptly without retry or leaked resources",[&]{SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",L"eof");const auto started=GetTickCount64();const auto r=normal();const auto elapsed=GetTickCount64()-started;SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);need(!r.value("ready",true)&&r.value("reason",std::string{})=="resource-worker-read-failed"&&elapsed<1000&&r.value("resourceWorkerDestroyed",false)&&handles()==count,"resource EOF spun or retained ownership");});
+    check("forged or stale child response cannot claim ready",[&]{
+        for(const auto* mode:{L"bad-reply",L"progress-invalid-order",L"progress-invalid-type",L"progress-invalid-secret",L"progress-invalid-extra",L"progress-invalid-duplicate",L"progress-invalid-repeat"}){
+            SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",mode);const auto r=normal();SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);
+            need(!r.value("ready",true)&&r.value("resourceWorkerDestroyed",false)&&r.value("reason",std::string{})=="resource-worker-reply-invalid","forged resource reply accepted");
+            need(handles()==count,"invalid reply leaked handles");
+        }
+    });
+    check("child EOF before a result stops promptly without retry or leaked resources",[&]{SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",L"eof");const auto started=GetTickCount64();const auto r=normal();const auto elapsed=GetTickCount64()-started;SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);need(!r.value("ready",true)&&r.value("reason",std::string{})=="resource-worker-read-failed"&&elapsed<1000&&r.value("resourceWorkerDestroyed",false)&&handles()==count,"resource EOF spun or retained ownership");
+        const auto logged=ymcc::deckydiag::record("prepare",r);
+        need(logged.value("resourceWorkerReadKind",std::string{})=="ended"&&logged.contains("resourceWorkerReadError")&&logged.at("resourceWorkerReadError")==r.at("resourceWorkerReadError")&&!logged.value("resourceWorkerReplyReceived",true)&&logged.value("resourceWorkerDestroyed",false),"real EOF framing facts missing from existing preparation log");
+        checkExitedResourceWait(steam,home,metadata);});
     check("noncooperative resource callback is revoked before the unchanged 3200ms deadline",[&]{SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",L"stall");const auto started=GetTickCount64();const auto r=normal();const auto elapsed=GetTickCount64()-started;SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);need(elapsed<=3200&&!r.value("ready",true)&&r.value("resourceWorkerDestroyed",false),"resource worker exceeded stop bound or retained Job/IO");need(handles()==count,"stalled resource child leaked handles");const auto pid=static_cast<DWORD>(std::stoul([&]{std::ifstream file(home/L"fixture-child-started");std::string s;file>>s;return s;}()));HANDLE process=OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);need(!process||WaitForSingleObject(process,0)==WAIT_OBJECT_0,"stalled child survived");if(process)CloseHandle(process);cases.push_back({{"name","stalled callback actual resources at deadline"},{"pass",true},{"elapsedMs",elapsed},{"deadlineMs",3200},{"destroyed",r.at("resourceWorkerDestroyed")}});});
-    check("OFF during a stuck child stops only its owned Job without waiting for callback release",[&]{SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",L"stall");const auto started=GetTickCount64();const auto r=worker::prepare(steam,home,metadata,[&]{return GetTickCount64()-started<150;},true);const auto elapsed=GetTickCount64()-started;SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);need(elapsed<=1000&&r.value("reason",std::string{})=="preparation-cancelled"&&r.value("resourceWorkerDestroyed",false),"OFF blocked on resource child");need(handles()==count,"OFF resource child leaked handles");});
+    check("OFF during a stuck child stops only its owned Job without waiting for callback release",[&]{SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",L"stall");const auto started=GetTickCount64();const auto r=worker::prepare(steam,home,metadata,[&]{return GetTickCount64()-started<150;},true);const auto elapsed=GetTickCount64()-started;SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);need(elapsed<=1000&&r.value("reason",std::string{})=="preparation-cancelled"&&r.value("resourceWorkerDestroyed",false),"OFF blocked on resource child");
+        const auto logged=ymcc::deckydiag::record("prepare",r);
+        need(!logged.value("resourceWorkerChildExitKnown",true)&&!logged.contains("resourceWorkerChildExitCode"),"our own OFF termination was reported as prior child exit");
+        need(handles()==count,"OFF resource child leaked handles");});
     check("explicit OFF at entry starts no child and touches no resource",[&]{const auto before=handles();const auto r=worker::prepare(steam,home,metadata,[]{return false;},true);need(!r.value("ready",true)&&r.value("reason",std::string{})=="preparation-cancelled"&&handles()==before,"OFF starts resource worker");});
     check("parent setup consumes child verification without any synchronous resource digest",[&]{ymcc::deckyresources::Options options;options.enabled=false;options.isolatedPreparation=normal;const auto r=ymcc::deckysetup::prepare(steam,home,[](const std::wstring&)->std::string{throw std::runtime_error("parent digest must never run");},false,[]{return true;},metadata,options);need(r.value("ready",false)&&r.value("resourceWorkerDestroyed",false),"parent performed resource IO or lost child verification");});
     check("actual Runtime OFF drains a stuck resource preparation before its original deadline",[&]{
@@ -89,6 +242,16 @@ int wmain(int argc,wchar_t** argv){int code=0;if(childPeer(code))return code;try
         need(fs::exists(home/L"fixture-child-started"),"actual Runtime resource child did not enter");
         const auto started=GetTickCount64();runtime.shutdown();const auto elapsed=GetTickCount64()-started;SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);
         need(elapsed<=3200&&destroyed&&!runtime.snapshot().enabled&&handles()==count,"actual Runtime OFF retained resource Job or parent worker handles");
+        fs::remove(home/L"fixture-cache-stage-started");SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",L"progress-stall");
+        const auto progressStarted=GetTickCount64();ULONGLONG stageEntered=0;
+        const auto stageResult=worker::prepare(steam,home,metadata,[&]{
+            if(!stageEntered&&fs::exists(home/L"fixture-cache-stage-started"))stageEntered=GetTickCount64();
+            return !stageEntered||GetTickCount64()-stageEntered<100;
+        },true);
+        SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);
+        const auto stageLogged=ymcc::deckydiag::record("prepare",stageResult);
+        need(GetTickCount64()-progressStarted<=3200&&!stageResult.value("ready",true)&&stageResult.value("reason",std::string{})=="preparation-cancelled"&&stageResult.value("resourceWorkerDestroyed",false)&&handles()==count,"actual phase callback stall weakened cancellation or resource return");
+        need(stageLogged.value("resourceWorkerChildStage",std::string{})=="cache"&&stageLogged.value("resourceWorkerProgressCount",0u)==3u&&!stageLogged.value("resourceWorkerReplyReceived",true),"last child stage was lost or progress claimed final readiness");
     });
     check("actual Runtime committed preparation repairs resource loss without granting Loader launch",[&]{
         ymcc::deckysidebar::Runtime runtime;ymcc::deckysidebar::Config config;std::atomic<unsigned> prepared=0;std::atomic<bool> recovered=false;
@@ -100,5 +263,5 @@ int wmain(int argc,wchar_t** argv){int code=0;if(childPeer(code))return code;try
         need(prepared==2&&recovered&&runtime.snapshot().pid==0,"Ready did not recover resources or started a Loader");
         need(!runtime.requestPreparationRefresh(77),"duplicate Ready restarted preparation");runtime.shutdown();need(handles()==count,"committed resource recovery leaked resources");
     });
-    const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& r){return r.at("pass")==true;});const Json result={{"pass",passed==static_cast<int>(cases.size())},{"count",cases.size()},{"passed",passed},{"cases",cases},{"realSteamActions",0},{"officialLoaderExecuted",false},{"childIsOwnTestImage",true},{"originalStopDeadlineMs",3200}};put(argv[2],result.dump(2));std::cout<<result.dump()<<std::endl;return result.at("pass")==true?0:2;
+    const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& r){return r.at("pass")==true;});const Json result={{"pass",passed==static_cast<int>(cases.size())},{"count",cases.size()},{"passed",passed},{"cases",cases},{"realSteamActions",0},{"officialLoaderExecuted",false},{"childIsOwnTestImage",true},{"exitedResourceWait",exitedResourceWait},{"optionalProgressLoss",optionalProgressLoss},{"optionalRepairProgressLoss",optionalRepairProgressLoss},{"originalStopDeadlineMs",3200}};put(argv[2],result.dump(2));std::cout<<result.dump()<<std::endl;return result.at("pass")==true?0:2;
  }catch(const std::exception& error){SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);std::cerr<<error.what()<<std::endl;return 3;}}

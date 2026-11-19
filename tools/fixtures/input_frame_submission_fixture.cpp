@@ -16,6 +16,10 @@
 #include "game_feedback_receipt.h"
 #include "windows_motion_submission.h"
 #include "legion_motion_source.h"
+#include "msi_virtual_report_diagnostic.h"
+#include "input_host_shared_power.h"
+#include "input_host_compact_frame_reply.h"
+#include <memory>
 #include <atomic>
 #include <cstring>
 #include <functional>
@@ -29,14 +33,14 @@ static std::atomic<bool> g_inputHostRequestedPersonaMatchesBound{true};
 using json=nlohmann::json;
 static bool g_xinputSpecialButton=true;static DWORD g_xinputPrimarySlot=0,g_xinputConnectedMask=1;
 static ULONGLONG now=100;static ULONGLONG GetTickCount64(){return now;}
-static std::atomic<ULONGLONG> power{1},g_inputHostVirtualIntentRevision{0},g_msiMainSourceRevision{1},g_msiFeedbackModeGeneration{1};
+static std::atomic<ULONGLONG> fixturePowerGeneration{1},g_inputHostVirtualIntentRevision{0},g_msiMainSourceRevision{1},g_msiFeedbackModeGeneration{1};
 static std::atomic<unsigned> g_inputHostVirtualIntentWriters{0},g_xinputTopologyEpoch{1},g_xinputSlotIdentityEpoch{1};
 static std::atomic<bool> g_inputReady{true},g_inputHostPowerAdmissionRevoked{false},g_inputHostFaultHoldsStart{false},g_msiDinputRouteDinputArmed{false};
 static std::mutex g_inputHostPersonaMx;
 static std::string g_inputHostBuildPersona,g_inputHostBoundPersona="steamdeck";
 static std::string g_inputHostRunId="native-rog-submission-fixture",g_inputHostStartupNonce="native-rog-submission-fixture-nonce";
 static unsigned long long g_inputHostBoundPowerGeneration=1,g_inputHostSequence=0,g_inputHostSampleSequence=0,g_inputHostConfigRevision=1;
-static std::atomic<ULONGLONG>& g_powerGeneration=power;
+static std::atomic<ULONGLONG>& g_powerGeneration=fixturePowerGeneration;
 static unsigned fixtureRequestId=0;
 static std::string inputHostNewId(){return "native-fixture-request-"+std::to_string(++fixtureRequestId);}
 static ULONGLONG g_inputHostEpoch=7;
@@ -44,22 +48,42 @@ static ULONGLONG g_inputHostEpoch=7;
 @@ENVELOPE@@
 static const char kC6aHexDigits[]="0123456789abcdef";
 @@HASH@@
-static ULONGLONG inputHostEpochToken(){return g_inputHostEpoch;}static ULONGLONG currentPowerGeneration(){return power;}
+static ULONGLONG inputHostEpochToken(){return g_inputHostEpoch;}static ULONGLONG currentPowerGeneration(){return fixturePowerGeneration;}
 static bool g_inputHostProcess=true,g_inputHostPrepared=true,g_inputHostNeutralized=true,g_inputHostTransportFault=false,g_inputHostActive=true;
 static bool exitFence=false,writerAllowed=true,knownMsi=false,msiEligible=true;
-static bool inputHostExitFenceRaised(){return exitFence;}static bool sgVirtualWriterAllowedNow(){return writerAllowed;}static bool msiClawKnownBoardAuthority(){return knownMsi;}static bool msiDinputMainSourceEligible(){return msiEligible;}static bool msiControllerNeutralCleanupAllowed(bool neutral){return neutral&&knownMsi;}
+static bool inputHostExitFenceRaised(){return exitFence;}static bool msiClawKnownBoardAuthority(){return knownMsi;}static bool msiDinputMainSourceEligible(){return msiEligible;}static bool msiControllerNeutralCleanupAllowed(bool neutral){return neutral&&knownMsi;}
 static bool logThrows=false;static std::vector<json> logs;static void appendNativeLifecycleLog(const char*,const json& row){if(logThrows)throw std::runtime_error("inert evidence failure");logs.push_back(row);}
-struct InputCaptureGamepadSnapshot {
-    bool live=true;XINPUT_GAMEPAD pad{};DWORD primarySlot=0;unsigned connectedMask=1;std::string inputSource="xinput";
-    ULONGLONG readAttemptSequence=1,readStartedTick=100,readCompletedTick=100,readPowerGeneration=1,readMsiSourceRevision=1,readMsiModeGeneration=1;
-    unsigned readTopologyGeneration=1,readIdentityGeneration=1;bool readContextStable=true;
-    unsigned physicalReaderPid=0;unsigned long long physicalReaderSequence=0;bool rogRawInputSubstitution=false;ymcc::touchhaptic::SourceToken feedbackSource{};bool specialXbox=false;
-};
+
+// Controlled original fixture inputs project through one public Reader. No device/OS power read.
+namespace sp=ymcc::sleeppower;namespace ip=ymcc::inputHost::sharedPower;
+static std::uint64_t fixturePublication=1,fixtureNotification=1,fixtureSuspendSerial=1;
+static std::uint32_t fixturePowerPhase=0;static bool fixtureNotificationPending=false;
+static sp::RevocationMirrors g_sharedPowerRevocations;
+static ip::Cache g_inputHostInputPowerCache;
+static thread_local std::shared_ptr<ip::Scope> t_inputHostRequestPower;
+@@HARDWARE_TLS@@
+static bool sgShouldKeepInputDuringStandby(){return true;}
+static int __cdecl readSharedSystemPower(sp::SharedPowerV1* output,std::uint32_t bytes){
+ if(!output||bytes!=sizeof(*output))return 0;
+ sp::SharedPowerV1 value;value.generation=currentPowerGeneration();
+ value.publicationRevision=fixturePublication;value.observedNotificationSequence=fixtureNotification;
+ value.suspendSerial=fixtureSuspendSerial;value.phase=fixturePowerPhase;
+ value.flags=sp::kKnown|(writerAllowed&&value.phase==0?sp::kHardwareAllowed:0u)|
+  (fixtureNotificationPending?sp::kNotificationPending:0u);*output=value;return 1;
+}
+static sp::SharedPowerV1 fixtureReadPublicPower(){sp::SharedPowerV1 result;
+ if(!sp::capturePowerObservation(&readSharedSystemPower,result))throw std::runtime_error("public Reader UNKNOWN");return result;}
+@@POWER_WRITER@@
+
+@@SNAPSHOT_TYPE@@
 static InputCaptureGamepadSnapshot g_inputCaptureGamepadSnapshot;
 static ymcc::input::frameSubmission::ReadProgress g_inputHostReadProgress;
 static void captureReadSnapshot(const std::string& inputSource="xinput",DWORD admittedMask=1){
  const bool live=true;const XINPUT_GAMEPAD pad{};const bool rogRawInputSubstitution=inputSource=="rog-hid-raw";
+ const bool usedCommonHid=inputSource=="xinput-hid";
+ const CommonControllerHidRead commonHidRead{1,100,false,true,32768};
 @@SNAPSHOT_GUIDE@@
+ g_inputCaptureGamepadSnapshot.sharedPower=fixtureReadPublicPower();
 }
 static json sourceDiagnostic(){return json{
 @@UI_SOURCE_FIELD@@
@@ -79,14 +103,23 @@ static void nativeSubmitGameFeedbackFrame(const InputFrameSubmission&,bool) {}
 // production guard is inactive here; unexpected entry remains an explicit fail.
 static thread_local const void* t_inputHostDeferredPhysicalHideWrite=nullptr;
 static bool inputHostDeferredPhysicalHideWriteCurrent(){throw std::logic_error("unmodeled-deferred-visibility-in-frame-fixture");}
+static thread_local bool t_inputHostOneXStartWrite=false;
+static bool inputHostOneXStartCurrent(){throw std::logic_error("OneX lifecycle outside frame fixture");}
+static bool inputHostOneXStartMayIssue(){throw std::logic_error("OneX lifecycle outside frame fixture");}
+static thread_local bool t_inputHostDeferredPhysicalHideRefreshIssueActive=false;
+static bool inputHostDeferredPhysicalHideReserveRefreshIssue(){throw std::logic_error("visibility refresh outside frame fixture");}
 @@ADAPTERS@@
-namespace ymcc::screenpads {struct Snapshot{bool present=false;};static json snapshotJson(const Snapshot& s){return {{"present",s.present}};}}
+namespace ymcc::screenpads {using Json=nlohmann::json;
+@@SCREENPAD_TYPES@@
+}
 @@NORMALIZE_AXIS@@
 @@FRAME@@
 @@SERIALIZERS@@
 enum class InputHostPublicationStage{SourceAbsent};static void inputHostNotePublicationStage(InputHostPublicationStage){}
 static std::atomic<ULONGLONG> g_inputHostHealthySinceTick{0};
-struct InputHostFastReceipt{};
+@@FAST_RECEIPT@@
+@@COMPACT_GLOBALS@@
+namespace inputHostSelfTestRules{struct ReceiptObservation;}
 static unsigned pipeWrites=0,commandSequence=0,failuresFromHost=0;static bool connectFails=false;
 static bool freshNeutralReady=true;static unsigned freshNeutralCalls=0;
 static bool inputHostFreshNeutralReady(bool,const XINPUT_GAMEPAD&,unsigned){++freshNeutralCalls;return freshNeutralReady;}
@@ -97,6 +130,8 @@ static json issuedCommands=json::array();static bool exportIssued=false;
 static std::string caseName,caseSource="xinput";
 static bool request(const char* command,const json& payload,json* responseOut,
  const std::string* preparedText=nullptr,const std::string* preparedRequestId=nullptr,const unsigned long long* preparedSequence=nullptr){
+ const InputHostRequestPowerScope sharedRequest(t_inputFrameSubmission?t_inputFrameSubmission->powerScope:
+  g_inputHostInputPowerCache.acquire(&readSharedSystemPower,g_sharedPowerRevocations,sgShouldKeepInputDuringStandby()));
 @@PRE_ENVELOPE@@
  std::string requestText,requestIdValue;unsigned long long sequenceValue=0;
  if(preparedText){
@@ -106,7 +141,9 @@ static bool request(const char* command,const json& payload,json* responseOut,
  }
  if(requestIdValue.empty()||!sequenceValue)throw std::runtime_error("invalid tuple");
  if(connectHook){auto hook=std::move(connectHook);connectHook={};hook();}
+ const bool connected=!connectFails;
 @@PRE_PIPE@@
+ if(!inputHostFrameSubmissionMayIssue(t_inputFrameSubmission))return false;
  if(connectFails){++failuresFromHost;return false;}
  const auto issued=json::parse(requestText);
  for(const auto& item:controlObservation.items())if(issued.at(item.key())!=item.value())throw std::runtime_error("issued controls differ from actual frame");
@@ -114,8 +151,8 @@ static bool request(const char* command,const json& payload,json* responseOut,
  if(exportIssued)issuedCommands.push_back({{"case",caseName},{"source",t_commonFrameSource?t_commonFrameSource->inputSource:"none"},{"command",issued}});
  return true;
 }
-static bool inputHostRequestPreparedLocked(const char* command,const json& frame,const char*,int,json* responseOut,const std::string* text,const std::string* id,const unsigned long long* sequence,InputHostFastReceipt*){pendingFrame=frame;return request(command,frame,responseOut,text,id,sequence);}
-static bool inputHostRequestLocked(const char* command,const json& frame,const char*,int,json* responseOut){pendingFrame=frame;return request(command,frame,responseOut);}
+static bool inputHostRequestPreparedLocked(const char* command,const json& frame,const char*,int,json* responseOut,const std::string* text,const std::string* id,const unsigned long long* sequence,InputHostFastReceipt*,bool advanceSequence=true,inputHostSelfTestRules::ReceiptObservation* observation=nullptr,bool compactRequest=false,InputFrameSubmission* =nullptr){if(!advanceSequence||observation||compactRequest)throw std::logic_error("unselected compact/diagnostic request terminal");pendingFrame=frame;return request(command,frame,responseOut,text,id,sequence);}
+[[maybe_unused]] static bool inputHostRequestLocked(const char* command,const json& frame,const char*,int,json* responseOut){pendingFrame=frame;return request(command,frame,responseOut);}
 struct Result{bool accepted=false,neutral=false,rejected=false,fault=false;json receipt;};
 static unsigned long long nativeSignalWireSample=0,nativeSignalWireTick=0;
 static const char* inputCaptureMotionProofId(bool){return "pair-unproven-safe-zero";}
@@ -173,18 +210,27 @@ static Result submit(const InputCaptureGamepadSnapshot* sample,bool semanticNeut
  t_commonFrameSource=nullptr;return {accepted,publishedSemanticNeutral,frameSubmission.rejected,fault,receipt};
 }
 static InputCaptureGamepadSnapshot sample;
-static void reset(){g_inputHostReadProgress={};g_realStickTest={true,true};g_inputHostRequestedPersonaMatchesBound=true;logThrows=false;freshNeutralReady=true;freshNeutralCalls=0;now=100;power=1;g_inputHostVirtualIntentRevision=0;g_msiMainSourceRevision=1;g_inputHostVirtualIntentWriters=0;g_xinputTopologyEpoch=g_xinputSlotIdentityEpoch=1;g_inputReady=true;g_inputHostPowerAdmissionRevoked=false;g_inputHostFaultHoldsStart=false;g_msiDinputRouteDinputArmed=false;g_inputHostEpoch=7;g_inputHostProcess=g_inputHostPrepared=g_inputHostNeutralized=g_inputHostActive=true;g_inputHostTransportFault=exitFence=knownMsi=false;writerAllowed=msiEligible=true;logs.clear();sample={};sample.inputSource=caseSource;sample.specialXbox=true;g_xinputSpecialButton=true;g_xinputConnectedMask=1;g_inputCaptureGamepadSnapshot={};t_commonFrameSource=nullptr;t_inputFrameSubmission=nullptr;pipeWrites=commandSequence=failuresFromHost=0;wire=json::object();controlObservation=json::object();connectHook=afterAssemblyHook={};connectFails=false;g_inputHostSequence=g_inputHostSampleSequence=0;fixtureRequestId=0;exportIssued=false;g_inputHostBoundPowerGeneration=1;g_inputHostBoundPersona="steamdeck";g_inputHostBuildPersona.clear();}
+static void reset(){g_inputHostFrameReplyBinding.clear();g_inputHostCompactFrameRequest=false;t_inputHostRequestHardwareRequired=false;g_inputHostInputPowerCache.reset();t_inputHostRequestPower.reset();g_sharedPowerRevocations.revoke();fixturePublication=fixtureNotification=fixtureSuspendSerial=1;fixturePowerPhase=0;fixtureNotificationPending=false;g_inputHostReadProgress={};g_realStickTest={true,true};g_inputHostRequestedPersonaMatchesBound=true;logThrows=false;freshNeutralReady=true;freshNeutralCalls=0;now=100;fixturePowerGeneration=1;g_inputHostVirtualIntentRevision=0;g_msiMainSourceRevision=1;g_inputHostVirtualIntentWriters=0;g_xinputTopologyEpoch=g_xinputSlotIdentityEpoch=1;g_inputReady=true;g_inputHostPowerAdmissionRevoked=false;g_inputHostFaultHoldsStart=false;g_msiDinputRouteDinputArmed=false;g_inputHostEpoch=7;g_inputHostProcess=g_inputHostPrepared=g_inputHostNeutralized=g_inputHostActive=true;g_inputHostTransportFault=exitFence=knownMsi=false;writerAllowed=msiEligible=true;logs.clear();sample={};sample.live=true;sample.connectedMask=1;sample.readAttemptSequence=1;sample.readStartedTick=sample.readCompletedTick=100;sample.readPowerGeneration=1;sample.readMsiSourceRevision=sample.readMsiModeGeneration=1;sample.readTopologyGeneration=sample.readIdentityGeneration=1;sample.readContextStable=true;sample.sharedPower=fixtureReadPublicPower();sample.inputSource=caseSource;sample.commonHidReportSequence=caseSource=="xinput-hid"?1:0;sample.commonHidObservedTick=caseSource=="xinput-hid"?100:0;sample.commonHidCompleteBasic=caseSource=="xinput-hid";sample.commonHidCombinedTriggerRaw=caseSource=="xinput-hid"?32768:0;sample.specialXbox=true;g_xinputSpecialButton=true;g_xinputConnectedMask=1;g_inputCaptureGamepadSnapshot={};t_commonFrameSource=nullptr;t_inputFrameSubmission=nullptr;pipeWrites=commandSequence=failuresFromHost=0;wire=json::object();controlObservation=json::object();connectHook=afterAssemblyHook={};connectFails=false;g_inputHostSequence=g_inputHostSampleSequence=0;fixtureRequestId=0;exportIssued=false;g_inputHostBoundPowerGeneration=1;g_inputHostBoundPersona="steamdeck";g_inputHostBuildPersona.clear();}
 static json cases=json::array(),failures=json::array();static unsigned assertions=0;
 static json pairedFrames=json::object();
 static void require(bool value,const char* message){++assertions;if(!value)failures.push_back({{"case",caseName},{"message",message}});}
-template<class F>static void run(const std::string& name,F fn){reset();caseName=name;const auto before=failures.size();const auto checks=assertions;fn();require(t_inputFrameSubmission==nullptr&&t_commonFrameSource==nullptr,"thread-local scopes unwind after every path");cases.push_back({{"name",name},{"passed",before==failures.size()},{"assertions",assertions-checks},{"pipeWrites",pipeWrites},{"commandSequence",commandSequence}});}
+template<class F>static void run(const std::string& name,F fn){
+#ifdef YMCC_COMMON_HID_DIRECTED
+ if(name.rfind("legacy/xinput-hid/",0)!=0&&name.rfind("prepared/xinput-hid/",0)!=0&&name.rfind("common-hid/",0)!=0)return;
+#endif
+ reset();caseName=name;const auto before=failures.size();const auto checks=assertions;fn();require(t_inputFrameSubmission==nullptr&&t_commonFrameSource==nullptr,"thread-local scopes unwind after every path");cases.push_back({{"name",name},{"passed",before==failures.size()},{"assertions",assertions-checks},{"pipeWrites",pipeWrites},{"commandSequence",commandSequence}});}
 @@UNIFIED_CONTROLLER_INPUT@@
 int main(){
  unifiedControllerInputCases();
  run("snapshot/Guide-press-is-captured",[]{g_xinputSpecialButton=true;captureReadSnapshot();require(g_inputCaptureGamepadSnapshot.specialXbox,"producer captures Guide together with physical snapshot");});
  run("snapshot/Guide-release-replaces-press",[]{g_inputCaptureGamepadSnapshot.specialXbox=true;g_xinputSpecialButton=false;captureReadSnapshot();require(!g_inputCaptureGamepadSnapshot.specialXbox,"producer clears Guide on a later complete snapshot");});
  for(const std::string route:{"xinput","msi-dinput","none"})run("diagnostic/actual-source/"+route,[&]{g_xinputConnectedMask=route=="xinput"?1:0;captureReadSnapshot(route,g_xinputConnectedMask);require(sourceDiagnostic().at("source")==route,"neutral admission reports captured source, never guesses ROG HID from zero XInput mask");});
- for(const bool fast:{false,true})for(const std::string source:{"xinput","rog-hid-raw"}){
+#ifdef YMCC_COMMON_HID_DIRECTED
+ const std::array<std::string,1> selectedSources{"xinput-hid"};
+#else
+ const std::array<std::string,2> selectedSources{"xinput","rog-hid-raw"};
+#endif
+ for(const bool fast:{false,true})for(const std::string source:selectedSources){
   caseSource=source;
   const std::string mode=fast?"prepared/":"legacy/";
   const std::string prefix=mode+source+"/";
@@ -236,18 +282,18 @@ int main(){
    const auto r=submit(&sample,false,fast);
    require(r.accepted&&!r.neutral&&pipeWrites==1,"same-generation complete snapshot remains publishable");
    require(wire["buttons"]==(capturedGuide?0x1401:0x1001),"Guide belongs to captured physical sample despite opposite later UI read");
-   require(sample.readPowerGeneration==power&&sample.readTopologyGeneration==g_xinputTopologyEpoch&&sample.readIdentityGeneration==g_xinputSlotIdentityEpoch,"interleaving does not change any lifecycle generation");
+   require(sample.readPowerGeneration==fixturePowerGeneration&&sample.readTopologyGeneration==g_xinputTopologyEpoch&&sample.readIdentityGeneration==g_xinputSlotIdentityEpoch,"interleaving does not change any lifecycle generation");
   });
   for(const std::string route:{"xinput","xinput-any-connected","msi-dinput"})run(prefix+"valid-"+route,[&]{sample.inputSource=route;if(route=="msi-dinput"){knownMsi=true;g_msiDinputRouteDinputArmed=true;sample.connectedMask=0;}const auto r=submit(&sample,false,fast);require(r.accepted&&!r.neutral&&!r.fault&&pipeWrites==1,"current authorized source crosses actual guard/dispatch");require(wire["buttons"]==0x1401&&wire["backButtons"]==3,"normal content remains live");});
   const std::vector<std::pair<std::string,std::function<void()>>> stale={
-   {"power",[]{++power;}},{"topology",[]{++g_xinputTopologyEpoch;}},{"identity",[]{++g_xinputSlotIdentityEpoch;}},
+   {"power",[]{++fixturePowerGeneration;}},{"topology",[]{++g_xinputTopologyEpoch;}},{"identity",[]{++g_xinputSlotIdentityEpoch;}},
    {"age",[]{now=2000;}},{"unstable",[]{sample.readContextStable=false;}},{"no-sequence",[]{sample.readAttemptSequence=0;}},
    {"future-read",[]{sample.readCompletedTick=1000;}},{"unknown-route",[]{sample.inputSource="unknown";}},
    {"xinput-zero-mask",[]{sample.connectedMask=0;}},{"MSI-source-revoked",[]{knownMsi=true;g_msiDinputRouteDinputArmed=true;sample.inputSource="msi-dinput";sample.connectedMask=0;++g_msiMainSourceRevision;}}
   };
   for(const auto& row:stale)run(prefix+"initial-stale-neutral/"+row.first,[&]{row.second();const auto r=submit(&sample,false,fast);require(r.accepted&&r.neutral&&!r.fault&&pipeWrites==1,"already stale sample sends full neutral rather than stale live values");require(wire==focusIsolationAssembleFrame(focusIsolationNeutralContent()),"buttons,Guide,back,raw,triggers,IMU,touch and screen bits all use actual neutral assembly");});
   const std::vector<std::pair<std::string,std::function<void()>>> changes={
-   {"target-persona-mismatch",[]{g_inputHostRequestedPersonaMatchesBound=false;}},{"target-disabled",[]{g_realStickTest.virtualTargetEnabled=false;}},{"capture-disabled",[]{g_realStickTest.enabled=false;}},{"power",[]{++power;}},{"power-revoked",[]{g_inputHostPowerAdmissionRevoked=true;}},{"writer-gate",[]{writerAllowed=false;}},
+   {"target-persona-mismatch",[]{g_inputHostRequestedPersonaMatchesBound=false;}},{"target-disabled",[]{g_realStickTest.virtualTargetEnabled=false;}},{"capture-disabled",[]{g_realStickTest.enabled=false;}},{"power",[]{++fixturePowerGeneration;}},{"power-revoked",[]{g_inputHostPowerAdmissionRevoked=true;}},{"writer-gate",[]{writerAllowed=false;}},
    {"Host",[]{++g_inputHostEpoch;}},{"intent",[]{++g_inputHostVirtualIntentRevision;}},{"intent-writing",[]{++g_inputHostVirtualIntentWriters;}},
    {"topology",[]{++g_xinputTopologyEpoch;}},{"identity",[]{++g_xinputSlotIdentityEpoch;}},{"read-expired",[]{now=2000;}}
   };
@@ -284,6 +330,12 @@ int main(){
   run(prefix+"evidence-failure-never-admits-stale-live-or-breaks-cleanup",[&]{logThrows=true;now=2000;const auto r=submit(&sample,false,fast);require(r.accepted&&r.neutral&&pipeWrites==1,"throwing log sink does not change actual neutralization/admission");});
   run(prefix+"true-transport-failure-stays-fault",[&]{connectFails=true;const auto r=submit(&sample,false,fast);require(!r.accepted&&!r.rejected&&r.fault&&failuresFromHost==1,"a genuine current-context transport failure is not hidden as a transient skip");});
  }
+#ifdef YMCC_COMMON_HID_DIRECTED
+ caseSource="xinput-hid";
+ run("common-hid/unproven-report-rejected",[]{sample.commonHidReportSequence=0;require(!inputCaptureBindStandardInput(&sample).known(),"HID alias requires actual report sequence");});
+ run("common-hid/missing-slot-rejected",[]{sample.connectedMask=0;require(!inputCaptureBindStandardInput(&sample).known(),"HID alias requires original physical slot mask");});
+ run("common-hid/persona-preserved",[]{sample.pad.wButtons=XINPUT_GAMEPAD_A;auto r=submit(&sample,false,false);require(r.accepted&&inputHostConfiguredPersona()=="steamdeck","source data does not change requested persona");});
+#endif
  caseSource="xinput";
  run("rog-compare/canonical-and-raw-controls-identical",[]{
   for(const std::string mode:{"prepared/","legacy/"})for(const std::string state:{"held","release"})
@@ -293,5 +345,6 @@ int main(){
    require(!command.contains("source")&&!command.contains("case"),"case/source metadata stays outside production envelope");
   }
  });
+ g_inputHostInputPowerCache.reset();t_inputHostRequestPower.reset();
  std::cout<<json({{"cases",cases},{"assertions",assertions},{"failures",failures},{"issuedCommands",issuedCommands},{"allTransportInert",true},{"realDeviceIo",false},{"wholeSubmitOrRequestCompiled",false}}).dump(2)<<std::endl;return failures.empty()?0:1;
 }

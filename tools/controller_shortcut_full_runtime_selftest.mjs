@@ -1,23 +1,41 @@
 // Audits the production parser and trigger state machine for every visible output.
 // The OS window/action, configuration and clock are in-memory seams only.
-import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {createRequire} from 'node:module';import {createHash} from 'node:crypto';
-const root=path.resolve(import.meta.dirname,'..'),out=path.resolve(process.argv[2]||'G:/YeManCC-Work/Build/Tasks/ControllerShortcutFullAudit-20261031/native');fs.mkdirSync(out,{recursive:true});
-const sourceFile=process.argv[3]||path.join(root,'native/main.cpp'),source=fs.readFileSync(sourceFile,'utf8');
+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {createRequire} from 'node:module';import {createHash} from 'node:crypto';import {fileURLToPath} from 'node:url';
+const positional=[];let serialConfigSourceOrigin=false,repoRoot;
+for(let i=2;i<process.argv.length;++i){const arg=process.argv[i];if(arg==='--serial-config-source-origin'){assert(!serialConfigSourceOrigin,'Duplicate selector');serialConfigSourceOrigin=true;}else if(arg==='--repo-root'){assert(repoRoot===undefined&&process.argv[i+1]&&path.isAbsolute(process.argv[i+1]),'--repo-root requires one absolute repository source root');repoRoot=process.argv[++i];}else{assert(!arg.startsWith('--'),'Unknown option '+arg);positional.push(arg);}}
+assert(positional.length<=6&&(!serialConfigSourceOrigin||positional.length===2),'Use [OUT SOURCE_MAIN VARIANTS SAVED REPAIR CONTROL] [--repo-root ABS_ROOT] or OUT SOURCE_MAIN --repo-root ABS_ROOT --serial-config-source-origin');
+if(serialConfigSourceOrigin)assert(repoRoot!==undefined&&path.isAbsolute(positional[0])&&path.isAbsolute(positional[1]),'Directed source-origin mode requires explicit absolute OUT, SOURCE_MAIN and --repo-root');
+const root=path.resolve(repoRoot??path.join(import.meta.dirname,'..')),out=path.resolve(positional[0]||'G:/YeManCC-Work/Build/Tasks/ControllerShortcutFullAudit-20261031/native');if(serialConfigSourceOrigin&&fs.existsSync(out)&&fs.readdirSync(out).length)throw Error('Directed evidence directory must be empty');fs.mkdirSync(out,{recursive:true});
+const sourceFile=path.resolve(positional[1]||path.join(root,'native/main.cpp')),source=fs.readFileSync(sourceFile,'utf8');
+const sourceOriginCaseNames=['generation-zero-backup-keeps-existing-semantics','generation-zero-primary-latches-source','generation-zero-after-primary-rejects-source-downgrade','read-failure-cannot-claim-required','old-backup-cannot-claim-required','primary-read-restores-required-and-new-admission','applied-generation-backup-cannot-replace-current-rules','valid-primary-missing-input-is-authoritative'];
 function extract(name){const regex=new RegExp(String.raw`^static [^\n;]*\b${name}\([^;{]*\)\s*\{[^]*?\n\}`,'m'),match=regex.exec(source);assert(match,'Missing '+name);return match[0]}
 const structure=source.match(/struct NativeKeyboardShortcutRule \{[\s\S]*?\n\};/)[0];
+const inventoryDeclaration=source.match(/^static bool g_nativeShortcutInventoryDirty[^;\n]*;/m)?.[0]||'';
 const funcs=['nativeKeyboardShortcutMaskBit','nativeKeyboardShortcutDuration','nativeKeyboardShortcutRequiredMask','nativeInputShortcutDesktopKey','nativeInputShortcutDesktopKeys','nativeKeyboardShortcutVirtualKey','nativeKeyboardShortcutInputFlags','nativeKeyboardShortcutAllInputs','nativeYmccShortcutAction','nativeYmccShortcutDelta','nativeShortcutLegacyDefaultSlot','nativeShortcutLegacyTemplateMatches','nativeShortcutLegacyDefaultAllowed','nativeKeyboardShortcutsRefresh'].map(extract);
 
-const req=createRequire(path.join(root,'package.json')),defaultsModule={exports:{}};new Function('module','exports','require',req('esbuild').buildSync({entryPoints:[path.join(root,'src/bridge/controllerShortcutRules.ts')],bundle:true,platform:'node',format:'cjs',write:false}).outputFiles[0].text)(defaultsModule,defaultsModule.exports,req);const factoryDefaults=defaultsModule.exports.NATIVE_DEFAULT_SHORTCUTS.map(d=>defaultsModule.exports.nativeDefaultRule(d.defaultKey));
-const legacyStart=source.indexOf('    const bool shoulderDown = ',source.indexOf('static void nativeKeyboardShortcutsEvaluate(')),legacyEnd=source.indexOf('\n    gamepadProcessUiInput(w, now);',legacyStart);assert(legacyStart>0&&legacyEnd>legacyStart);const allLegacyCore=source.slice(legacyStart,legacyEnd);
-const repairExports=process.argv[6]?JSON.parse(fs.readFileSync(process.argv[6],'utf8')):[];
-const savedExports=process.argv[5]?JSON.parse(fs.readFileSync(process.argv[5],'utf8')):[];
-const controlExports=process.argv[7]?JSON.parse(fs.readFileSync(process.argv[7],'utf8')):[];
-const variants=JSON.parse(fs.readFileSync(process.argv[4]||'G:/YeManCC-Work/Build/Tasks/ControllerShortcutFullAudit-20261031/model/POSITIVE-VARIANTS.json','utf8'));
+// The actual refresh may publish configuration revisions. Keep that type-level
+// fence exact; keyboard sequence engine, clocks and mock action ports stay intact.
+const serialActionFenceNeeded=funcs.some(code=>/\bGamepadSerialEvent::/.test(code));
+const serialActionTypeMatches=serialActionFenceNeeded?[...source.matchAll(/^struct GamepadSerialEvent\s*\{[\s\S]*?^\};/gm)]:[];
+if(serialActionFenceNeeded)assert.equal(serialActionTypeMatches.length,1,'one actual GamepadSerialEvent fence declaration');
+const serialActionType=serialActionFenceNeeded?serialActionTypeMatches[0][0]:'';
+if(serialConfigSourceOrigin)for(const name of ['ConfigurationWrite','rulesPublished','RulesRequired','RulesApplied','captureRevision','currentRevision'])assert(serialActionType.includes(name),'Directed origin scenario needs actual existing fence '+name);
+
+const req=createRequire(path.join(root,'package.json')),defaultsModule={exports:{}};if(!serialConfigSourceOrigin)new Function('module','exports','require',req('esbuild').buildSync({entryPoints:[path.join(root,'src/bridge/controllerShortcutRules.ts')],bundle:true,platform:'node',format:'cjs',write:false}).outputFiles[0].text)(defaultsModule,defaultsModule.exports,req);const factoryDefaults=serialConfigSourceOrigin?[]:defaultsModule.exports.NATIVE_DEFAULT_SHORTCUTS.map(d=>defaultsModule.exports.nativeDefaultRule(d.defaultKey));
+const legacyStart=source.indexOf('    const bool shoulderDown = ',source.indexOf('static void gamepadEval() {'));
+const legacyTail=source.indexOf('gamepadProcessUiInput(w, now',legacyStart);
+const legacyEnding=source.slice(legacyStart,legacyTail).match(/(?:\s*\{\s*UiCostGamepadSpan uiInputCost\(kUiCostGamepadUiInput,uiStageCostOn\);)?\s*$/);
+assert(legacyStart>0&&legacyTail>legacyStart&&legacyEnding);const allLegacyCore=source.slice(legacyStart,legacyStart+legacyEnding.index);
+const repairExports=positional[4]?JSON.parse(fs.readFileSync(positional[4],'utf8')):[];
+const savedExports=positional[3]?JSON.parse(fs.readFileSync(positional[3],'utf8')):[];
+const controlExports=positional[5]?JSON.parse(fs.readFileSync(positional[5],'utf8')):[];
+const variants=serialConfigSourceOrigin?[]:JSON.parse(fs.readFileSync(positional[2]||'G:/YeManCC-Work/Build/Tasks/ControllerShortcutFullAudit-20261031/model/POSITIVE-VARIANTS.json','utf8'));
 const evaluatorStart=source.indexOf('static void nativeKeyboardShortcutsEvaluate('),coreStart=source.indexOf('        const uint64_t currentMask = ',evaluatorStart),coreEnd=source.indexOf('        if (emit) {',coreStart);assert(coreStart>evaluatorStart&&coreEnd>coreStart);const triggerCore=source.slice(coreStart,coreEnd);
 const cpp=String.raw`
 #define YMCC_SHORTCUT_FIXTURE
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+${serialConfigSourceOrigin?'#define SERIAL_CONFIG_SOURCE_ORIGIN_FIXTURE 1':''}
 #include <Windows.h>
 #include <Xinput.h>
 #include <algorithm>
@@ -34,45 +52,64 @@ const cpp=String.raw`
 #include <fstream>
 #include <functional>
 #include <string>
+#include <stdexcept>
 #include <set>
 #include <vector>
+#include "gyro_telemetry_record.h"
 #include "input_shortcut_toggle.h"
+#include "shortcut_window_toggle.h"
 #include "shortcut_action_protocol.h"
+#if __has_include("desktop_function_shortcut.h")
+#include "desktop_function_shortcut.h"
+#endif
 #include "keyboard_shortcut_sequence.h"
 #include "shortcut_frontend_button.h"
 #include "boot_mode_shortcuts.h"
 using json=nlohmann::json;
+${serialActionType}
 namespace ymcc::radial{static bool userAvailable(){return false;}static bool userActionAvailable(const std::string& s){return s!="radial.summon";}}
 static constexpr int kOemProducerCount=8;
 ${structure}
 static std::vector<NativeKeyboardShortcutRule> g_nativeKeyboardShortcuts;
 static uint32_t g_nativeShortcutLegacyOverrideMask=0;
 static bool g_nativeShortcutRulesConfigured=false;
+${inventoryDeclaration}
 static ULONGLONG g_nativeKeyboardShortcutLastRefresh=0;
 static long long g_nativeKeyboardShortcutRevision=-1;
 static constexpr ULONGLONG NATIVE_KEYBOARD_SHORTCUT_REFRESH_MS=400;
 static std::atomic<uint32_t> g_oemShortcutEdgeEpoch{0};
 static json fixtureInput;
+static bool fixtureSettingsPrimaryRead=true,fixtureSettingsReadFailure=false;
 static json ymSettingsSection(const char*){return fixtureInput;}
 // In-memory settings seam; the production getter is checked by its real Win32 leaf.
-static json ymSettingsFields(const char* section, std::initializer_list<const char*> fields) {
+// primaryRead is controlled source fact only; this port is NOT the actual file/cache/lock reader.
+static json ymSettingsFields(const char* section, std::initializer_list<const char*> fields,bool* primaryRead=nullptr) {
+    if(primaryRead)*primaryRead=false;
+    if(fixtureSettingsReadFailure)return json::object();
     const auto input = ymSettingsSection(section);
     json selected = json::object();
     if (input.is_object()) for (const auto* key : fields) {
         const auto value = input.find(key);
         if (value != input.end()) selected[key] = *value;
     }
+    if(primaryRead)*primaryRead=fixtureSettingsPrimaryRead;
     return selected;
 }
 static bool nativeInputShortcutDesktopKey(const std::string&,WORD&);
+#ifdef SERIAL_CONFIG_SOURCE_ORIGIN_FIXTURE
+static json fixtureSourceLogs=json::array();static unsigned fixtureSourceLogAttempts=0;static bool fixtureSourceLogThrows=false;
+static void appendNativeLifecycleLog(const char* event,const json& data){++fixtureSourceLogAttempts;if(fixtureSourceLogThrows)throw std::runtime_error("controlled-log-failure");fixtureSourceLogs.push_back({{"event",event},{"data",data}});}
+#else
+static void appendNativeLifecycleLog(const char*,const json&){}
+#endif
 ${funcs.join('\n')}
 static std::set<int> desktopDown;
 static SHORT fixtureGetAsyncKeyState(int key){return desktopDown.count(key)?SHORT(0x8000):0;}
 #define GetAsyncKeyState fixtureGetAsyncKeyState
-static void appendNativeLifecycleLog(const char*,const json&){}
 
+#ifndef SERIAL_CONFIG_SOURCE_ORIGIN_FIXTURE
 namespace ymcc::keyboardEvents {enum class SourceId{NativeKeyboardShortcut};}
-struct OemProducerTokens{};
+struct OemProducerTokens{uint64_t requiredMask=0;};
 static constexpr uint64_t kOemShortcutUnboundEpoch=0;
 static std::atomic<bool> fixtureWindowCurrent{true};
 static std::atomic<bool> g_exitRequested{false},g_shortcutRecordingActive{false},g_inputReady{true},fixtureProducerCurrent{true};
@@ -80,6 +117,8 @@ static std::atomic<uint64_t> fixturePowerGeneration{1};
 static uint64_t currentPowerGeneration(){return fixturePowerGeneration.load();}
 static bool sgVirtualWriterAllowedNow(){return true;}
 static bool radialHasInputOwner(){return false;}
+static std::atomic<bool> g_inputReleaseRequired{false};
+static bool customSteamLibraryInputSuppressed(){return false;}
 static bool oemProducerTokensCurrent(OemProducerTokens){return fixtureProducerCurrent.load();}
 static bool msiWmiGenerationCurrent(uint64_t){return true;}
 static bool msiWmiShortcutAuthoritative(){return false;}
@@ -97,7 +136,19 @@ static bool nativeYmccShortcutSubmit(std::function<void()> job,SerialJobKind,uin
 #include "keyboard_shortcut_sequence_runtime.h"
 
 static int emissions=0;
+template<class... Args> static void nativeOemVirtualConsumeMatched(Args&&...){}
 static void tick(uint64_t controllerMask,uint64_t oemMask,ULONGLONG now){for(auto& rule:g_nativeKeyboardShortcuts){const bool oemRule=(rule.requiredMask>>20)!=0;
+const uint32_t desktopBit=0;
+ const ymcc::input::desktopFunction::Edge* desktopEdge=nullptr;
+ static std::atomic<bool>g_desktopFunctionHookActive{false};
+ static std::atomic<uint32_t>g_desktopFunctionKeys{0},g_desktopFunctionPhysicalKeys{0};
+ // This fixture supplies physical key state through the existing memory OS
+ // seam; it does not claim native keyboard-hook admission or chord witnesses.
+ const bool chordReady=false;
+ const bool oemEdge=false;const int epoch=0,sampledVirtualObservation=0;
+ const int* virtualWitness=nullptr;const int* capturedTokens=nullptr;
+ const ymcc::input::desktopFunction::KeyboardKeys g_desktopChordKeys{};
+ const auto nativeDesktopChordPhysicalKeys=[](){return ymcc::input::desktopFunction::KeyboardKeys{};};
 ${triggerCore}
 if(emit)++emissions;rule.matchedLastTick=matched;
 }}
@@ -109,35 +160,46 @@ static ULONGLONG fixtureTickCount(){return fixtureNow;}
 #define IsWindow(handle) true
 #define IsWindowVisible(handle) true
 static HWND g_hwnd=reinterpret_cast<HWND>(1);
+// Existing OS-window seam exercises the ordinary route. The real floating
+// carrier and this production adapter are checked by the R21 Win32 consumer.
+static HWND mainUiPresentationWindow(){return g_hwnd;}
 struct FocusTargetSnapshot{};static FocusTargetSnapshot g_pendingSummonTarget;
 static bool focusMainWindowIsForeground(){return false;}
 static FocusTargetSnapshot focusCaptureForegroundTarget(){return {};}
-static void nativeYmccShortcutSummon(const FocusTargetSnapshot&){++legacyCounts[0];}
+static ymcc::DefaultSummonHold g_defaultSummonHold;
+static struct { ULONGLONG readContinuityGeneration=1; } g_inputCaptureGamepadSnapshot;
+static ULONGLONG g_summonGeneration=0;
+static bool nativeDefaultSummonTry(const FocusTargetSnapshot&){++legacyCounts[0];++g_summonGeneration;return true;}
 static void focusBeginReturnToPreviousWindow(ULONGLONG){++legacyCounts[1];}
 static void nativeAdjustTdp(int){++legacyCounts[2];}
 static void nativeAdjustBrightness(int){++legacyCounts[3];}
-static void runKillBat(){++legacyCounts[4];}
+static json nativeCaptureGameCloseTarget(){return json::object();}
+static void runKillBat(const json&){++legacyCounts[4];}
 static void openTouchKeyboard(){++legacyCounts[5];}
 static void returnToDesktop(){++legacyCounts[6];}
 static void toggleMouseMode(const std::string&){++legacyCounts[7];}
 template<class F>static void gamepadSerialSubmit(F job){job();}
+// Same memory action sink; no real serial/power lifecycle or game operation.
+template<class F>static bool gamepadSerialSubmitCurrentPower(F job){job();return true;}
 static std::mutex g_gamepadSettingsMx;static std::string g_mouseBackend="fixture";
 static bool g_summonEnabled=true,g_bDoubleMinimize=true,g_tdpShortcut=true,g_fpsShortcut=true,g_killGame=true,g_openKeyboard=true,g_returnDesktop=true,g_mouseToggle=true;
 static WORD g_prevW=0;
-static ULONGLONG gpHoldStart=0,gpLastBPress=0,g_bClosePendingSince=0,g_bCloseReadyAt=0,s_dpHeldStart=0,s_dpLastEmit=0,s_brightnessHeldStart=0,s_brightnessLastEmit=0,gpKbHoldStart=0,gpKxHoldStart=0,gpKyHoldStart=0;
-static bool gpArmed=true,gpPrevB=false,g_bClosePending=false,gpKbArmed=true,gpKxArmed=true,gpKyArmed=true;
+static ULONGLONG gpLastBPress=0,g_bClosePendingSince=0,g_bCloseReadyAt=0,s_dpHeldStart=0,s_dpLastEmit=0,s_brightnessHeldStart=0,s_brightnessLastEmit=0,gpKbHoldStart=0,gpKxHoldStart=0,gpKyHoldStart=0;
+static bool gpPrevB=false,g_bClosePending=false,gpKbArmed=true,gpKxArmed=true,gpKyArmed=true;
 static void allLegacyTick(WORD w,ULONGLONG now){fixtureNow=now;constexpr ULONGLONG HOLD_MS=500,B_DOUBLE_MS=500;
 const bool both=(w&(XINPUT_GAMEPAD_LEFT_SHOULDER|XINPUT_GAMEPAD_RIGHT_SHOULDER))==(XINPUT_GAMEPAD_LEFT_SHOULDER|XINPUT_GAMEPAD_RIGHT_SHOULDER),startHeld=w&XINPUT_GAMEPAD_START,selectHeld=w&XINPUT_GAMEPAD_BACK,bPressed=w&XINPUT_GAMEPAD_B,xPressed=w&XINPUT_GAMEPAD_X,yPressed=w&XINPUT_GAMEPAD_Y,aPressed=w&XINPUT_GAMEPAD_A,dpUp=w&XINPUT_GAMEPAD_DPAD_UP,dpDown=w&XINPUT_GAMEPAD_DPAD_DOWN,dpLeft=w&XINPUT_GAMEPAD_DPAD_LEFT,dpRight=w&XINPUT_GAMEPAD_DPAD_RIGHT;
 ${allLegacyCore}
 g_prevW=w;
 }
-static std::array<int,8> replayAllLegacy(){legacyCounts.fill(0);g_prevW=0;gpHoldStart=gpLastBPress=g_bClosePendingSince=g_bCloseReadyAt=s_dpHeldStart=s_dpLastEmit=s_brightnessHeldStart=s_brightnessLastEmit=gpKbHoldStart=gpKxHoldStart=gpKyHoldStart=0;gpArmed=gpKbArmed=gpKxArmed=gpKyArmed=true;gpPrevB=g_bClosePending=false;
+static std::array<int,8> replayAllLegacy(){legacyCounts.fill(0);g_prevW=0;g_defaultSummonHold.release();gpLastBPress=g_bClosePendingSince=g_bCloseReadyAt=s_dpHeldStart=s_dpLastEmit=s_brightnessHeldStart=s_brightnessLastEmit=gpKbHoldStart=gpKxHoldStart=gpKyHoldStart=0;gpKbArmed=gpKxArmed=gpKyArmed=true;gpPrevB=g_bClosePending=false;
 const WORD chords[]={XINPUT_GAMEPAD_LEFT_SHOULDER|XINPUT_GAMEPAD_RIGHT_SHOULDER,XINPUT_GAMEPAD_B,XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_DPAD_UP,XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_DPAD_DOWN,XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_DPAD_LEFT,XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_DPAD_RIGHT,XINPUT_GAMEPAD_BACK|XINPUT_GAMEPAD_B,XINPUT_GAMEPAD_BACK|XINPUT_GAMEPAD_X,XINPUT_GAMEPAD_BACK|XINPUT_GAMEPAD_A,XINPUT_GAMEPAD_BACK|XINPUT_GAMEPAD_Y};
 ULONGLONG base=20000;for(const auto chord:chords){allLegacyTick(0,base);allLegacyTick(chord,base+100);allLegacyTick(chord,base+700);allLegacyTick(0,base+710);allLegacyTick(chord,base+800);allLegacyTick(0,base+810);allLegacyTick(chord,base+900);allLegacyTick(chord,base+1500);allLegacyTick(0,base+1510);allLegacyTick(0,base+1600);base+=3000;}return legacyCounts;}
+#endif
 static int checks=0;static json failures=json::array();
 static void check(bool ok,const std::string& name){++checks;if(!ok){failures.push_back(name);std::cout<<"FAIL "<<name<<'\n';}}
 static json key(const char* code,const char* src="controller"){return{{"source",src},{"code",code}};}
 static json row(const char* id="good"){return{{"id",id},{"origin","custom"},{"enabled",true},{"actionId","window.summon"},{"inputs",json::array({key("a")})},{"trigger","press"},{"params",json::object()}};}
+#ifndef SERIAL_CONFIG_SOURCE_ORIGIN_FIXTURE
 static void refresh(){g_nativeKeyboardShortcutLastRefresh=0;g_nativeKeyboardShortcutRevision=-1;nativeKeyboardShortcutsRefresh(10000);emissions=0;desktopDown.clear();}
 static void load(json rows,bool initialized=true){fixtureInput={{"revision",1},{"buttonMapping",{{"rules",{{"shortcutRules",rows},{"shortcutRulesInitialized",initialized}}}}}};refresh();}
 static int repeats(json rule,bool acceleration,const char* action="power.tdpAdjust"){rule["actionId"]=action;rule["params"]={{"direction",std::string(action)=="power.tdpAdjust"?"up":"right"},{"amount",1},{"linearAcceleration",acceleration}};rule["trigger"]="repeat";rule["holdMs"]=0;rule["intervalMs"]=150;load(json::array({rule}));tick(0,0,10000);for(ULONGLONG t=10100;t<=15100;t+=10)tick(XINPUT_GAMEPAD_A,0,t);return emissions;}
@@ -188,6 +250,80 @@ static void keyboardSequenceChecks(){
 
 }
 
+#endif
+
+#ifdef SERIAL_CONFIG_SOURCE_ORIGIN_FIXTURE
+int main(){try{
+ const auto expectedCases=json::parse(R"ORIGIN(${JSON.stringify(sourceOriginCaseNames)})ORIGIN");json cases=json::array();
+ auto scenario=[&](std::size_t index,auto body){const auto start=checks;const auto failed=failures.size();body();cases.push_back({{"name",expectedCases.at(index)},{"checks",checks-start},{"pass",failures.size()==failed}});};
+ ULONGLONG now=10000;auto parse=[&]{now+=1000;nativeKeyboardShortcutsRefresh(now);};
+ auto input=[](long long revision,json rows){return json{{"revision",revision},{"buttonMapping",{{"rules",{{"shortcutRules",rows},{"shortcutRulesInitialized",true}}}}}};};
+ const auto backup=input(1,json::array({row("old-backup")}));
+ const auto primaryA=input(2,json::array({row("primary-A1"),row("primary-A2")}));
+ const auto primaryB=input(3,json::array());
+ auto read=[&](const json& value,bool primary,bool failed=false){fixtureInput=value;fixtureSettingsPrimaryRead=primary;fixtureSettingsReadFailure=failed;parse();};
+ auto published=[](){GamepadSerialEvent::ConfigurationWrite writer(true);GamepadSerialEvent::rulesPublished();};
+ auto pending=[](){return GamepadSerialEvent::RulesRequired.load()!=GamepadSerialEvent::RulesApplied.load();};
+ scenario(0,[&]{
+  check(GamepadSerialEvent::RulesRequired.load()==0,"source-origin process starts before local rule publication");
+  read(json::object(),false,true);
+  check(g_nativeKeyboardShortcutRevision==0&&!g_nativeShortcutRulesConfigured&&GamepadSerialEvent::currentRevision(GamepadSerialEvent::captureRevision()),"never-seen-primary generation zero keeps original first-run failed-read defaults");
+  read(backup,false);
+  check(g_nativeKeyboardShortcutRevision==1&&g_nativeKeyboardShortcuts.size()==1,"generation zero may initially adopt original backup rules");
+  check(GamepadSerialEvent::RulesApplied.load()==0&&GamepadSerialEvent::currentRevision(GamepadSerialEvent::captureRevision()),"initial backup retains existing generation-zero admission semantics only");
+ });
+ scenario(1,[&]{
+  read(primaryA,true);
+  check(GamepadSerialEvent::RulesRequired.load()==0&&g_nativeKeyboardShortcutRevision==2&&g_nativeKeyboardShortcuts.size()==2,"generation zero actually adopts primary A before any local commit");
+  check(GamepadSerialEvent::currentRevision(GamepadSerialEvent::captureRevision()),"primary A creates a current admission identity");
+ });
+ scenario(2,[&]{
+  const auto revision=GamepadSerialEvent::ConfigurationRevision.load();const auto attempts=fixtureSourceLogAttempts;
+  read(backup,false);read(json::object(),true,true);
+  check(g_nativeKeyboardShortcutRevision==2&&g_nativeKeyboardShortcuts.size()==2,"after seeing primary generation zero cannot replace A with backup or failed-read defaults");
+  check(GamepadSerialEvent::ConfigurationRevision.load()==revision&&GamepadSerialEvent::RulesApplied.load()==0,"rejected generation-zero downgrade publishes no replacement parse");
+  check(fixtureSourceLogAttempts==attempts+1,"source rejection is logged once per continuous episode");
+  check(!fixtureSourceLogs.empty()&&fixtureSourceLogs.back()["event"]=="oem-shortcut-edge-delivery"&&fixtureSourceLogs.back()["data"].value("reason",std::string{})=="current-rule-source-not-primary"&&fixtureSourceLogs.back()["data"]["rulesRequired"]==0&&fixtureSourceLogs.back()["data"]["rulesApplied"]==0,"source rejection records actual existing event reason and captured generations");
+  read(primaryA,true);check(g_nativeKeyboardShortcutRevision==2,"primary success restores source receipt without requiring a new rule commit");
+ });
+ scenario(3,[&]{
+  published();const auto required=GamepadSerialEvent::RulesRequired.load();const auto attempts=fixtureSourceLogAttempts;
+  read(json::object(),true,true);
+  check(required==1&&pending(),"failed source read cannot acknowledge a new successful rule publication");
+  check(g_nativeKeyboardShortcutRevision==2&&g_nativeKeyboardShortcuts.size()==2,"failed read leaves actual parsed A unchanged");
+  check(!GamepadSerialEvent::currentRevision(GamepadSerialEvent::captureRevision()),"new admission remains refused while required is unparsed");
+  check(fixtureSourceLogAttempts==attempts+1&&!fixtureSourceLogs.empty()&&fixtureSourceLogs.back()["data"]["rulesRequired"]==required&&fixtureSourceLogs.back()["data"]["rulesApplied"]==0,"primary recovery clears episode suppression and next rejection reports pending generations");
+ });
+ scenario(4,[&]{
+  const auto attempts=fixtureSourceLogAttempts;read(backup,false);
+  check(pending()&&GamepadSerialEvent::RulesApplied.load()==0,"old backup cannot sign latest required as applied");
+  check(g_nativeKeyboardShortcutRevision==2&&g_nativeKeyboardShortcuts.size()==2,"old backup cannot replace parser state while primary publication is pending");
+  check(fixtureSourceLogAttempts==attempts,"repeated backup rejection does not flood the existing event");
+ });
+ scenario(5,[&]{
+  read(primaryB,true);
+  check(g_nativeKeyboardShortcutRevision==3&&g_nativeKeyboardShortcuts.empty()&&g_nativeShortcutLegacyOverrideMask==255,"readable primary B installs its explicit empty rule table");
+  check(!pending()&&GamepadSerialEvent::RulesApplied.load()==1,"actual parser acknowledges the captured publication after primary success");
+  check(GamepadSerialEvent::currentRevision(GamepadSerialEvent::captureRevision()),"new admission works after matching primary is parsed");
+ });
+ scenario(6,[&]{
+  const auto revision=GamepadSerialEvent::ConfigurationRevision.load();const auto attempts=fixtureSourceLogAttempts;
+  read(backup,false);read(backup,false);
+  check(!pending()&&g_nativeKeyboardShortcutRevision==3&&g_nativeKeyboardShortcuts.empty()&&g_nativeShortcutLegacyOverrideMask==255,"even already-applied generation cannot downgrade B to old enabled backup");
+  check(GamepadSerialEvent::ConfigurationRevision.load()==revision&&fixtureSourceLogAttempts==attempts+1,"rejected applied-generation backup neither republishes nor floods");
+  read(primaryB,true);const auto beforeThrow=fixtureSourceLogAttempts;const auto stored=fixtureSourceLogs.size();fixtureSourceLogThrows=true;read(backup,false);fixtureSourceLogThrows=false;
+  check(fixtureSourceLogAttempts==beforeThrow+1&&fixtureSourceLogs.size()==stored&&g_nativeKeyboardShortcutRevision==3&&g_nativeKeyboardShortcuts.empty(),"throwing optional reason log cannot alter rejection or parser state");
+  read(backup,false);check(fixtureSourceLogAttempts==beforeThrow+1,"throwing diagnostic is still bounded until a primary succeeds");read(primaryB,true);
+ });
+ scenario(7,[&]{
+  published();read(json::object(),true);
+  check(!pending()&&GamepadSerialEvent::RulesApplied.load()==2&&g_nativeKeyboardShortcutRevision==0,"valid primary with missing input is authoritative rather than a failed source read");
+  check(!g_nativeShortcutRulesConfigured&&GamepadSerialEvent::currentRevision(GamepadSerialEvent::captureRevision()),"missing-input primary preserves original parser semantics after source proof");
+ });
+ json report={{"selection","serial-config-source-origin"},{"pass",failures.empty()},{"checks",checks},{"cases",cases},{"failures",failures},{"actualRuleParser",true},{"actualConfigurationFence",true},{"settingsIo","memory"},{"primaryReadPort","controlled source fact; not actual cache reader or file lock"},{"actualSettingsReader",false},{"keyboardSequenceExecuted",false},{"physicalInput",false},{"sourceLogs",fixtureSourceLogs},{"sourceLogAttempts",fixtureSourceLogAttempts}};
+ std::ofstream("RESULT.json")<<report.dump(2);std::cout<<"SOURCE_ORIGIN_CASES "<<cases.size()<<" CHECKS "<<checks<<" FAILURES "<<failures.size()<<'\n';return failures.empty()?0:2;
+ }catch(const std::exception& error){std::cerr<<"FAIL "<<error.what()<<'\n';return 1;}}
+#else
 int main(){try{
 keyboardSequenceChecks();
 json variants;std::ifstream("VARIANTS.json")>>variants;
@@ -269,10 +405,15 @@ const auto normal=repeats(row(),false),accelerated=repeats(row(),true);check(acc
 for(const char* src:{"oem","controller","keyboard","mouse","future"}){auto r=row();r["inputs"]=json::array({key("no-such-key",src)});load(json::array({r}));check(g_nativeKeyboardShortcuts.empty(),std::string(src)+" unknown input fails closed");}
 json report={{"nativeWorkerObservedHoldMs",observedKeyboardHoldMs},{"pass",failures.empty()},{"checks",checks},{"variants",variants.size()},{"failures",failures},{"acceleratedCount",accelerated},{"constantCount",normal},{"physicalInput",false},{"settingsIo","memory"}};std::ofstream("RESULT.json")<<report.dump(2);std::cout<<"CHECKS "<<checks<<" FAILURES "<<failures.size()<<'\n';return failures.empty()?0:2;
 }catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}
+#endif
 `;
 fs.writeFileSync(path.join(out,'VARIANTS.json'),JSON.stringify(variants));fs.writeFileSync(path.join(out,'SAVED-INPUTS.json'),JSON.stringify(savedExports));fs.writeFileSync(path.join(out,'REPAIR-SAVED-INPUTS.json'),JSON.stringify(repairExports));fs.writeFileSync(path.join(out,'CONTROL-SAVED-INPUTS.json'),JSON.stringify(controlExports));
 const generated=path.join(out,'shortcut-full-runtime.cpp');fs.writeFileSync(generated,cpp);
 const sdk='C:/Program Files (x86)/Windows Kits/10',version='10.0.26100.0';const exe=path.join(out,'shortcut-full-runtime.exe'),batch=path.join(out,'build.cmd');
 fs.writeFileSync(batch,'@echo off\r\ncall "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat" '+version+' >nul\r\nif errorlevel 1 exit /b 1\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 '+['um','shared','ucrt'].map(p=>'/I"'+sdk+'/Include/'+version+'/'+p+'"').join(' ')+' /I"'+root+'/native" /I"'+root+'/deps/json" "'+generated+'" /Fo"'+out+'/shortcut-full-runtime.obj" /Fe"'+exe+'" /link /LIBPATH:"'+sdk+'/Lib/'+version+'/um/x64" /LIBPATH:"'+sdk+'/Lib/'+version+'/ucrt/x64"\r\nexit /b %errorlevel%\r\n');
 const build=spawnSync('cmd.exe',['/d','/c',batch],{cwd:out,encoding:'utf8',windowsHide:true});fs.writeFileSync(path.join(out,'BUILD.log'),(build.stdout||'')+(build.stderr||''));assert.equal(build.status,0,build.stdout+build.stderr);
-const run=spawnSync(exe,[],{cwd:out,encoding:'utf8',windowsHide:true});fs.writeFileSync(path.join(out,'RUN.log'),(run.stdout||'')+(run.stderr||''));console.log((run.stdout||'')+(run.stderr||''));const report={sourceHashes:Object.fromEntries(['native/main.cpp','native/keyboard_shortcut_sequence.h','native/keyboard_shortcut_sequence_runtime.h','tools/controller_shortcut_full_runtime_selftest.mjs'].map(f=>[f,createHash('sha256').update(fs.readFileSync(path.join(root,f))).digest('hex')])),pass:run.status===0,exit:run.status,result:run.stdout,source:sourceFile,sourceSha256:createHash('sha256').update(source).digest('hex'),actualRuleParser:true,allVisibleOutputs:true,actualTriggerStateMachine:true,hardwareIo:false,installedSettingsWritten:false};fs.writeFileSync(path.join(out,'ACCEPTANCE.json'),JSON.stringify(report,null,2));assert.equal(run.status,0,'Production full shortcut runtime regression');
+const run=spawnSync(exe,[],{cwd:out,encoding:'utf8',windowsHide:true});fs.writeFileSync(path.join(out,'RUN.log'),(run.stdout||'')+(run.stderr||''));console.log((run.stdout||'')+(run.stderr||''));
+const originResult=serialConfigSourceOrigin?JSON.parse(fs.readFileSync(path.join(out,'RESULT.json'),'utf8')):undefined;
+const report={sourceHashes:Object.fromEntries(['native/main.cpp','native/gyro_telemetry_record.h','native/keyboard_shortcut_sequence.h','native/keyboard_shortcut_sequence_runtime.h','tools/controller_shortcut_full_runtime_selftest.mjs'].map(f=>[f,createHash('sha256').update(f==='native/main.cpp'?source:fs.readFileSync(f==='tools/controller_shortcut_full_runtime_selftest.mjs'?fileURLToPath(import.meta.url):path.join(root,f))).digest('hex')])),pass:run.status===0,exit:run.status,result:run.stdout,source:sourceFile,sourceSha256:createHash('sha256').update(source).digest('hex'),repositoryRoot:root,selection:serialConfigSourceOrigin?'serial-config-source-origin':'default',expectedCases:serialConfigSourceOrigin?sourceOriginCaseNames:undefined,cases:originResult?.cases,settingsReadPort:serialConfigSourceOrigin?'controlled primaryRead memory fact; actual reader checked separately':undefined,actualRuleParser:true,allVisibleOutputs:!serialConfigSourceOrigin,actualTriggerStateMachine:!serialConfigSourceOrigin,hardwareIo:false,installedSettingsWritten:false};fs.writeFileSync(path.join(out,'ACCEPTANCE.json'),JSON.stringify(report,null,2));
+if(serialConfigSourceOrigin){assert.equal(originResult.selection,'serial-config-source-origin');assert.deepEqual(originResult.cases.map(item=>item.name),sourceOriginCaseNames,'Exact directed case selection');assert.equal(originResult.keyboardSequenceExecuted,false);}
+assert.equal(run.status,0,'Production full shortcut runtime regression');

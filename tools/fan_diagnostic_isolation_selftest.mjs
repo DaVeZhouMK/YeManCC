@@ -15,7 +15,7 @@ const sourceFiles = ['src/bridge/fanHost.ts', 'src/bridge/ipc.ts', 'tools/fixtur
 const hash = p => createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 const bindings = sourceFiles.map(p => ({ path: p, sha256: hash(p) }));
 const bundle = await build({
-  stdin: { contents: "export * from './src/bridge/fanDiagnostics';export {FanHostLifecycle} from './src/bridge/fanHost';export {NoIoHost} from './tools/fixtures/fan_no_io_host';export {setLogSink,rejectAllPending} from './src/bridge/ipc';", resolveDir: project, sourcefile: 'fan-diagnostic-isolation-entry.ts' },
+  stdin: { contents: "export * from './src/bridge/fanDiagnostics';export {FanHostLifecycle} from './src/bridge/fanHost';export {FanApiError} from './src/bridge/fanApi';export {NoIoHost} from './tools/fixtures/fan_no_io_host';export {setLogSink,rejectAllPending} from './src/bridge/ipc';", resolveDir: project, sourcefile: 'fan-diagnostic-isolation-entry.ts' },
   bundle: true, write: false, format: 'iife', globalName: 'FanTest', platform: 'browser', target: 'es2022', define: { 'import.meta.env': '{}' },
   plugins: [{ name: 'bind-diagnostic-before-image', setup(b) {
     b.onLoad({ filter: /[\\/]src[\\/]bridge[\\/]fanDiagnostics\.ts$/ }, () => ({ contents: fs.readFileSync(diagnosticSource, 'utf8'), loader: 'ts', resolveDir: path.join(project, 'src/bridge') }));
@@ -134,6 +134,54 @@ await check('a failed heartbeat log cannot reject a renewed lease or block next 
     await life.heartbeat(); assert.equal(life.currentLease.leaseId, lease.leaseId, 'renewal survives diagnostic failure');
     await life.disable(); await life.apply(curve); assert.equal(host.calls.filter(v => v === 'enable').length, 2); assert.equal(starts, 1); assert.equal(stops, 0); assert.equal(life.state, 'ready');
     return { handshake: host.calls.filter(v => v === 'handshake').length, enables: 2, starts, hardwareCalls: 0 };
+  } finally { if (life) await life.close(); await f.done(); }
+});
+await check('timer heartbeat success batches without changing renewals or losing failures and manual receipts', async () => {
+  const f = fixture(); let life;
+  try {
+    const host = new f.api.NoIoHost(); host.factoryType = 'HandheldCompanion.Devices.MSI.ClawCG3EM';
+    host.generation = 3; host.attempt = 1; host.powerState = 'On'; host.completeResume = true;
+    life = new f.api.FanHostLifecycle({ enabled: true, adapter: host, heartbeatIntervalMs: 5000,
+      readNativeActivity: async () => null, readNativePowerState: async () => ({ generation: 3, phase: 'ready', resumeReady: true, inputReady: true, hardwareWritesAllowed: true, hibernateAvailable: true }),
+      launcher: { start: async () => ({ pid: 111402, executable: 'inert.exe' }), stop: async () => {} }, onControlDisplay() {} });
+    life.setPowerGeneration(3); life.observePowerBoundary('resume-ready', 3);
+    const curve = [{ tempC: 0, dutyPercent: 20 }, { tempC: 40, dutyPercent: 35 }, { tempC: 70, dutyPercent: 65 }, { tempC: 100, dutyPercent: 100 }];
+    f.api.adoptFanDiagnosticLoggingState(true); await life.start(); await life.apply(curve);
+    const renewals = () => host.calls.filter(v => v === 'heartbeat').length;
+    const success = () => f.calls.filter(v => v.args.event === 'lifecycle.heartbeat-success').map(v => v.args.details);
+    await f.advance(60_000);
+    assert.equal(renewals(), 12);
+    assert.deepEqual(success().map(d => [d.observationKind, d.confirmedTimerRenewals]), [['timer-first', 1]]);
+    await f.advance(5000);
+    assert.equal(renewals(), 13);
+    assert.deepEqual(success().map(d => [d.observationKind, d.confirmedTimerRenewals, d.generation]),
+      [['timer-first', 1, 3], ['timer-batch', 12, 3]]);
+
+    await life.heartbeat(); await life.heartbeat();
+    assert.equal(renewals(), 15);
+    assert.deepEqual(success().slice(-2).map(d => Object.keys(d)), [['state'], ['state']]);
+
+    await f.advance(5000); // One success pending in the old diagnostic window.
+    f.api.adoptFanDiagnosticLoggingState(false); f.api.adoptFanDiagnosticLoggingState(true);
+    await f.advance(5000);
+    assert.equal(success().at(-1).observationKind, 'timer-first', 'gate re-enable starts a new window even between ticks');
+    f.api.adoptFanDiagnosticLoggingState(false); await f.advance(10_000);
+    assert.equal(renewals(), 19); assert.equal(success().length, 5);
+    f.api.adoptFanDiagnosticLoggingState(true); await f.advance(5000);
+    assert.equal(success().length, 6);
+    await f.advance(5000); // One success pending when the next attempt fails.
+    const renew = host.heartbeat.bind(host);
+    host.heartbeat = async () => {
+      host.heartbeat = renew; host.calls.push('heartbeat');
+      throw new f.api.FanApiError('fixture unavailable', 503, 'FAN_HTTP_RESULT_UNKNOWN');
+    };
+    await f.advance(5000);
+    assert.equal(success().length, 6);
+    assert.equal(f.calls.filter(v => v.args.event === 'lifecycle.heartbeat-failure').length, 1);
+    await f.advance(5000);
+    assert.equal(renewals(), 23);
+    assert.deepEqual(success().slice(-1).map(d => [d.observationKind, d.confirmedTimerRenewals]), [['timer-first', 1]]);
+    assert.equal(host.calls.filter(v => v === 'enable').length, 1);
   } finally { if (life) await life.close(); await f.done(); }
 });
 // Reuse grammar only: repeated event values still undergo the same redaction.

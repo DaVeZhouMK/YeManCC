@@ -7,6 +7,7 @@ void require(bool condition,const std::string& message){++checks;if(!condition)t
 HANDLE rawHandle(std::uintptr_t n=0x55){return reinterpret_cast<HANDLE>(n);}
 std::uintptr_t cacheKey(){return reinterpret_cast<std::uintptr_t>(rawHandle());}
 void reset(){
+    memory::rawInfoCalls=0;memory::rawCalls.clear();memory::rawFailures.clear();memory::rawHook={};memory::enumerationHook={};
     hidHideInvalidateRawInputIdentityCache();memory::nodes.clear();memory::devices.clear();memory::rawPaths.clear();
     memory::opens=memory::closes=memory::preps=memory::frees=memory::xusb=memory::hit=memory::discards=memory::routeRefreshes=memory::enumerations=memory::selectedTransitions=memory::msiNotifications=0;
     memory::now=100;memory::error=0;memory::route=L"xusb-original";memory::routeHook={};g_machineIdentity={};g_hidHidePhysicalIdentity={};
@@ -57,7 +58,50 @@ void testAncestorEvidence(){
     reset();memory::nodes[2]={"USB\\VID_17EF&PID_6182&MI_00\\CHILD",3};memory::nodes[3]={"USB\\VID_17EF&PID_6182\\REAL-OWNER",0};
     auto out=physical();require(out.baseContainerDeviceInstanceId=="USB\\VID_17EF&PID_6182\\REAL-OWNER","real ancestor walker selected qualified child instead of owning base");
 }
-void testProbeFailures(){for(unsigned kind=0;kind<4;++kind){reset();auto&d=memory::devices[0];if(kind==0)d.open=false;if(kind==1)d.attributes=false;if(kind==2)d.preparsed=false;if(kind==3)d.caps=false;HidHidePhysicalIdentity out;HidResolveReject reject;
+
+unsigned expectedNameCalls(std::size_t length){
+#ifdef YMCC_NAME_BASELINE
+ static_cast<void>(length);return 2;
+#else
+ return length+1<=512?1:2;
+#endif
+}
+void testRawNameBoundaries(){
+ for(const std::size_t length:{std::size_t(0),std::size_t(7),std::size_t(510),std::size_t(511),std::size_t(512),std::size_t(513),std::size_t(1537)})for(bool capture:{false,true}){
+  reset();const std::wstring path(length,L'Q');memory::devices[0].path=path;memory::rawPaths[rawHandle()]=path;if(!capture){memory::devices[0].page=1;memory::devices[0].usage=5;}
+  HidHidePhysicalIdentity out;std::uint64_t gen=0;
+  if(length==0){require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen,capture)&&!out.resolved&&gen==g_hidResolveCacheGeneration&&memory::rawInfoCalls==expectedNameCalls(length),"empty API name retains original real-interface rejection");continue;}
+  require(hidHideResolveRawInputIdentity(rawHandle(),out,&gen,capture)&&out.resolved&&out.sourcePath==std::string(length,'Q'),"full resolver preserves exact boundary/long raw name");
+  require(gen==g_hidResolveCacheGeneration&&memory::rawInfoCalls==expectedNameCalls(length),"fresh name has exact successful direct/fallback query count");
+  if(length>=512){require(memory::rawCalls.size()==2&&memory::rawCalls[1].capacity==length+1,"fallback uses exact required character capacity");
+#ifndef YMCC_NAME_BASELINE
+   require(memory::rawCalls[0].data&&memory::rawCalls[0].error==ERROR_INSUFFICIENT_BUFFER&&memory::rawCalls[0].reported==length+1,"long name is insufficient-buffer fallback, not hidden size query");
+#endif
+  }
+  const auto calls=memory::rawInfoCalls;require(hidHideResolveRawInputIdentity(rawHandle(),out,&gen,capture)&&memory::rawInfoCalls==calls+expectedNameCalls(length),"every cache hit rereads the device name");
+ }
+ for(bool capture:{false,true}){
+  reset();HidHidePhysicalIdentity out;std::uint64_t gen=9;require(!hidHideResolveRawInputIdentity(nullptr,out,&gen,capture)&&gen==0&&!out.resolved&&memory::rawInfoCalls==0,"null handle remains zero query");
+  require(!hidHideResolveRawInputIdentity(rawHandle(1),out,&gen,capture)&&gen==0&&!out.resolved&&memory::rawInfoCalls==1&&memory::enumerations==0,"invalid handle remains one query with no cache delivery");
+ }
+ reset();g_machineIdentity.deviceClass="not-Legion";HidHidePhysicalIdentity out;std::uint64_t gen=9;require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen,true)&&gen==0&&memory::rawInfoCalls==0,"disallowed Legion route performs zero name queries");
+ for(unsigned failedCall:{1u,2u}){
+  reset();memory::devices[0].path=std::wstring(1537,L'z');memory::rawPaths[rawHandle()]=memory::devices[0].path;memory::rawFailures[failedCall]={5,1700};gen=9;
+  require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen,true)&&!out.resolved&&gen==0&&memory::rawInfoCalls==failedCall&&memory::enumerations==0,"name API failure is not swallowed or delivered from stale cache");
+ }
+#ifndef YMCC_NAME_BASELINE
+ for(UINT badRequired:{0u,1u,512u}){reset();memory::rawFailures[1]={ERROR_INSUFFICIENT_BUFFER,badRequired};gen=9;require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen,true)&&gen==0&&memory::rawInfoCalls==1&&memory::enumerations==0,"invalid insufficient-buffer required size cannot trigger retry or identity delivery");}
+#endif
+ reset();memory::devices[0].path=std::wstring(513,L'g');memory::rawPaths[rawHandle()]=memory::devices[0].path;memory::rawHook=[](unsigned call){if(call==2)memory::rawPaths[rawHandle()]=std::wstring(1800,L'h');};gen=9;
+ require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen,true)&&!out.resolved&&gen==0&&memory::rawInfoCalls==2&&memory::enumerations==0,"growth between required-size and data read fails without truncation or retry loop");
+ reset();memory::devices[0].page=1;memory::devices[0].usage=5;require(hidHideResolveRawInputIdentity(rawHandle(),out,&gen),"full cold miss establishes physical identity");
+ memory::devices[0].path=L"new-same-handle-path";memory::rawPaths[rawHandle()]=memory::devices[0].path;memory::nodes[2].id="USB\\VID_17EF&PID_6182\\NEW-OWNER";require(hidHideResolveRawInputIdentity(rawHandle(),out,&gen)&&out.sourcePath=="new-same-handle-path"&&out.baseContainerDeviceInstanceId.find("NEW-OWNER")!=std::string::npos,"reused handle/path change performs complete new identity resolution");
+ memory::rawFailures[memory::rawInfoCalls+1]={6,0};gen=9;require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen)&&!out.resolved&&gen==0,"API failure cannot serve prior successful cached identity");
+ reset();memory::enumerationHook=[] {hidHideInvalidateRawInputIdentityCache();};gen=9;require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen,true)&&!out.resolved&&gen==0&&g_legionMotionResolveCache.empty()&&memory::discards==1,"full miss generation change rejects fill and delivery");
+}
+
+void testProbeFailures(){
+    testRawNameBoundaries();for(unsigned kind=0;kind<4;++kind){reset();auto&d=memory::devices[0];if(kind==0)d.open=false;if(kind==1)d.attributes=false;if(kind==2)d.preparsed=false;if(kind==3)d.caps=false;HidHidePhysicalIdentity out;HidResolveReject reject;
     require(!interfaceCall(true,out,reject)&&!out.resolved,"failed boundary probe admitted identity");require(reject==(kind==0?HidResolveReject::OpenFailed:HidResolveReject::ProbeFailed),"probe rejection kind changed");require(memory::preps==memory::frees,"preparsed data was not freed");}}
 void fillBoth(){auto identity=physical();const auto generation=g_hidResolveCacheGeneration.load();const auto path=ascii_lower(W2U(memory::devices[0].path));
     require(executeProductionCacheFill(false,cacheKey(),HidResolveKind::Unsupported,{},path,memory::now,generation),"default Unsupported fill failed");
@@ -67,7 +111,13 @@ void testCacheNamespaces(){reset();fillBoth();const auto probes=memory::opens;Hi
     require(hidHideResolveRawInputIdentity(rawHandle(),out,&gen,true)&&out.resolved,"capture must hit its Physical cache independently");
     require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen)&&!out.resolved,"capture hit contaminated later default cache");
     require(memory::hit==3&&memory::opens==probes&&g_hidResolveCache.at(cacheKey()).kind==HidResolveKind::Unsupported&&g_legionMotionResolveCache.at(cacheKey()).kind==HidResolveKind::Physical,"same HANDLE cache namespace isolation failed");
-    memory::rawPaths[rawHandle()]=L"different-path";require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen,true)&&gen==0,"reused HANDLE with different path hit old identity");
+    memory::rawPaths[rawHandle()]=L"different-path";
+#ifdef YMCC_FIXTURE_FULL_RAW
+    require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen,true)&&!out.resolved&&memory::hit==3&&g_legionMotionResolveCache.at(cacheKey()).devicePathLower=="different-path"&&g_legionMotionResolveCache.at(cacheKey()).kind==HidResolveKind::AbsentPath,"reused HANDLE with different path hit old identity");
+#else
+    require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen,true)&&gen==0,"reused HANDLE with different path hit old identity");
+#endif
+
     g_machineIdentity.deviceClass="unknown";memory::rawPaths[rawHandle()]=memory::devices[0].path;require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen,true)&&gen==0,"capture route off used previously physical cache");}
 void testInvalidateAndFillFence(){reset();fillBoth();g_hidResolveDiagKeys.insert("old");const auto old=g_hidResolveCacheGeneration.load();hidHideInvalidateRawInputIdentityCache();
     require(g_hidResolveCache.empty()&&g_legionMotionResolveCache.empty()&&g_hidResolveDiagKeys.empty(),"invalidate must clear both scope namespaces and diagnostics");
@@ -76,7 +126,13 @@ void testInvalidateAndFillFence(){reset();fillBoth();g_hidResolveDiagKeys.insert
     for(bool capture:{false,true})require(!executeProductionCacheFill(capture,cacheKey(),HidResolveKind::Physical,identity,path,memory::now,old),"stale resolver generation was filled into new scope cache");
     require(g_hidResolveCache.empty()&&g_legionMotionResolveCache.empty(),"stale fill repopulated a namespace");
     require(executeProductionCacheFill(true,cacheKey(),HidResolveKind::Physical,identity,path,memory::now,old+1),"fresh generation fill failed");
-    ++g_hidResolveCacheGeneration;HidHidePhysicalIdentity out;std::uint64_t delivered=99;require(!hidHideResolveRawInputIdentity(rawHandle(),out,&delivered,true)&&!out.resolved&&delivered==0,"cache entry with stale generation delivered");}
+    ++g_hidResolveCacheGeneration;HidHidePhysicalIdentity out;std::uint64_t delivered=99;
+#ifdef YMCC_FIXTURE_FULL_RAW
+    require(hidHideResolveRawInputIdentity(rawHandle(),out,&delivered,true)&&out.resolved&&delivered==g_hidResolveCacheGeneration&&memory::hit==0,"stale cache rejected before fresh full resolver refill");
+#else
+    require(!hidHideResolveRawInputIdentity(rawHandle(),out,&delivered,true)&&!out.resolved&&delivered==0,"cache entry with stale generation delivered");
+#endif
+}
 void testEvictionNamespaces(){reset();const auto gen=g_hidResolveCacheGeneration.load();auto identity=physical();
     for(std::uintptr_t i=0;i<kHidResolveCacheMaxEntries;++i)for(bool capture:{false,true})require(executeProductionCacheFill(capture,i,HidResolveKind::Physical,identity,"path",100+i,gen),"cache population failed");
     const auto full=kHidResolveCacheMaxEntries;require(executeProductionCacheFill(true,full,HidResolveKind::Physical,identity,"new",500,gen),"capture capacity fill failed");
@@ -94,15 +150,49 @@ void testCaptureNoXusbDefaultRefresh(){reset();fillBoth();memory::now=2000;HidHi
 void testHitGenerationInterleave(){reset();memory::devices[0].page=1;memory::devices[0].usage=5;auto identity=physical(false);const auto old=g_hidResolveCacheGeneration.load();
     require(executeProductionCacheFill(false,cacheKey(),HidResolveKind::Physical,identity,ascii_lower(W2U(memory::devices[0].path)),memory::now,old),"fill failed");memory::now+=1000;
     memory::routeHook=[] {hidHideInvalidateRawInputIdentityCache();};HidHidePhysicalIdentity out;std::uint64_t gen=99;
+    
+#ifdef YMCC_FIXTURE_FULL_RAW
+    memory::enumerationHook=[] {hidHideInvalidateRawInputIdentityCache();};require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen)&&!out.resolved&&gen==0&&memory::discards==2,"invalidated cache snapshot was delivered during XUSB refresh");
+#else
     require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen)&&!out.resolved&&gen==0&&memory::discards==1,"invalidated cache snapshot was delivered during XUSB refresh");
-    require(g_hidResolveCache.empty()&&g_legionMotionResolveCache.empty()&&g_hidResolveCacheGeneration==old+1,"interleaved invalidation did not fence both scopes");}
+#endif
+
+    require(g_hidResolveCache.empty()&&g_legionMotionResolveCache.empty()&&g_hidResolveCacheGeneration==old+
+#ifdef YMCC_FIXTURE_FULL_RAW
+2
+#else
+1
+#endif
+,"interleaved invalidation did not fence both scopes");}
+void testRouteCopyOwnership(){
+ reset();memory::devices[0].page=1;memory::devices[0].usage=5;auto identity=physical(false);
+ identity.baseContainerDeviceInstanceId="USB\\VID_17EF&PID_6182\\"+std::string(192,'b')+"-owned-base";
+ const auto generation=g_hidResolveCacheGeneration.load();const auto path=ascii_lower(W2U(memory::devices[0].path));
+ require(executeProductionCacheFill(false,cacheKey(),HidResolveKind::Physical,identity,path,memory::now,generation),"route copy setup fill");
+ HidHidePhysicalIdentity out;std::uint64_t gen=0;memory::lastRouteBase.clear();const auto routes=memory::xusb;
+ memory::now=200;require(hidHideResolveRawInputIdentity(rawHandle(),out,&gen)&&out.baseContainerDeviceInstanceId==identity.baseContainerDeviceInstanceId,"cached output keeps original base identity");
+ require(memory::xusb==routes&&memory::lastRouteBase.empty(),"not due hit must not run route resolver");
+ memory::now=2000;memory::route.clear();require(hidHideResolveRawInputIdentity(rawHandle(),out,&gen),"empty route keeps physical identity hit");
+ require(memory::lastRouteBase==identity.baseContainerDeviceInstanceId,"route refresh receives owned exact base identity");
+ require(out.baseContainerDevicePath.empty()&&g_hidResolveCache.at(cacheKey()).routeRefreshTick==2000&&!g_hidResolveCache.at(cacheKey()).routeReady,"empty route advances cooldown and clears ready");
+ memory::now=2001;require(hidHideResolveRawInputIdentity(rawHandle(),out,&gen)&&memory::xusb==routes+1,"failed route not retried within cooldown");
+ memory::now=3000;memory::route=L"refreshed-again";require(hidHideResolveRawInputIdentity(rawHandle(),out,&gen)&&out.baseContainerDevicePath=="refreshed-again","route success after cooldown");
+ require(memory::lastRouteBase==identity.baseContainerDeviceInstanceId,"recovery route base unchanged");
+#ifdef YMCC_FAULT_INJECT
+ reset();const auto forced=g_hidResolveCacheGeneration.load();HidHidePhysicalIdentity nonPhysical;nonPhysical.baseContainerDeviceInstanceId="forced-base-"+std::string(192,'f');
+ require(executeProductionCacheFill(false,cacheKey(),HidResolveKind::Unsupported,nonPhysical,ascii_lower(W2U(memory::devices[0].path)),100,forced),"forced route setup");
+ memory::now=2000;g_fiForceRoute.store(1);memory::lastRouteBase.clear();gen=0;const auto expectedForcedBase=g_hidResolveCache.at(cacheKey()).identity.baseContainerDeviceInstanceId;
+ require(!hidHideResolveRawInputIdentity(rawHandle(),out,&gen)&&gen==forced&&memory::lastRouteBase==expectedForcedBase&&memory::xusb==1,"final forced route condition retains base ownership");auto captureIdentity=physical();require(executeProductionCacheFill(true,cacheKey(),HidResolveKind::Physical,captureIdentity,ascii_lower(W2U(memory::devices[0].path)),memory::now,forced),"capture forced setup");const auto captureRoutes=memory::xusb;require(hidHideResolveRawInputIdentity(rawHandle(),out,&gen,true)&&memory::xusb==captureRoutes,"capture remains route-free under forced refresh");g_fiForceRoute.store(0);
+#endif
+}
+
 } // namespace
 int main(int argc,char**argv){const std::vector<std::pair<std::string,std::function<void()>>> cases{
     {"default-vendor-rejection-and-publication",testDefaultVendorRejects},{"four-exact-model-predicate",testExactFourModels},{"virtual-marker-refusal",testVirtualMarkers},
     {"base-ancestor-evidence",testAncestorEvidence},{"boundary-probe-failures",testProbeFailures},{"cache-namespaces",testCacheNamespaces},
     {"invalidate-and-fill-generation-fence",testInvalidateAndFillFence},{"namespace-capacity-eviction",testEvictionNamespaces},{"capture-no-xusb-default-refresh",testCaptureNoXusbDefaultRefresh},
-    {"cache-hit-generation-interleave",testHitGenerationInterleave}};
-    const std::string filter=argc==3&&std::string(argv[1])=="--case"?argv[2]:"";if(argc!=1&&filter.empty()){std::cerr<<"invalid arguments\n";return 2;}unsigned ran=0;
-    for(const auto& item:cases){if(!filter.empty()&&filter!=item.first)continue;try{auto before=checks;item.second();++ran;std::cout<<"PASS "<<item.first<<" checks="<<checks-before<<'\n';}
+    {"cache-hit-generation-interleave",testHitGenerationInterleave},{"default-route-copy-ownership",testRouteCopyOwnership}};
+    const bool suffix=argc==3&&std::string(argv[1])=="--from";const std::string filter=argc==3&&(std::string(argv[1])=="--case"||suffix)?argv[2]:"";if(argc!=1&&filter.empty()){std::cerr<<"invalid arguments\n";return 2;}unsigned ran=0;bool selected=!suffix;
+    for(const auto& item:cases){if(suffix){if(item.first==filter)selected=true;if(!selected)continue;}else if(!filter.empty()&&filter!=item.first)continue;try{auto before=checks;item.second();++ran;std::cout<<"PASS "<<item.first<<" checks="<<checks-before<<'\n';}
         catch(const std::exception&e){std::cerr<<"FAIL "<<item.first<<": "<<e.what()<<'\n';return 1;}}
     if(!ran){std::cerr<<"unknown case\n";return 2;}std::cout<<"SUMMARY cases="<<ran<<" checks="<<checks<<'\n';return 0;}

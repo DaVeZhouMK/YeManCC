@@ -1,13 +1,14 @@
 import nodeTest,{after} from 'node:test';
 import crypto from 'node:crypto';
-import {createRequire} from 'node:module';
+import {createRequire,syncBuiltinESMExports} from 'node:module';
+import childProcess from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 const filterSpecified=process.env.YMCC_BUDGET_CASE_FILTER!==undefined;
 const CaseFilter=filterSpecified?JSON.parse(process.env.YMCC_BUDGET_CASE_FILTER):null,availableCases=new Set(),selectedCases=[];
 if(filterSpecified&&(!Array.isArray(CaseFilter)||!CaseFilter.length||CaseFilter.some(name=>typeof name!=='string')||new Set(CaseFilter).size!==CaseFilter.length))throw Error('BUDGET_CASE_FILTER_INVALID');
 const test=(name,fn,directedOnly=false)=>{
  availableCases.add(name);
- if(CaseFilter===null){if(!directedOnly)return nodeTest(name,fn);}
+ if(CaseFilter===null){if(!directedOnly)return nodeTest(name,context=>{prepareControlFixture();return fn(context);});}
  else if(CaseFilter.includes(name))selectedCases.push({name,fn});
 };
 import assert from 'node:assert/strict';
@@ -18,18 +19,23 @@ import {runProcess} from '../global/runner.mjs';
 const repo=path.resolve(import.meta.dirname,'../../..'),core=path.resolve(process.env.YMCC_SIM_CORE_ROOT??'G:/YeManCC-Work/Testing/YMCC');
 const root=path.resolve(process.env.YMCC_BUDGET_TEST_ROOT??path.join(core,'Evidence/Build/execution-budget-tests'));
 const inside=(parent,file)=>{const relative=path.relative(parent,file);return relative!==''&&!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep);};
-if(!inside(fs.realpathSync(core),root))throw Error('BUDGET_TEST_ROOT_OUTSIDE_CORE');
-let rootAncestor=root;while(!fs.existsSync(rootAncestor))rootAncestor=path.dirname(rootAncestor);
-const realCore=fs.realpathSync(core),realAncestor=fs.realpathSync(rootAncestor);
-if(path.relative(realCore,realAncestor)!==''&&!inside(realCore,realAncestor))throw Error('BUDGET_TEST_ROOT_ESCAPE');
-fs.mkdirSync(root,{recursive:true});if(!inside(realCore,fs.realpathSync(root)))throw Error('BUDGET_TEST_ROOT_ESCAPE');
-const own=fs.mkdtempSync(path.join(root,'owned-')),worker=path.join(own,'synthetic-worker.mjs');
-// An inert owned child and descendant, not a product or a formal acceptance result.
-fs.writeFileSync(worker,`import fs from 'node:fs';import path from 'node:path';import {spawn} from 'node:child_process';
+let own,worker;
+function prepareControlFixture(){
+ if(worker)return;
+ const realCore=fs.realpathSync(core);
+ if(!inside(realCore,root))throw Error('BUDGET_TEST_ROOT_OUTSIDE_CORE');
+ let rootAncestor=root;while(!fs.existsSync(rootAncestor))rootAncestor=path.dirname(rootAncestor);
+ const realAncestor=fs.realpathSync(rootAncestor);
+ if(path.relative(realCore,realAncestor)!==''&&!inside(realCore,realAncestor))throw Error('BUDGET_TEST_ROOT_ESCAPE');
+ fs.mkdirSync(root,{recursive:true});if(!inside(realCore,fs.realpathSync(root)))throw Error('BUDGET_TEST_ROOT_ESCAPE');
+ const owned=fs.mkdtempSync(path.join(root,'owned-')),entry=path.join(owned,'synthetic-worker.mjs');
+ // An inert owned child and descendant, not a product or a formal acceptance result.
+ fs.writeFileSync(entry,`import fs from 'node:fs';import path from 'node:path';import {spawn} from 'node:child_process';
 const ctx=JSON.parse(fs.readFileSync(process.argv[3],'utf8')),mode=ctx.args[0];
 if(mode==='hang'){const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',windowsHide:true});fs.writeFileSync(path.join(ctx.runDir,'owned-descendant.json'),JSON.stringify({pid:child.pid}));setInterval(()=>{},1000);}
 else{
  if(mode==='drift')fs.appendFileSync(process.argv[1],'\\n// changed after launch\\n');
+ if(mode==='receipt-job-publish-failure')fs.mkdirSync(path.join(ctx.runDir,'owned-job.json'));
  const result={schemaVersion:1,status:mode==='blocked'?'INCOMPLETE':'PASS_SELECTED_SCOPE',runDir:ctx.runDir,summary:{selected:1,executedThisRun:mode==='blocked'?0:1,actualPassedThisRun:mode==='blocked'?0:1}};
  const reports={'fail-zero':'FAIL','timeout-zero':'TIMEOUT','incomplete-zero':'INCOMPLETE','blocked-zero':'BLOCKED','not-run-zero':'NOT_RUN_BUSY'};
  if(reports[mode]){result.status=reports[mode];result.summary.actualPassedThisRun=0;}
@@ -51,9 +57,12 @@ else{
  else if(!['missing-result',...planModes].includes(mode))fs.writeFileSync(path.join(ctx.runDir,'result.json'),JSON.stringify(result));
  process.exitCode=mode==='blocked'?10:mode==='bad-exit'||mode==='delegated-failure'?2:0;
 }`);
+ own=owned;worker=entry;
+}
 const run=(mode,budgetMs=10000)=>runWithWallBudget([mode,...(mode==='modeless-run-plan'?['--mode','run']:[])],{repoRoot:repo,coreRoot:core,workerEntry:worker,budgetMs,outDir:own});
 test('normal owned work produces current result, one guard and a finite shared budget',async()=>{
  const {exitCode,result}=await run('normal');assert.equal(exitCode,0);assert.equal(result.status,'PASS_SELECTED_SCOPE');assert.equal(result.ownedJob.jobDisposed,true);assert.equal(result.actualPassedThisRun,1);
+ assert.equal(result.resourceZeroVerified,true);assert.equal(result.ownedJob.activeProcessesFinal,0);assert.equal(result.ownedJob.zeroObservedBeforeDispose,true);assert.equal(result.ownedJob.cleanupError,null);assert.equal(result.ownedJob.rootExitCode,0);
 });
 test('a stale PASS-shaped file cannot mask the actual nonzero child exit',async()=>{
  const {exitCode,result}=await run('bad-exit');assert.equal(exitCode,2);assert.equal(result.status,'FAIL');
@@ -66,6 +75,7 @@ test('one deadline reclaims an owned hanging worker and its descendant and prese
  const pidFile=path.join(result.runDir,'owned-descendant.json');assert.equal(fs.existsSync(pidFile),true,'inert grandchild must actually start before testing cleanup');
  const {pid}=JSON.parse(fs.readFileSync(pidFile,'utf8'));assert.throws(()=>process.kill(pid,0));
  assert.equal(fs.existsSync(path.join(result.runDir,'execution-budget.json')),true);assert.notEqual(result.status,'PASS_SELECTED_SCOPE');
+ assert.equal(result.resourceZeroVerified,true);assert.equal(result.ownedJob.activeProcessesFinal,0);assert.equal(result.ownedJob.zeroObservedBeforeDispose,true);assert.equal(result.ownedJob.terminationRequested,true);assert.equal(result.ownedJob.terminationSucceeded,true);assert.equal(result.ownedJob.cleanupError,null);
 });
 test('worker context rejects changed nonce and evidence outside the selected core',async()=>{
  const {result}=await run('normal');const context=path.join(result.runDir,'budget-context.json');
@@ -187,10 +197,28 @@ const identityDeadlineCase=async stage=>{
 };
 test(identityCaseNames.pre,()=>identityDeadlineCase('pre'),true);
 test(identityCaseNames.post,()=>identityDeadlineCase('post'),true);
+async function withReceiptWriteFailure(leaf,action){const o={open:fs.openSync,write:fs.writeFileSync,close:fs.closeSync,spawn:childProcess.spawn},names=new Map(),pending=new Set();let hits=0,spawns=0,lastFile=null,value=null,error=null;const selected=f=>typeof f==='string'&&(path.basename(f)===leaf||path.basename(f).startsWith(leaf+'.'));
+fs.openSync=function(f,...a){const fd=o.open.call(fs,f,...a);names.set(fd,String(f));if(selected(String(f)))pending.add(fd);return fd;};fs.closeSync=function(fd){try{return o.close.call(fs,fd);}finally{names.delete(fd);pending.delete(fd);}};fs.writeFileSync=function(f,...a){const name=typeof f==='number'?names.get(f):String(f);if(hits===0&&selected(name)){hits++;lastFile=name;o.write.call(fs,f,'');throw Object.assign(new Error('controlled ENOSPC at actual receipt writer'),{code:'ENOSPC',path:name});}return o.write.call(fs,f,...a);};childProcess.spawn=function(...a){spawns++;return o.spawn(...a);};syncBuiltinESMExports();try{value=await action();}catch(e){error={code:e.code,message:e.message};}finally{fs.openSync=o.open;fs.writeFileSync=o.write;fs.closeSync=o.close;childProcess.spawn=o.spawn;syncBuiltinESMExports();}return{value,error,hits,spawns,lastFile,pendingFds:pending.size};}
+
+// Explicit directed parameters of the existing budget entry; default test set stays unchanged.
+test('receipt write failures retain exits and observed resources without restarting owned work',async()=>{
+ const rows=[];
+ for(const leaf of ['budget-context.json','budget-arguments.json']){
+  const f=await withReceiptWriteFailure(leaf,()=>run('normal'));assert.equal(f.error,null);assert.equal(f.hits,1);assert.equal(f.spawns,0);assert.equal(f.pendingFds,0);assert.equal(f.value.exitCode,10);assert.equal(f.value.result.status,'INCOMPLETE_RECORDING');assert.equal(f.value.result.processStarted,false);assert.equal(fs.existsSync(path.join(f.value.result.runDir,leaf)),false);rows.push({parameter:leaf,status:'PASS',spawns:0,pendingFds:0});
+ }
+ for(const leaf of ['budget.stdout.log','execution-budget.json']){
+  const f=await withReceiptWriteFailure(leaf,()=>run('normal'));assert.equal(f.error,null);assert.equal(f.hits,1);assert.equal(f.pendingFds,0);assert.equal(f.value.exitCode,10);assert.equal(f.value.result.status,'INCOMPLETE_RECORDING');assert.equal(f.value.result.processExitCode,0);assert.equal(f.value.result.resourceZeroVerified,true);assert.equal(f.value.result.actualPassedThisRun,null);assert.equal(fs.existsSync(path.join(f.value.result.runDir,leaf)),false);assert(f.value.unpersistedRecords.length>0);rows.push({parameter:leaf,status:'PASS',processExit:0,resourceZeroVerified:true});
+ }
+ const failed=await withReceiptWriteFailure('budget.stdout.log',()=>run('bad-exit'));assert.equal(failed.error,null);assert.equal(failed.value.exitCode,2);assert.equal(failed.value.result.status,'FAIL');assert.equal(failed.value.result.actualPassedThisRun,null);rows.push({parameter:'real-nonzero-with-recording-failure',status:'PASS',exitCode:2});
+ const publication=await run('receipt-job-publish-failure');assert.equal(publication.exitCode,10);assert.equal(publication.result.status,'INCOMPLETE_RECORDING');assert.equal(publication.result.ownedJobVerified,false);assert.equal(publication.result.resourceZeroVerified,false);const d=publication.result.guardRecordingDiagnostic;assert(d);assert.equal(d.originalEffectiveExitCode,0);assert.equal(d.effectiveExitCode,10);for(const key of ['process','ready','temporaryStream'])assert.equal(d.dispose[key].returned,true);assert.equal(d.receipt.zeroObservedBeforeDispose,true);rows.push({parameter:'real-guard-publication-failure',status:'PASS',diagnosticNotOriginalJobProof:true});
+ assert.equal(rows.length,6);fs.writeFileSync(path.join(own,'receipt-failure-parameters.raw.json'),JSON.stringify({schemaVersion:1,group:'execution-budget',caseName:'receipt write failures retain exits and observed resources without restarting owned work',rows},null,2)+'\n',{flag:'wx'});
+},true);
+
 if(CaseFilter!==null){
  if(CaseFilter.some(name=>!availableCases.has(name)))throw Error('BUDGET_CASE_FILTER_UNKNOWN');
  const selectedNames=selectedCases.map(row=>row.name),actualNames=[],results=[];
  assert.equal(selectedNames.length,CaseFilter.length);
+ prepareControlFixture();
  fs.writeFileSync(path.join(own,'case-selection.json'),JSON.stringify({schemaVersion:1,group:'execution-budget',CaseFilter,selectedNames,selectedCount:selectedNames.length},null,2)+'\n');
  for(const row of selectedCases)nodeTest(row.name,async context=>{
   actualNames.push(row.name);

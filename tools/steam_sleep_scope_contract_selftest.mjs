@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import vm from 'node:vm';
 // Offline test: only the pinned Valve method is evaluated. No Steam process,
 // controller, network, sleep, or game is touched. Pass the verified source index.
-const profiles = [
+const defaultProfiles = [
   {
     "channel": "stable",
     "version": "1788652215",
@@ -22,6 +22,13 @@ const profiles = [
     "packageSha256": "012f3d0a5799278e0e404e568f20df1f0d37d50556f4562f46fc4f8dcea3bf8a"
   }
 ];
+// The original two-profile default stays unchanged. New source coverage is explicit.
+const scopeProfileAt=process.argv.indexOf('--scope-profile');
+const scopeProfile=scopeProfileAt<0?'':process.argv[scopeProfileAt+1];
+assert(scopeProfileAt<0||scopeProfile==='valve-win64-1794424036','unknown or empty scope profile');
+const expectScopeRejected=process.argv.includes('--expect-scope-rejected');
+assert(!expectScopeRejected||(scopeProfile&& !process.argv.includes('--expect-beta-rejected')),'source rejection control requires the explicit new profile');
+const profiles=scopeProfile?[{channel:'stable',version:'1794424036',bundleSha256:'4b818cd371388e06c66fe8c0bb592b7dfd4a6fb55eb56844d1b360b64aec3046',methodLength:1043,methodFnv1a32:3939488289,packageSha256:'c4ef0ef15369de9076657e67af5b218d95d71402ed3f92a1b3d096fb06a7b69b'}]:defaultProfiles;
 const arg = name => process.argv[process.argv.indexOf(name) + 1];
 assert(process.argv.includes('--source-index'), 'pass --source-index pointing to the manifest-verified Valve source index');
 const index = JSON.parse(fs.readFileSync(arg('--source-index'), 'utf8'));
@@ -51,7 +58,7 @@ function fixture(profile,method,options={}) {
   const enumRoot={Ul:{Fi:4,Vv:1}},desktop={VE:413080},client={s5U:769},appStore={tw:{allApps:apps}};
   const platform={rf:()=>false},log={Debug(){},IsDebugEnabled:()=>false};
   const mobx={h5(fn){stats.calls++;if(drift)account=43;fn();},HO:value=>value};
-  const globals=profile.channel==='stable'?{ze:enumRoot,Ve:desktop,m:client,J:appStore,y:platform,wt:log,n:mobx}:{ce:enumRoot,F:desktop,l:client,ke:appStore,I:platform,Di:log,e:mobx};
+  const globals=profile.version==='1794424036'?{G:enumRoot,at:desktop,r:client,Lt:appStore,ie:platform,Qi:log,ot:mobx}:profile.channel==='stable'?{ze:enumRoot,Ve:desktop,m:client,J:appStore,y:platform,wt:log,n:mobx}:{ce:enumRoot,F:desktop,l:client,ke:appStore,I:platform,Di:log,e:mobx};
   const actual=tamper?method.replace('ScopeRunningApps - App ','ScopeRunningApps ? App '):method;
   assert(!tamper||actual!==method);
   const scope=vm.runInNewContext('({'+actual+'})',globals,{timeout:1000});
@@ -68,6 +75,11 @@ for(const profile of profiles) {
   const raw=fs.readFileSync(file.path);assert.equal(sha256(raw),profile.bundleSha256,'pinned Valve source changed');
   const method=extractMethod(raw.toString('utf8'));
   assert.equal(method.length,profile.methodLength);assert.equal(fnv(method),profile.methodFnv1a32);
+  if(expectScopeRejected){
+    const f=fixture(profile,method,{local:4,rawRunning:[945360]}),r=await f.fn(f.request);
+    assert(!r.ok&&!r.mutated);assert.equal(r.reason,'steam-rescope-schema-changed');assert.equal(f.stats.calls,0);
+    rows.push({channel:profile.channel,case:'exact-new-official-body-before-adaptation',result:'rejected-with-zero-writes',reason:r.reason,contract:r.rescopeContract});continue;
+  }
   for(const local of [4,1]) {
     const f=fixture(profile,method,{local,rawRunning:[945360]});const r=await f.fn(f.request);
     if(expectBetaRejected&&profile.channel==='publicbeta') {

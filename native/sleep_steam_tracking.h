@@ -2,12 +2,14 @@
 // Pure Steam evidence parser. Logs are observations, not commands. No process,
 // registry, Steam UI, controller or fan mutations exist in this header.
 #include <string>
+#include <array>
 #include <vector>
 #include <map>
 #include <cstdint>
 #include <limits>
 #include <algorithm>
 #include <sstream>
+#include <string_view>
 #include "json.hpp"
 namespace ymcc::sleepsteam {
 using Json=nlohmann::json;
@@ -83,15 +85,20 @@ inline Binding track(const std::vector<std::string>& lines,std::uint32_t pid,con
     std::map<std::uint32_t,Binding> live;bool removed=false;unsigned scanned=0;
     for(const auto& row:lines) {
         ++scanned;
+        // Classify the original three message kinds once; unrelated rows retain
+        // their byte budget and line number without timestamp/body copies.
+        if(row.size()<22)continue;
+        const unsigned kind=row.compare(22,6,"AppID ")==0?1:row.compare(22,7,"Remove ")==0?2:
+            row.compare(22,15,"Client version:")==0?3:0;
+        if(!kind)continue;
         std::string at;if(!timestamp(row,at))continue;const auto text=row.substr(22);
-        if(text.rfind("Client version:",0)==0){live.clear();removed=false;continue;}
-        if(text.rfind("Remove ",0)==0) {
+        if(kind==3){live.clear();removed=false;continue;}
+        if(kind==2) {
             const auto end=text.find(" from running list",7);std::uint32_t id=0;
             if(scope==TrackingScope::RunningListAndProcess&&end!=std::string::npos&&
                 appId(text.substr(7,end-7),id)&&live.erase(id))removed=true;
             continue;
         }
-        if(text.rfind("AppID ",0)!=0)continue;
         const auto sep=text.find(' ',6);if(sep==std::string::npos)continue;std::uint32_t id=0;
         if(!appId(text.substr(6,sep-6),id))continue;
         const auto action=text.substr(sep);const std::string adding=" adding PID ",dropping=" no longer tracking PID ";
@@ -106,21 +113,72 @@ inline Binding track(const std::vector<std::string>& lines,std::uint32_t pid,con
     if(live.size()==1)return live.begin()->second;
     result.status=live.empty()?(removed?"removed":"unknown"):"ambiguous";return result;
 }
+// Parse the two requested views together. Each owns its independent lifetime state;
+// the original single-view parser above remains the unchanged standalone path.
+inline std::array<Binding,2> trackScopes(const std::vector<std::string>& lines,std::uint32_t pid,const std::string& exe,
+    const std::string& earliest,const std::string& latest) {
+    std::array<Binding,2> results{};if(!pid||exe.empty()||earliest.empty()||latest.empty()||earliest>latest)return results;
+    if(lines.empty())return results;
+    if(!trackerLinesWithinBudget(lines)){for(auto& item:results)item.status="incomplete";return results;}
+    std::array<std::map<std::uint32_t,Binding>,2> live;
+    std::array<bool,2> removed{};unsigned scanned=0;
+    for(const auto& row:lines) {
+        ++scanned;
+        // Classify the original three message kinds once; unrelated rows retain
+        // their byte budget and line number without timestamp/body copies.
+        if(row.size()<22)continue;
+        const unsigned kind=row.compare(22,6,"AppID ")==0?1:row.compare(22,7,"Remove ")==0?2:
+            row.compare(22,15,"Client version:")==0?3:0;
+        if(!kind)continue;
+        std::string at;if(!timestamp(row,at))continue;const auto text=row.substr(22);
+        if(kind==3){for(auto& state:live)state.clear();removed.fill(false);continue;}
+        if(kind==2) {
+            const auto end=text.find(" from running list",7);std::uint32_t id=0;
+            if(end!=std::string::npos&&
+                appId(text.substr(7,end-7),id)&&live[0].erase(id))removed[0]=true;
+            continue;
+        }
+        const auto sep=text.find(' ',6);if(sep==std::string::npos)continue;std::uint32_t id=0;
+        if(!appId(text.substr(6,sep-6),id))continue;
+        const auto action=text.substr(sep);const std::string adding=" adding PID ",dropping=" no longer tracking PID ";
+        const bool add=action.rfind(adding,0)==0,drop=action.rfind(dropping,0)==0;if(!add&&!drop)continue;
+        const auto begin=add?adding.size():dropping.size();const auto end=action.find_first_of(" ,",begin);std::uint64_t candidate=0;
+        if(end==std::string::npos||!unsignedDecimal(action.substr(begin,end-begin),candidate)||candidate!=pid)continue;
+        if(drop){for(std::size_t i=0;i<live.size();++i)if(live[i].erase(id))removed[i]=true;continue;}
+        const std::string marker=" as a tracked process ";if(action.compare(end,marker.size(),marker)!=0)continue;
+        if(at<earliest||at>latest||pathKey(commandExe(action.substr(end+marker.size())))!=pathKey(exe))continue;
+        Binding b;b.status="tracked";b.at=at;b.appid=id;b.line=scanned;b.exactPath=true;for(auto& state:live)state[id]=b;
+    }
+    for(std::size_t i=0;i<live.size();++i){
+        if(live[i].size()==1)results[i]=live[i].begin()->second;
+        else results[i].status=live[i].empty()?(removed[i]?"removed":"unknown"):"ambiguous";
+    }
+    return results;
+}
 // Native ProcID observations identify the local game-record primary, not every
 // member of its tracked PID vector. Labels are metadata, never OS path authority.
 struct NativePrimaryProcessRow {std::uint32_t appid=0,pid=0;std::string at,label;bool local=false,removed=false;unsigned line=0;};
 struct NativePrimaryProcessInventory {bool complete=true;std::string reason;std::map<std::uint32_t,NativePrimaryProcessRow> rows;};
-// Match the existing complete-file read budget. Console logs can exceed 20,000
-// short unrelated lines within 2 MiB; inspect the whole bounded snapshot so a
-// later primary update/removal cannot be missed or authorize an older record.
-inline constexpr std::size_t nativePrimaryMaximumBytes=2U*1024U*1024U;
+// Console has its own bounded complete-source budget. Inspect every byte,
+// including later primary updates/removals; a truncated tail never supplies
+// primary identity. GameProcess keeps its independent original 2 MiB budget.
+inline constexpr std::size_t nativePrimaryMaximumBytes=8U*1024U*1024U;
 inline NativePrimaryProcessInventory nativePrimaryProcessInventoryText(const std::string& bytes,const std::string& earliest,const std::string& latest) {
     NativePrimaryProcessInventory result;unsigned scanned=0;
     if(earliest.empty()||latest.empty()||earliest>latest){result.complete=false;result.reason="steam-native-primary-boundary-invalid";return result;}
     if(bytes.size()>nativePrimaryMaximumBytes){result.complete=false;result.reason="steam-native-primary-byte-limit";return result;}
-    std::istringstream input(bytes);std::string line;
-    while(std::getline(input,line)){
+    // Borrow each complete source line. Unrelated diagnostics need neither a
+    // copy nor timestamp/path parsing; every possible primary marker still
+    // reaches the original strict parser, including malformed timestamps.
+    std::size_t offset=0;
+    while(offset<bytes.size()){
+        const auto end=bytes.find('\n',offset);
+        const auto length=(end==std::string::npos?bytes.size():end)-offset;
+        const std::string_view view(bytes.data()+offset,length);
+        offset=end==std::string::npos?bytes.size():end+1;
         ++scanned;
+        if(view.find("Game process ")==std::string_view::npos)continue;
+        const std::string line(view);
         std::string at;if(!timestamp(line,at)){
             if(line.find("Game process added : AppID ")!=std::string::npos||line.find("Game process updated : AppID ")!=std::string::npos||line.find("Game process removed: AppID ")!=std::string::npos){result.complete=false;result.reason="steam-native-primary-diagnostic-malformed";return result;}
             continue;

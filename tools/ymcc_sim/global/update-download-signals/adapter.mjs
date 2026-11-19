@@ -12,6 +12,7 @@ export function getUpdateDownloadAdapters(repoRoot=defaultRepo){let artifactInpu
   "pnpm-lock.yaml",
   "package.json",
   "src/bridge/api.ts",
+  "src/bridge/powerLifecycleState.ts",
   "src/bridge/autofloat.ts",
   "src/bridge/controllerPersona.ts",
   "src/bridge/controllerShortcutRules.ts",
@@ -58,6 +59,7 @@ export function getUpdateDownloadAdapters(repoRoot=defaultRepo){let artifactInpu
   "src/version.ts",
   "src/bridge/gamePolicyTarget.ts",
   "src/bridge/gamePolicyHysteresis.ts",
+  "tools/lib/updater_fixture_environment.ts",
   "tools/updater_stability_selftest.ts",
   "tools/updater_game_recovery_selftest.ts",
   "tools/updater_predownload_integration_selftest.ts",
@@ -74,7 +76,7 @@ export function getUpdateDownloadAdapters(repoRoot=defaultRepo){let artifactInpu
   "tools/ymcc_sim/global/update-download-signals/tool-scope.mjs",
   ...BUNDLED_AUTHORITY_SOURCES
 ])],
- referenceInputs:['src/bridge/gamePolicyTarget.ts'],referenceMeaning:'Game admission interface/provenance only; game status is injected in memory exactly like the original service test.',
- boundary:'Real service/scheduler/provider/manager/yeman/IPC; fake clock and memory WebView native replies, no actual HTTP/package files/install/native handlers/user configuration.'
+ referenceInputs:['src/bridge/gamePolicyTarget.ts','src/bridge/powerLifecycleState.ts'],referenceMeaning:'Game admission is inert. Default shared-power facts are inert with the exact product admission predicate bound in worker; factory decoding/order are exercised only by the explicit service-power-admission selection.',
+ boundary:'Real service/scheduler/provider/manager/yeman/IPC; default inert shared-power facts plus exact product predicate; explicit power selection runs actual shared source; fake clock and memory WebView native replies, no actual HTTP/package files/install/native handlers/user configuration. Shared power decoding/order/recovery is tested separately by lifecycle.ui-power-recovery.'
 }];}
 

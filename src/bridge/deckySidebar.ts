@@ -35,7 +35,10 @@ export const deckySidebar = {
   environment: () => invoke<DeckySidebarEnvironment>('deckySidebar.environment', {}, { timeoutMs: 5000 }),
   get: () => invoke<DeckySidebarState>('deckySidebar.get', {}, { timeoutMs: 3000 }),
   repairConnection: (pid:number,birth:string,revision:number) => invoke<{ok:boolean;reason?:string;mutated?:boolean;requestDispatched?:boolean}>('deckySidebar.repairConnection', {userInitiated:true,pid,birth,revision}, {timeoutMs:20000}),
-  setEnabled: (enabled: boolean) => invoke<DeckySidebarState>('deckySidebar.setEnabled', { enabled }, { timeoutMs: 5000 }),
+  setEnabled: (enabled: boolean, options: import('./bootModeGlobalPreferences').BootPreferenceWrite = {}) => {
+    const origin = options.origin, bootContext = options.bootContext === undefined ? undefined : structuredClone(options.bootContext);
+    return invoke<DeckySidebarState>('deckySidebar.setEnabled', { enabled, ...(origin ? { origin } : {}), ...(bootContext === undefined ? {} : { bootContext }) }, { timeoutMs: 5000 });
+  },
   subscribe: (listener: (state: DeckySidebarState) => void) => on<DeckySidebarState>('deckySidebar.updated', listener),
 };
 
@@ -51,6 +54,9 @@ export function deckySidebarCanRepair(state: DeckySidebarState | null): boolean 
 export function deckyConnectionSummary(state: DeckySidebarState | null): {label:string;detail:string;tone:string} {
   if(!state)return {label:'正在检查连接',detail:'连接异常时自动恢复，也可手动修复',tone:'pending'};
   if(!state.enabled)return {label:'已关闭',detail:deckySidebarSafetyReason(state.reason)||'开启后自动连接 Steam',tone:'off'};
+  // A confirmed launch refusal must retain its actionable reason even if an
+  // earlier connection-recovery status is still present.
+  if(state.phase==='failed'&&state.reason==='launch-failed'&&state.launchStage==='shell-token-elevated')return {label:'启动权限不满足',detail:deckySidebarDescription(state),tone:'warning'};
   if(state.recovery?.phase==='recovering')return {label:'正在恢复连接',detail:'恢复完成后自动可用',tone:'pending'};
   if(state.recovery?.phase==='manual-required')return {label:'需要手动修复',detail:state.recovery.reason==='steam-ui-refresh-requires-user'?'插件后台未连接，请点击修复连接':'自动恢复未完成，请重试',tone:'warning'};
   if(state.phase==='unavailable'&&state.reason==='mirror-bootstrap-session-changed')return {label:'连接已中断',detail:'Steam 会话校验发生变化，请手动修复并重新验证',tone:'warning'};

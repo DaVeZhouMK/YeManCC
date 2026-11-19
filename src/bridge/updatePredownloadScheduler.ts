@@ -22,7 +22,7 @@ export interface PredownloadDependencies {
   initialize(): Promise<void>;
   refresh(): Promise<void>;
   current(): { info: UpdateInfo | null; progress: UpdateProgressState };
-  check(): Promise<void>;
+  check(): Promise<boolean | void | 'retired'>;
   prepare(cacheOnly: boolean): Promise<boolean>;
   cancel(): Promise<void>;
   notify(version: string): Promise<boolean>;
@@ -145,6 +145,10 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
       if (ended || refreshTicket !== revision) return;
       let current = deps.current();
       if (busyPhases.includes(current.progress.phase || '')) { progress(); return; }
+      if (current.progress.installerActive === true ||
+          current.progress.stage === 'install' && current.progress.repairAuthorized === true) {
+        publish({ phase: 'paused', message: '安装事务尚未结束，请在更新页完成或修复安装' }); return;
+      }
       const runTicket = revision;
       // Recover a completed .part after a crash even without network. Probe an
       // interrupted identity once, so ordinary partials don't bypass backoff.
@@ -178,15 +182,24 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
         return;
       }
       if (deps.now() < policy.nextCheckAt) return;
-      // An interrupted installation belongs to the explicit install action.
-      if (current.info && current.progress.stage === 'install' && ['installing', 'interrupted', 'failed'].includes(current.progress.phase || '') && !verified) {
-        publish({ phase: 'paused', message: '上次安装未完成，请在更新页重试安装' }); return;
-      }
+      // Historical diagnostics cannot veto discovering a newer package. Keep
+      // the same failed identity manual; only a new version/SHA may predownload.
+      const oldInstallIdentity = current.info && current.progress.stage === 'install' &&
+        ['interrupted', 'failed'].includes(current.progress.phase || '') && !verified ? identity(current.info) : '';
       const ticket = revision;
       publish({ phase: 'waiting', message: '正在后台检查新版本' });
-      await deps.check();
-      if (ended || !policy.enabled || ticket !== revision || deps.canRun?.() === false) return;
+      const checked = await deps.check();
+      if (ended || !policy.enabled || ticket !== revision || deps.canRun?.() === false || checked === 'retired') return;
       current = deps.current();
+      if (checked === false) {
+        if (current.progress.phase === 'failed') throw Error(current.progress.error || '后台检查更新失败');
+        return; // A replaced check no longer owns the target or its deadline.
+      }
+      if (oldInstallIdentity && current.info && identity(current.info) === oldInstallIdentity &&
+          current.progress.stage === 'install') {
+        await schedule(false);
+        publish({ phase: 'paused', message: '上次安装未完成，请在更新页重试安装' }); return;
+      }
       if (current.progress.phase === 'failed') throw Error(current.progress.error || '后台检查更新失败');
       if (!current.info || current.progress.phase === 'latest') {
         publish({ phase: 'idle', version: '', percent: 0, message: '当前已是最新版本，后台定期检查' });

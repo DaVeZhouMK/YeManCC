@@ -14,24 +14,31 @@
 #include <mutex>
 #include <limits>
 #include <cwctype>
+#include <functional>
+#include <chrono>
+#include <optional>
 using json=nlohmann::json;
 static std::wstring YM_SETTINGS_FILE,YM_SETTINGS_BACKUP_FILE;
-struct SettingsFileGuard {};
+// FILE_SETTINGS_GUARD
 struct InputHostTargetWriteGuard{bool admit(const json&,const json&){return true;}void commit(){}};
-namespace fspath{static bool exists(const std::wstring& path){return std::filesystem::exists(std::filesystem::path(path));}}
+namespace fspath=std::filesystem;
+// FILE_SETTINGS_TOUCH_HEADERS
+// FILE_SETTINGS_IO_PORTS
 // FILE_SETTINGS_PRODUCTION_BODIES
+// FILE_SETTINGS_TOUCH_HANDLER
 static json handle(const json& request){
  auto file=std::filesystem::weakly_canonical(std::filesystem::u8path(request.at("file").get<std::string>()));
  auto root=std::filesystem::weakly_canonical(std::filesystem::u8path(request.at("root").get<std::string>()));
  const auto relative=std::filesystem::relative(file,root);if(relative.empty()||relative.is_absolute()||*relative.begin()==L"..")throw std::runtime_error("outside isolated evidence root");
  YM_SETTINGS_FILE=file.wstring();YM_SETTINGS_BACKUP_FILE=YM_SETTINGS_FILE+L".bak";
  const auto operation=request.at("operation").get<std::string>();
+ // FILE_SETTINGS_TOUCH_DISPATCH
  if(operation=="read")return ymSettingsReadSnapshot(request.value("stamp",std::string{}));
  if(operation=="shortcutRules") { const auto document=ymSettingsReadUnlocked(); const auto input=request.contains("input")?request.at("input"):document.value("input",json::object()); const auto rules=ymcc::bootModeShortcuts::effectiveRules(input); return {{"rules",rules?*rules:json::array()}}; }
  json committed;bool conflict=false,blocked=false,ok=false;
  if(operation=="write"){
   const auto baseline=request.value("baseline",json(nullptr));
-  ok=ymSettingsWriteDocumentUnlocked(request.at("content").get<std::string>(),nullptr,baseline.is_object()?&baseline:nullptr,&committed,request.value("initialize",false),request.value("expectedInputRevision",-1LL),&conflict,&blocked);
+  ok=ymSettingsWriteDocumentUnlocked(request.at("content").get<std::string>(),nullptr,baseline.is_object()?&baseline:nullptr,&committed,request.value("initialize",false),request.value("expectedInputRevision",-1LL),&conflict,&blocked,request.value("guardBootMode",false));
  }else if(operation=="startup"){
   auto before=ymSettingsReadUnlocked();auto next=ymcc::initializeBootModeInputStartup(before,request.at("session").get<std::string>(),request.at("boot").get<std::string>());
   ok=ymSettingsWriteDocumentUnlocked(next.dump(),nullptr,&before,&committed);

@@ -1,3 +1,5 @@
+#include "../input-sources/native/log_snapshot_state.h"
+#include "../input-sources/native/sleep_recovery_record_name.h"
 #include <atomic>
 #include <thread>
 #include <condition_variable>
@@ -42,7 +44,8 @@ struct SgSleepTarget { bool markerOwned=false; unsigned long long powerGeneratio
 struct SgResumeResult { int count=0; };
 static bool sgReadSleepTarget(SgSleepTarget&) { return false; }
 static bool sgResumeSleepTargetUnlocked(unsigned long long, bool) { throw std::runtime_error("unexpected memory target resume"); }
-static SgResumeResult sgResumeTrackedAllUnlocked() { businessFacts.push_back({{"kind","memory-empty-resume"}}); return {}; }
+enum class SgDirectoryResumePurpose { ExitCleanup };
+static SgResumeResult sgResumeTrackedAllUnlocked(SgDirectoryResumePurpose purpose) { if(purpose!=SgDirectoryResumePurpose::ExitCleanup) throw std::runtime_error("unexpected resume purpose"); businessFacts.push_back({{"kind","memory-empty-resume"}}); return {}; }
 static void sgCancelWakeGameRecoveryUnlocked(const char* reason) { ++cancelCalls; businessFacts.push_back({{"kind","memory-wake-cancel"},{"reason",reason}}); }
 // EXACT_CURRENT_FULL_DEFINITIONS
 static void need(bool condition, const char* text) { if(!condition)throw std::runtime_error(text); }

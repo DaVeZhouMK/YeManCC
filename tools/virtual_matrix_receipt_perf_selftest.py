@@ -2,6 +2,7 @@
 from pathlib import Path
 import argparse,datetime,difflib,hashlib,json,os,re,subprocess,sys,zipfile
 sys.dont_write_bytecode=True
+from input_capture_recipe import expand_recipe_receipt
 REPO=Path(__file__).resolve().parents[1];OUTPUT=REPO.parents[2]/'Build/Validation/VirtualInputPerf-R21-20261015';VCVARS=Path('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat')
 ARCHIVE=Path('C:/Users/DaVe/Desktop/日志-侧边栏全开后/YeManCC-logs-20261014-160313--G3E虚拟手柄OK.zip');ARCHIVE_SHA='e886bcacb06e9250976235f4d1c0dae28c8f8e46902e7a1210f148c4cc01a479'
 PLAN={'campaigns':2,'rounds':11,'minimumFasterRounds':10,'minimumPairedReduction':.05,'minimumRatioReduction':.05,'fewerRequests':True,'fewerBytes':True,'batchSize':32,'batches':24,'warmupBatches':6,'scopes':['receipt','hc-object','receipt-dump','hc-dump'],'decision':'Every selected MSI G3E scenario and scope must pass in both profiles and campaigns.'}
@@ -64,7 +65,8 @@ def build_cases(run):
                 try:r=json.loads(line)
                 except (ValueError,UnicodeDecodeError):continue
                 if r.get('kind')!='sample':continue
-                receipt=r['hcMatrixCandidate']['recipeReceipt']
+                receipt=expand_recipe_receipt(r['hcMatrixCandidate']['recipeReceipt'])
+                if receipt is None:raise ValueError('Invalid compact motion recipe receipt')
                 rows.append({'name':f'{name}:{line_no}','case':{'deviceClass':'HandheldCompanion.Devices.ClawCG3EM','product':'MS-1T91','gyroMatrixId':'hc-06c0b954:msi-claw-sub:gyro:x-y-neg-z','accelMatrixId':'hc-06c0b954:msi-claw-a1m:accel:neg-x-neg-z-y','matrixSourceSha256':'hc-06c0b954:msi-claw-sub:gyro:x-y-neg-z','meta':{'gyroFamily':receipt['gyro']['provider'],'accelFamily':receipt['accel']['provider'],'gyroHcLegacyFields':receipt['gyro']['legacyFieldOverride'],'accelHcLegacyFields':receipt['accel']['legacyFieldOverride']},'expected':receipt}})
     assert len(rows)==2301
     save(run/'all-cases.json',rows)

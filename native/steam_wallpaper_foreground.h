@@ -8,7 +8,7 @@ namespace ymcc::steamwallpaperForeground {
 struct Facts {
     bool known=false, physical=false, enabled=false, ready=false;
     std::uint32_t pid=0, steamPid=0;
-    std::uint64_t birth=0, window=0, steamBirth=0, power=0;
+    std::uint64_t birth=0, window=0, steamBirth=0, power=0, modeRevision=0;
     std::string modeEpoch;
     bool operator==(const Facts&) const = default;
 };

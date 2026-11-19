@@ -1,8 +1,9 @@
 import { invoke, on } from './ipc';
 import { steamRunning } from './yeman';
 export type SteamUiMode = 'desktop' | 'bigpicture' | 'unknown' | 'stopped';
-export interface SteamUiState { known: boolean; running: boolean; mode: SteamUiMode; pid: number; birth: string; reason: string; }
-interface Dependencies { invoke<T>(cmd: string, args: object, options: { timeoutMs: number }): Promise<T>; running(): Promise<boolean>; }
+export interface SteamUiState { known: boolean; running: boolean; mode: SteamUiMode; pid: number; birth: string; reason: string; observedAccount?: number; modeEpoch?: string; }
+interface Dependencies { invoke<T>(cmd: string, args: object, options: { timeoutMs: number; signal?: AbortSignal }): Promise<T>; running(): Promise<boolean>; }
+type SteamUiReadOptions = ({ automatic?: true } | { publishedOnly: true }) & { signal?: AbortSignal };
 export function validSteamUiState(value: any): value is SteamUiState {
   return !!value && typeof value.known === 'boolean' && typeof value.running === 'boolean'
     && ['desktop','bigpicture','unknown','stopped'].includes(value.mode)
@@ -28,23 +29,38 @@ export function createSteamUi(deps: Dependencies) {
       const result=await deps.invoke<{ok:boolean;reason?:string}>('steam.ui.stop',{pid:state.pid,birth:state.birth,userInitiated:true},{timeoutMs:10000});
       if(!result||result.ok!==true)throw Error(result?.reason==='steam-session-changed'?'Steam 会话已改变，请重新检测后重试':'Steam 退出请求未成功：'+(result?.reason??'返回无效'));
     },
-    async read(options?: { automatic: true }): Promise<SteamUiState> {
+    async read(options?: SteamUiReadOptions): Promise<SteamUiState> {
+      const requestOptions = options?.signal ? { timeoutMs: 8000, signal: options.signal } : { timeoutMs: 8000 };
+      if (options && 'publishedOnly' in options) {
+        const state = await deps.invoke<SteamUiState>('steam.uiState', { publishedOnly: true }, requestOptions);
+        if (!validSteamUiState(state)) throw new Error('Steam 界面状态返回无效');
+        return state;
+      }
+      const automatic = options && 'automatic' in options && options.automatic === true;
       try {
         let state: SteamUiState;
-        try { state = await deps.invoke<SteamUiState>('steam.uiState', options?.automatic ? {} : { force: true }, { timeoutMs: 8000 }); }
+        try { state = await deps.invoke<SteamUiState>('steam.uiState', automatic ? {} : { force: true }, requestOptions); }
         catch (error) {
           // Older native builds accept an empty argument object. Compatibility
           // is one explicit retry only, never a timeout/IO fallback loop.
-          if (options?.automatic || String((error as Error).message) !== 'Invalid Steam UI read') throw error;
-          state = await deps.invoke<SteamUiState>('steam.uiState', {}, { timeoutMs: 8000 });
+          if (automatic || options?.signal?.aborted || String((error as Error).message) !== 'Invalid Steam UI read') throw error;
+          state = await deps.invoke<SteamUiState>('steam.uiState', {}, requestOptions);
         }
         if (!validSteamUiState(state)) throw new Error('Steam 界面状态返回无效');
         return state;
       } catch (error) {
         // Only a missing handler merits legacy compatibility. IO/transport failure
         // is unknown, never evidence of desktop mode or permission to stop Steam.
-        if (!/^unknown:\s*steam\.uiState$|unknown.*(?:command|ipc|cmd)|unsupported.*(?:command|ipc|cmd)|no handler/i.test(String((error as Error).message))) throw error;
-        const running = await deps.running();
+        const signal = options?.signal;
+        if (signal?.aborted || !/^(?:unknown|unknown ipc cmd): steam\.uiState$/i.test(String((error as Error)?.message))) throw error;
+        const running = signal ? await new Promise<boolean>((resolve, reject) => {
+          const abort = () => reject(new Error('IPC request retired'));
+          signal.addEventListener('abort', abort, { once: true });
+          Promise.resolve().then(() => {
+            if (signal.aborted) throw new Error('IPC request retired');
+            return deps.running();
+          }).then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+        }) : await deps.running();
         return { known: true, running, mode: running ? 'unknown' : 'stopped', pid: 0, birth: '0', reason: 'native-ui-mode-unavailable' };
       }
     },
@@ -59,4 +75,37 @@ export function createSteamUi(deps: Dependencies) {
     },
   };
 }
-export const steamUi = { ...createSteamUi({ invoke, running: steamRunning }), subscribe: (handler: () => void) => on('steam.uiStateChanged', handler) };
+const service = createSteamUi({ invoke, running: steamRunning });
+const notificationReads = new WeakMap<Event, Promise<SteamUiState>>();
+let activeNotification: Event | undefined;
+export const steamUi = {
+  ...service,
+  async read(options?: SteamUiReadOptions): Promise<SteamUiState> {
+    // Share only within the synchronous subscribers of this exact dispatch.
+    // A later notification, timer, or action confirmation reads independently.
+    if (!options || 'publishedOnly' in options || !options.automatic || options.signal || !activeNotification) return service.read(options);
+    const notification = activeNotification;
+    let pending = notificationReads.get(notification);
+    if (!pending) {
+      pending = service.read(options);
+      notificationReads.set(notification, pending);
+    }
+    return { ...await pending };
+  },
+  subscribe(handler: (published?: SteamUiState) => void, options?: { publishedMediaState: true }): () => void {
+    return on<{mediaStateV1?: unknown}>('steam.uiStateChanged', (data, notification) => {
+      const previous = activeNotification;
+      activeNotification = notification;
+      try {
+        const state = options?.publishedMediaState ? data?.mediaStateV1 : undefined;
+        if(validSteamUiState(state) && state.reason === 'published-media-notice' &&
+            (state.mode === 'desktop' || state.mode === 'bigpicture') &&
+            (state.observedAccount === undefined || Number.isSafeInteger(state.observedAccount) &&
+             state.observedAccount > 0 && state.observedAccount <= 0xffffffff) &&
+            (state.modeEpoch === undefined || typeof state.modeEpoch === 'string' && state.modeEpoch.length <= 96)) {
+          handler(state);
+        } else handler();
+      } finally { activeNotification = previous; }
+    }, true);
+  },
+};

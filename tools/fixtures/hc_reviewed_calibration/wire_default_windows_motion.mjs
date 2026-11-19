@@ -51,11 +51,11 @@ export function wireWindowsCalibrationContext(base,source){
  return{code:prefix+tail,bindings};
 }
 
-export function copyWindowsCalibrationContextHeaders(repo,out,freeze){
- for(const file of ['capabilities/HcMotionCapabilityCatalog.h','capabilities/HcMotionCapabilityCatalog.generated.h','native/hc_generic_motion_catalog.h'])fs.writeFileSync(path.join(out,path.basename(file)),freeze(path.join(repo,file)));
+export function copyWindowsCalibrationContextHeaders(repo,out,freeze,writeFile=fs.writeFileSync){
+ for(const file of ['capabilities/HcMotionCapabilityCatalog.h','capabilities/HcMotionCapabilityCatalog.generated.h','native/hc_generic_motion_catalog.h'])writeFile(path.join(out,path.basename(file)),freeze(path.join(repo,file)));
  const pending=['windows_source_view.h','windows_source_eligibility.h','windows_motion_processing.h','hc_oem_windows_motion_catalog.h'],copied=new Set();
- for(const name of ['private_profile_scope.inc','private_profile_cases.inc','windows_processing_cases.inc'])fs.writeFileSync(path.join(out,name),freeze(path.join(repo,'tools/fixtures/hc_reviewed_calibration',name)));
- while(pending.length){const name=pending.pop();if(copied.has(name))continue;copied.add(name);const data=freeze(path.join(repo,'native',name));fs.writeFileSync(path.join(out,name),data);for(const m of data.toString('utf8').matchAll(/#include\s+"([^"/]+\.h)"/g))if(fs.existsSync(path.join(repo,'native',m[1])))pending.push(m[1]);}
+ for(const name of ['private_profile_scope.inc','private_profile_cases.inc','windows_processing_cases.inc'])writeFile(path.join(out,name),freeze(path.join(repo,'tools/fixtures/hc_reviewed_calibration',name)));
+ while(pending.length){const name=pending.pop();if(copied.has(name))continue;copied.add(name);const data=freeze(path.join(repo,'native',name));writeFile(path.join(out,name),data);for(const m of data.toString('utf8').matchAll(/#include\s+"([^"/]+\.h)"/g))if(fs.existsSync(path.join(repo,'native',m[1])))pending.push(m[1]);}
 }
 
 // Real worker ownership bodies; this only wires isolated fixtures and has no hardware effects.

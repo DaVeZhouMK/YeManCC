@@ -6,6 +6,11 @@
 
 namespace ymcc::inputHost::compactReply {
 inline constexpr int kVersion = 1;
+inline constexpr int kRequestVersion = 1;
+inline constexpr const char* kRequestTupleFields[] = {
+    "runId", "epoch", "powerGeneration", "targetId", "ownerIdentity",
+    "persona", "profileIdentity", "configRevision", "configHash"
+};
 inline constexpr std::size_t kMaxReplyBytes = 16 * 1024;
 inline bool validToken(std::string_view token) noexcept {
     if (token.size() != 64) return false;
@@ -27,6 +32,9 @@ inline bool legacyIdentityField(std::string_view key) noexcept {
 // The original DOM fallback keeps its legacy duplicate-key semantics. Only the
 // new compact shape rejects duplicate admission keys and mixed identity forms.
 struct DomKeys {
+    // Request advertisement duplicates must not disable legacy reply binding.
+    bool requestVersionSeen = false;
+    bool requestVersionDuplicate = false;
     unsigned seen = 0;
     bool duplicate = false;
     bool legacyIdentity = false;
@@ -37,6 +45,10 @@ struct DomKeys {
         wireValid = !wire.empty() && wire.size() <= kMaxReplyBytes && wire.find('\0') == std::string_view::npos;
     }
     void key(std::string_view name) noexcept {
+        if (name == "compactFrameRequestVersion") {
+            requestVersionDuplicate |= requestVersionSeen;
+            requestVersionSeen = true;
+        }
         unsigned bit = 0;
         if (name == "compactFrameReplyVersion") bit = 1u;
         else if (name == "frameReplyBinding") bit = 2u;
@@ -52,6 +64,31 @@ struct DomKeys {
         legacyIdentity |= legacyIdentityField(name);
     }
 };
+inline bool requestEnabled(std::string_view token, bool advertised) noexcept {
+    return advertised && validToken(token);
+}
+// Call only after the original full PREPARE/RECREATE identity/status admission.
+template<class Json>
+bool advertisesRequest(const Json& reply, const DomKeys& keys) {
+    if (!keys.wireValid || !keys.requestVersionSeen || keys.requestVersionDuplicate) return false;
+    const auto version = reply.find("compactFrameRequestVersion");
+    return version != reply.end() && version->is_number_unsigned() &&
+        version->template get<std::uint64_t>() == kRequestVersion;
+}
+// Diagnostic-only expansion, before the sole binding append. Mixed tuple forms
+// cannot mask a serializer error; no request bytes or production state change.
+template<class Json>
+bool expandRequestForParity(Json& request, const Json& full) {
+    if (!request.is_object() || !full.is_object()) return false;
+    const auto version = request.find("compactFrameRequestVersion");
+    if (version == request.end() || !version->is_number_unsigned() ||
+        version->template get<std::uint64_t>() != kRequestVersion) return false;
+    for (const char* field : kRequestTupleFields)
+        if (request.contains(field) || !full.contains(field)) return false;
+    request.erase("compactFrameRequestVersion");
+    for (const char* field : kRequestTupleFields) request[field] = full.at(field);
+    return true;
+}
 template<class Json>
 bool mayExpand(const Json& reply, const std::string* expected, const DomKeys& keys) {
     if (!expected || !validToken(*expected) || !keys.wireValid || keys.duplicate || keys.legacyIdentity ||

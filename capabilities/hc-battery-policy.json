@@ -12,6 +12,7 @@
     "ayaneo-ceii-bypass",
     "oxp-x1-amd-ec",
     "oxp-x1-intel-ec",
+    "oxp-x2-mini-pro-direct-ec",
     "oxp3-wmi-ec",
     "valve-deck-firmware",
     "gpd-win-mini-2025",
@@ -25,7 +26,8 @@
     "AYANEONEXT2",
     "AYANEOAIRPlusNxx",
     "OneXPlayer3",
-    "OneXPlayerSuperX"
+    "OneXPlayerSuperX",
+    "OneXPlayerX2MiniPro"
   ],
   "disabledSourceModels": [
     {
@@ -37,7 +39,8 @@
   "admission": "Exact reviewed identity rules select existing consumers; firmware, independent readback, conflict ownership and recovery remain consumer-owned.",
   "reviewedRouteOverlays": [
     "native/BatteryHost/oxp3-battery-route.json",
-    "native/BatteryHost/superx-charge-route.json"
+    "native/BatteryHost/superx-charge-route.json",
+    "capabilities/upstream/onexconsole-0.10.4-fix3/X2MiniProCharge.source-facts.json"
   ],
   "sourceProvenance": [
     "capabilities/hc-battery-policy.json",

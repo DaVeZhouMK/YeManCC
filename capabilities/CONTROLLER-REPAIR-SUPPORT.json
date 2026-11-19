@@ -1,4 +1,4 @@
-﻿{
+{
   "schemaVersion": 1,
   "updatedOn": "2026-10-25",
   "capturedAt": "2026-10-25T19:10:38.963010+08:00",
@@ -182,7 +182,127 @@
       "R4": "F15",
       "guard": "Win5 OEM profile, live interface and generation, producer authority/release checks; not global F14/F15 suppression"
     },
-    "firmwareScope": "frozen HC IsHidSupported is Version(0x01,0x11); current native gpdBackBind uses exact HID collection and does not prove a firmware read or newly installable driver"
+    "firmwareScope": "frozen HC IsHidSupported is Version(0x01,0x11); current native gpdBackBind uses exact HID collection and does not prove a firmware read or newly installable driver",
+    "oemKeyContract122": {
+      "contract": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Win5-OemKeys-20261110\\WIN5-OEM-CAPABILITY-CONTRACT.json",
+        "bytes": 7521,
+        "sha256": "000ccfe66559f71a652f995f19b96eff3a70694162481e66da1f9f82e78aebb5"
+      },
+      "keys": [
+        {
+          "keyId": "r4",
+          "hcOem": "OEM2",
+          "canonicalMaskDecimal": "4294967296",
+          "backIndex": 2,
+          "keyboardSourceDeclaration": "F3+F15",
+          "currentKeyboardBaseKey": "F15",
+          "hidBodyByte": 9,
+          "hidMaskHex": "69",
+          "heldShape": "state bits with release; actual keyboard-source behavior remains separately observed",
+          "fieldHidPositive": "NOT_OBSERVED",
+          "fieldKeyboardTypeVariants": [
+            "Max+388",
+            "Max+395"
+          ],
+          "retainedKeyboardField123": {
+            "evidence": {
+              "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\HC-Win5-OemKeys-20261110\\continuation-20261111\\R4-KEYBOARD-FIELD-FINAL.json",
+              "bytes": 41934,
+              "sha256": "c7d33f0bf07fe0e3c399f9bcb77dfdce1694ae8f0faaf5fc7754f378b8f48aa0"
+            },
+            "scope": "native keyboard interpretation only; not HID positive, physical button label or completed action",
+            "observedCpuContext": "Max+395; same member PID/power; process birth and keyboard device unproven",
+            "samePidPowerPressReleasePairs": 4,
+            "sameWindowMachineContextPairs": 3,
+            "initialMachineWindowZeroContextPairs": 1,
+            "durationMs": [
+              81,
+              712,
+              352,
+              360
+            ],
+            "baseKeyStateBit": 1024,
+            "baseKeyMeaning": "internal F15 state bit, not VK code or scan code",
+            "prefixMask": 0,
+            "nativeAssemblyOnly": "four backButtons2->0 pairs; no Host/driver/Steam receipt accepted",
+            "r4HidPositive": "NOT_OBSERVED",
+            "hardwareAccepted": false
+          }
+        },
+        {
+          "keyId": "l4",
+          "hcOem": "OEM3",
+          "canonicalMaskDecimal": "8589934592",
+          "backIndex": 1,
+          "keyboardSourceDeclaration": "LControl+LShift+F14",
+          "currentKeyboardBaseKey": "F14",
+          "hidBodyByte": 8,
+          "hidMaskHex": "69",
+          "fieldSameProducerHidTrueToFalsePairs": 99,
+          "fieldHidScope": "decoded-source witness; not physical label or action acceptance",
+          "fieldKeyboardTypeVariants": [
+            "Max+388",
+            "Max+395"
+          ]
+        },
+        {
+          "keyId": "gamepad",
+          "hcOem": "OEM4",
+          "canonicalMaskDecimal": "17179869184",
+          "backIndex": 0,
+          "keyboardSourceDeclaration": "F13",
+          "currentKeyboardBaseKey": "F13",
+          "hidBodyByte": 7,
+          "hidMaskHex": "69",
+          "catalogFormIsNotExclusiveTransport": "Existing KeyboardVk descriptor does not remove current vendor-HID source; no runtime form change",
+          "fieldSameProducerHidTrueToFalsePairs": 19,
+          "fieldHidScope": "decoded-source witness; not hardware mode switch",
+          "fieldKeyboardTypeVariants": [
+            "Max+388"
+          ]
+        },
+        {
+          "keyId": "keyboard",
+          "hcOem": "OEM5",
+          "canonicalMaskDecimal": "34359738368",
+          "backIndex": 0,
+          "keyboardSourceDeclaration": "LControl+LWin+O",
+          "currentKeyboardChord": "Ctrl+Win+O",
+          "hidSourceDefinedByWin5HandleReport": false,
+          "physicalHeldOrFirmwarePulse": "UNKNOWN; source declaration alone does not establish physical hold duration",
+          "fieldKeyboardTypeVariants": [
+            "Max+388",
+            "Max+395"
+          ],
+          "fieldCondition": "225250 PID11048 has observed 45/46ms matched pulses versus saved hold500; emit=false is not enough to declare missing capability"
+        },
+        {
+          "keyId": "home",
+          "hcOem": "OEM6",
+          "canonicalMaskDecimal": "68719476736",
+          "backIndex": 0,
+          "keyboardSourceDeclaration": "LWin+D",
+          "currentKeyboardChord": "Win+D",
+          "hidSourceDefinedByWin5HandleReport": false,
+          "physicalHeldOrFirmwarePulse": "UNKNOWN",
+          "notXboxGuide": true,
+          "fieldKeyboardTypeVariants": [
+            "Max+388",
+            "Max+395"
+          ]
+        }
+      ],
+      "firmwareComparisonTuple": [
+        1,
+        17
+      ],
+      "firmwareScope": "upstream condition controls keyboard chord silencing; no observed native firmware query; avoid decimal Version(1,11)",
+      "menu": "OEM1 remains silenced/excluded; no newGuide",
+      "physicalHold": "Keyboard/Home UNKNOWN; per-source field pulse and chosen trigger must be distinguished",
+      "evidenceStatus": "SOURCE_AND_RETAINED_LOG_SCOPE_ONLY",
+      "hardwareAccepted": false
+    }
   },
   "onex": {
     "endpoint": "1A86:FE00; additionally 1A86:1305 for X2/X2MiniPro, not OneXPlayer3; FF00:0001",
@@ -1913,5 +2033,1441 @@
     "hardwareAcceptedRowsAdded": 0,
     "runtimeChangesBySupport": false,
     "fixturesRunBySupport": false
+  },
+  "aokzoeFamilyControllerConsumption20261109": {
+    "status": "SOURCE_READY_PHYSICAL_ACCEPTANCE_OPEN",
+    "actualFieldModel": "HandheldCompanion.Devices.AOKZOEA1X",
+    "reviewedModels": [
+      "AOKZOEA1",
+      "AOKZOEA1Pro",
+      "AOKZOEA1X",
+      "AOKZOEA2"
+    ],
+    "operations": 6,
+    "physicalDedicatedControls": 3,
+    "independentRearSignalProven": false,
+    "physicalHardwareAbsenceProven": false,
+    "officialFrontendFullSuppressionProven": false,
+    "newModelRegistrations": 0,
+    "hardwareAcceptedRowsAdded": 0,
+    "newDlls": 0,
+    "virtualOutputChanged": false,
+    "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/ControllerFiveConsumerAudit-20261109/Repair-011/REPORT.zh-CN.md",
+    "handoff": "G:/YeManCC-Work/Testing/YMCC/Evidence/ControllerFiveConsumerAudit-20261109/Repair-011/HANDOFF.json",
+    "exitVibrationRepair": {
+      "status": "AOKZOE_EXIT_SOURCE_FIX_READY_PHYSICAL_ROOT_CAUSE_OPEN",
+      "humanColdBootControl": "no vibration before YMCC has run; vibration after manual open and foreground Exit",
+      "confirmedSourceDefect": "failed zero remains owned but exit-fenced scheduler refuses its retry",
+      "scope": "AOKZOE family current-owned physical target only",
+      "maxZeroAttempts": 2,
+      "existingRetryIntervalMs": 500,
+      "normalExportEvent": "aokzoe-feedback-exit",
+      "physicalStopVerified": false,
+      "packageProduced": false,
+      "handoff": "G:/YeManCC-Work/Testing/YMCC/Evidence/ControllerFiveConsumerAudit-20261109/Repair-012/HANDOFF.json"
+    }
+  },
+  "globalPhysicalFeedbackExit20261110": {
+    "status": "GLOBAL_PHYSICAL_FEEDBACK_EXIT_SOURCE_READY_HARDWARE_ACCEPTANCE_OPEN",
+    "recordedAtUtc": "2026-11-09T16:06:21.004317+00:00",
+    "supersedesAokzoeOnlyExitScope": true,
+    "backends": [
+      "xinput",
+      "msi-dinput"
+    ],
+    "maxZeroAttempts": 2,
+    "existingRetryIntervalMs": 500,
+    "rejectsNewNonzeroDuringExit": true,
+    "ownedZeroStopPreserved": true,
+    "normalRuntimeVibrationPreserved": true,
+    "normalExportEvent": "gamepad-feedback-exit",
+    "hardwareStopVerified": false,
+    "packageProduced": false,
+    "newDlls": 0,
+    "hardwareAcceptedRowsAdded": 0,
+    "virtualOutputChanged": false,
+    "handoff": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-013\\HANDOFF.json",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-013\\REPORT.zh-CN.md"
+  },
+  "staticVibrationCapabilityDetection20261110": {
+    "status": "GLOBAL_STATIC_VIBRATION_CAPABILITY_CONTRACT_READY",
+    "existingQueryAlreadyReadOnly": true,
+    "detectionMode": "static",
+    "manualTestRequiresUserAction": true,
+    "capabilityProbeIssuesZeroWrites": false,
+    "ownedZeroCleanupPreserved": true,
+    "newDlls": 0,
+    "hardwareAcceptedRowsAdded": 0,
+    "packageProduced": false,
+    "hardwareVerified": false,
+    "handoff": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-014\\HANDOFF.json",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-014\\REPORT.zh-CN.md"
+  },
+  "noVirtualOemSupport125": {
+    "taskDate": "2026-11-13",
+    "consumerThreadId": "01a12e67-8c00-7db3-b742-9307931b4056",
+    "entry": "oemUnifiedInputBindingFor/current-total-library",
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-125-OEM-NO-VIRTUAL-MODEL-SUPPORT\\CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 9791,
+      "sha256": "c893e096678db5b64efb87797887dfc09831433b6150c9f3b216bc78a8178243"
+    },
+    "modelMatrix": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-125-OEM-NO-VIRTUAL-MODEL-SUPPORT\\MODEL-MATRIX.json",
+      "bytes": 374557,
+      "sha256": "23a932240ed14d6a7641869ffeb2a58e40b663d7e0d07cd4328cac614598b969"
+    },
+    "sourceProjection": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-125-OEM-NO-VIRTUAL-MODEL-SUPPORT\\SOURCE-PROJECTION.json",
+      "bytes": 45278,
+      "sha256": "d0a3474b29fb575f9fd429d31bb8ac85493f61918c8fde5cc7428bfc84df8013"
+    },
+    "sourceRows": 102,
+    "modelKeyRows": 352,
+    "meaning": "descriptive current-source support; counts are not hardware or runtime acceptance",
+    "newRuntimeRegistration": false,
+    "coldNoHostAndAfterRealOffAccepted": false,
+    "hardwareAccepted": false,
+    "wholeGoalComplete": false
+  },
+  "ayaAirProOemField127": {
+    "taskDate": "2026-11-13",
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-127-AYA-AIRPRO-OEM-FIELD\\AYA-AIRPRO-OEM-CONTRACT.json",
+      "bytes": 5942,
+      "sha256": "d75f692a638ffa8aaca3c9cd26759b83541db85984233e2731475215911c2609"
+    },
+    "fieldEvidence": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-127-AYA-AIRPRO-OEM-FIELD\\FIELD-EVIDENCE.json",
+      "bytes": 46707,
+      "sha256": "8166821e05fb28792f539bde052ed5358f2b7f5299ad86073c6dff3fe016fc6c"
+    },
+    "sourceVerification": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-127-AYA-AIRPRO-OEM-FIELD\\SOURCE-VERIFICATION.json",
+      "bytes": 18864,
+      "sha256": "84eddc892538afc945bf5a2dc9bc0f2caa5570be9daa5b217326a5c8fbb0272c"
+    },
+    "deviceClass": "HandheldCompanion.Devices.AYANEOAIRPro",
+    "cpuObserved": "AMD Ryzen7 5825U",
+    "profile": "AyaneoAir",
+    "profileId": 6,
+    "existingKeyIds": [
+      "ckbig",
+      "cksmall",
+      "cktl",
+      "cktr"
+    ],
+    "keyChords": [
+      "Ctrl+Win+F12",
+      "Win+D",
+      "Ctrl+Win+F11",
+      "Ctrl+Win+F10"
+    ],
+    "historicalTypeRows": 6,
+    "historicalPhysicalKeyIds": 4,
+    "firstWitnessIsNotCurrentPressOrActionProof": true,
+    "currentSession": {
+      "dateLocal": "2026-11-13",
+      "pid": 6512,
+      "powerGeneration": 15782,
+      "consumptionRows": 13,
+      "matchedSum": 0,
+      "replayedOsEventsSum": 22,
+      "meaning": "OS-chord suppression/replay only; physical press count and final action outcome UNKNOWN"
+    },
+    "fieldIsNotAir1SOrAirPro1S": true,
+    "physicalOriginKnown": false,
+    "newRuntimeMappingAdded": false,
+    "consumerThreadId": "01a12e67-8c00-7db3-b742-9307931b4056",
+    "originalNoVirtualTaskContinues": true,
+    "hardwareAccepted": false
+  },
+  "familyNoVirtualConsumer128": {
+    "taskDate": "2026-11-13",
+    "humanRequirement": "同类型按共同根因做家族修复",
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "summary": {
+      "sourceRows": 102,
+      "modelKeyRows": 352,
+      "sourceRowsWithAnyImplementedOemKey": 91,
+      "canonicalKeyRowsDeclaredImplemented": 350,
+      "familyGroups": 13,
+      "allAreStaticRowsNotHardwareCounts": true
+    },
+    "defaultImpactBoundary": "existing implemented OEM keys through shared inputCapture consumer; all original per-model source/profile/authority gates retained",
+    "ayaLegacyAirGroup": [
+      "AYANEOAIR",
+      "AYANEOAIRLite",
+      "AYANEOAIRPro"
+    ],
+    "ayaDistinctCecGroupIncludes": [
+      "AYANEOAIR1S",
+      "AYANEOAIRPro1S"
+    ],
+    "notAllFamilyPhysicalOrRuntimeAcceptance": true,
+    "consumerThreadId": "01a12e67-8c00-7db3-b742-9307931b4056",
+    "newRuntimeMapping": false,
+    "wholeGoalComplete": false
+  },
+  "familySourceSuccessor129": {
+    "taskDate": "2026-11-13",
+    "humanRequirement": "记得作为家族能力而不是单独修复哦同类型一起修复bug",
+    "sourceRepairScope": "shared consumer and existing per-profile AYA observation; same-type family paths, not single-model registration",
+    "familyContract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "consumerHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\cold-return-aya-20261113\\HANDOFF.json",
+      "bytes": 1352,
+      "sha256": "6801b54c3d64d7683d3b50cc8eb8cc25675e32eaa1c6ce6ac6314c445d4554e2"
+    },
+    "consumerSourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\cold-return-aya-20261113\\SOURCE_READY.json",
+      "bytes": 5745,
+      "sha256": "e426eac83621f0254899afe687eae23949f24230612ead332d925a4b77c57d8f"
+    },
+    "sourceIntake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-129-COLD-RETURN-FAMILY-SUCCESSOR\\FINAL-SUCCESSOR-IDENTITY-INTAKE.json",
+      "bytes": 2422490,
+      "sha256": "1210a4209f5af429616186668a06fc21042765234d54440964774cd8c8ec9fa0"
+    },
+    "provenanceQualifications": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-129-COLD-RETURN-FAMILY-SUCCESSOR\\FINAL-SUCCESSOR-PROVENANCE-QUALIFICATIONS.json",
+      "bytes": 19390,
+      "sha256": "e97320e5be38aac118eed56ff89694bd7ed1ef3d94c46c427222ded5e7906c94"
+    },
+    "independentAyaFamilySourceReview": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-129-COLD-RETURN-FAMILY-SUCCESSOR\\aya-family-source-audit\\SOURCE-REVIEW.json",
+      "bytes": 31405,
+      "sha256": "ab84cad66120e60538f2851e14cf40588e69f7eff64e2be9b9d6897e94a1e5a6"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-129-COLD-RETURN-FAMILY-SUCCESSOR\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 3339,
+      "sha256": "4924783118a57734045e324d55dc84c5b91e1eea1c978ba564111b811418fcf9"
+    },
+    "sharedColdReturnCorrection": "RESOLVED_AT_SHARED_SOURCE_AND_BOUNDED_ENQUEUE_SCOPE",
+    "ayaFunctionKeyObservation": "existing-profile-only F10-F24; raw/hook/injected distinct; excludes Win+D/mouse",
+    "familyModelDifferencesPreserved": true,
+    "newRuntimeMapping": false,
+    "physicalAccepted": false,
+    "actualColdReturnAccepted": false,
+    "completeBuildAccepted": false,
+    "wholeLibraryComplete": false,
+    "originalTasksContinue": true
+  },
+  "sourceReconstructionSuccessor131": {
+    "taskDate": "2026-11-13",
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-131-SOURCE-RECONSTRUCTION-AND-GATE-OBSERVATION\\SOURCE-RECONSTRUCTION-INTAKE.json",
+      "bytes": 21450,
+      "sha256": "0498f50b293fef13e3c5d2617271d7b5ecd78b302f25a3c163df0e7b02f06106"
+    },
+    "status": "ACCEPTED_SOFTWARE_SCOPE_RECONSTRUCTED_TEXT_EQUALS_ORIGINAL_PINS",
+    "referenceCount": 14,
+    "distinctSources": 12,
+    "reconstructionAfterRun": true,
+    "originalColdAyaHandoffUnchanged": true,
+    "resolves": "HC129-R05 historical intermediate executor/fixture text missing only; original SDK before pins not recovered",
+    "historicalSdkBeforePinsStillUnknown": true,
+    "fullCompileIdentityAccepted": false,
+    "physicalAccepted": false,
+    "wholeLibraryComplete": false,
+    "originalConsumerContinues": true
+  },
+  "familyGateSoftwareEvidence132": {
+    "taskDate": "2026-11-13",
+    "handoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\gate-transition-20261113\\HANDOFF.json",
+      "bytes": 1242,
+      "sha256": "39876df27d5564761248e27fae9fdfe068a19b29ad1953851620774e861469e7"
+    },
+    "sourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\gate-transition-20261113\\SOURCE_READY.json",
+      "bytes": 4259,
+      "sha256": "ecb4d90a9dc13139efc7ce22637aa5dfa24d6448c8ea2858b31597ae4542e2ab"
+    },
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-132-GATE-REFRESH-BOUNDARY\\STABLE-GATE-DELIVERY-INTAKE.json",
+      "bytes": 741311,
+      "sha256": "227ea7cdb290208606bcf21842b7a05be678ad7a60021269676c16ad2ccc631d"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-132-GATE-REFRESH-BOUNDARY\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 2525,
+      "sha256": "1e896c8287b1cf313288cf31bc69dd1e82cc6a84e94e9ca2b5532f8f81856bcd"
+    },
+    "boundedSoftwareStatus": "ACCEPTED_SOFTWARE_SCOPE",
+    "prefixQualifiedFamilyAssertions": 78,
+    "prefixExtraCanonicalLookup": 1,
+    "tailAssertions": 84,
+    "wholeParentPass": false,
+    "models": [
+      "AYANEOAIRPro",
+      "ClawA1M",
+      "GPDWin5",
+      "OneXPlayerMiniAMD",
+      "AOKZOEA1",
+      "GamingZone"
+    ],
+    "rogScope": "qualified simulated Raw Input ownership only",
+    "hostHandlesAlwaysAbsent": true,
+    "actualBackendOffAndReturnAccepted": false,
+    "periodicSettingsRefreshOnly": true,
+    "miniAmdRepresentative": "orange; existing catalog unchanged",
+    "fullCompilerIdentityAccepted": false,
+    "physicalAccepted": false,
+    "goalStatus": "active",
+    "wholeLibraryComplete": false
+  },
+  "ordinaryOemPackage133": {
+    "taskDate": "2026-11-13",
+    "status": "ACCEPTED_SOFTWARE_SCOPE_PACKAGE_IDENTITY_ONLY",
+    "package": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-OEM-Native-Test-20261113-060357Z\\YeManCC.zip",
+      "bytes": 111748357,
+      "sha256": "9004a15422a437eb351c2d77b30810d168c93aba6a80d90a79ab09b98839b41d"
+    },
+    "nativeSha256": "121b019be858322b3b3feef23948eb1249678be74b0894bc95fe72308e6e2381",
+    "nativeBuildId": "d1675f4ede71c5c5f362a2c3db05886108c8ed17a8ef4b151139b5d9a3fbb106",
+    "buildId": "cdf949b08b451ecc92eaff94d59a55c0d4fdef01aac5d2aa5ef71083813e381d",
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-133-OEM-PACKAGE-SOURCE-PREFLIGHT\\STABLE-PACKAGE-INTAKE.json",
+      "bytes": 815332,
+      "sha256": "350f4a1d792e7b0bcc782bce255469926dc636b1f772e2bb78ef81c699566eaa"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-133-OEM-PACKAGE-SOURCE-PREFLIGHT\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 2954,
+      "sha256": "9420b84d58eda5ae1e229565acd24aeac14a6686b24fd3fc175f853e23971655"
+    },
+    "sourceEntries": 1785,
+    "buildPayload": 235,
+    "zipFiles": 619,
+    "actualHostOffReturnAccepted": false,
+    "physicalAccepted": false,
+    "fixtureValidation": "NOT_RUN",
+    "formalReleaseAccepted": false,
+    "goalStatus": "active",
+    "wholeLibraryComplete": false
+  },
+  "hostOffOemSoftwareComposition137": {
+    "taskDate": "2026-11-13",
+    "status": "ACCEPTED_SOFTWARE_SCOPE_TWO_KEYBOARD_SOURCE_REPRESENTATIVES",
+    "familyContract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "consumerHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\host-off-action-20261113\\HANDOFF.json",
+      "bytes": 2136,
+      "sha256": "a6d7b20da69e82490e9da3db67d8abb8d7290b9eba89373cef6d9a73896dcb3b"
+    },
+    "consumerSourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\host-off-action-20261113\\SOURCE_READY.json",
+      "bytes": 2134,
+      "sha256": "e619bdf7024a1f8294f502c9100314784c49e4f9edbce28d08732d114673493a"
+    },
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-137-OEM-HOST-OFF-ACTION-COMPOSITION.json",
+      "bytes": 1293,
+      "sha256": "00bba1594a16230a8825c2abaa5a10c1f97ff767ff0d5cf1ed31f5e272126acb"
+    },
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-137-OEM-HOST-OFF-ACTION-COMPOSITION\\STABLE-FINAL-DELIVERY-INTAKE.json",
+      "bytes": 40508,
+      "sha256": "b19670d6209999272c0e4e94144c1fc22dbabe57ad48e21c1412674f2638d6f4"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-137-OEM-HOST-OFF-ACTION-COMPOSITION\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 6775,
+      "sha256": "0f0a1e6711c4453ef817b3607d59f2ea47c47f629180a97d267ce7273ddc4efc"
+    },
+    "actualChecks": 174,
+    "models": [
+      "AYANEOAIRPro",
+      "GPDWin5"
+    ],
+    "actualPrivateManagedOffSoftwareAccepted": true,
+    "physicalHostOffOrOsEffectsAccepted": false,
+    "fullProductShutdownAccepted": false,
+    "priorAttempt001UnknownPreserved": true,
+    "newProductEdits": false,
+    "newRuntimeMapping": false,
+    "newPackage": false,
+    "wholeLibraryComplete": false,
+    "goalStatus": "active"
+  },
+  "hostOffFieldQualification139": {
+    "taskDate": "2026-11-13",
+    "status": "PARTIAL_FIELD_NOT_YET_QUALIFIED",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-139-OEM-FIELD-QUALIFICATION-AND-PATH-ERRATUM.json",
+      "bytes": 1571,
+      "sha256": "2e442a95a0bf9033f08b87bff3cb8110ff68c4611aa4502a4ff2384b27185c91"
+    },
+    "intake": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-139-OEM-FIELD-QUALIFICATION-AND-PATH-ERRATUM\\STABLE-FIELD-DELIVERY-INTAKE.json",
+      "bytes": 14651,
+      "sha256": "00d325deddc574bad10f266aa9bda33d3984b0bf8d42482e644bd363d0b6536f"
+    },
+    "pathErratum": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-139-OEM-FIELD-QUALIFICATION-AND-PATH-ERRATUM\\HC137-C05-PACKAGE-PATH-ERRATUM.json",
+      "bytes": 1381,
+      "sha256": "0ce3ad5a014096b1d34129d9d9cc7722764f5843acecd5898f2ac3a2bde31991"
+    },
+    "correctPackageHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\package-intake-20261113\\HANDOFF.json",
+      "bytes": 1802,
+      "sha256": "3ca54447ca3d29440357fa9924df4996037202391a88aa811ca798424e6da0c9"
+    },
+    "fieldHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\field-intake-20261113\\HANDOFF.json",
+      "bytes": 2072,
+      "sha256": "83ead046b1ac0629b02bbfb8dfc7ec873d7e9f713b4f3d3fea0ff4ae14801f72"
+    },
+    "twoExportedGlobalCustomTablesEmpty": true,
+    "defaultActionAbsenceProven": false,
+    "loadedCandidateProven": false,
+    "physicalOemBehaviorAccepted": false,
+    "newRuntimeMapping": false,
+    "wholeLibraryComplete": false,
+    "goalStatus": "active"
+  },
+  "win5NativeOnlyPositiveField142": {
+    "taskDate": "2026-11-13",
+    "status": "PARTIAL_POSITIVE_NATIVE_ONLY_WINDOW_FIELD",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD.json",
+      "bytes": 1159,
+      "sha256": "205232184eb90c198210fd1496aaa6265552c97c53df99748cba9f0f05b64d04"
+    },
+    "archive": {
+      "path": "G:\\YeManCC-Work\\日志\\Win5\\YeManCC-logs-20261113-153718-潜行者2失败.zip",
+      "bytes": 12830720,
+      "sha256": "07b37b05a58c7190d0e9ced7d083d2283201da9d8f27b93a6c1af794f76a360b"
+    },
+    "fieldRows": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD\\STABLE-FIELD-ROWS-AND-PHASES.json",
+      "bytes": 14398,
+      "sha256": "7093737b1368569e5f03a1bf874707ce03f040110e53b4b16aff612261314221"
+    },
+    "package": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD\\SELECTED-PACKAGE-IDENTITY.json",
+      "bytes": 1566,
+      "sha256": "2919611e298394776a4014c5ffe5cc870d0f738bb6359b065fba91ecc39b26a2"
+    },
+    "selectedSourceComparison": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD\\OEM-SELECTED-SOURCE-COMPARISON.json",
+      "bytes": 5076,
+      "sha256": "9e2ab3912fcce3da6b60ad23ed45e5fd9b929974b5676cd577506e2c19bbaeb3"
+    },
+    "humanFeedback": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD\\ORIGINAL-CONSUMER-HUMAN-FEEDBACK.json",
+      "bytes": 645,
+      "sha256": "a6b7c757c25459c9e1c9cbccd42c99fbbafb4ad59b9b9864759bbe1c2598473b"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-142-WIN5-NATIVE-ONLY-POSITIVE-FIELD\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 3921,
+      "sha256": "a938bc81cb14bb2f75914672f5038ba1f42519b6e27d86d8a4603167577c1bed"
+    },
+    "positiveWindowFeedbackAccepted": true,
+    "triggerKeyUnknown": true,
+    "customBoundActionAccepted": false,
+    "physicalOemSuppressionAccepted": false,
+    "wholeGpdFamilyPhysicalAccepted": false,
+    "newRuntimeMapping": false,
+    "wholeLibraryComplete": false,
+    "goalStatus": "active"
+  },
+  "win5GamepadFieldClarification143": {
+    "taskDate": "2026-11-13",
+    "status": "PARTIAL_WIN5_GAMEPAD_HUMAN_FIELD_CONFIRMED",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-143-WIN5-GAMEPAD-FAMILY-FIELD-CLARIFICATION.json",
+      "bytes": 1303,
+      "sha256": "bb46c702eac0927c16d7142b80b5d3df79e7db6f7d5d51990b8a39cc49692f52"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-143-WIN5-GAMEPAD-FAMILY-FIELD-CLARIFICATION\\FINAL-RESULT.json",
+      "bytes": 3331,
+      "sha256": "f581b4e25312efdac659adc3db49bc44d13606869a5581f57e0aa9fa4c1d28eb"
+    },
+    "consumerHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\field-win5-153718-20261113\\HANDOFF.json",
+      "bytes": 1227,
+      "sha256": "19adc053ede439bfd0878cb8f5f7ceddb9470d38d6afd919ae9456784a7f30c4"
+    },
+    "evidence": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-143-WIN5-GAMEPAD-FAMILY-FIELD-CLARIFICATION\\OWNER-FIELD-INTAKE.json",
+      "bytes": 47379,
+      "sha256": "c081849794e9018f5abe0c7aa5b7b82a2ca76336694b0365807406d91a64437d"
+    },
+    "humanClarification": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-143-WIN5-GAMEPAD-FAMILY-FIELD-CLARIFICATION\\DIRECT-HUMAN-KEY-CLARIFICATION.json",
+      "bytes": 1369,
+      "sha256": "a792943ab0e2062cb00134261e84d97ab3cc4e48b7a0c5d902fef2a33bcbe6d3"
+    },
+    "familyContract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "supersedesHistorical142TriggerKeyUnknownForHumanAttributionOnly": true,
+    "physicalTriggerKeyHumanConfirmed": true,
+    "keyId": "gamepad",
+    "rawSourceToEachActionProven": false,
+    "savedCustomBoundActionAccepted": false,
+    "physicalOemSuppressionAccepted": false,
+    "wholeGpdFamilyPhysicalAccepted": false,
+    "newRuntimeMapping": false,
+    "wholeLibraryComplete": false,
+    "goalStatus": "active"
+  },
+  "familyConsumerConsultation144": {
+    "taskDate": "2026-11-13",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-144-FAMILY-CONSUMER-CONSULT-AND-SLEEP-CONTACT.json",
+      "bytes": 1382,
+      "sha256": "36ef640482300dfb2a8e806f8b7741153be771f804811cf0ba564e7ef6586878"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-144-FAMILY-CONSUMER-CONSULT-AND-SLEEP-CONTACT\\FINAL-RESULT.json",
+      "bytes": 3901,
+      "sha256": "f343356eb95fd6c005a64fa70dedb3311aaa3f45a5aab4607bcc3c341e3eb77e"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-144-FAMILY-CONSUMER-CONSULT-AND-SLEEP-CONTACT\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 5106,
+      "sha256": "37640ae96b3d61b2f9c400563547b1e47865e85cd8b2a1b5733d4caba811b3a6"
+    },
+    "familyContract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "gpdObservationSoftwareAccepted": true,
+    "newModelOrAlias": false,
+    "newActionOrSuppressionProof": false,
+    "mixedOwnerConsumerPending": true,
+    "threeOldFunctionPrefixComparisonsCorrected": true,
+    "wholeLibraryComplete": false
+  },
+  "mixedRetainedOwnerAdmission145": {
+    "taskDate": "2026-11-13",
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-145-FAMILY-MIXED-OEM-OWNER-ADMISSION\\FINAL-RESULT.json",
+      "bytes": 3890,
+      "sha256": "8e7b661082152db4899dae7a8fe5f6cfd06261794ccbeda1c604c721892b3917"
+    },
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-145-FAMILY-MIXED-OEM-OWNER-ADMISSION.json",
+      "bytes": 1352,
+      "sha256": "847e8e8011a74d00e0946dd0b21fcbbc1e8b35954821256ff4c9d159299b9c72"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-145-FAMILY-MIXED-OEM-OWNER-ADMISSION\\SOURCE-AND-CONSUMER-CONDITIONS.json",
+      "bytes": 3754,
+      "sha256": "f48e25b333854f597799b8ab564d95071dd9d229abef27de4b5ff466f9d1876c"
+    },
+    "sourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\oem-mixed-owner-20261113\\SOURCE_READY.json",
+      "bytes": 7546,
+      "sha256": "2701cb7712fd8e5305033a9425a53d88058d989801ed42bbdec5603a393d35cd"
+    },
+    "familyContract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-128-NO-VIRTUAL-CONSUMER-BOUNDARY\\FAMILY-CONSUMER-SUPPORT-CONTRACT.json",
+      "bytes": 181148,
+      "sha256": "1f532dcec5d2c2dffa4a4158bc46f538ae4d2bc3ea807b2e005d8096a66ef96a"
+    },
+    "retainedMixedControllerAdmissionSoftwareAccepted": true,
+    "pureOemIndependent": true,
+    "observedControlledChecks": 56,
+    "allFamilyPhysicalAccepted": false,
+    "afterQueueOwnerBoundaryAccepted": false,
+    "newRuntimeMapping": false,
+    "wholeLibraryComplete": false
+  },
+  "recordingDefinitionConsumption164": {
+    "schemaVersion": 1,
+    "atHongKong": "2026-11-14T01:02:57.596793+08:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-164-RECORDED-KEY-DEFINITIONS-SOURCE-ACCEPTANCE.json",
+      "bytes": 1364,
+      "sha256": "5af84c7c07e75281fe7064130eb6cd5b3567f07cc3888774f2d79b050af37592"
+    },
+    "sourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\recording-definitions-20261113\\SOURCE_READY.json",
+      "bytes": 6050,
+      "sha256": "60801d165dbbeba9e06cfa4f8a840251b0921851def9b2a4f7e50100818df969"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-164-RECORDED-KEY-DEFINITIONS-SOURCE-ACCEPTANCE\\CONDITIONS-AND-HC163-RESOLUTION.json",
+      "bytes": 1843,
+      "sha256": "e57bf3998ea3daa1d6b70da428ff55196ab01abe093717826cf48097c4153a47"
+    },
+    "scope": "Existing family-bound read-only recording-definition/presentation consumer and exact scoped mainline import",
+    "sourceOnly": true,
+    "noNewCapabilityOrProtocolRows": true,
+    "noCrossSourceAutomaticMerge": true,
+    "preservesSavedF13PressAndDistinctHomeKeyboardRearIds": true,
+    "softwareEvidence": {
+      "nativeDefinitionsControlledChecks": 158,
+      "uiChecks": 31,
+      "uiHeights": [
+        720,
+        800
+      ],
+      "normalizationChecks": 19,
+      "countsAreSeparateNotPhysicalOrCombinedFamilyPass": true,
+      "typecheck": "fixed-private-source",
+      "ownedJobsZeroBeforeDispose": 14
+    },
+    "hc163ConditionsClosed": [
+      "HC163-C01",
+      "HC163-C02"
+    ],
+    "completeNativeWebPackage": false,
+    "physicalSuccessForThisNewSource": false,
+    "previousWin5HumanSuccessReview": "HC161",
+    "wholeLibraryComplete": false,
+    "next": "Next natural matching paired build; no new export/retest/device request."
+  },
+  "rogSuppressionSourceContract165": {
+    "schemaVersion": 1,
+    "atUtc": "2026-11-14T12:15:47.091314+00:00",
+    "status": "PARTIAL",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-165-ROG-SUPPRESS-AND-TRIGGER-CONTRACT.json",
+      "bytes": 3274,
+      "sha256": "7a0d23b284095f4d3c0790543a23d15247a3fee762c7518d6a7e70cdb08a12dd"
+    },
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-165-ROG-SUPPRESS-AND-TRIGGER-CONTRACT\\ROG-SUPPRESSION-CONTRACT.json",
+      "bytes": 14413,
+      "sha256": "1d9226ee3200224b22ca817e5a7a30adccb89c5d98f529661c7cdd0273f242f6"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-165-ROG-SUPPRESS-AND-TRIGGER-CONTRACT\\REPORT.zh-CN.md",
+      "bytes": 3667,
+      "sha256": "7de61eb60ab91ca4b9280663bee6f5bc4411e3617f83ee7a32b6e6c9438c0a8b"
+    },
+    "family": [
+      "ROGAlly",
+      "ROGAllyX",
+      "XboxROGAlly",
+      "XboxROGAllyX"
+    ],
+    "sameBoundFamilySource": true,
+    "currentHumanRequirement": "屏蔽原动作+触发，而非只触发",
+    "sourceProvenCorrection": "HC165-C01",
+    "runtimeCaptureDeclarationsUnchanged": true,
+    "noNewProtocolOrDeviceRules": true,
+    "physicalSuppressionProven": false,
+    "keyRoutesMustRemainSeparate": [
+      "rear F18/F17 keyboard remap/capture/OS consumption",
+      "front CC/AC/LIB vendor HID click",
+      "official-frontend reversible service lease"
+    ],
+    "hookBinaryReturnPathAtFixedHC": "not-source-proven;Gma binary-only",
+    "wholeLibraryComplete": false
+  },
+  "vendorQueueSoftwareSuccessor167": {
+    "schemaVersion": 1,
+    "atUtc": "2026-11-14T13:15:53.783537+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "scope": "Vendor frontend queue publication lifetime,exception settlement and observability;not keyboard/original-action suppression acceptance",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-167-ROG-VENDOR-QUEUE-SOFTWARE-REVIEW.json",
+      "bytes": 1749,
+      "sha256": "d3a97b77f6e2c5950da60e104077a9461e7575ebf393e90a217c3b5eb1df2438"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-167-ROG-VENDOR-QUEUE-SOFTWARE-REVIEW\\CONDITIONS-AND-CORRECTION-RESOLUTION.json",
+      "bytes": 3384,
+      "sha256": "2638702a22474ce6aeee2cd0a84ab52285157ffc7449b496a15cbdb992b8e595"
+    },
+    "sourceReadySha256": "53d49da92cb8107e0e6041c0309e5369bf67a4285502617933c4d3826125abb6",
+    "handoffSha256": "a1c90ccf1c58ec206330783ce9675eb5b8b2cf64149d48b0188a040887eb4fad",
+    "mainlineImport": {
+      "productFiles": 1,
+      "originalFixtureFiles": 3,
+      "exactHunks": 13,
+      "nativeMainChangedByBatch": false
+    },
+    "softwareEpochs": {
+      "failedParent16HasCancelPrefix8": true,
+      "tailChecks": 55,
+      "finalChecks": 12,
+      "notOneCombinedOrDefaultSuitePass": true,
+      "tailFourTuplesThreeClassesWithInvalidResolverTupleDisclosed": true,
+      "finalActualXboxROGAllyClassSupplement": true
+    },
+    "ownedJobs": {
+      "zeroBeforeDispose": 7,
+      "natural": 2,
+      "qualifiedVctipOnlyCleanup": 5
+    },
+    "compilerScope": {
+      "failedPreparationGraphEntries": 295,
+      "successfulCompilationGraphEntries": [
+        297,
+        297,
+        297,
+        297,
+        297
+      ],
+      "historicalVcvarsBeforeAfterIdentity": "UNKNOWN",
+      "fullNativeLinkPackage": false
+    },
+    "wholeLibraryComplete": false,
+    "physicalDefaultActionSuppressionAccepted": false,
+    "hc165C01": "OPEN",
+    "preserveSavedF13PressAndSourceCode": true,
+    "capabilityModelProtocolRowsChanged": false,
+    "nextConsumer": "Original task is working on explicit keyboard:F13/F17/F18 edge consumption;OEM device provenance stays separate;no duplicate dispatch."
+  },
+  "familySuppressionSupport168": {
+    "schemaVersion": 1,
+    "atUtc": "2026-11-14T13:39:38.122173+00:00",
+    "status": "PARTIAL_SOURCE_SUPPORT_INTERIM_CONSUMER",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-168-FAMILY-SUPPRESSION-SUPPORT.json",
+      "bytes": 1234,
+      "sha256": "3531c375d419742c81c9b302f39f92d657e80adbf3ecfbf621fc5421b173b32c"
+    },
+    "matrix": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-168-EXPLICIT-FUNCTION-EDGE-INTERIM\\FAMILY-SUPPRESSION-SUPPORT-MATRIX.json",
+      "bytes": 340245,
+      "sha256": "22cb4a1c3836f1d03d8cb782e085af39d4bf59449485ec1fd741bac151ee4b1c"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-168-EXPLICIT-FUNCTION-EDGE-INTERIM\\FAMILY-SUPPRESSION-SUPPORT.zh-CN.md",
+      "bytes": 7789,
+      "sha256": "cb6dd3aac6993e22b1d1c69418ce0abe4e71ce5af23dc1830ac9a53ec007138f"
+    },
+    "sourceRevalidation": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-168-EXPLICIT-FUNCTION-EDGE-INTERIM\\FAMILY-SOURCE-REVALIDATION.json",
+      "bytes": 19642,
+      "sha256": "ba34bac2f88f75b98663abac123a7befed9b740df589c28add4152d02bf50a79"
+    },
+    "sourceModelRows": 102,
+    "modelKeyRows": 352,
+    "workGroups": 12,
+    "priorWorkGroups": 11,
+    "priorMissingExistingGpdLegacyRows": 19,
+    "current58FullFragmentsUnchanged": true,
+    "newRuntimeCapabilityOrProtocolRows": false,
+    "allCountsStaticSourceNotPhysicalOrTestSuccess": true,
+    "candidateSourceCorrections": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-168-EXPLICIT-FUNCTION-EDGE-INTERIM\\SOURCE-CORRECTIONS.json",
+      "bytes": 7758,
+      "sha256": "fd330e6e90aef70304054503f435e272d7cf8a65acdc77d4342c8405288f97d7"
+    },
+    "candidateSuccessor": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-168-EXPLICIT-FUNCTION-EDGE-INTERIM\\SUCCESSOR-R3-OBSERVATION.json",
+      "bytes": 3733,
+      "sha256": "93bc3a46f2911fca700f1cd17ce476cca910dd6ed4bb1037151f92153699b792"
+    },
+    "ordinaryRogSuppressionC01": "OPEN",
+    "explicitDesktopCandidateFinalAcceptance": false,
+    "wholeGoalComplete": false,
+    "explicitKeyboardSupersededBy169": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-169-EXPLICIT-KEYBOARD-SOFTWARE-REVIEW.json",
+      "bytes": 1735,
+      "sha256": "9798c0d5166350bbd6aed5c02bd4aa7e003169f9f097b75ea3023350bec01b84"
+    }
+  },
+  "explicitKeyboardSourceSoftware169": {
+    "schemaVersion": 1,
+    "atUtc": "2026-11-14T15:05:27.683207+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-169-EXPLICIT-KEYBOARD-SOFTWARE-REVIEW.json",
+      "bytes": 1735,
+      "sha256": "9798c0d5166350bbd6aed5c02bd4aa7e003169f9f097b75ea3023350bec01b84"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-169-EXPLICIT-KEYBOARD-SOFTWARE-REVIEW\\FINAL-RESULT.json",
+      "bytes": 4375,
+      "sha256": "3e7f1f097b2927011b11c85864ce2abd4f02f8315c0e52cfab68aeeab6b933a5"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-169-EXPLICIT-KEYBOARD-SOFTWARE-REVIEW\\REPORT.zh-CN.md",
+      "bytes": 2325,
+      "sha256": "ac86b9d402b3365a1ba833e42033609a3db711e7f803d01da46e7f932e822e40"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-169-EXPLICIT-KEYBOARD-SOFTWARE-REVIEW\\CONDITIONS-AND-CORRECTION-RESOLUTION.json",
+      "bytes": 4096,
+      "sha256": "7084619c39653a2fc450aa02aa23fcd44000f74e6bba12ffd459e18596d59093"
+    },
+    "appliesTo": "Existing explicitly saved keyboard source single F13-F24 rules; conditional system-keyboard consumption and independent no-virtual action guards",
+    "uniqueProductFiles": 2,
+    "uniqueFixtureFiles": 10,
+    "applicationHunksByEpoch": [
+      66,
+      5
+    ],
+    "mainline16Functions2Types4HeadersMatchPrivateAndFixedSourceEpoch": true,
+    "familyContinuation": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-169-EXPLICIT-KEYBOARD-SOFTWARE-REVIEW\\FAMILY-CONTINUATION-R3.json",
+      "bytes": 13696,
+      "sha256": "12b96b29f399494316c1b6b9157ec2c0bd251a1640410611af2ec205e80d9ff5"
+    },
+    "modelProtocolRuntimeRowsChanged": false,
+    "preservedSavedSourceCode": true,
+    "ordinaryDeviceQualifiedRogSuppressionHC165C01": "OPEN",
+    "currentGlobalKeyboardPolicyResearch": "HC165-C01 source/API inquiry only; original key task owns implementation",
+    "fullNativeLinkPackageAndPhysicalAccepted": false,
+    "wholeLibraryComplete": false,
+    "goalToolActionByLibrary": false
+  },
+  "rogOrdinarySuppressionSourceApi170": {
+    "schemaVersion": 1,
+    "atUtc": "2026-11-14T15:19:54.856979+00:00",
+    "status": "PARTIAL_SOURCE_API_SUPPORT",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-170-ROG-SUPPRESSION-SOURCE-API-CONTRACT.json",
+      "bytes": 1249,
+      "sha256": "09028f8f802995396e5708132340531b1b1136a46b7dafb2a44b5c3647060b6e"
+    },
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-170-ROG-SUPPRESSION-SOURCE-API-CONTRACT\\ROG-OEM-SUPPRESSION-INTERFACE-CONTRACT.json",
+      "bytes": 12138,
+      "sha256": "f095392c7f88a493d40c254a4e6c1cff14acfcc942d176f8e783a2d55e9fa33e"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-170-ROG-SUPPRESSION-SOURCE-API-CONTRACT\\REPORT.zh-CN.md",
+      "bytes": 3342,
+      "sha256": "4e05be1749d923c6f73bc1b01d8b6ce20fc3b98e2b81775c49afd27d8239c040"
+    },
+    "supplement": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-170-ROG-SUPPRESSION-SOURCE-API-CONTRACT\\FINAL-SOURCE-API-SUPPLEMENT.json",
+      "bytes": 1291,
+      "sha256": "e886293a740ba03bbc2b0388affa5053b5b7e09315c06dd8da3913ae49959885"
+    },
+    "familyModels": [
+      "ROGAlly",
+      "ROGAllyX",
+      "XboxROGAlly",
+      "XboxROGAllyX"
+    ],
+    "hcSelectedControllerStatePumpIsNotVirtualOutputCreation": true,
+    "hcTargetNullInjectionNoop": true,
+    "rearIndependentHid165NotConsumedInFixedHandleEvent": true,
+    "hid167168AreAcHoldReleaseNotProvenRearM2": true,
+    "synchronousLlSuppressionThenDeviceRawDeliveryGuarantee": "NOT_PROVEN",
+    "separateGlobalMuteDoesNotCreateDeviceActionProvenance": true,
+    "doNotSilentlyConvertSavedOemSourceCodeOrEnableMask": true,
+    "ordinaryRogHC165C01": "OPEN",
+    "wholeLibraryComplete": false
+  },
+  "pureDesktopChordActionSoftware171": {
+    "schemaVersion": 1,
+    "atUtc": "2026-11-14T15:37:03.955484+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-171-DESKTOP-CHORD-CONSUMER-REVIEW.json",
+      "bytes": 1513,
+      "sha256": "04249d9ab22eea99d5c742124d0173d9421ca59f691fabc3e63cfaf020812f1f"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-171-DESKTOP-CHORD-CONSUMER-REVIEW\\REPORT.zh-CN.md",
+      "bytes": 2143,
+      "sha256": "1f51ab999d742429681289f072cf6bb786fba0574615acc43a422b210f9654c4"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-171-DESKTOP-CHORD-CONSUMER-REVIEW\\FINAL-RESULT.json",
+      "bytes": 3802,
+      "sha256": "ad21090e6e0c29dc9bd3e86a46fe909d8cb94ec0cfd9a75f5bea1f074b1793c5"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-171-DESKTOP-CHORD-CONSUMER-REVIEW\\ACCEPTED-SCOPE-AND-LIMITS.json",
+      "bytes": 2767,
+      "sha256": "ec3bce931734261ec7893d12ddc3e1a44d991f19bac25519c96bf25a9027596b"
+    },
+    "scope": "Pure saved keyboard/mouse action admission without controllerAllowed; original sampledpower/epoch/neutral tofinalguards",
+    "productFiles": 1,
+    "existingFixtureFiles": 4,
+    "exactHunks": 13,
+    "completeFinalFunctionsVerified": 8,
+    "savedSourceCodeOrRuntimeModelProtocolChanged": false,
+    "rawActionAdmissionNotOsSuppression": true,
+    "ordinaryRogDeviceQualifiedSuppressionHC165C01": "OPEN",
+    "fullNativeLinkPackagePhysicalAccepted": false,
+    "wholeLibraryComplete": false
+  },
+  "rogLlSuppressionSourceReview173": {
+    "status": "NEEDS_REVISION",
+    "familyModels": [
+      "ROGAlly",
+      "ROGAllyX",
+      "XboxROGAlly",
+      "XboxROGAllyX"
+    ],
+    "sourceProfile": "Existing Rog binding; no new model/protocol row",
+    "libraryReview": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-173-ROG-LL-HELD-SUCCESSOR.json",
+      "bytes": 2782,
+      "sha256": "e321e5f87bf4e0ca01a360c48653fb2a3dd06e14483b6a8accfec1221910a66f"
+    },
+    "openCorrection": "HC173-C01",
+    "priorSingleThreadHeld8AndSymmetric8": "source-bound software progress; production UI ownership pending",
+    "systemKeyboardFallbackIsPerDevice": false,
+    "qualifiedRawSuppressionAccepted": false,
+    "physicalAccepted": false,
+    "productAndTestsOwnerThreadId": "01a12e67-8c00-7db3-b742-9307931b4056"
+  },
+  "rogUiSourceOwnershipSoftware174": {
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-174-ROG-UI-SOURCE-OWNER.json",
+      "bytes": 1434,
+      "sha256": "b3734e8b4b2b262e2f2dd1e8da5c8e2d463ca87312722280830b8b675ee4f2e5"
+    },
+    "consumerHandoffSha256": "ad1ed13d823c9099157df41d0c9abce6123a76001fc2f929848fc210f1ae8b73",
+    "familyModels": [
+      "ROGAlly",
+      "ROGAllyX",
+      "XboxROGAlly",
+      "XboxROGAllyX"
+    ],
+    "actualPositiveIdentity": "XboxROGAllyX",
+    "actualDirectedSoftwareChecks": 18,
+    "resolvedSourceCorrectionIds": [
+      "HC172-C01",
+      "HC173-C01"
+    ],
+    "rawLiveStateAppliedBy": "Existing UI reconcile only",
+    "pairedPhysicalRepeatAndUpPreserved": true,
+    "qualifiedRawGlobalSuppressionAccepted": false,
+    "physicalAccepted": false,
+    "fullNativeLinkPackageAccepted": false,
+    "wholeGoalComplete": false
+  },
+  "rogLlReturnNeutralSoftware175": {
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-175-ROG-LL-RETURN-NEUTRAL.json",
+      "bytes": 1412,
+      "sha256": "c29adb48988c49b722daa2f006bd689ed48a672f264ac4daf16a826f52592e38"
+    },
+    "actualDirectedChecks": 11,
+    "sourceEpoch": "964b20e3600e210574f3ecbf20940e3b8cfeb437d4b154a17d565907d72f6f4b",
+    "singleExecutedIdentity": "XboxROGAllyX",
+    "realNeutralRequiredAfterSourceReturn": true,
+    "pairedPhysicalUpPreserved": true,
+    "qualifiedRawGlobalSuppressionAccepted": false,
+    "physicalAccepted": false,
+    "wholeGoalComplete": false
+  },
+  "rogThreeRouteSourcePlan176": {
+    "status": "PARTIAL_SOURCE_PLAN_ACCEPTED",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-176-ROG-THREE-ROUTE-SOURCE-PLAN.json",
+      "bytes": 2095,
+      "sha256": "dad034d5935aed5e1891bb2cb706da10277c43f3f5ce94deba936fa1f530c82d"
+    },
+    "routes": [
+      "Existing system keyboard LL fallback",
+      "Device-qualified Raw capture/actions;selective suppression OPEN",
+      "Front LIB147 shared HID + existing reversible ASUS frontend lease;physical behavior OPEN"
+    ],
+    "staticFamilyGroups": 12,
+    "staticModelRows": 102,
+    "staticModelKeyRelations": 352,
+    "physicalCountsNotImplied": true,
+    "nextSourceSupport": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-176-ROG-THREE-ROUTE-SOURCE-PLAN\\NEXT-BOUNDED-FAMILY-SOURCE-SUPPORT.json",
+      "bytes": 1652,
+      "sha256": "7e22186e88fc247f151792035995be6a1c04151fdec1f12053074c3b3cb80743"
+    },
+    "wholeGoalComplete": false
+  },
+  "gpdLegacyRecordedKeyboardSourceSupport177": {
+    "status": "PARTIAL_SOURCE_SUPPORT",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-177-GPD-LEGACY-RECORDED-KEYBOARD-SUPPORT.json",
+      "bytes": 1379,
+      "sha256": "cd7a87adcbe15b53762b8fa1f1a4a65ec797206572b3481ec467a6b6e961570f"
+    },
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-177-GPD-LEGACY-RECORDED-KEYBOARD-SUPPORT\\GPD-LEGACY-INPUT-SOURCE-CONTRACT.json",
+      "bytes": 70854,
+      "sha256": "9c73d53124c4f7a66e479c8d09b3be840a0d81481e15bfb4c9384ec943bc6e73"
+    },
+    "legacyStaticModels": 19,
+    "actualSourceDeclaringRoots": 6,
+    "leftExpression": [
+      "F11",
+      "KeyL"
+    ],
+    "rightExpression": [
+      "F12",
+      "KeyR"
+    ],
+    "savedOemAndKeyboardDefinitionsSeparate": true,
+    "win5InterfaceOrFirmwareGateInherited": false,
+    "physicalAccepted": false,
+    "wholeGoalComplete": false
+  },
+  "recordedPureKeyboardConsumerSoftware179": {
+    "atUtc": "2026-11-14T17:32:49.232778+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-179-RECORDED-KEYBOARD-CONSUMER.json",
+      "bytes": 1737,
+      "sha256": "0be8ff5d5edbe1da566534ef70f7ee908c1fb10d6d2b77de824a48cc54eb820f"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-179-RECORDED-KEYBOARD-CONSUMER\\FINAL-RESULT.json",
+      "bytes": 5650,
+      "sha256": "d3cd6026b76a1ad8ea30289256bd4e6a1e4e6d081e497d5274fd05110df12836"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-179-RECORDED-KEYBOARD-CONSUMER\\ACCEPTED-SCOPE-AND-LIMITS.json",
+      "bytes": 17681,
+      "sha256": "f820c1d0e42a796b3376172eb810e0f2cc73a63d550f1ff0103ed65e05a5f3d2"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-179-RECORDED-KEYBOARD-CONSUMER\\REPORT.zh-CN.md",
+      "bytes": 2056,
+      "sha256": "eb425e68ee3efedf7b5883aed8c7f0251090149798c853a200e6332725b8d545"
+    },
+    "consumerHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\recorded-keyboard-chord-20261115\\HANDOFF.json",
+      "bytes": 950,
+      "sha256": "87f3b70675e9de5a14cc6df99b96db32b073710e7524866422d3ba4703fc955f"
+    },
+    "consumerSourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\recorded-keyboard-chord-20261115\\SOURCE_READY.json",
+      "bytes": 19066,
+      "sha256": "a74d187b1ac073ee746ece48b36dcd62cc4916bfff1f0487b74a9159cf11cf44"
+    },
+    "qualifiedRogRawSuppressionHC165C01": "OPEN",
+    "wholeGoalComplete": false
+  },
+  "mouseCombinationFamilySourceSupport180": {
+    "atUtc": "2026-11-14T17:41:52.518726+00:00",
+    "status": "PARTIAL_SOURCE_SUPPORT",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-180-MOUSE-COMBINATION-FAMILY-SOURCE.json",
+      "bytes": 1309,
+      "sha256": "dda0e49918df5b7e927fe570867eb5b09da9f245f9df2f59baed4c1b1109c774"
+    },
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-180-MOUSE-COMBINATION-FAMILY-SOURCE\\MOUSE-COMBINATION-FAMILY-SOURCE-CONTRACT.json",
+      "bytes": 22943,
+      "sha256": "539b043ef8894f35c45588362ca0a6a1c2cc6bf1ef014dfd00a0afde38880da7"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-180-MOUSE-COMBINATION-FAMILY-SOURCE\\REPORT.zh-CN.md",
+      "bytes": 813,
+      "sha256": "efa4457f4c95e72322915fd8fcfec40812d04aed482c7e83ba9ec11458647744"
+    },
+    "staticModels": 6,
+    "declaringRoots": 2,
+    "businessInvocations": 0,
+    "wholeGoalComplete": false
+  },
+  "fixedNativeBuildKeyboardConsumer181": {
+    "atUtc": "2026-11-14T18:15:17.254890+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-181-NATIVE-BUILD-SOURCE-COMPLETENESS.json",
+      "bytes": 1792,
+      "sha256": "f32bb0d458ed7e209b0ed2bad544e7e7da793133de7e9be246d7acf83572abd7"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-181-NATIVE-BUILD-SOURCE-COMPLETENESS\\FINAL-RESULT.json",
+      "bytes": 4787,
+      "sha256": "5428231554d1fa5a340a096b48246dc81a75c71a341a5ca2113a12b92824afbd"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-181-NATIVE-BUILD-SOURCE-COMPLETENESS\\ACCEPTED-SCOPE-AND-LIMITS.json",
+      "bytes": 1081,
+      "sha256": "905733a079bf9f427628f4e19aa2de7d98c8f5545abdf60e379ac78f19a82d2b"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-181-NATIVE-BUILD-SOURCE-COMPLETENESS\\REPORT.zh-CN.md",
+      "bytes": 1933,
+      "sha256": "091caeed9e6b3c8fee68bfef46c2a2ad66faf7096ac6c0d1548ef3504a218269"
+    },
+    "wholeGoalComplete": false
+  },
+  "actualPostedRecordingSourceSupport182": {
+    "atUtc": "2026-11-14T18:28:19.463019+00:00",
+    "status": "PARTIAL_SOURCE_SUPPORT",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-182-RETAINED-RECORDING-ACTUAL-SOURCE-SUPPORT.json",
+      "bytes": 1271,
+      "sha256": "9fa01e569892d68fe28b8f50c3453deb0ef35aef301224c2dafe4166ed9f4572"
+    },
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-182-RETAINED-RECORDING-ACTUAL-SOURCE-SUPPORT\\ACTUAL-POSTED-RECORDING-SOURCE-CONTRACT.json",
+      "bytes": 70115,
+      "sha256": "b329c8a37ed2e4f45ee088f018ec995f9cf2a9ade75b334c566fcc7be51a9191"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-182-RETAINED-RECORDING-ACTUAL-SOURCE-SUPPORT\\REPORT.zh-CN.md",
+      "bytes": 919,
+      "sha256": "76be4d3bac454ca53a501693e06b01e7e4ddcf21745e605558a0e1f4730de9ae"
+    },
+    "actualPostedStaticModels": 10,
+    "upstreamFixedSources": 16,
+    "wholeGoalComplete": false
+  },
+  "aynRetainedRecordingSoftware183": {
+    "atUtc": "2026-11-14T18:28:19.463019+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-183-AYN-POSTED-RECORDING-CONSUMER.json",
+      "bytes": 1634,
+      "sha256": "1ad39233eb9e63015a7f53f43d01185821eff6df6deb71b82fc38bae85cb80bf"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-183-AYN-POSTED-RECORDING-CONSUMER\\FINAL-RESULT.json",
+      "bytes": 3668,
+      "sha256": "181aa546e60195b9d843101b06f1c177475513e13aa7088ec274784075abc5dd"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-183-AYN-POSTED-RECORDING-CONSUMER\\ACCEPTED-SCOPE-AND-LIMITS.json",
+      "bytes": 2004,
+      "sha256": "9350958d41ffc1956aa154640ada2a313a4e3d9f983949a01ed272cbe0738e7b"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-183-AYN-POSTED-RECORDING-CONSUMER\\REPORT.zh-CN.md",
+      "bytes": 1032,
+      "sha256": "1a0e0ad51aa67a5640a7ad26aca330b239f26ca3a0bb225119f4ee53c128718e"
+    },
+    "consumerHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\ayn-retained-guide-20261115\\HANDOFF.json",
+      "bytes": 413,
+      "sha256": "576c2eec4039acb0110a3b2d6243c9e70da8d8f23965e2a3a8efd37aca15f6f8"
+    },
+    "wholeGoalComplete": false
+  },
+  "zotacSuiPlayRetainedRecordingSoftware184": {
+    "atUtc": "2026-11-14T18:31:47.386100+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-184-ZOTAC-SUIPLAY-POSTED-RECORDING.json",
+      "bytes": 1683,
+      "sha256": "da76d73546e0a58b5f604ec4a4b04272fead35bef2a4da12b146ad68bd4f16b2"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-184-ZOTAC-SUIPLAY-POSTED-RECORDING\\FINAL-RESULT.json",
+      "bytes": 2990,
+      "sha256": "7e31db9568d014213f993853ca3b6c8886328dd2aae19874f83ea7a295b638e8"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-184-ZOTAC-SUIPLAY-POSTED-RECORDING\\ACCEPTED-SCOPE-AND-LIMITS.json",
+      "bytes": 1202,
+      "sha256": "048b3ea1f2523a271f12faf3c6eafb9f85df4065a7c0931d5bafafe3ba05f1c1"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-184-ZOTAC-SUIPLAY-POSTED-RECORDING\\REPORT.zh-CN.md",
+      "bytes": 722,
+      "sha256": "91d9da479df213129f5114a397b1ddfa5a8fe2de022d7fc33346b32e5dedaa98"
+    },
+    "wholeGoalComplete": false
+  },
+  "msiRogFallbackRecordingSoftware185": {
+    "atUtc": "2026-11-14T18:39:06.237273+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-185-MSI-ROG-FALLBACK-RECORDING.json",
+      "bytes": 1694,
+      "sha256": "66fc47718d4a20bab54b626499c1d3bead823b524aea4025c160c6236f721d04"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-185-MSI-ROG-FALLBACK-RECORDING\\FINAL-RESULT.json",
+      "bytes": 3459,
+      "sha256": "8ea7311b3fb764039ca7b3c6dbab6da8d4d82586243337394c76ea99380f1f80"
+    },
+    "conditions": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-185-MSI-ROG-FALLBACK-RECORDING\\ACCEPTED-SCOPE-AND-LIMITS.json",
+      "bytes": 1877,
+      "sha256": "91cb976e36087f268fb65fcb8e74589a9a4131fd186b64e4cffc8f3506f9415c"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-185-MSI-ROG-FALLBACK-RECORDING\\REPORT.zh-CN.md",
+      "bytes": 1447,
+      "sha256": "e54b2ec68d9492af4d7347d324c4e94e5b5a6db2b3a2fb49d17e88e4193dd94b"
+    },
+    "wholeGoalComplete": false
+  },
+  "rogFinalSuppressionSourceDecision186": {
+    "atUtc": "2026-11-14T18:52:59.768005+00:00",
+    "status": "PARTIAL_SOURCE_SUPPORT",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-186-ROG-FINAL-SUPPRESSION-SOURCE-DECISION.json",
+      "bytes": 1437,
+      "sha256": "f4b349c1e0887e39824a0890fa239c929728662e7f5b0c7e6b408b634d9535d9"
+    },
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-186-ROG-FINAL-SUPPRESSION-SOURCE-DECISION\\ROG-FINAL-SUPPRESSION-SOURCE-DECISION.json",
+      "bytes": 38876,
+      "sha256": "c1adef4dd3fcb646874add44f248ea14fdfcc7fe9966d16e796da5620838faa5"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-186-ROG-FINAL-SUPPRESSION-SOURCE-DECISION\\REPORT.zh-CN.md",
+      "bytes": 1844,
+      "sha256": "0b7a85aa7b6aa8e07801d98dd7350bb92479a1267caeb07d7094a963ded61455"
+    },
+    "decision": "NO_DIRECTLY_REUSABLE_DEVICE_QUALIFIED_SINGLE_KEY_SUPPRESSION_OR_MCU_MUTE_IN_REVIEWED_SOURCE",
+    "qualifiedRawSuppressionHC165C01": "OPEN",
+    "ordinaryMatchedPackagePriority": true,
+    "newTestsRequested": false,
+    "wholeGoalComplete": false
+  },
+  "matchedPackageSoftware191": {
+    "atUtc": "2026-11-14T20:10:58.940260+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "acceptedScope": "FIXED_CAPTURED_CONTROLLER_SOURCE_AND_MATCHED_NATIVE_SELECTED_PAYLOAD_ARCHIVE_BYTE_IDENTITIES_ONLY",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-191-MATCHED-PACKAGE-IDENTITY.json",
+      "bytes": 2028,
+      "sha256": "c469eab9e5506494ab3762f449c14bcaf6055845fef0f1eb2d8402a2b5b2fe3f"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-191-MATCHED-PACKAGE-IDENTITY\\FINAL-RESULT.json",
+      "bytes": 5172,
+      "sha256": "65427db907edb4babebe1e1acb0cfeb30d835b4955d7e57c620493252d7ced74"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-191-MATCHED-PACKAGE-IDENTITY\\REPORT.zh-CN.md",
+      "bytes": 1559,
+      "sha256": "2206d6354ba7812d32dd5faf01f247f5d945ad6d91f3ef8594af4fa02e75776b"
+    },
+    "qualifiedHandoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\matched-package-20261115\\QUALIFIED-HANDOFF.json",
+      "bytes": 1073,
+      "sha256": "8225b0df369ebdad87e0e9bf8f5669c7cce865f2ff25e0aad18635ab35578ebb"
+    },
+    "archive": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-OEM-NoVirtual-Input-20261115\\YeManCC.zip",
+      "bytes": 112531021,
+      "sha256": "995d222c66e32a6676342512fdb207d24b4d1f172b1ea6c2dc56d9b3db8d0e9a"
+    },
+    "nativeBuildId": "d52b8694af9d578178f202f77ae0e5d0bb96c97c5f7da656b07ba8b75f1d6643",
+    "hostHistoricalUnknownCount": 3,
+    "completeHostToolGraphAccepted": false,
+    "formalReleaseAccepted": false,
+    "physicalAccepted": false,
+    "wholeGoalComplete": false,
+    "fullFamilyScope": {
+      "groups": 12,
+      "models": 102,
+      "relationships": 352,
+      "physicalPassed": 0
+    }
+  },
+  "explicitMouseChordSourceSupport192": {
+    "atUtc": "2026-11-14T20:18:42.062144+00:00",
+    "status": "PARTIAL_SOURCE_SUPPORT",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-192-EXPLICIT-MOUSE-CHORD-SOURCE-SUPPORT.json",
+      "bytes": 1674,
+      "sha256": "356cae4a37c247c046bd2a484c60db1fcca571c35d1279e2dc88407a07773b9d"
+    },
+    "contract": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-192-EXPLICIT-MOUSE-CHORD-SOURCE-SUPPORT\\MOUSE-CHORD-SOURCE-CONTRACT.json",
+      "bytes": 35628,
+      "sha256": "02069112d1a67c0178aa1f94738a6e36e28b48faac3131b2f1c94aebe3bec0ec"
+    },
+    "corrections": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-192-EXPLICIT-MOUSE-CHORD-SOURCE-SUPPORT\\CORRECTIONS.json",
+      "bytes": 3247,
+      "sha256": "bca02e62c377c189c708f5b89d40d56ea2e4d2cfb5c0681f244ae9e29384f2db"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-192-EXPLICIT-MOUSE-CHORD-SOURCE-SUPPORT\\REPORT.zh-CN.md",
+      "bytes": 1962,
+      "sha256": "70d3e9c32656f32daeeb4bca215aa89bd9d97f373648e8366761e91d3f346b79"
+    },
+    "currentFunctions31EqualFixedPackage": true,
+    "sourceGap": "HC192-C01",
+    "originalConsumerOwner": "01a12e67-8c00-7db3-b742-9307931b4056",
+    "newTestsRequested": false,
+    "wholeGoalComplete": false
+  },
+  "keyboardHookDiagnosticSoftware193": {
+    "atUtc": "2026-11-14T20:30:23.123882+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "acceptedScope": "SOURCE_BOUND_CURRENT_KEYBOARD_HOOK_LOCAL_DECISION_DIAGNOSTICS_ONLY",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-193-KEYBOARD-HOOK-DECISION-DIAGNOSTICS.json",
+      "bytes": 2017,
+      "sha256": "7a7fa33614981bde6d6b120f6ed5446b5f411a5883d2b5387700b494e141e75f"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-193-KEYBOARD-HOOK-DECISION-DIAGNOSTICS\\FINAL-RESULT.json",
+      "bytes": 4789,
+      "sha256": "a0531c87a2f0a3bc0a41afb5e6b746de9ff473389dee63b976d264bbaecdc5c7"
+    },
+    "handoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\keyboard-hook-evidence-20261115\\HANDOFF.json",
+      "bytes": 1050,
+      "sha256": "66e79b105b045afc21f1de2cf1c137dce194495e2847bad3f69cff2c0298573a"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-193-KEYBOARD-HOOK-DECISION-DIAGNOSTICS\\REPORT.zh-CN.md",
+      "bytes": 1634,
+      "sha256": "789357a528d20f79f148566564f18d2741c2457a1c8a2075c2e588ccffd7c072"
+    },
+    "localHookReturnOnly": true,
+    "externalSuppressionVerified": false,
+    "oldPackageContainsSuccessor": false,
+    "nextNaturalNativeRequired": true,
+    "explicitMouseGapHC192C01": "OPEN",
+    "physicalAccepted": false,
+    "wholeGoalComplete": false
+  },
+  "explicitMouseChordConsumerSoftware195": {
+    "atUtc": "2026-11-14T21:09:44.872684+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "acceptedScope": "SOURCE_BOUND_EXPLICIT_TYPED_MOUSE_AND_KEYBOARD_MOUSE_CONSUMER_LOCAL_HOOK_ONLY",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-195-EXPLICIT-MOUSE-CHORD-CONSUMER.json",
+      "bytes": 2132,
+      "sha256": "05f48ee53c10f3a2f7af3e93d58ca4b76769cc8a946a047d92fdbe9f641d1800"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-195-EXPLICIT-MOUSE-CHORD-CONSUMER\\FINAL-RESULT.json",
+      "bytes": 9430,
+      "sha256": "0b4311b1f08c5a870911895ff647b32069a7b1dad60aa2d3c3cca126cb8eb089"
+    },
+    "handoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\recorded-mouse-consumer-20261115\\HANDOFF.json",
+      "bytes": 1239,
+      "sha256": "b1365fb5fdba59c483eb1927b900d323a7d3ccf148037405dd1de6f5c8d947c3"
+    },
+    "sourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\recorded-mouse-consumer-20261115\\SOURCE_READY.json",
+      "bytes": 3121,
+      "sha256": "7f7a398aa261e8b9ba9a12621c811ab2245cee95924f0b632456e7a400e9260c"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-195-EXPLICIT-MOUSE-CHORD-CONSUMER\\REPORT.zh-CN.md",
+      "bytes": 1984,
+      "sha256": "629db002878458b5dab4aa89f7678c8d51e0e495e77c8fc36281180b18347884"
+    },
+    "closedSoftwareCorrections": [
+      "HC192-C01",
+      "HC194-C01",
+      "HC194-C02"
+    ],
+    "externalSuppressionVerified": false,
+    "deviceQualifiedSuppressionVerified": false,
+    "oldPackageContainsSuccessor": false,
+    "nextNaturalNativeRequired": true,
+    "rogRawGapHC165C01": "OPEN",
+    "physicalAccepted": false,
+    "wholeGoalComplete": false
+  },
+  "mouseOnlyHookDependencyConsumerSoftware197": {
+    "atUtc": "2026-11-14T21:54:55.013973+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "acceptedScope": "SOURCE_BOUND_MOUSE_ONLY_HOOK_DEPENDENCY_AND_SURVIVING_DELIVERY_DEBT_SOFTWARE",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-197-MOUSE-ONLY-HOOK-CONSUMER.json",
+      "bytes": 2213,
+      "sha256": "1b11cb512b2855b7d61b9e39f3315b185a9bae1e7bd669b167dbb5035a452b40"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-197-MOUSE-ONLY-HOOK-CONSUMER\\FINAL-RESULT.json",
+      "bytes": 7146,
+      "sha256": "466cdaadff785e41c14e38c2358c5d96fe4b06f783310f90e65f058adb9eb092"
+    },
+    "handoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\mouse-only-hook-dependency-20261115\\HANDOFF.json",
+      "bytes": 1230,
+      "sha256": "285ae3b504d0aae5a063cb31b92373881aee4e73093027851c468f59e5bbaf01"
+    },
+    "sourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\mouse-only-hook-dependency-20261115\\SOURCE_READY.json",
+      "bytes": 2197,
+      "sha256": "ff360463b382f3b8083169b5a4e6a75fde5a8cc355ad76fe2c06e65ff5687cf0"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-197-MOUSE-ONLY-HOOK-CONSUMER\\REPORT.zh-CN.md",
+      "bytes": 2260,
+      "sha256": "73a482ae675774d501b6de4aee7ead15f08994cd3045f2d54aab6a4b1c7d65c1"
+    },
+    "closedSoftwareCorrection": "HC196-C01",
+    "MaintainErratumPreserved": true,
+    "oldPackageContainsSuccessor": false,
+    "nextNaturalMatchingNativePackageRequired": true,
+    "rogQualifiedRawGapHC165C01": "OPEN",
+    "externalSuppressionVerified": false,
+    "physicalAccepted": false,
+    "wholeGoalComplete": false
+  },
+  "matchedMousePackageSoftware199": {
+    "atUtc": "2026-11-14T22:37:25.542627+00:00",
+    "status": "ACCEPTED_SOFTWARE_SCOPE",
+    "acceptedScope": "FIXED_MAINLINE_CAPTURE_MATCHED_NATIVE_SELECTED_PAYLOAD_AND_ARCHIVE_IDENTITIES_ONLY",
+    "review": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\reviews\\HC-CODEX-199-MATCHED-MOUSE-PACKAGE-IDENTITY.json",
+      "bytes": 2480,
+      "sha256": "5b4a9749d2380422381560f80bb7d0ac54810e7d709d3c9605c37ac717987d57"
+    },
+    "result": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-199-MATCHED-MOUSE-PACKAGE-IDENTITY\\FINAL-RESULT.json",
+      "bytes": 9487,
+      "sha256": "6ca56165d3f5bbbf90720684ca0bbcfdccade649c36dda6783899ff01b88c601"
+    },
+    "handoff": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\matched-mouse-package-20261115\\HANDOFF.json",
+      "bytes": 969,
+      "sha256": "4fdcd947c0d5a1559c57fe848669d741fcbf8a574393607c82dfb65f244bc6d1"
+    },
+    "sourceReady": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\matched-mouse-package-20261115\\SOURCE_READY.json",
+      "bytes": 3269,
+      "sha256": "1672b52885a5dd8769c6c02dcb9ad5328f0672aa646a736093623d3c918f2fd9"
+    },
+    "archive": {
+      "path": "G:\\YeManCC-Work\\Deliverables\\YMCC-OEM-NoVirtual-Input-Mouse-20261115\\YeManCC.zip",
+      "bytes": 112561500,
+      "sha256": "c5ceb4c5b4ed507641986e4833e575dc25ef21829b25de5680644b9a62119d5c"
+    },
+    "report": {
+      "path": "G:\\YeManCC-Work\\Docs\\Tasks\\HC\\Capability-Library-TraeCode-CN\\Codex\\observations\\HC-CODEX-199-MATCHED-MOUSE-PACKAGE-IDENTITY\\REPORT.zh-CN.md",
+      "bytes": 2683,
+      "sha256": "70669d05dba0d45b31e2551c8a60badd25b07bb2d4edfe29b49a60d9b7995fa9"
+    },
+    "fieldGuide": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerFiveConsumerAudit-20261109\\Repair-019-NoVirtualBoundOem\\matched-mouse-package-20261115\\FIELD-TEST.zh-CN.md",
+      "bytes": 1460,
+      "sha256": "9f54f2cd5f70c755fab17a7b8563a53cf02839da2c6fb291e5da5a31dd09f1ae"
+    },
+    "buildId": "6be4c210fbd92a89ee21ff9ed624002a0467db516f58430ec8a91a8e1a66839d",
+    "nativeBuildId": "a8ee05085a5845bbf3e7b626b0ceac9d5add5de71ac7769429b2253f5dabbfdb",
+    "HC197ConsumerIncluded": true,
+    "fullFamilyScope": {
+      "groups": 12,
+      "models": 102,
+      "relationships": 352,
+      "physicalPassed": 0
+    },
+    "ordinaryFixtures": "NOT_RUN",
+    "newEvidencedLocatableUnrepairedConsumerSoftwareGap": "暂无",
+    "rogQualifiedRawGapHC165C01": "OPEN",
+    "externalSuppressionVerified": false,
+    "physicalAccepted": false,
+    "formalReleaseAccepted": false,
+    "wholeGoalComplete": false
   }
 }

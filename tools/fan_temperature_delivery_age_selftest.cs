@@ -42,7 +42,7 @@ internal static class Checks {
  sealed class Fixture:IDisposable {
   internal readonly Producer Producer=new();internal readonly object Backend,Source,Gate;internal readonly FakeDevice Device=new();internal readonly long OldTick;
   internal Fixture(){var options=T("HostOptions").GetMethod("Parse",F)!.Invoke(null,[Array.Empty<string>()]);Backend=Activator.CreateInstance(T("RealHcBackend"),F,null,[options],null)!;Source=Activator.CreateInstance(T("HWiNFOTemperatureMonitor"),true)!;Gate=Get(Backend,"hardwareGate")!;
-   var route=T("RealHcBackend").GetMethod("ResolveRouteForSelfTest",F)!.Invoke(null,["HandheldCompanion.Devices.GPD.GPDWin5"])!;
+   var route=T("RealHcBackend").GetMethod("ResolveRouteForSelfTest",F)!.Invoke(null,["HandheldCompanion.Devices.GPDWin5"])!;
    if(route is null)throw new InvalidOperationException("expected current registered GPD GenericDuty fixture route");
    Call(Backend,"InstallSelfTestRouteSessionForSelfTest",Device,route,true);Set(Backend,"activeFanProfile",new FakeProfile());Set(Backend,"cpuTemperatureMonitor",Source);OldTick=Environment.TickCount64-10000;Set(Backend,"lastTemperatureTick",OldTick);Set(Backend,"temperatureHealthRevision",7L);Set(Source,"lastMappingName",Producer.Name);
   }
@@ -151,5 +151,27 @@ internal static class Checks {
   var count=a.Writes;var missing=false;try{Duty(f.Backend,null,99);}catch(InvalidOperationException e){missing=e.Message=="HC device unavailable";}Check(missing&&a.Writes==count,"bound duty: null current device cannot write through previous binding");
   Duty(f.Backend,a,27.5);var owner=T("RealHcBackend").GetField("fanDutyWriterDevice",F);var writer=T("RealHcBackend").GetField("fanDutyWriter",F);Check(owner is null&&writer is null||owner is not null&&writer is not null&&ReferenceEquals(owner.GetValue(f.Backend),a)&&writer.GetValue(f.Backend) is Delegate,"bound duty ownership: current exact device owns optional binding");Call(f.Backend,"DetachCpuTemperatureLoop");Check(owner?.GetValue(f.Backend) is null&&writer?.GetValue(f.Backend) is null,"bound duty ownership: detach retains no device or writer");Set(f.Backend,"device",f.Device);
  }
- public static int Main(string[] args){try{var dll=Path.GetFullPath(args[0]);var resolver=new AssemblyDependencyResolver(dll);AssemblyLoadContext.Default.Resolving+=(_,n)=>resolver.ResolveAssemblyToPath(n) is { } p?AssemblyLoadContext.Default.LoadFromAssemblyPath(p):null;host=AssemblyLoadContext.Default.LoadFromAssemblyPath(dll);T("Program").GetProperty("IsSelfTestProcess",F)!.SetValue(null,true);var dutyOnly=Environment.GetEnvironmentVariable("YMCC_FAN_DUTY_BINDING_ONLY")=="1";var temperatureOnly=Environment.GetEnvironmentVariable("YMCC_FAN_TEMPERATURE_BINDING_ONLY")=="1";var bindingOnly=Environment.GetEnvironmentVariable("YMCC_FAN_SPEED_BINDING_ONLY")=="1";var requireProbe=Environment.GetEnvironmentVariable("YMCC_FAN_SPEED_REFLECTION_PROBE")=="1";Check(requireProbe?SpeedReflectionCount().HasValue:!SpeedReflectionCount().HasValue,"reflection witness is available only in explicit scratch-probe mode");if(!bindingOnly&&!temperatureOnly&&!dutyOnly){Delayed(true);Delayed(false);Fresh();NewProfile();ProfileAfterHealthy();ProfileDuringChanged();ProfileReplaySameOwner();}if(!temperatureOnly&&!dutyOnly){BoundSpeedPipeline();BoundSpeedIdentityAndFallback();}if(!dutyOnly){BoundTemperaturePipeline();BoundTemperatureIdentityAndFallback();}BoundDutyPipeline();BoundDutyChangedBoundary();BoundDutyIdentityAndFallback();Check(requireProbe?TemperatureReflectionCount().HasValue:!TemperatureReflectionCount().HasValue,"temperature reflection witness is available only in explicit scratch-probe mode");Check(requireProbe?DutyReflectionCount().HasValue:!DutyReflectionCount().HasValue,"duty reflection witness is available only in explicit scratch-probe mode");Check(!AppDomain.CurrentDomain.GetAssemblies().Any(a=>a.GetName().Name=="HandheldCompanion"),"HC assembly never loaded");var result=new{ok=failures.Count==0,checks=rows.Count,failures,results=rows,observations,reflectionWitnessAvailable=SpeedReflectionCount().HasValue,temperatureReflectionWitnessAvailable=TemperatureReflectionCount().HasValue,bindingOnly,temperatureOnly,dutyOnly,scope="Actual compiled Poll/private RAM/real hardwareGate/backend callbacks/fake device/profile; local test thread delay only; no real Host Main/HC/hardware/OS sleep/CPU benchmark"};var json=JsonSerializer.Serialize(result);File.WriteAllText(args[1],json);Console.WriteLine(json);return failures.Count==0?0:1;}catch(Exception e){Console.Error.WriteLine(e);return 2;}}
+ public static int Main(string[] args){try{
+  var dll=Path.GetFullPath(args[0]);var resolver=new AssemblyDependencyResolver(dll);
+  AssemblyLoadContext.Default.Resolving+=(_,n)=>resolver.ResolveAssemblyToPath(n) is { } p?AssemblyLoadContext.Default.LoadFromAssemblyPath(p):null;
+  host=AssemblyLoadContext.Default.LoadFromAssemblyPath(dll);T("Program").GetProperty("IsSelfTestProcess",F)!.SetValue(null,true);
+  var dutyOnly=Environment.GetEnvironmentVariable("YMCC_FAN_DUTY_BINDING_ONLY")=="1";
+  var temperatureOnly=Environment.GetEnvironmentVariable("YMCC_FAN_TEMPERATURE_BINDING_ONLY")=="1";
+  var bindingOnly=Environment.GetEnvironmentVariable("YMCC_FAN_SPEED_BINDING_ONLY")=="1";
+  var deliveryOnly=Environment.GetEnvironmentVariable("YMCC_FAN_DELIVERY_AGE_ONLY")=="1";
+  if(deliveryOnly&&(dutyOnly||temperatureOnly||bindingOnly))throw new ArgumentException("Delivery-age selection cannot include binding selections");
+  var requireProbe=Environment.GetEnvironmentVariable("YMCC_FAN_SPEED_REFLECTION_PROBE")=="1";
+  Check(requireProbe?SpeedReflectionCount().HasValue:!SpeedReflectionCount().HasValue,"reflection witness is available only in explicit scratch-probe mode");
+  if(!bindingOnly&&!temperatureOnly&&!dutyOnly){Delayed(true);Delayed(false);Fresh();if(!deliveryOnly){NewProfile();ProfileAfterHealthy();ProfileDuringChanged();ProfileReplaySameOwner();}}
+  if(!deliveryOnly){
+   if(!temperatureOnly&&!dutyOnly){BoundSpeedPipeline();BoundSpeedIdentityAndFallback();}
+   if(!dutyOnly){BoundTemperaturePipeline();BoundTemperatureIdentityAndFallback();}
+   BoundDutyPipeline();BoundDutyChangedBoundary();BoundDutyIdentityAndFallback();
+  }
+  Check(requireProbe?TemperatureReflectionCount().HasValue:!TemperatureReflectionCount().HasValue,"temperature reflection witness is available only in explicit scratch-probe mode");
+  Check(requireProbe?DutyReflectionCount().HasValue:!DutyReflectionCount().HasValue,"duty reflection witness is available only in explicit scratch-probe mode");
+  Check(!AppDomain.CurrentDomain.GetAssemblies().Any(a=>a.GetName().Name=="HandheldCompanion"),"HC assembly never loaded");
+  var result=new{ok=failures.Count==0,checks=rows.Count,failures,results=rows,observations,reflectionWitnessAvailable=SpeedReflectionCount().HasValue,temperatureReflectionWitnessAvailable=TemperatureReflectionCount().HasValue,bindingOnly,temperatureOnly,dutyOnly,deliveryOnly,scope="Actual compiled Poll/private RAM/real hardwareGate/backend callbacks/fake device/profile; local test thread delay only; no real Host Main/HC/hardware/OS sleep/CPU benchmark"};
+  var json=JsonSerializer.Serialize(result);using(var file=new FileStream(args[1],FileMode.CreateNew)){using var writer=new StreamWriter(file);writer.Write(json);}Console.WriteLine(json);return failures.Count==0?0:1;
+ }catch(Exception e){Console.Error.WriteLine(e);return 2;}}
 }

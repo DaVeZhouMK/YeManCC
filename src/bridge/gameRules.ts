@@ -7,10 +7,23 @@ export interface GameRulesSnapshot {
 
 export type GameRuleList = 'blacklist' | 'whitelist';
 
+const LITERAL_RULE_PREFIX = '@exe:';
+function validLiteralRuleName(value: string): boolean {
+  return value.endsWith('.exe.exe') && value.length >= 8 &&
+    !value.startsWith(' ') && !value.endsWith(' ') &&
+    !/[\u0000-\u001f\\/:*?\[\]<>|#"]/.test(value);
+}
+
 export function gameRuleNameFromPath(path: string): string {
-  const file = String(path || '').trim().split(/[\\/]/).pop() || '';
-  const lower = file.toLowerCase();
-  return lower.endsWith('.exe') ? lower.slice(0, -4) : lower;
+  const input = String(path || '').trim().toLowerCase();
+  if (input.startsWith('@exe') && input.includes(':')) {
+    if (!input.startsWith(LITERAL_RULE_PREFIX) || !validLiteralRuleName(input.slice(LITERAL_RULE_PREFIX.length)))
+      throw new Error('进程规则格式未知或无效，已保留原名单');
+    return input;
+  }
+  const file = input.split(/[\\/]/).pop() || '';
+  if (validLiteralRuleName(file)) return LITERAL_RULE_PREFIX + file;
+  return file.endsWith('.exe') ? file.slice(0, -4) : file;
 }
 
 function normalizeSnapshot(raw: Partial<GameRulesSnapshot> | null | undefined): GameRulesSnapshot {

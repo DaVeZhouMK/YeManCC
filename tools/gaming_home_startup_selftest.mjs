@@ -253,7 +253,7 @@ await check('rollback failure is reported explicitly with the backup retained',a
 });
 function bridgeFixture(registryFixture=fixture(),legacy=false){
   const canonical='野蛮优化整合系统\\Xbox大屏游戏模式',tasks=new Set(legacy?[canonical]:[]),directories=new Set(),files=new Map(),calls=[];
-  let exportFails=false;
+  let exportFails=false, onTaskRead;const scopedCalls=[];
   const api={registry:registryFixture.port,fs:{
     async exists(p){const prefix='C:\\Windows\\System32\\Tasks\\';return p.startsWith(prefix)?tasks.has(p.slice(prefix.length)):directories.has(p)||files.has(p);},
     async mkdir(p){directories.add(p);return true;},async writeTextFileAtomic(p,c,_timeout,expected){if(expected?.expectedContent===null&&files.has(p))throw Error('backup already exists');files.set(p,c);},
@@ -262,15 +262,20 @@ function bridgeFixture(registryFixture=fixture(),legacy=false){
   },shell:{async run(program,args){
     calls.push([program,...args]);const task=args[args.indexOf('/TN')+1];
     if(program!=='schtasks')throw Error('Unexpected program '+program);
-    if(args.includes('/Query'))return{exitCode:tasks.has(task)&&!(args.includes('/XML')&&exportFails)?0:1,stdout:args.includes('/XML')?'<Task>original physpanel definition</Task>':'task',stderr:''};
+    if(args.includes('/Query')){await onTaskRead?.(args,task);return{exitCode:tasks.has(task)&&!(args.includes('/XML')&&exportFails)?0:1,stdout:args.includes('/XML')?'<Task>original physpanel definition</Task>':'task',stderr:''};}
     if(args.includes('/Delete')){tasks.delete(task);return{exitCode:0,stdout:'',stderr:''};}
     throw Error('Unexpected scheduled task mutation '+args.join(' '));
   }}};
   const imports={'./api':api,'./ipc':{invoke:async(name,a)=>{
+    if(name.startsWith('bootMode.gamingHome.')){
+      assert(a.bootContext);scopedCalls.push({name,args:structuredClone(a)});
+      if(name==='bootMode.gamingHome.write')return registryFixture.port.write(a.root,a.path,a.name,a.value);
+      assert.equal(name,'bootMode.gamingHome.delete');return registryFixture.port.remove(a.root,a.path,a.name);
+    }
     assert.equal(name,'registry.delete');assert(a.name);return registryFixture.port.remove(a.root,a.path,a.name);
   }},'./gamingHomePolicy':policy,'./frameRateModel':frameRateModel,'./tdpRuntimeState':tdpRuntimeState,'./rtssOverlay':{},'./settingsRepository':{},'./tdpCircuitBreaker':{},'./controllerShortcutRules':{OEM_EMPTY_SNAPSHOT:{}}};
   const bridge=backupMode ? backupBridge(api, (name,a)=>imports['./ipc'].invoke(name,a), 'C:\\owned-memory') : evaluate(fs.readFileSync(path.join(root,'src/bridge/yeman.ts'),'utf8'),imports,{window:{addEventListener(){},removeEventListener(){}}});
-  return{bridge,tasks,files,calls,registryFixture,set exportFails(v){exportFails=v;}};
+  return{bridge,tasks,files,calls,registryFixture,scopedCalls,set exportFails(v){exportFails=v;},set onTaskRead(v){onTaskRead=v;}};
 }
 await check('actual bridge reads create no backups, scheduled task calls or registry writes',async()=>{
   const f=bridgeFixture(fixture({device:46,startup:1}));assert((await f.bridge.readGamingHomeConfiguration()).startupEnabled);
@@ -291,6 +296,18 @@ await check('actual bridge serializes explicit enable/disable, keeps home and ba
   await Promise.all([f.bridge.writeGamingHomeStartup(true),f.bridge.writeGamingHomeStartup(false)]);
   assert.equal(await f.registryFixture.get('HKLM',OEM,'DeviceForm'),46);assert.equal(await f.registryFixture.get('HKCU',CFG,'StartupToGamingHome'),0);
   assert.equal([...f.files.keys()].filter(p=>p.endsWith('.json')).length,2);assert(!f.calls.some(a=>a.includes('/Create')));
+  assert.deepEqual(f.scopedCalls,[]);
+  const bootContext={input:{revision:1},extensions:{bootModes:{schema:1}}};
+  const scoped=bridgeFixture(fixture({device:null,startup:0,home:'Original.Home!App'}));
+  scoped.registryFixture.writeHook=(_root,_path,name)=>name==='StartupToGamingHome'?false:undefined;
+  await assert.rejects(scoped.bridge.writeGamingHomeStartup(true,true,'xbox',async()=>bootContext),/StartupToGamingHome/);
+  assert(scoped.scopedCalls.some(row=>row.name==='bootMode.gamingHome.delete'&&row.args.name==='DeviceForm'));
+  assert(scoped.scopedCalls.some(row=>row.name==='bootMode.gamingHome.write'&&row.args.name==='GamingHomeApp'&&row.args.value==='Original.Home!App'));
+  assert(scoped.scopedCalls.every(row=>JSON.stringify(row.args.bootContext)===JSON.stringify(bootContext)));
+  const legacy=bridgeFixture(fixture({device:46,startup:1}),true);let reads=0, expired=false;
+  legacy.onTaskRead=async(args,task)=>{if(args.includes('/FO')&&legacy.tasks.has(task)&&++reads===3)expired=true;};
+  await assert.rejects(legacy.bridge.writeGamingHomeStartup(true,true,'xbox',async()=>{if(expired)throw Error('fixture owner expired');return bootContext;}),/owner expired/);
+  assert(legacy.tasks.size===1&&!legacy.calls.some(call=>call.includes('/Delete')));
 });
 
 

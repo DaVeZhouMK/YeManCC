@@ -1,0 +1,35 @@
+static NativeDetectedGame foregroundCandidate(){auto game=original();game.pid=7780;game.processCreated+=1;game.path=L"D:\\Game\\Other.exe";return game;}
+static void overlayCases(bool oldControl){
+ unsigned rows=0;
+ auto run=[&](const char* name,const std::function<void(FocusTargetSnapshot&)>& arrange,bool wanted,unsigned scans){
+  reset<New>();overlaySequence=10;overlayRevocations=0;overlayForeground=reinterpret_cast<HWND>(7780);
+  const auto old=New::view();production::nativeValvePublish(New::raw());
+  const auto published=production::g_gameValveObservation.load();const auto writes=ports::s.publications;
+  const auto game=foregroundCandidate();ports::s.candidate=game;
+  FocusTargetSnapshot target;target.valid=true;target.hwnd=overlayForeground;target.pid=game.pid;target.processCreated=game.processCreated;target.path=game.path;
+  arrange(target);
+  const bool result=oldControl?production::overlayOldControl(target):production::gameOverlayQualifyCapturedGame(target);
+  const auto now=New::view();
+  check(now.game.pid==old.game.pid&&now.game.processCreated==old.game.processCreated&&now.identity==old.identity&&now.generation==old.generation,std::string(name)+": existing game identity was changed");
+  check(production::g_gameValveObservation.load()==published&&ports::s.publications==writes,std::string(name)+": global game was republished");
+  check(result==wanted,std::string(name)+": wrong local qualification");
+  check(ports::s.scans==scans,std::string(name)+": wrong scan count");
+  check(!overlayRegistrations,std::string(name)+": revocation registration retained");
+  ++rows;
+ };
+ const auto atScan=[](auto callback){ports::s.point=ports::Point::ScanComplete;ports::s.hook=callback;};
+ run("field alternate foreground rejected",[](auto&){ports::s.candidate={};},false,1);
+ run("qualified different foreground stays local",[](auto&){},true,1);
+ run("same PID reused",[](auto&){++ports::s.candidate.processCreated;},false,1);
+ run("wrong path",[](auto&){ports::s.candidate.path=L"D:\\Other.exe";},false,1);
+ run("empty target prevents ordinary scan",[](auto& target){target.pid=0;},false,0);
+ run("rules unavailable",[](auto&){ports::s.rulesError=2;},false,0);
+ run("closed power blocks before rule work",[](auto&){g_powerLifecycle=PowerLifecycle::Suspending;},false,0);
+ run("suspend during rule read",[](auto&){ports::s.point=ports::Point::Rules;ports::s.hook=[] { ++overlaySequence; ++overlayRevocations; };},false,0);
+ run("new ready generation during scan",[&](auto&){atScan([] { ++fixturePower; });},false,1);
+ run("same generation ready with new notice",[&](auto&){atScan([] { ++overlaySequence; });},false,1);
+ run("same-visible-state cancellation during scan",[&](auto&){atScan([] { ++overlayRevocations; });},false,1);
+ run("rules changed during scan",[&](auto&){atScan([] { ++g_gameRulesEpoch; });},false,1);
+ run("foreground changed during scan",[&](auto&){atScan([] { overlayForeground=reinterpret_cast<HWND>(7771); });},false,1);
+ std::cout<<"{\"cases\":"<<rows<<",\"assertions\":"<<checks<<",\"result\":\"PASS\"}"<<'\n';
+}

@@ -2,8 +2,95 @@
 // No wWinMain, product startup, controller/driver access, Steam or installation.
 #define YMCC_MSI_FOREGROUND_ISOLATION_TEST 1
 #include <iostream>
+#include <stdexcept>
+// Private fixture only: every production GetTickCount64 consumer sees the same
+// explicit clock while this selected case runs. Default cases use the real clock.
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <cstdint>
+static std::uint64_t g_gpdPreHostFixtureTick=0;
+static ULONGLONG gpdPreHostFixtureClock() noexcept {
+    return g_gpdPreHostFixtureTick ? g_gpdPreHostFixtureTick : ::GetTickCount64();
+}
+#define GetTickCount64 gpdPreHostFixtureClock
+
+// A live, initially suspended child of THIS original regression executable is
+// the inert helper root. Its only user code is wmain's early return(6). Real
+// LaunchScope/Job/owner-file/retire execute; no device operation is simulated as
+// an actual PnP call, and the controlled diagnostic facts remain an IO input.
+
 #include "../native/main.cpp"
+// Fixture support after the original #include ../native/main.cpp. No product
+// function is renamed/replaced, including ObserveNativeWait/query/returned/Start.
+struct GpdPreHostChildCleanup {
+    HANDLE root=nullptr,primary=nullptr,observer=nullptr,job=nullptr;
+    bool transferred=false,resumed=false,zero=false;
+    GpdPreHostChildCleanup(HANDLE process,HANDLE thread,const std::wstring& name):root(process),primary(thread){
+        (void)DuplicateHandle(GetCurrentProcess(),process,GetCurrentProcess(),&observer,
+                PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,0);
+        job=OpenJobObjectW(JOB_OBJECT_QUERY,FALSE,name.c_str());
+    }
+    bool complete() noexcept {
+        if(zero)return true;
+        if(!resumed){if(ResumeThread(primary)==DWORD(-1))return false;resumed=true;}
+        const auto observed=observer?observer:root;
+        if(WaitForSingleObject(observed,2000)!=WAIT_OBJECT_0)return false;
+        DWORD exitCode=0;if(!GetExitCodeProcess(observed,&exitCode)||exitCode!=6||!job)return false;
+        // Real process exit and positive Job0 are separate observations.
+        for(unsigned i=0;i<1000;++i){
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info{};
+            if(!QueryInformationJobObject(job,JobObjectBasicAccountingInformation,&info,sizeof(info),nullptr))return false;
+            if(!info.ActiveProcesses){zero=true;break;}
+            Sleep(1);
+        }
+        if(zero&&primary){if(!CloseHandle(primary))return false;primary=nullptr;}
+        return zero;
+    }
+    bool releaseObservers() noexcept {
+        if(!zero || primary)return false;
+        bool ok=true;
+        if(observer){const auto value=observer;observer=nullptr;ok=CloseHandle(value)!=FALSE&&ok;}
+        if(job){const auto value=job;job=nullptr;ok=CloseHandle(value)!=FALSE&&ok;}
+        return ok;
+    }
+    ~GpdPreHostChildCleanup(){
+        const bool returned=complete();
+        if(!returned)std::cerr<<"FAIL GPD prehost actual inert child/Job return unproven\n";
+        if(primary)CloseHandle(primary);
+        if(observer)CloseHandle(observer);
+        if(job)CloseHandle(job);
+        if(!transferred&&root)CloseHandle(root);
+    }
+};
+static void GpdPreHostPrepareReturnedInputs(){
+    namespace target=ymcc::inputHost::targetReturnRuntime;
+    // Open an actually empty private history through the production Session;
+    // do not manufacture a record() result or replace returned().
+    target::state.session.reset(new ymcc::targetReturn::Session(ymcc::targetReturn::Session::open(
+        (fspath::path(yemancc_data_dir())/L"controller-return"/L"empty-target-history.json").wstring(),
+        "windows-machine-guid:private-gpd-prehost")));
+    if(!target::state.session->ready()||!target::state.session->record()->obligations.empty())
+        throw std::runtime_error("real private target history not empty and ready");
+    g_shortcutRecordingActive=false;
+    g_xinputConnectedMask=1;g_xinputVirtualEndpointMask=0;g_xinputSlotUnknownMask=0;
+    g_xinputPreTargetBoundaryScanned=true;
+    g_xinputBoundaryScanEpoch=g_xinputTopologyEpoch.load();
+    {std::lock_guard sampleLock(g_inputCaptureGamepadSnapshotMx);
+        auto& sample=g_inputCaptureGamepadSnapshot;sample={};sample.live=true;sample.connectedMask=1;
+        sample.inputSource="xinput";sample.readAttemptSequence=1;
+        sample.readStartedTick=sample.readCompletedTick=GetTickCount64();
+        sample.readPowerGeneration=currentPowerGeneration();sample.readTopologyGeneration=g_xinputTopologyEpoch.load();
+        sample.readIdentityGeneration=g_xinputSlotIdentityEpoch.load();sample.readContextStable=true;
+        sample.readContinuityGeneration=1;sample.primarySlot=0;
+    }
+}
+
 #include "msi_native_foreground_regression.h"
+#include "native_visibility_write_checks.h"
+#include "gpd_native_handoff_cycle_legacy.h"
+#include "gpd_native_handoff_cycle_partial_before.h"
+#include "gpd_native_handoff_cycle_checks.h"
 
 
 
@@ -357,12 +444,31 @@ static std::pair<unsigned,unsigned> pauseMaskOnlyLogRegression() {
 }
 
 int wmain(int argc,wchar_t** argv) {
-    if(argc!=2 && !(argc==3 && std::wstring(argv[2])==L"--shield-mutation-probes")) return 2;
-    const bool mutationProbesOnly=argc==3;
+    if(argc==2 && std::wstring(argv[1])==L"--gpd-terminal-inert-leaf")return 6;
+    if(argc!=2 && !(argc==3 && (std::wstring(argv[2])==L"--shield-mutation-probes" || std::wstring(argv[2])==L"--shield-priority-probes" || std::wstring(argv[2])==L"--shield-native-off-probes" || std::wstring(argv[2])==L"--native-visibility-write" || std::wstring(argv[2])==L"--native-handoff-cycle" || std::wstring(argv[2])==L"--native-handoff-before" || std::wstring(argv[2])==L"--native-handoff-partial-before"))) return 2;
+    const bool mutationProbesOnly=argc==3 && std::wstring(argv[2])==L"--shield-mutation-probes";
+    const bool priorityProbesOnly=argc==3 && std::wstring(argv[2])==L"--shield-priority-probes";
+    const bool nativeOffProbesOnly=argc==3 && std::wstring(argv[2])==L"--shield-native-off-probes";
     g_yemanccDataDir=argv[1];fspath::create_directories(g_yemanccDataDir);
     // The real logger uses app_data_dir(), not the input-data root. Keep every
     // offline receipt inside this fixture; never initialize a user app-data path.
     g_appDataDir=g_yemanccDataDir;
+    if(const char* selected=std::getenv("YMCC_GPD_PREHOST_WRITER_CASE")){
+        if(argc!=3 || !priorityProbesOnly || !*selected)return 2;
+        try{const auto result=msiNativeForegroundRegression(false,false,false,selected);return result.second?3:0;}
+        catch(const std::exception& e){std::cerr<<"GPD_PREHOST_PREPARATION_OR_ASSERTION_FAIL "<<e.what()<<'\n';return 3;}
+    }
+
+    if(argc==3 && (std::wstring(argv[2])==L"--native-handoff-cycle" || std::wstring(argv[2])==L"--native-handoff-before" || std::wstring(argv[2])==L"--native-handoff-partial-before")){
+        const auto own=gpdNativeHandoffCycleChecks(std::wstring(argv[2])==L"--native-handoff-before",std::wstring(argv[2])==L"--native-handoff-partial-before");
+        std::cout<<"NATIVE_HANDOFF_CYCLE checks="<<own.first<<" failures="<<own.second<<" realHardwareAccess=false\n";
+        return own.second?3:0;
+    }
+    if(argc==3 && std::wstring(argv[2])==L"--native-visibility-write"){
+        const auto own=nativeVisibilityWriteChecks();
+        std::cout<<"NATIVE_VISIBILITY_WRITE checks="<<own.first<<" failures="<<own.second<<" realHardwareAccess=false\n";
+        return own.second?3:0;
+    }
     unsigned cases=0,failures=0,locationReads=0,inventoryReads=0,snapshotReads=0,discoveryReads=0;
     std::vector<std::string> queue;
     std::vector<std::wstring> hidden,writes;
@@ -463,13 +569,24 @@ int wmain(int argc,wchar_t** argv) {
     check("journal continuation losing readiness cannot park or retry a second time",queue.size()==2&&writes.empty()&&!g_msiForegroundIsolation.journalWait&&g_msiForegroundIsolation.pendingToken==0);
     };
     auto finish=[&](){
+        if(!mutationProbesOnly && !priorityProbesOnly && !nativeOffProbesOnly){
+            const auto added=nativeVisibilityWriteChecks();cases+=added.first;failures+=added.second;
+        }
         g_inputHostProcess=nullptr;
         std::cout<<"MSI_FOREGROUND_NATIVE cases="<<cases<<" failures="<<failures<<" realHardwareAccess=false\n";
         std::ofstream report(fspath::path(g_yemanccDataDir)/L"msi-foreground-native-summary.json");
         report<<json({{"cases",cases},{"failures",failures},{"actualProductionTu",true},{"realHardwareAccess",false},{"testIoOnly",true},
-            {"scope",mutationProbesOnly?"shield-mutation-probes":"full-normal"}}).dump(2);
+            {"scope",mutationProbesOnly?"shield-mutation-probes":priorityProbesOnly?"shield-priority-probes":nativeOffProbesOnly?"shield-native-off-probes":"full-normal"}}).dump(2);
         return failures?3:0;
     };
+    if(priorityProbesOnly){
+        const auto probes=msiNativeForegroundRegression(false,true);cases+=probes.first;failures+=probes.second;
+        return finish();
+    }
+    if(nativeOffProbesOnly){
+        const auto probes=msiNativeForegroundRegression(false,false,true);cases+=probes.first;failures+=probes.second;
+        return finish();
+    }
     if(mutationProbesOnly){
         journalProbeChecks();
         const auto probes=msiNativeForegroundRegression(true);cases+=probes.first;failures+=probes.second;

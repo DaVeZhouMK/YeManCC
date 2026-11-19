@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {terminal26RuntimePaths,terminal26RuntimeLayout,TERMINAL26_PUBLIC_RUNTIME_POLICY} from '../../ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-runtime-layout.mjs';
 const sha=text=>createHash('sha256').update(text).digest('hex');
 export const privateSettingsMutexDefinition=String.raw`
 // Test-only OS boundary. Same private settings directory shares a real named
@@ -43,21 +44,67 @@ static HANDLE fixturePrivateSettingsMutex(LPSECURITY_ATTRIBUTES attributes,BOOL 
 `;
 // A moved core-test run must explicitly bind its one runtime directory.
 // Keep the legacy default byte-for-byte; never admit all of Testing or a sibling.
-export function privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot){
- if(runtimeRoot===undefined)return privateSettingsMutexDefinition;
+export function privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot,{managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount}={}){
+ assert(managedInputContract===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1','current105-terminal26-sdk-lifetime-compact-v1'].includes(managedInputContract),'UNKNOWN_MUTEX_RUNTIME_CONTRACT');
+ const finiteModes=managedInputContract==='current105-terminal26-sdk-lifetime-compact-v1';
+ if(gpdPreHideBatchCount!==undefined)assert(Number.isInteger(gpdPreHideBatchCount)&&gpdPreHideBatchCount>=2&&gpdPreHideBatchCount<=16&&runtimeRoot!==undefined&&managedInputContract===undefined&&runtimeParameterLayout===undefined&&runtimeReusePolicy===undefined,'EXACT_GPD_PRE_HIDE_BATCH_ROOTS_REQUIRED');
+ if(runtimeRoot===undefined){assert(!finiteModes,'EXPLICIT26_RUNTIME_ROOT_REQUIRED');return privateSettingsMutexDefinition;}
  assert(typeof runtimeRoot==='string'&&path.isAbsolute(runtimeRoot)&&!/[\0\r\n]/.test(runtimeRoot),'ABSOLUTE_OWNED_RUNTIME_ROOT_REQUIRED');
  const canonical=path.resolve(runtimeRoot),base=path.resolve(import.meta.dirname,'../../../../../../Testing/YMCC/Evidence'),relative=path.relative(base,canonical);
- assert(relative&&!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep),'RUNTIME_ROOT_OUTSIDE_CORE_EVIDENCE');
+ const workspaceBase=path.resolve(base,'../Workspace'),workspaceRelative=path.relative(workspaceBase,canonical),parts=workspaceRelative.split(path.sep);
+ const evidenceOwned=relative&&!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep);
+ const workspaceOwned=workspaceRelative&&!path.isAbsolute(workspaceRelative)&&workspaceRelative!=='..'&&!workspaceRelative.startsWith('..'+path.sep)&&
+  parts.length>=4&&parts[1].toLowerCase()==='build'&&parts[2].toLowerCase()==='validation';
+ assert(evidenceOwned||workspaceOwned,'RUNTIME_ROOT_OUTSIDE_CORE_EVIDENCE');
  const start=privateSettingsMutexDefinition.indexOf('(root.find(');
  const end=privateSettingsMutexDefinition.indexOf('))\n        throw',start);
  assert(start>=0&&end>start,'EXACT_LEGACY_RUNTIME_ADMISSION_REQUIRED');
  const old=privateSettingsMutexDefinition.slice(start,end+1);
  assert.equal(privateSettingsMutexDefinition.split(old).length,2,'EXACT_LEGACY_RUNTIME_ADMISSION_REQUIRED');
- return privateSettingsMutexDefinition.replace(old,'root!=normalizeWindowsPathForCompare(L'+JSON.stringify(canonical)+')');
+ assert(runtimeParameterLayout===undefined||finiteModes,'PARAMETER_PATHS_REQUIRE_FINITE_EXPLICIT26');
+ const paths=finiteModes?terminal26RuntimePaths(canonical,{runtimeParameterLayout,runtimeReusePolicy}):gpdPreHideBatchCount===undefined?[canonical]:Array.from({length:gpdPreHideBatchCount},(_,i)=>path.join(canonical,'b'+i));
+ if(runtimeReusePolicy!==undefined){
+  assert(finiteModes&&runtimeReusePolicy===TERMINAL26_PUBLIC_RUNTIME_POLICY,'EXPLICIT26_PUBLIC_RUNTIME_POLICY_REQUIRED');
+  const layout=terminal26RuntimeLayout(canonical,{runtimeParameterLayout,runtimeReusePolicy});
+  const admitted=paths.map(value=>'root==normalizeWindowsPathForCompare(L'+JSON.stringify(value)+')').join(' ||\n        ');
+  const helpers=String.raw`
+// Only an exact qualification path or one fresh hexadecimal child of this compiled owner.
+static bool fixturePrivateRuntimeRootAllowed(const std::wstring& supplied,bool fresh) {
+    try {
+        const std::filesystem::path raw(supplied);
+        if(!raw.is_absolute())return false;
+        const auto root=normalizeWindowsPathForCompare(supplied);
+        const std::filesystem::path selected(root);
+        const bool qualification=(
+        ${admitted});
+        bool publicChild=false;
+        const auto leaf=raw.filename().wstring();
+        if(leaf.size()==16 && normalizeWindowsPathForCompare(selected.parent_path().wstring())==normalizeWindowsPathForCompare(L${JSON.stringify(layout.publicRuntime.base)})) {
+            publicChild=true;
+            for(const auto ch:leaf)if(!((ch>=L'0'&&ch<=L'9')||(ch>=L'a'&&ch<=L'f')))publicChild=false;
+        }
+        if(!qualification&&!publicChild)return false;
+        for(auto cursor=selected;;cursor=cursor.parent_path()) {
+            const auto attributes=GetFileAttributesW(cursor.c_str());
+            if(attributes==INVALID_FILE_ATTRIBUTES || !(attributes&FILE_ATTRIBUTE_DIRECTORY) || (attributes&FILE_ATTRIBUTE_REPARSE_POINT))return false;
+            if(cursor.parent_path()==cursor)break;
+        }
+        if(fresh) {
+            std::error_code error;
+            if(!std::filesystem::is_empty(selected,error)||error)return false;
+        }
+        return true;
+    }catch(...){return false;}
 }
-export function isolateCurrentFixtureSettingsMutex(original,{runtimeRoot,moduleMaintenance=false}={}){
+`;
+  return helpers+privateSettingsMutexDefinition.replace(old,'!fixturePrivateRuntimeRootAllowed(g_yemanccDataDir,false)');
+ }
+ const expression=paths.map(value=>'root!=normalizeWindowsPathForCompare(L'+JSON.stringify(value)+')').join(' &&\n        ');
+ return privateSettingsMutexDefinition.replace(old,paths.length===1?expression:'('+expression+')');
+}
+export function isolateCurrentFixtureSettingsMutex(original,{runtimeRoot,moduleMaintenance=false,managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount}={}){
  assert(typeof moduleMaintenance==='boolean','BOOLEAN_MODULE_MAINTENANCE_BOUNDARY_REQUIRED');
- let boundary=privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot);
+ let boundary=privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot,{managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount});
  if(moduleMaintenance){
   assert(runtimeRoot!==undefined,'EXPLICIT_MODULE_MAINTENANCE_RUNTIME_REQUIRED');
   const oldGuard='if(attributes || initialOwner || !requestedName ||\n       std::wstring(requestedName)!=L"Local\\\\YeManCC-UnifiedSettings")';
@@ -74,9 +121,19 @@ export function isolateCurrentFixtureSettingsMutex(original,{runtimeRoot,moduleM
  assert(!original.includes('fixturePrivateSettingsMutex'),'PRIVATE_SETTINGS_MUTEX_ALREADY_PRESENT');
  const after='static HANDLE fixturePrivateSettingsMutex(LPSECURITY_ATTRIBUTES,BOOL,LPCWSTR);\n'+
   '#define CreateMutexW fixturePrivateSettingsMutex\n'+before+'\n#undef CreateMutexW\n'+boundary;
- const text=original.replace(before,after);
- assert.equal(text.split(after).length,2);assert.equal(text.replace(after,before),original);
- return {text,originalSha256:sha(original),isolatedSha256:sha(text),wholeOriginalRestored:true,
+ let text=original.replace(before,after);
+ const edits=[{before,after}];
+ // The existing source reader reconstructs only this exact, non-executable include stub.
+ const runtimeBoundaryOnly=original==='#include "main.inert.cpp"\n';
+ if(runtimeReusePolicy!==undefined&&!runtimeBoundaryOnly){
+  const entry='if(argc!=3&&argc!=4&&argc!=5)return 2;const std::wstring mode=argv[2];std::wstring selectedCase;';
+  const guarded='if(argc!=3&&argc!=4&&argc!=5)return 2;if(!fixturePrivateRuntimeRootAllowed(argv[1],true))return 2;const auto fixtureRuntimeRoot=normalizeWindowsPathForCompare(argv[1]);if(normalizeWindowsPathForCompare(POWER_CONTROL_DIR)!=fixtureRuntimeRoot||normalizeWindowsPathForCompare(YM_SETTINGS_FILE)!=fixtureRuntimeRoot+L"\\\\yeman-settings.json"||normalizeWindowsPathForCompare(YM_SETTINGS_BACKUP_FILE)!=fixtureRuntimeRoot+L"\\\\yeman-settings.json.bak")return 2;const std::wstring mode=argv[2];std::wstring selectedCase;';
+  assert.equal(text.split(entry).length,2,'EXACT_ORIGINAL_MAIN_ADMISSION_REQUIRED');
+  text=text.replace(entry,guarded);edits.push({before:entry,after:guarded});
+ }
+ let inverse=text;for(const edit of edits.slice().reverse()){assert.equal(inverse.split(edit.after).length,2);inverse=inverse.replace(edit.after,edit.before);}
+ assert.equal(inverse,original);
+ return {text,originalSha256:sha(original),isolatedSha256:sha(text),wholeOriginalRestored:true,...(runtimeReusePolicy===undefined?{}:{runtimeEntryAdmissionEnforced:!runtimeBoundaryOnly,runtimeBoundaryOnly}),
   scope:'Only the generated private fixture CreateMutexW boundary. Original SettingsFileGuard/local mutex, INFINITE named wait, release and CloseHandle code remain. Directory identity names share the same real mutex only for the same admitted private settings directory. Installed product source is unchanged.',
-  productionMutexReached:false,...(moduleMaintenance?{moduleMaintenanceNamespace:'same owned directory identity plus -ModuleMaintenance',moduleMaintenanceProductionNameReached:false}:{}),edits:[{before,after}]};
+  productionMutexReached:false,...(moduleMaintenance?{moduleMaintenanceNamespace:'same owned directory identity plus -ModuleMaintenance',moduleMaintenanceProductionNameReached:false}:{}),edits};
 }

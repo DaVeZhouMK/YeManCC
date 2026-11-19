@@ -1,3 +1,43 @@
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include "input_host_shared_power.h"
+#undef near
+#undef FALSE
+#undef ERROR_SUCCESS
+#undef ERROR_INVALID_WINDOW_HANDLE
+#undef RIDEV_INPUTSINK
+#undef RIDEV_DEVNOTIFY
+#undef INVALID_HANDLE_VALUE
+#undef GENERIC_WRITE
+#undef CREATE_NEW
+#undef FILE_ATTRIBUTE_NORMAL
+#undef FILE_FLAG_WRITE_THROUGH
+#undef MOVEFILE_REPLACE_EXISTING
+#undef MOVEFILE_WRITE_THROUGH
+#define ULONGLONG motionFixtureULONGLONG
+#define USHORT motionFixtureUSHORT
+#define USAGE motionFixtureUSAGE
+#define BYTE motionFixtureBYTE
+#define DWORD motionFixtureDWORD
+#define UINT motionFixtureUINT
+#define UINT_PTR motionFixtureUINT_PTR
+#define HWND motionFixtureHWND
+#define BOOL motionFixtureBOOL
+#define RAWINPUTDEVICE motionFixtureRAWINPUTDEVICE
+#define HANDLE motionFixtureHANDLE
+#define GetTickCount64 motionFixtureGetTickCount64
+#define GetMessageTime motionFixtureGetMessageTime
+#define RegisterRawInputDevices motionFixtureRegisterRawInputDevices
+#define GetLastError motionFixtureGetLastError
+#define SetTimer motionFixtureSetTimer
+#define GetCurrentProcessId motionFixtureGetCurrentProcessId
+#define CreateFileW motionFixtureCreateFileW
+#define WriteFile motionFixtureWriteFile
+#define FlushFileBuffers motionFixtureFlushFileBuffers
+#define CloseHandle motionFixtureCloseHandle
+#define MoveFileExW motionFixtureMoveFileExW
+#define DeleteFileW motionFixtureDeleteFileW
 #include "controller_motion_session.h"
 #include "controller_motion_bank_sessions.h"
 #include "controller_motion_calibration.h"
@@ -201,6 +241,30 @@ static auto g_gmWorld = &getWorld;
 // Complete real frame decide() remains in input_frame_submission.h. Only its
 // external current globals are replaced; no source/admission verdict is stubbed.
 static fsb::Current frameCurrent;
+
+namespace sp=ymcc::sleeppower;namespace ip=ymcc::inputHost::sharedPower;
+static sp::RevocationMirrors g_sharedPowerRevocations;
+static ip::Cache g_inputHostInputPowerCache;
+static thread_local std::shared_ptr<ip::Scope> t_inputHostRequestPower;
+static thread_local bool t_inputHostRequestHardwareRequired=false;
+static bool sgShouldKeepInputDuringStandby(){return true;}
+// Existing final-frame Current is this consumer's controlled power input.
+// Controller lifecycle mutations remain original separate source-retirement inputs.
+static int __cdecl readSharedSystemPower(sp::SharedPowerV1* output,std::uint32_t bytes){
+ if(!output||bytes!=sizeof(*output))return 0;sp::SharedPowerV1 v;
+ v.generation=frameCurrent.power;v.publicationRevision=1;v.observedNotificationSequence=1;
+ v.suspendSerial=1;v.flags=sp::kKnown|(frameCurrent.ready?sp::kHardwareAllowed:0u);v.phase=0;*output=v;return 1;
+}
+static sp::SharedPowerV1 fixtureReadSharedPower(){sp::SharedPowerV1 v;return sp::capturePowerObservation(&readSharedSystemPower,v)?v:sp::SharedPowerV1{};}
+static bool inputHostFrameSharedPowerCurrent(InputFrameSubmission&) noexcept;
+static thread_local const void* t_inputHostOneXStartWrite=nullptr;
+static bool inputHostOneXStartCurrent(){return false;}
+static bool inputHostOneXStartMayIssue(){return false;}
+static thread_local const void* t_inputHostDeferredPhysicalHideWrite=nullptr;
+static thread_local bool t_inputHostDeferredPhysicalHideRefreshIssueActive=false;
+static bool inputHostDeferredPhysicalHideWriteCurrent(){return false;}
+static bool inputHostDeferredPhysicalHideReserveRefreshIssue(){return false;}
+
 static unsigned frameNotes = 0;
 static thread_local InputFrameSubmission* t_inputFrameSubmission = nullptr;
 static thread_local const MotionSample* t_legionMotionSubmission = nullptr;
@@ -274,6 +338,7 @@ static unsigned liveHandles() {
     unsigned n = 0; for (const auto& [key,value] : handles) { (void)key; if (value.alive) ++n; } return n;
 }
 static void reset(unsigned n) {
+    g_inputHostInputPowerCache.reset();t_inputHostRequestPower.reset();g_sharedPowerRevocations.revoke();t_inputHostRequestHardwareRequired=false;
     libraryLoaded = true; inputCaptureLegionMotionSessionRevoke(); g_legionMotion.revoke();
     CHECK(liveHandles() == 0);
     handles.clear(); createCalls = deleteCalls = processCalls = playerCalls = worldCalls = 0;
@@ -474,7 +539,8 @@ static InputFrameSubmission frame(const MotionSample* motion) {
     InputFrameSubmission f; f.ticket = {frameCurrent.host,frameCurrent.power,frameCurrent.intent,false};
     f.sample.window = {1,clockMs,clockMs,frameCurrent.power,frameCurrent.topology,true};
     f.sample.identity = frameCurrent.identity; f.sample.live = f.sample.routeKnown = true;
-    f.physicalSourceAdmitted = true; f.controllerMotion = motion; return f;
+    f.physicalSourceAdmitted = true; f.controllerMotion = motion;
+    f.sourcePower=fixtureReadSharedPower();f.powerScope=g_inputHostInputPowerCache.acquire(&readSharedSystemPower,g_sharedPowerRevocations,sgShouldKeepInputDuringStandby());return f;
 }
 static void guardsRejectFrame(InputFrameSubmission& f) {
     InputFrameSubmissionScope scope(&f); json response;
@@ -941,7 +1007,7 @@ int main(int argc, char** argv) {
     int failedCases = 0; unsigned index = 0;
     for (const auto& scenario : scenarios) {
         activeCase = scenario.name; const auto beforeChecks = checks, beforeFailures = failures;
-        reset(++index); scenario.run(); inputCaptureLegionMotionSessionRevoke(); CHECK(liveHandles() == 0);
+        reset(++index); scenario.run(); g_inputHostInputPowerCache.reset();t_inputHostRequestPower.reset();g_sharedPowerRevocations.revoke();inputCaptureLegionMotionSessionRevoke(); CHECK(liveHandles() == 0);
         const auto failed = failures-beforeFailures; if (failed) ++failedCases;
         std::printf("CASE %s checks=%d failures=%d\n", activeCase,checks-beforeChecks,failed);
     }

@@ -1,6 +1,8 @@
 import {mouseModeState} from './mouseModeState';
+import {captureBootPreferenceWrite,type BootPreferenceWrite} from './bootModeGlobalPreferences';
 import { readMonitorCpuName } from './monitorHardwareMetadata';
 import { startMonitorNoticeHost } from './monitorNoticeHost';
+import { onSharedPowerLifecycle, isSharedPowerLifecycleAdmitted } from './powerLifecycleState';
 import { subscribeMonitorGameLogo } from './monitorGameLogo';
 // One sample source, ONE YMCC output adapter, two native/H5 carrier ports.
 import { invoke, on } from './ipc';
@@ -21,11 +23,34 @@ export function startMonitorHudHost() {
   let ready=false,ended=false,restoring=false,queued=false,version=0,availabilityVersion=0,lastAttemptKey='';
   let activePreferences:MonitorOutputPreferences|null=null;
   let desktopCloseSerial=0,applying=false,settling=false,settleRevision=0;
+  let recoveryWrite:BootPreferenceWrite={},latestIntent=0,preferenceRevision=0,intentPreferenceRevision=0;
+  // Only failed startup/control operations retain this temporary wake lease.
+  // Native pulses drive the deadline while the main WebView is hidden; the
+  // one-shot browser timeout is a fallback, never a healthy polling loop.
+  const retryDelays=[1000,3000] as const,maxAttempts=3;
+  let retryTimer:number|null=null,retryAt=0,retryLease:(()=>void)|null=null,retrySerial=0;
+  let settingsPending=false,settingsReading=false,settingsAttempts=0,restoreAttempts=0;
+  let requestRevision=0,lastApplyOk=false,powerHeld=true,powerGeneration=-1,committedPowerGeneration=-1;
+  let powerNotificationSequence:number|undefined;
+  let readyTask:Promise<void>|null=null,preferenceDraft:MonitorOutputPreferences|null=null;
+  let diagnosticRows=0,visibilityLease:(()=>void)|null=null;
+  function note(stage:string,phase=''){
+    if(ended||diagnosticRows>=32)return;++diagnosticRows;
+    void invoke('diagnostics.frontendTrace',{where:'monitor-hud-startup',message:JSON.stringify({stage,phase,
+      settingsAttempts,restoreAttempts,settingsPending,powerHeld,powerGeneration,
+      enabled:activePreferences?.enabled??null,output:activePreferences?.output??null})},{timeoutMs:1000}).catch(()=>{});
+  }
   const clock=createHudClock({nonce:()=>crypto.randomUUID(),now:Date.now,
-    invoke:(command,args)=>invoke(command,args),
+    invoke:(command,args,signal)=>invoke(command,args,signal?{signal}:undefined),
     setTimer:(fn,ms)=>window.setTimeout(fn,ms),clearTimer:id=>window.clearTimeout(id as number),
-    pulse(snapshot){if(!ended&&source.users()>0)acceptPublishedMonitorSnapshot(snapshot);relay.advance();desktop.advance();},
-    failed(reason){relay.clockUnavailable(reason);desktop.clockUnavailable(reason);},
+    pulse(snapshot){if(!ended&&source.users()>0)acceptPublishedMonitorSnapshot(snapshot);relay.advance();desktop.advance();advanceRecovery();},
+    failed(reason){
+      const supervisionOnly=!!visibilityLease&&!desktop.inspect().owned&&!desktop.inspect().opening&&!restoring;
+      releaseVisibilityLease();relay.clockUnavailable(reason);desktop.clockUnavailable(reason);
+      // A terminal receipt may arrive while no sample/window owner exists.
+      // Reuse bounded control retries; never immediately reacquire in a failure loop.
+      if(supervisionOnly){if(restoreAttempts<maxAttempts)++restoreAttempts;lastAttemptKey='';scheduleRetry();}
+    },
   });
   const source=createHudSampleSource({cpuName:()=>cpuName,canReuseSnapshot:isOwnedMonitorDisplaySnapshot,subscribeGameLogo:subscribeMonitorGameLogo,subscribeSnapshot:subscribeMonitorHudSnapshot,subscribeTdp:subscribeMonitorTdpState,
     readOnce:readMonitorSnapshot,acquire(need){
@@ -35,41 +60,114 @@ export function startMonitorHudHost() {
     },now:Date.now});
   source.setClockEnabled(false);
   const relay=createSteamHudRelay({externalClock:true,acquireClock:clock.acquire,now:Date.now,session:()=>crypto.randomUUID(),sample:source.sample,acquire:source.acquire,
-    reply:(connection,message)=>invoke<boolean>('deckySidebar.mirrorReply',{connection,message},{timeoutMs:3000}),
+    reply:(connection,message,current)=>invoke<boolean>('deckySidebar.mirrorReply',{connection,message,...(current?.bootContext?{origin:'boot-mode',bootContext:structuredClone(current.bootContext)}:{})},{timeoutMs:3000}),
     setTimer:(fn,ms)=>window.setTimeout(fn,ms),clearTimer:id=>window.clearTimeout(id as number),statusChanged:()=>invalidate()});
-  const desktop=createDesktopHudOwner({externalClock:true,acquireClock:clock.acquire,scope:'global',target:()=>null,policyGame:getPolicyGame,mouseMode:()=>mouseModeState.value,nonce:()=>crypto.randomUUID(),now:Date.now,
+  const desktop=createDesktopHudOwner({externalClock:true,acquireClock:clock.acquire,visibilityTerminal:()=>releaseVisibilityLease(),availabilityRecovered:()=>{restoreAttempts=0;lastAttemptKey='';cancelRetry();note('native-ready-again');invalidate();},visibilityProblem:(reason,repairs)=>note('visibility-repair',reason+':'+repairs),visibilityAllowed:()=>ready&&!ended&&!powerHeld&&!applying&&!settling&&activePreferences?.enabled===true&&activePreferences.output==='ymcc',scope:'global',target:()=>null,policyGame:getPolicyGame,mouseMode:()=>mouseModeState.value,nonce:()=>crypto.randomUUID(),now:Date.now,
     sample:source.sample,acquire:source.acquire,invoke:(cmd,args)=>invoke(cmd,args as Record<string,unknown>), // owner bounds calls; retain late native descriptors
     observe(listener){const stops=['desktopHud.ready','desktopHud.painted','desktopHud.prepared','desktopHud.visibility','desktopHud.closed','desktopHud.unavailable','desktopHud.expired','desktopHud.placement','desktopHud.template'].map(name=>on<DesktopHudEvent>(name,event=>{if(name==='desktopHud.closed')++desktopCloseSerial;listener(name,event);}));return()=>{for(const stop of stops)stop();};},
     placementChanged:value=>{void saveMonitorHudPlacement(value).catch(error=>console.warn('监控位置保存失败',error));},
     templateChanged:(template,revision)=>{void saveMonitorHudTemplate(template,revision).catch(error=>console.warn('监控模板保存失败',error));},
     setTimer:(fn,ms)=>window.setTimeout(fn,ms),clearTimer:id=>window.clearTimeout(id as number),changed:()=>invalidate()});
   const router=createHudCarrierRouter({available:relay.available,visible:relay.visible,state:relay.state,setVisible:relay.setVisible},desktop,'desktop-global');
-  async function refreshAvailability(){const at=++availabilityVersion;const available=ready&&!ended&&await router.available();if(at===availabilityVersion&&!ended)publishMonitorHudAvailability(available);}
+  const wantsHud=()=>activePreferences?.enabled===true&&activePreferences.output==='ymcc';
+  function releaseVisibilityLease(){const release=visibilityLease;visibilityLease=null;release?.();}
+  function syncVisibilityLease(){
+    const expected=ready&&!ended&&!powerHeld&&wantsHud()&&!desktop.inspect().recoveryBlocked;
+    desktop.setVisibilityExpected(expected);
+    if(!expected){releaseVisibilityLease();return;}
+    // A control-only lease of the EXISTING native pulse survives missing
+    // windows/sample owners. It acquires no sensor demand and no JS timer.
+    if(!visibilityLease){try{visibilityLease=clock.acquire();}catch{note('visibility-clock-unavailable');}}
+  }
+  function cancelRetry(){
+    ++retrySerial;if(retryTimer!==null)window.clearTimeout(retryTimer);retryTimer=null;retryAt=0;
+    const release=retryLease;retryLease=null;release?.();
+  }
+  function scheduleRetry(){
+    const attempts=settingsPending?settingsAttempts:restoreAttempts;
+    if(ended||!ready||powerHeld||retryTimer!==null||(!settingsPending&&!wantsHud()))return;
+    if(attempts>=maxAttempts||desktop.inspect().recoveryBlocked){note('recovery-stopped');return;}
+    const serial=++retrySerial,delay=retryDelays[Math.max(0,attempts-1)];
+    retryAt=Date.now()+delay;
+    try{retryLease=clock.acquire();}catch{/* The bounded one-shot still retires failed clock generations. */}
+    retryTimer=window.setTimeout(()=>{if(serial===retrySerial)advanceRecovery();},delay);
+    note('retry-scheduled');
+  }
+  function advanceRecovery(){
+    if(!retryAt||Date.now()<retryAt)return;
+    cancelRetry();if(ended||powerHeld)return;
+    if(settingsPending)void loadStartupPreferences();else invalidate();
+  }
+  function configureSource(prefs:MonitorOutputPreferences){
+    if(prefs.output==='ymcc')source.setDemand(hudNativeDemand(prefs.ymcc.fields));
+    source.setClockEnabled(prefs.output==='ymcc'&&prefs.enabled&&prefs.ymcc.fields.clock===true);
+    source.setGameLogoEnabled(prefs.output==='ymcc'&&prefs.enabled&&prefs.ymcc.underlay==='game-logo');
+    clock.setFrameTime(prefs.output==='ymcc'&&prefs.enabled&&prefs.ymcc.fields.frametimeGraph===true);
+  }
+  async function loadStartupPreferences(){
+    if(ended||settingsReading)return;
+    settingsReading=true;const preferenceAt=preferenceRevision,intentAt=latestIntent;
+    try{
+      ++settingsAttempts;const prefs=await readMonitorOutputPreferences();if(ended)return;
+      // An already-published intent owns startup, even if its apply was waiting
+      // for this host. A later ordinary save supplies the current startup bank.
+      if(latestIntent===intentAt&&intentAt===0)activePreferences=preferenceAt===preferenceRevision?prefs:preferenceDraft??prefs;
+      settingsPending=false;settingsAttempts=0;
+    }catch{
+      if(ended)return;
+      if(latestIntent===0&&preferenceRevision===preferenceAt){settingsPending=true;note('settings-read-failed');}
+      else{if(latestIntent===0&&preferenceDraft)activePreferences=preferenceDraft;settingsPending=false;}
+    }finally{
+      settingsReading=false;
+      if(!ended){
+        if(activePreferences){configureSource(activePreferences);noticeHost.ready(activePreferences);}
+        const first=!ready;ready=true;if(first)relay.hello();note('preferences-loaded');
+        if(settingsPending)scheduleRetry();else invalidate();
+      }
+    }
+  }
+  async function refreshAvailability(){const at=++availabilityVersion;const available=ready&&!ended&&await router.available();if(at===availabilityVersion&&!ended){syncVisibilityLease();publishMonitorHudAvailability(available);}}
   function invalidate(){
-    ++version;if(!ready||ended)return;void refreshAvailability();
+    ++version;syncVisibilityLease();if(!ready||ended)return;void refreshAvailability();
     if(queued)return;queued=true;queueMicrotask(()=>{queued=false;void reconcile();});
   }
-  const contextKey=(route:string|null)=>route+'|'+(route==='steam'?JSON.stringify(relay.inspect().status?.game??null):'')+'|'+desktopCloseSerial;
+  const contextKey=(route:string|null)=>route+'|'+(route==='steam'?JSON.stringify(relay.inspect().status?.game??null):'')+'|'+desktopCloseSerial+'|'+(route==='desktop'?desktop.inspect().retirementRevision:0);
   async function reconcile(){
-    if(!ready||ended||restoring||applying||settling||!activePreferences?.enabled||activePreferences.output!=='ymcc')return;
+    if(!ready||ended||powerHeld||settingsPending||restoring||applying||settling||retryAt||!wantsHud()||restoreAttempts>=maxAttempts||desktop.inspect().recoveryBlocked)return;
     const revision=settleRevision,startedVersion=version;
-    const route=await router.kind(activePreferences);
+    const route=await router.kind(activePreferences!);
     // Recheck intent after native IO. Same-output appearance drafts stay live,
     // but an explicit switch/OFF or a newer event invalidates this recovery.
-    if(!ready||ended||restoring||applying||settling||!route||!activePreferences?.enabled||activePreferences.output!=='ymcc'||revision!==settleRevision||startedVersion!==version)return;
-    const desired=activePreferences;
+    if(!ready||ended||powerHeld||restoring||applying||settling||!wantsHud()||revision!==settleRevision||startedVersion!==version)return;
+    if(!route){++restoreAttempts;note('carrier-unavailable');scheduleRetry();return;}
+    const desired=activePreferences!;
     const key=contextKey(route); // Default desktop never needs a game identity.
     if(key===lastAttemptKey||desktop.inspect().opening)return;
-    lastAttemptKey=key;restoring=true;const at=version;
-    try{await monitorOutputCoordinator.apply(desired);}finally{restoring=false;if(at!==version)invalidate();}
+    restoring=true;++restoreAttempts;const at=version,requestAt=requestRevision;
+    const current=()=>!ended&&!powerHeld&&requestAt===requestRevision&&wantsHud();
+    try{
+      const result=await monitorOutputCoordinator.apply(desired,captureBootPreferenceWrite(recoveryWrite),current);
+      if(current()){
+        if(result.ok){lastAttemptKey=contextKey(route);restoreAttempts=0;cancelRetry();note('restored');}
+        else{note('apply-failed',result.phase);scheduleRetry();}
+      }
+    }catch(error){
+      if(current()){
+        if(error instanceof Error&&(error.message==='BOOT_PREFERENCE_REQUEST_EXPIRED'||error.message==='MONITOR_OUTPUT_REQUEST_EXPIRED')){lastAttemptKey=key;cancelRetry();note('request-expired');}
+        else{note('apply-rejected');scheduleRetry();}
+      }
+    }finally{restoring=false;if(at!==version||requestAt!==requestRevision)invalidate();}
   }
+  let steamPresence:boolean|null|undefined;
   const offSteamPresence=on<{steamKnown:boolean;steamRunning:boolean}>('deckySidebar.updated',state=>{
-    relay.noteSteamPresence(state.steamKnown===true?state.steamRunning:null);
+    const next=state.steamKnown===true?state.steamRunning:null;
+    if(next===steamPresence)return;steamPresence=next;relay.noteSteamPresence(next);
   });
-  const offClock=on<{nonce:string;snapshot:unknown}>('monitor.hudPulse',event=>clock.accept(event));
+  const offClock=on<{nonce:string;snapshot:unknown;expired?:boolean}>('monitor.hudPulse',event=>clock.accept(event));
   const offExtension=registerDeckyMirrorExtension({prefix:'hud.',connected:peer=>relay.connected(peer),request:event=>relay.request(event)});
-  const offAdapter=registerYmccHudOutputAdapter({global:true,globalFor:async prefs=>await router.kind(prefs)==='desktop',async available(prefs){return ready&&await router.available(prefs??activePreferences??undefined);},async visible(){return router.visible();},async state(){return router.active()==='desktop'&&desktop.waiting()?'armed':router.state();},setVisible:(show,prefs)=>{if(show)source.setDemand(hudNativeDemand(prefs.ymcc.fields));return router.setVisible(show,prefs);}});
-  const offPreferences=onMonitorOutputPreferencesChanged(prefs=>{
+  const offAdapter=registerYmccHudOutputAdapter({global:true,globalFor:async prefs=>await router.kind(prefs)==='desktop',async available(prefs){return ready&&await router.available(prefs??activePreferences??undefined);},async visible(){return router.visible();},async state(){return router.active()==='desktop'&&desktop.waiting()?'armed':router.state();},setVisible:async(show,prefs,current)=>{if(current&&!await current())throw Error('MONITOR_OUTPUT_REQUEST_EXPIRED');if(show)source.setDemand(hudNativeDemand(prefs.ymcc.fields));return router.setVisible(show,prefs,current);}});
+  const offPreferences=onMonitorOutputPreferencesChanged((prefs,write)=>{
+    ++preferenceRevision;++requestRevision;preferenceDraft=normalizeMonitorOutput(prefs);recoveryWrite=captureBootPreferenceWrite(write??{});
     noticeHost.update(prefs);
     if(prefs.output==='ymcc')source.setDemand(hudNativeDemand(prefs.ymcc.fields));
     source.setClockEnabled(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.fields.clock === true);
@@ -79,13 +177,17 @@ export function startMonitorHudHost() {
     // Retire obsolete custom recovery while the existing save/apply queue runs.
     // Saving the new target alone still does not start or migrate any output.
     if(!prefs.enabled||prefs.output!=='ymcc'){
-      activePreferences=normalizeMonitorOutput(prefs);
+      activePreferences=normalizeMonitorOutput(prefs);settingsPending=false;cancelRetry();syncVisibilityLease();
     }else if(activePreferences?.output==='ymcc'){
       const next=normalizeMonitorOutput(prefs);
       activePreferences={...activePreferences,mouseStatusEnabled:next.mouseStatusEnabled,ymcc:next.ymcc,ymccTemplate:next.ymccTemplate,ymccTemplateRevision:next.ymccTemplateRevision,ymccTemplates:next.ymccTemplates};
     }
   });
-  const offApplying=onMonitorOutputApplying(value=>{
+  const offApplying=onMonitorOutputApplying((value,intent)=>{
+    if(intent){
+      if(!intent.recovery){++requestRevision;restoreAttempts=0;lastAttemptKey='';cancelRetry();}
+      activePreferences=normalizeMonitorOutput(intent.preferences);latestIntent=intent.id;recoveryWrite=captureBootPreferenceWrite(intent.write);intentPreferenceRevision=preferenceRevision;lastApplyOk=false;settingsPending=false;
+    }
     applying=value;const at=++settleRevision;
     if(value){settling=false;return;}
     if(!ready||ended)return;
@@ -93,28 +195,44 @@ export function startMonitorHudHost() {
     // transaction must not enqueue stale preferences behind the user's intent.
     settling=true;
     void router.kind(activePreferences??undefined).then(route=>{
-      if(at===settleRevision&&!applying&&!ended)lastAttemptKey=contextKey(route);
+      if(at===settleRevision&&!applying&&!ended&&lastApplyOk)lastAttemptKey=contextKey(route);
     }).catch(()=>{}).finally(()=>{
-      if(at===settleRevision&&!ended){settling=false;invalidate();}
+      if(at===settleRevision&&!ended){settling=false;if(!lastApplyOk&&restoreAttempts>0)scheduleRetry();invalidate();}
     });
   });
-  const offApplied=onMonitorOutputApplied((prefs,result)=>{
+  const offApplied=onMonitorOutputApplied((prefs,result,intent)=>{
+    if(intent&&(intent.id!==latestIntent||intentPreferenceRevision!==preferenceRevision))return;
+    if(intent)recoveryWrite=captureBootPreferenceWrite(intent.write);
     // Keep the requested output/OFF intent even when its application fails,
     // so a later event cannot revive the previously selected custom HUD.
     activePreferences=normalizeMonitorOutput(prefs);
-    if(result.ok){source.setDemand(hudNativeDemand(activePreferences.ymcc.fields));source.setClockEnabled(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.fields.clock === true);source.setGameLogoEnabled(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.underlay==='game-logo');clock.setFrameTime(prefs.output==='ymcc' && prefs.enabled && prefs.ymcc.fields.frametimeGraph === true);if(result.applied!=='ymcc')lastAttemptKey='';}});
+    lastApplyOk=result.ok;
+    if(result.ok){configureSource(activePreferences);restoreAttempts=0;cancelRetry();if(result.applied!=='ymcc')lastAttemptKey='';}});
+  const offPower=onSharedPowerLifecycle(snapshot=>{
+    const held=!isSharedPowerLifecycleAdmitted(snapshot),newGeneration=snapshot.generation!==powerGeneration;
+    const scopeChanged=snapshot.observedNotificationSequence!==powerNotificationSequence;
+    if(ended||held===powerHeld&&!newGeneration&&!scopeChanged)return;
+    const readyAfterBoundary=!held&&(powerHeld||newGeneration);
+    const retainedReadyAdvance=!held&&!powerHeld&&!newGeneration&&scopeChanged;
+    ++requestRevision;powerHeld=held;powerGeneration=snapshot.generation;
+    powerNotificationSequence=snapshot.observedNotificationSequence;
+    // A new public scope retires old requests without refunding the same
+    // generation's attempts or shortening its existing retry delay.
+    if(!retainedReadyAdvance)cancelRetry();
+    if(readyAfterBoundary)clock.reconcileAfterWake();
+    syncVisibilityLease();
+    if(!held){
+      if(snapshot.generation!==committedPowerGeneration){committedPowerGeneration=snapshot.generation;restoreAttempts=0;}
+      if(settingsPending&&settingsAttempts<maxAttempts)void loadStartupPreferences();else invalidate();
+    }
+  },{observeNotificationSequence:true});
   return {
     async ready(){
-      if(ended)return;activePreferences=await readMonitorOutputPreferences().catch(()=>null);if(ended)return;
-      source.setDemand(hudNativeDemand(activePreferences?.ymcc.fields));
-      source.setClockEnabled(activePreferences?.output==='ymcc' && activePreferences.enabled && activePreferences.ymcc.fields.clock === true);
-      clock.setFrameTime(activePreferences?.output==='ymcc' && activePreferences.enabled && activePreferences.ymcc.fields.frametimeGraph === true);
-      source.setGameLogoEnabled(activePreferences?.output==='ymcc' && activePreferences.enabled && activePreferences.ymcc.underlay==='game-logo');
-      if(activePreferences)noticeHost.ready(activePreferences);
-      ready=true;relay.hello();invalidate();
+      if(ended)return;if(!readyTask)readyTask=loadStartupPreferences();await readyTask;
     },
-    stop(){if(ended)return;ended=true;noticeHost.stop();ready=false;publishMonitorHudAvailability(false);offApplied();offApplying();offPreferences();offExtension();offSteamPresence();
+    stop(){if(ended)return;ended=true;++requestRevision;cancelRetry();syncVisibilityLease();offPower();noticeHost.stop();ready=false;publishMonitorHudAvailability(false);offApplied();offApplying();offPreferences();offExtension();offSteamPresence();
       relay.dispose();void desktop.dispose().finally(()=>{offClock();clock.dispose();});offAdapter();},
-    inspect:()=>({steam:relay.inspect(),desktop:desktop.inspect(),carrier:router.active(),sampleUsers:source.users(),clock:clock.inspect(),restoring}),
+    inspect:()=>({steam:relay.inspect(),desktop:desktop.inspect(),carrier:router.active(),sampleUsers:source.users(),clock:clock.inspect(),restoring,
+      recovery:{settingsPending,settingsAttempts,restoreAttempts,retryAt,powerHeld,powerGeneration,visibilityLease:!!visibilityLease}}),
   };
 }

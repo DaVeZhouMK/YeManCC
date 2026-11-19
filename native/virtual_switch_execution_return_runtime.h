@@ -16,6 +16,7 @@ struct State {
     bool cold=false;
     unsigned coldPasses=0;
     std::uint64_t nextObservation=0;
+    std::uint64_t deadline=0; // Original R3 deadline; repeated Carry cannot renew it.
 };
 static State state; // g_inputHostMx, including optional logging.
 static void logLocked(const char* stage,const char* reason,bool startReturned=false) noexcept {
@@ -27,6 +28,7 @@ static void logLocked(const char* stage,const char* reason,bool startReturned=fa
             {"powerGeneration",state.power},{"pending",state.pending},{"returned",state.returned},
             {"queued",state.queued},{"startReturned",startReturned},
             {"coldHistoricalReturn",state.cold},{"coldPasses",state.coldPasses},
+            {"originalDeadline",state.deadline},{"currentTargetProofPending",inputHostTargetReturnCurrentProofPendingLocked()},
             {"elapsedMs",view.requestId==state.requestId?json(view.elapsedMs):json(nullptr)},
             {"remainingMs",view.requestId==state.requestId?json(view.remainingMs):json(nullptr)},
             {"fallbackAttempts",view.requestId==state.requestId?json(view.fallbackAttempts):json(nullptr)},
@@ -34,7 +36,8 @@ static void logLocked(const char* stage,const char* reason,bool startReturned=fa
     }catch(...){}
 }
 static bool currentLocked() {
-    return state.pending && currentPowerGeneration()==state.power &&
+    return state.pending && (!state.deadline || inputHostStartProtectionNow()<state.deadline) &&
+        currentPowerGeneration()==state.power &&
         g_virtualStartProtection.canContinueExecution(state.requestId,state.persona,inputHostStartProtectionNow()) &&
         inputHostConfiguredPersona()==state.persona && !inputHostExitFenceRaised() &&
         !g_exitRequested.load(std::memory_order_acquire) && !g_inputCaptureStop.load(std::memory_order_acquire);
@@ -61,11 +64,31 @@ static bool pausedLocked() {
         g_inputHostPowerAdmissionRevoked.load(std::memory_order_acquire) ||
         g_shortcutRecordingActive.load(std::memory_order_acquire) || physicalReleaseWindowActive();
 }
+// Current proof settlement needs no Native-death proof. Current native leases
+// and opening/returning borrows still pause execution receipts and progression.
+static bool currentProofPausedLocked() {
+    if(msiForegroundIsolationBorrowBusy())return true;
+    std::unique_lock<std::mutex> lease(g_msiNativeForegroundMx,std::try_to_lock);
+    if(!lease.owns_lock())return true;
+    if(msiColdReturnLeaseMatchesLocked(state.requestId,state.power))return !msiColdReturnContextCurrentLocked();
+    return g_msiNativeForegroundLease.active || g_msiNativeForegroundLease.cycleProcess ||
+        g_msiNativeForegroundLease.nativeRefreshWriter || g_msiNativeForegroundLease.restorePending;
+}
 static void retireLocked(const char* reason) {
     state.pending=false;state.queued=false;
     g_inputHostSwitchExecutionReturnPending.store(false,std::memory_order_release);
     logLocked("return-continuation-retired",reason);
 }
+
+// The existing verifier still owns the unique final. A pause can defer this
+// candidate delivery, but must never refund an IO failure already observed.
+static void exhaustLocked() {
+    const auto ticket=state.requestId;
+    retireLocked("cold-return-bounded-observations-exhausted");
+    g_inputHostFaultHoldsStart.store(true,std::memory_order_release);
+    inputHostStartProtectionFinish(ticket,"failure","cold-return-still-unproven");
+}
+
 }
 
 static bool inputHostSwitchExecutionAwaitingLocked(std::uint64_t ticket) {
@@ -85,9 +108,23 @@ static bool inputHostSwitchExecutionBeginColdLocked(std::uint64_t ticket,
         if(state.pending)return false; // another still-current owner cannot be replaced
     }
     const auto persona=inputHostConfiguredPersona();
-    if(!g_virtualStartProtection.canContinueExecution(ticket,persona,inputHostStartProtectionNow()))return false;
+    const auto now=inputHostStartProtectionNow();
+    const auto view=g_virtualStartProtection.view(now);
+    if(!g_virtualStartProtection.canContinueExecution(ticket,persona,now) ||
+        view.requestId!=ticket || !view.remainingMs ||
+        view.remainingMs>(std::numeric_limits<std::uint64_t>::max)()-now)return false;
+    const auto previousPasses=state.requestId==ticket?state.coldPasses:0U;
+    const auto previousDeadline=state.requestId==ticket?state.deadline:0ULL;
+    if(previousPasses>=3)return false;
+    auto deadline=now+view.remainingMs;
+    if(previousDeadline && previousDeadline<deadline)deadline=previousDeadline;
+    if(g_inputHostSwitchRecoveryStartDeadline && g_inputHostSwitchRecoveryStartDeadline<deadline)
+        deadline=g_inputHostSwitchRecoveryStartDeadline;
+    if(now>=deadline)return false;
+    const auto firstPass=reason==ymcc::targetReturn::coldExecution::Reason::ContextRetired?0U:1U;
     state={ticket,currentPowerGeneration(),0,{},persona,true,false,false,true,
-        reason==ymcc::targetReturn::coldExecution::Reason::ContextRetired?0U:1U,inputHostStartProtectionNow()+1000};
+        (std::max)(previousPasses,firstPass),now+1000};
+    state.deadline=deadline;
     g_inputHostSwitchExecutionReturnPending.store(true,std::memory_order_release);
     logLocked("cold-return-begin",ymcc::targetReturn::coldExecution::reasonName(reason));return true;
 }
@@ -99,7 +136,8 @@ static bool inputHostSwitchExecutionCarryColdOffLocked(std::uint64_t ticket) {
     if(!ticket || inputHostExitFenceRaised() ||
         g_exitRequested.load(std::memory_order_acquire) ||
         g_inputCaptureStop.load(std::memory_order_acquire) ||
-        inputHostConfiguredPersona()!="disabled" || inputHostTargetReturnHistorySettledLocked())return false;
+        inputHostConfiguredPersona()!="disabled" ||
+        (inputHostTargetReturnHistorySettledLocked() && !inputHostTargetReturnCurrentProofPendingLocked()))return false;
     const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
     if(view.requestId!=ticket || view.persona!="disabled" || !view.locked ||
         (view.phase!="pending" && view.phase!="verifying"))return false;
@@ -109,9 +147,34 @@ static bool inputHostSwitchExecutionCarryColdOffLocked(std::uint64_t ticket) {
 // The same cold return consumer serves startup-OFF and a later admitted OFF
 // with no local Host/journal. Return true only when this owner handles the
 // historical duty; the caller must not emit a competing empty Stop candidate.
+// One bridge from known native historical debt into the EXISTING R3 cold
+// continuation. No extra attempt budget, deadline, thread or owner is created.
+static bool inputHostNativeVisibilityColdPeriodHeldLocked(){
+    const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
+    auto& owner=ymcc::inputHost::switchExecutionReturnRuntime::state;
+    if(owner.pending && inputHostSwitchExecutionAwaitingLocked(owner.requestId))return true;
+    return owner.cold && owner.requestId==view.requestId &&
+        (owner.coldPasses>=3 || (owner.deadline && inputHostStartProtectionNow()>=owner.deadline));
+}
+static bool inputHostNativeVisibilityColdReturnOrQueueLocked(const char* reason){
+    if(inputHostNativeVisibilityColdPeriodHeldLocked())return false;
+    if(inputHostNativeVisibilityColdReturnLocked(reason))return true;
+    const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
+    if(inputHostNativeVisibilityHistoryPending() && view.requestId &&
+        g_virtualStartProtection.canContinueExecution(view.requestId,inputHostConfiguredPersona(),inputHostStartProtectionNow()))
+        (void)inputHostSwitchExecutionBeginColdLocked(view.requestId,ymcc::targetReturn::coldExecution::Reason::VisibilityUnproven);
+    return false;
+}
 static bool inputHostPerformColdStartupReturn() {
     using namespace ymcc::inputHost::switchExecutionReturnRuntime;
     std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+    // Native historical responsibility also needs a cold pass when the saved
+    // choice is OFF. Existing serial owner only; never create a Host here.
+    if(inputHostNativeVisibilityColdPeriodHeldLocked())return true;
+    {
+        std::lock_guard leaseLock(g_msiNativeForegroundMx);
+        if(!g_msiNativeForegroundLease.active)(void)inputHostNativeVisibilityColdReturnLocked("startup-owned-return");
+    }
     if(inputHostConfiguredPersona()!="disabled" || inputHostTargetReturnHistorySettledLocked())return false;
     // No local Host alone is insufficient: MSI mode return or a retired PS
     // endpoint still belongs to normal Stop. Never skip that owner's cleanup.
@@ -195,8 +258,11 @@ static void inputHostSwitchExecutionReturnMaintenanceLocked() {
     if(state.cold && !coldPredecessorsReturnedLocked())return;
     if(state.cold){
         if(inputHostStartProtectionNow()<state.nextObservation)return;
-        const auto environment=ymcc::inputHost::targetReturnRuntime::ColdEnvironment{state.requestId,state.power,state.persona};
-        if(!environment.current())return; // known current owner/power/focus pause
+        if(!inputHostTargetReturnHistorySettledLocked()) {
+            const auto environment=ymcc::inputHost::targetReturnRuntime::ColdEnvironment{state.requestId,state.power,state.persona};
+            if(!environment.current())return;
+        }else if(currentProofPausedLocked())return;
+        if(state.coldPasses>=3){exhaustLocked();return;}
     }else if(!state.returned)return;
     state.queued=true;
     try {const auto reason="switch-execution-return:"+std::to_string(state.requestId);
@@ -214,17 +280,52 @@ static void inputHostPerformSwitchExecutionReturn(std::uint64_t ticket) {
         if(!cleanLocked() || pausedLocked() || (!state.cold && !state.returned))return;
         if(state.cold && !coldPredecessorsReturnedLocked())return;
         if(state.cold){
-            const auto result=inputHostTargetReturnColdPassLocked(ticket,state.power,state.persona);
-            // An OS observation/file commit can outlast this request. Never
-            // apply its failure hold or remaining Start to a newer intent.
-            if(!currentLocked()){retireLocked("cold-observation-context-retired");return;}
+            const bool hasCold=!inputHostTargetReturnHistorySettledLocked();
+            if(hasCold) {
+                const auto environment=ymcc::inputHost::targetReturnRuntime::ColdEnvironment{ticket,state.power,state.persona};
+                if(!environment.current())return;
+            }else if(currentProofPausedLocked())return;
+            if(state.coldPasses>=3){exhaustLocked();return;}
+            // Both phases share the original deadline and existing three passes.
+            const auto oldDeadline=g_inputHostSwitchRecoveryStartDeadline;
+            const auto oldRequest=g_inputHostSwitchRecoveryStartRequestId,oldPower=g_inputHostSwitchRecoveryStartPower;
+            struct RestoreCurrentReturn {
+                std::uint64_t deadline,request,power;
+                ~RestoreCurrentReturn(){g_inputHostSwitchRecoveryStartDeadline=deadline;
+                    g_inputHostSwitchRecoveryStartRequestId=request;g_inputHostSwitchRecoveryStartPower=power;}
+            } restore{oldDeadline,oldRequest,oldPower};
+            g_inputHostSwitchRecoveryStartDeadline=oldDeadline && oldDeadline<state.deadline?oldDeadline:state.deadline;
+            g_inputHostSwitchRecoveryStartRequestId=ticket;g_inputHostSwitchRecoveryStartPower=state.power;
+            const auto ioDeadline=g_inputHostSwitchRecoveryStartDeadline;
+
+            // Own helper must get its terminal poll before any store/CLI guard.
+            // Pending is an observation, not a failed pass and not a refund.
+            {
+                auto own=ymcc::inputHost::targetReturnRuntime::ColdEnvironment{ticket,state.power,state.persona};
+                const int progress=own.pollOwnColdRefresh();
+                if(progress==1){state.nextObservation=inputHostStartProtectionNow()+1000;return;}
+            }
+            bool failureCharged=false;
+            const auto chargeFailureOnce=[&](ymcc::targetReturn::coldExecution::Reason reason){
+                if(failureCharged||reason==ymcc::targetReturn::coldExecution::Reason::ContextRetired)return;
+                ++state.coldPasses;failureCharged=true;
+                state.nextObservation=inputHostStartProtectionNow()+1000;
+            };
+            const bool flushed=inputHostTargetReturnFlushCurrentLocked(ticket,state.power,state.persona,ioDeadline);
+            if(!currentLocked() || inputHostStartProtectionNow()>=ioDeadline){retireLocked("current-store-context-retired");return;}
+            if(!flushed)chargeFailureOnce(ymcc::targetReturn::coldExecution::Reason::OriginCommitFailed);
+            if(pausedLocked() || currentProofPausedLocked())return;
+            auto result=ymcc::targetReturn::coldExecution::Result{
+                ymcc::targetReturn::coldExecution::State::Clean,ymcc::targetReturn::coldExecution::Reason::Complete};
+            if(!flushed)result={ymcc::targetReturn::coldExecution::State::Deferred,
+                ymcc::targetReturn::coldExecution::Reason::OriginCommitFailed};
+            else if(hasCold)result=inputHostTargetReturnColdPassLocked(ticket,state.power,state.persona);
+            if(!currentLocked() || inputHostStartProtectionNow()>=ioDeadline){retireLocked("cold-observation-context-retired");return;}
+            if(!result.clean())chargeFailureOnce(result.reason);
+            if(pausedLocked() || currentProofPausedLocked())return;
             if(!result.clean()){
-                if(result.reason!=ymcc::targetReturn::coldExecution::Reason::ContextRetired)++state.coldPasses;
-                if(state.coldPasses>=3){
-                    retireLocked("cold-return-bounded-observations-exhausted");
-                    g_inputHostFaultHoldsStart.store(true,std::memory_order_release);
-                    inputHostStartProtectionFinish(ticket,"failure","cold-return-still-unproven");
-                }else state.nextObservation=inputHostStartProtectionNow()+1000;
+                if(state.coldPasses>=3)exhaustLocked();
+                else state.nextObservation=inputHostStartProtectionNow()+1000;
                 return;
             }
             state.returned=true;

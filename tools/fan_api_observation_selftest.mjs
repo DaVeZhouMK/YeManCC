@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import {createRequire} from 'node:module';
 const repo=path.resolve(import.meta.dirname,'..');
-const args=process.argv.slice(2);let out,apiSource;
-for(let i=0;i<args.length;i+=2){if(args[i]==='--out')out=path.resolve(args[i+1]);else if(args[i]==='--api-source')apiSource=path.resolve(args[i+1]);else throw Error('Usage: --out path [--api-source path]');}
+const args=process.argv.slice(2);let out,apiSource,fieldState;
+for(let i=0;i<args.length;i+=2){if(args[i]==='--out')out=path.resolve(args[i+1]);else if(args[i]==='--api-source')apiSource=path.resolve(args[i+1]);else if(args[i]==='--field-state')fieldState=path.resolve(args[i+1]);else throw Error('Usage: --out path [--api-source path] [--field-state path]');}
 if(!out)throw Error('--out is required');fs.mkdirSync(out,{recursive:true});
 const require=createRequire(path.join(repo,'package.json')),ts=require('typescript'),vue=require('vue');
 const files={fanApi:apiSource??path.join(repo,'src/bridge/fanApi.ts'),fanDiagnostics:path.join(repo,'src/bridge/fanDiagnostics.ts')};
@@ -50,6 +50,137 @@ await check('diagnostic-ipc-rejection-does-not-change-receipt',async()=>{reset()
 await check('response-and-request-secrets-do-not-enter-diagnostic-projection',async()=>{reset({ok:true,state:{...ready,sessionToken:'SECRET_RESPONSE_VALUE',leaseId:'SECRET_RESPONSE_LEASE'}});await adapter.enable([{tempC:0,dutyPercent:20}],'SECRET_REQUEST_LEASE');const text=JSON.stringify(rows);for(const secret of ['SECRET_SESSION_VALUE','SECRET_RESPONSE_VALUE','SECRET_RESPONSE_LEASE','SECRET_REQUEST_LEASE'])assert.equal(text.includes(secret),false);assert.equal(row('api.response').request.leasePresent,true);});
 await check('missing-host-ok-remains-absent',async()=>{reset({state:ready});await adapter.open();assert.equal(Object.hasOwn(row('api.response').receipt,'ok'),false);});
 await check('log-enabled-does-not-add-http-or-retries',async()=>{reset();await adapter.open();assert.equal(httpCalls.length,1);assert.equal(new URL(httpCalls[0].url).pathname,'/api/open');});
+const heartbeatLease={leaseId:'fixture-private-lease',generation:3,expiresAtMonoMs:14000};
+const heartbeatReply={ok:true,lease:heartbeatLease};
+const heartbeatRequestId=(id)=>{reply.headers='X-YeMan-Fan-Request-Id: '+id.toString(16).padStart(32,'0');};
+await check('complete success keeps one compact receipt for every heartbeat',async()=>{
+  reset(heartbeatReply);
+  for(const id of [1,2,3]){
+    heartbeatRequestId(id);
+    const returned=await adapter.heartbeat(heartbeatLease.leaseId);
+    assert.equal(returned.expiresAtMonoMs,heartbeatLease.expiresAtMonoMs);
+  }
+  assert.equal(httpCalls.length,3);assert.equal(rows.length,3);
+  for(const [i,r] of rows.entries()){
+    const d=r.details;
+    assert.equal(r.event,'api.response');assert.equal(d.path,'/api/heartbeat');assert.equal(d.method,'POST');
+    assert.equal(d.status,200);assert.equal(d.ok,true);assert.equal(d.bodyCompleteObserved,true);
+    assert.equal(d.bodyComplete,true);assert.equal(d.receiptValid,true);assert.equal(d.heartbeatReceiptSchema,1);
+    assert.equal(d.requestId,(i+1).toString(16).padStart(32,'0'));assert.equal(typeof d.durationMs,'number');
+    for(const name of ['request','receipt','response'])assert.equal(Object.hasOwn(d,name),false);
+  }
+  assert(!JSON.stringify(rows).includes(heartbeatLease.leaseId));
+});
+await check('different observations and legacy body completeness stay inline',async()=>{
+  for(const [body,complete,knownId] of [
+    [{...heartbeatReply,state:{...ready}},true,true],
+    [{...heartbeatReply,resumeNoop:true},true,true],
+    [heartbeatReply,undefined,true],
+    [heartbeatReply,true,false],
+    [{lease:heartbeatLease},true,true],
+  ]){
+    reset(body);if(knownId)heartbeatRequestId(10);
+    if(complete===undefined)delete reply.bodyComplete;
+    await adapter.heartbeat(heartbeatLease.leaseId);
+    const d=row('api.response');assert.equal(Object.hasOwn(d,'heartbeatReceiptSchema'),false);
+    assert.equal(d.request.leasePresent,true);assert.equal(d.bodyCompleteObserved,complete!==undefined);
+    if(body.state)assert.equal(d.response.state,'Ready');
+    if(body.resumeNoop)assert.equal(d.receipt.resumeNoop,true);
+  }
+});
+await check('mismatched lease and incomplete body retain failure evidence',async()=>{
+  reset({...heartbeatReply,lease:{...heartbeatLease,leaseId:'fixture-other-lease'}});heartbeatRequestId(11);
+  await assert.rejects(()=>adapter.heartbeat(heartbeatLease.leaseId),/FAN_HTTP_RESULT_UNKNOWN/);
+  const d=row('api.response');assert.equal(d.receiptValid,false);assert.equal(d.request.leasePresent,true);
+  assert.equal(Object.hasOwn(d,'heartbeatReceiptSchema'),false);assert.equal(row('api.request-failure').responseReceived,true);
+  reset(heartbeatReply);heartbeatRequestId(12);reply.bodyComplete=false;
+  await assert.rejects(()=>adapter.heartbeat(heartbeatLease.leaseId),/FAN_HTTP_RESULT_UNKNOWN/);
+  assert.equal(rows.some(r=>r.event==='api.response'),false);assert.equal(row('api.request-failure').status,200);
+});
+const telemetryState={...ready,unknownState:false,hcCloseCleanupPending:false,controlAccepting:true,oemRestoreConfirmed:false,powerState:'On',leaseGeneration:3,lastTemperatureC:51,
+  deviceIdentity:{fixtureDescription:'test-identity-'.repeat(125)}};
+const telemetryRead=(id,state=telemetryState,source='page-telemetry')=>{
+  reply.body=JSON.stringify({ok:true,state});
+  reply.headers=`X-YeMan-Fan-Request-Id: ${id.toString(16).padStart(32,'0')}`;
+  return adapter.getState(undefined,source);
+};
+await check('page-only stable state retains each receipt and refreshes the full snapshot',async()=>{
+  reset();adapter.setSessionToken('fixture-first');
+  for(let id=1;id<=17;id++){
+    const state=await telemetryRead(id);
+    assert.equal(state.deviceIdentity.fixtureDescription,telemetryState.deviceIdentity.fixtureDescription);
+  }
+  assert.equal(rows.length,17);assert.equal(httpCalls.length,17);
+  const details=rows.map(row=>row.details);
+  assert.equal(details[0].stateSnapshot.kind,'full');assert.equal(details[16].stateSnapshot.kind,'full');
+  for(const detail of details.slice(1,16)){
+    assert.equal(detail.stateSnapshot.kind,'unchanged');assert.equal(detail.stateSnapshot.baselineRequestId,details[0].requestId);
+    assert.equal(detail.response.lastTemperatureC,51);assert.equal(detail.response.hardwareWritesEnabled,true);
+    assert.equal(Object.hasOwn(detail.response,'deviceIdentity'),false);
+    assert.equal(detail.bodyComplete,true);assert.equal(detail.receiptValid,true);assert.equal(typeof detail.durationMs,'number');
+  }
+  assert.equal(new Set(details.map(detail=>detail.requestId)).size,17);
+  await telemetryRead(18,{...telemetryState,lastTemperatureC:52});
+  assert.equal(rows.at(-1).details.stateSnapshot.kind,'full');assert.equal(rows.at(-1).details.response.lastTemperatureC,52);
+  reply.body=JSON.stringify({ok:true,state:telemetryState});await adapter.getState();
+  assert.equal(Object.hasOwn(rows.at(-1).details,'stateSnapshot'),false);
+  assert.equal(rows.at(-1).details.response.deviceIdentity.fixtureDescription,telemetryState.deviceIdentity.fixtureDescription);
+  await telemetryRead(19);assert.equal(rows.at(-1).details.stateSnapshot.kind,'full');
+});
+await check('page state rearms after gate toggles, power or token changes, and failed responses',async()=>{
+  reset();adapter.setSessionToken('fixture-second');diag.setFanDiagnosticPowerGeneration(7);
+  await telemetryRead(20);await telemetryRead(21);assert.equal(rows.at(-1).details.stateSnapshot.kind,'unchanged');
+  diag.adoptFanDiagnosticLoggingState(false);await telemetryRead(22);assert.equal(rows.length,2);
+  diag.adoptFanDiagnosticLoggingState(true);await telemetryRead(23);assert.equal(rows.at(-1).details.stateSnapshot.kind,'full');
+  diag.adoptFanDiagnosticLoggingState(false);diag.adoptFanDiagnosticLoggingState(true);
+  await telemetryRead(24);assert.equal(rows.at(-1).details.stateSnapshot.kind,'full');
+  diag.setFanDiagnosticPowerGeneration(8);await telemetryRead(25);assert.equal(rows.at(-1).details.stateSnapshot.kind,'full');
+  adapter.setSessionToken('fixture-third');await telemetryRead(26);assert.equal(rows.at(-1).details.stateSnapshot.kind,'full');
+  reply.bodyComplete=false;await assert.rejects(()=>telemetryRead(27),/FAN_API_RESPONSE_INVALID/);
+  assert.equal(rows.at(-1).event,'api.request-failure');
+  reply.bodyComplete=true;await telemetryRead(28);assert.equal(rows.at(-1).details.stateSnapshot.kind,'full');
+  const fault={...telemetryState,unknownState:true};
+  await telemetryRead(29,fault);await telemetryRead(30,fault);
+  assert.equal(rows.at(-1).details.stateSnapshot.kind,'full');assert.equal(rows.at(-1).details.response.unknownState,true);
+  for(const [id,state] of [[31,{...telemetryState,controlAccepting:false}],[33,{...telemetryState,oemRestoreConfirmed:true}]]){
+    await telemetryRead(id,state);await telemetryRead(id+1,state);assert.equal(rows.at(-1).details.stateSnapshot.kind,'full');
+  }
+});
+if(fieldState){
+  const input=JSON.parse(fs.readFileSync(fieldState,'utf8'));
+  const states=input.rows;
+  assert(states.length>16);
+  reset();adapter.setSessionToken('fixture-field-state');
+  const byRequest=new Map();let full=0,unchanged=0,originalBytes=0,projectedBytes=0;
+  const measure=row=>Buffer.byteLength(JSON.stringify(row)+'\n');
+  for(const original of states){
+    const d=original.details;
+    assert.equal(d.path,'/api/state');assert.equal(d.status,200);assert.equal(d.bodyComplete,true);
+    reply.body=JSON.stringify({...d.receipt,state:d.response});
+    reply.headers=`X-YeMan-Fan-Request-Id: ${d.requestId}`;
+    diag.setFanDiagnosticPowerGeneration(d.generation+1000);
+    const returned=await adapter.getState(undefined,'page-telemetry');
+    assert.deepEqual(JSON.parse(JSON.stringify(returned)),d.response);
+    const observed=rows.pop().details;
+    assert.equal(observed.requestId,d.requestId);
+    if(observed.stateSnapshot.kind==='unchanged'){
+      unchanged++;
+      assert.deepEqual(byRequest.get(observed.stateSnapshot.baselineRequestId),d.response);
+      for(const [key,value] of Object.entries(observed.response))assert.deepEqual(value,d.response[key]);
+    }else{
+      full++;
+      assert.deepEqual(observed.response,d.response);
+      byRequest.set(observed.requestId,observed.response);
+    }
+    originalBytes+=measure(original);
+    projectedBytes+=measure({...original,details:{...d,response:observed.response,diagnosticSource:observed.diagnosticSource,stateSnapshot:observed.stateSnapshot}});
+  }
+  assert.equal(httpCalls.length,states.length);assert(full>0&&unchanged>0);
+  const report={scope:'historical logged projections replayed with assumed page source; not historical call-site, raw HTTP or installed result',
+    rows:states.length,full,unchanged,originalBytes,projectedBytes,savedBytes:originalBytes-projectedBytes,input:input.source};
+  fs.writeFileSync(path.join(out,'field-projection.json'),JSON.stringify(report,null,2)+'\n',{flag:'wx'});
+  console.log(JSON.stringify(report));
+}
 for(const [name,p] of Object.entries(files))assert.equal(digest(fs.readFileSync(p)),bindings[name].sha256,'source drift '+name);
 const report={status:failures.length?'FAIL':'PASS',checks,passed:checks.filter(c=>c.pass).length,failures,sourceBindings:bindings,scope:'actual TS API/diagnostics; fake HTTP/IPC; no product process, real network, setting or hardware'};
 fs.writeFileSync(path.join(out,'synthetic-fan-api-rows.json'),JSON.stringify({scope:'synthetic memory HTTP/IPC; not a field log',rows:syntheticRows},null,2)+'\n');fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({status:report.status,checks:checks.length,passed:report.passed,failures}));process.exitCode=failures.length?1:0;

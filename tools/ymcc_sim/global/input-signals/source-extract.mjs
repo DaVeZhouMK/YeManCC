@@ -25,6 +25,11 @@ export function extractNativeFollowup(source,{inputShortcutHeader}={}){
  const bitsAt=unique(source,'static constexpr uint64_t kOemBitM1 =');
  add('oemBits',bitsAt,source.indexOf(';',unique(source,'static constexpr uint64_t kOemBitLegionFrontL ='))+1,'actual-product-OEM-canonical-bit-declarations');
  func('familyEnum','enum class YmccFamily :');rows.at(-1).text+=';';rows.at(-1).sha256=hash(rows.at(-1).text);
+ const observationStart=unique(source,'struct OemVirtualKeyboardSample {');
+ const observation=unique(source,'struct OemVirtualPressObservation {');
+ const observationEnd=balancedEnd(source,source.indexOf('{',observation));
+ if(observationStart>=observation||source[observationEnd]!==';')throw Error('INVALID_OEM_VIRTUAL_PRESS_DECLARATIONS');
+ add('virtualPressTypes',observationStart,observationEnd+1,'actual-product-OEM-virtual-press-value-types');
  func('producerTokens','struct OemProducerTokens {');rows.at(-1).text+=';';rows.at(-1).sha256=hash(rows.at(-1).text);
  func('ruleStruct','struct NativeKeyboardShortcutRule {');rows.at(-1).text+=';';rows.at(-1).sha256=hash(rows.at(-1).text);
  func('dispatch','static bool nativeKeyboardShortcutDispatch(');

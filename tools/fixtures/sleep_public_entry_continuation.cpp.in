@@ -1,0 +1,161 @@
+#include <atomic>
+#include <mutex>
+#include <memory>
+#include <cstdint>
+#include <climits>
+#include <functional>
+#include <iostream>
+#include <string>
+#include <vector>
+#include "json.hpp"
+#include "sleep_recovery_diagnostics.h"
+#include "sleep_steam_settle.h"
+#include "steam_original_recovery_wake_watch.h"
+#include "steam_original_recovery_dual_route.h"
+#include "sleep_wake_admission.h"
+using json=nlohmann::json;using ULONGLONG=unsigned long long;using DWORD=unsigned long;
+enum class PowerLifecycle {Ready,Resuming,Suspending,Suspended};
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<unsigned long long> g_sleepRecoveryAutoConfigEpoch{1};
+static std::atomic<bool> g_sleepRecoveryAutoPending{false},g_exitRequested{false};
+static bool fixtureAllowed=true,fixtureRetrying=false,fixtureClassified=true;
+static ULONGLONG fixtureNow=134392908258301446ULL,fixtureTick=1000,fixtureGeneration=7;
+static bool sleepSteamRecoveryAllows(unsigned long long g,unsigned long long e){return fixtureAllowed&&!g_exitRequested&&g==fixtureGeneration&&e==g_sleepRecoveryAutoConfigEpoch;}
+static bool sgSleepRetryActive(){return fixtureRetrying;}
+static bool sharedSleepWakeClassified(unsigned long long g){return fixtureClassified&&g==fixtureGeneration;}
+static ULONGLONG sgNowFileTime(){return fixtureNow;}
+static ULONGLONG GetTickCount64(){return fixtureTick;}
+static ULONGLONG currentPowerGeneration(){return fixtureGeneration;}
+static bool sgModernStandbyRepairSupported(){return true;}
+static void sgNotifyWork(){}
+static void sgRecordFact(const char*,const json&){}
+static void steamOriginalRecoveryWake(unsigned long long){}
+static unsigned queued=0;
+static bool poolSubmit(std::function<void()>){++queued;return true;}
+namespace SleepSteamRecovery {
+struct Signal {bool value=true;bool current()const{return value;}};
+struct Request {ULONGLONG serial=9,rulesEpoch=1;bool revoked=false;std::shared_ptr<Signal> cancellation=std::make_shared<Signal>();};
+struct ProcessPort {bool live=true;bool processCurrent()const{return live;}};
+struct Identity {ULONGLONG epoch=1;};
+struct Game {DWORD pid=10708;ULONGLONG created=134392903158823114ULL;};
+struct Captured {ULONGLONG generation=7,configEpoch=1,boundaryGeneration=7,powerBoundaryFileTime=134392907000000000ULL;Game game;
+ std::shared_ptr<Request> request=std::make_shared<Request>();std::shared_ptr<ProcessPort> selectedProcess=std::make_shared<ProcessPort>();std::shared_ptr<Identity> identitySnapshot=std::make_shared<Identity>();};
+static Captured captured;
+static bool originalRulesCurrent(const Captured& v,ULONGLONG e){return v.request&&captured.request==v.request&&!v.request->revoked&&v.request->serial==9&&e==1&&v.generation==fixtureGeneration&&v.configEpoch==g_sleepRecoveryAutoConfigEpoch;}
+static Captured capturedFor(ULONGLONG g){return g==captured.generation&&captured.configEpoch==g_sleepRecoveryAutoConfigEpoch&&captured.request&&!captured.request->revoked&&captured.request->cancellation->current()?captured:Captured{};}
+static Captured wakeBoundaryFor(ULONGLONG g){return capturedFor(g);}
+static json capturedPauseState(ULONGLONG){return {{"available",true},{"manualPauseHeld",false},{"waitForSleepRelease",false}};}
+}
+struct ObserverPort {bool current=true;bool sameIdentityEpoch(const std::shared_ptr<SleepSteamRecovery::Identity>& v)const{return current&&v&&v->epoch==1;}}g_steamSettingsObserver;
+namespace SleepSteamRecovery {
+@@FUNCTION_originalTargetCurrent@@
+}
+namespace SleepRecoveryAuto {
+using namespace ymcc::sleeprecovery;
+static void notify(){}
+static void run(ULONGLONG,ULONGLONG,bool){}
+static void finish(ULONGLONG,ULONGLONG,const std::string&,const std::string&,json);
+@@STRUCT_State@@
+static State state;static std::mutex& mx=ymcc::sleeppower::nativeWakeFacts.mutex;
+@@FUNCTION_sharedWakeFactsLocked@@
+@@FUNCTION_followsWakeBoundary@@
+@@STRUCT_WakeOperationObservation@@
+@@FUNCTION_completedInteractiveResumeLocked@@
+@@FUNCTION_recordInteractiveResume@@
+@@FUNCTION_recordCompletedResume@@
+@@FUNCTION_proofSupersededLocked@@
+@@FUNCTION_wakeOperationAllowedLocked@@
+@@FUNCTION_wakeOperationAllows@@
+@@FUNCTION_wakeReadinessLocked@@
+@@FUNCTION_recordKernelWake@@
+@@FUNCTION_originalWakeIdentity@@
+@@FUNCTION_zeroWakeActionsLocked@@
+@@FUNCTION_zeroActionOriginalCurrentLocked@@
+@@FUNCTION_arm@@
+@@FUNCTION_captureReady@@
+@@FUNCTION_powerReady@@
+@@FUNCTION_tick@@
+static void finish(ULONGLONG,ULONGLONG,const std::string& phase,const std::string& reason,json){state.phase=phase;state.reason=reason;g_sleepRecoveryAutoPending=false;}
+}
+
+namespace SteamOriginalRecovery {
+@@FUNCTION_wakeProof@@
+@@FUNCTION_legacyWakeProof@@
+
+}
+
+using namespace SleepRecoveryAuto;
+static json rows=json::array();static unsigned fixtureChecks=0,failed=0;
+static void require(bool ok,const char* why){++fixtureChecks;if(!ok)throw std::runtime_error(why);}
+static void test(const std::string& name,const std::function<void()>& body){auto c=fixtureChecks;try{body();rows.push_back({{"name",name},{"pass",true},{"fixtureChecks",fixtureChecks-c}});}catch(const std::exception& e){++failed;rows.push_back({{"name",name},{"pass",false},{"reason",e.what()},{"fixtureChecks",fixtureChecks-c}});}}
+static void setup(){fixtureAllowed=fixtureClassified=true;fixtureRetrying=true;g_exitRequested=false;g_sleepRecoveryAutoConfigEpoch=1;fixtureGeneration=7;fixtureTick=1000;fixtureNow=134392908258301446ULL;
+ g_steamSettingsObserver.current=true;g_powerLifecycle=PowerLifecycle::Ready;g_sleepRecoveryAutoPending=false;queued=0;
+ SleepSteamRecovery::captured={};state={};ymcc::sleeppower::nativeWakeFacts.resetLocked();
+ ymcc::sleeppower::nativeWakeFacts.kernel(7,107,0,5,fixtureNow,fixtureNow);recordKernelWake(7,107,0,5,fixtureNow);arm(7);require(state.phase=="waiting"&&g_sleepRecoveryAutoPending,"old107-not-armed");}
+static void park(){tick();require(!g_sleepRecoveryAutoPending&&queued==0,"retry-not-zero-action");}
+static void successor(const std::string& order="ICR",int reason=1){fixtureTick=3000;fixtureNow=134392908514042653ULL;ymcc::sleeppower::nativeWakeFacts.kernel(7,506,1,-1,fixtureNow,fixtureNow);recordKernelWake(7,506,1,-1,fixtureNow);
+ fixtureNow=134392908524461397ULL;fixtureTick=4000;fixtureRetrying=false;
+ for(char x:order){if(x=='I'){ymcc::sleeppower::nativeWakeFacts.interactive(7,7,fixtureTick,fixtureTick,fixtureNow);recordInteractiveResume(7,7,fixtureTick);}if(x=='C'){ymcc::sleeppower::nativeWakeFacts.kernel(7,507,reason,-1,fixtureNow,fixtureNow);recordKernelWake(7,507,reason,-1,fixtureNow);}if(x=='R'){ymcc::sleeppower::nativeWakeFacts.ready(7);powerReady(7);}captureReady(7);}}
+static bool admitted(){return g_sleepRecoveryAutoPending&&state.phase=="waiting"&&state.wakeAdmission.value("status",std::string())=="admitted"&&ymcc::sleeppower::nativeWakeFacts.snapshot().completedResume.eventId==507;}
+
+static constexpr ULONGLONG entryJoinE=134392908500000000ULL,entryJoinC=entryJoinE+10000ULL,entryJoinOld=entryJoinE-10000ULL,entryJoinNew=entryJoinE+20000ULL;
+static void entryJoinReset(){fixtureAllowed=fixtureClassified=true;fixtureRetrying=false;g_exitRequested=false;g_sleepRecoveryAutoConfigEpoch=1;fixtureGeneration=7;fixtureTick=4000;fixtureNow=entryJoinE+10000000ULL;
+ g_steamSettingsObserver.current=true;g_powerLifecycle=PowerLifecycle::Ready;g_sleepRecoveryAutoPending=false;queued=0;SleepSteamRecovery::captured={};state={};ymcc::sleeppower::nativeWakeFacts.resetLocked();}
+static void entryJoinOldPbt(){ymcc::sleeppower::nativeWakeFacts.interactive(7,7,2999,4000,fixtureNow);}
+static void entryJoinNewPbt(){ymcc::sleeppower::nativeWakeFacts.interactive(7,7,3002,4000,fixtureNow);}
+static void entryJoinEntry(){ymcc::sleeppower::nativeWakeFacts.kernel(7,506,1,-1,entryJoinE,fixtureNow);}
+static void entryJoinExit(){ymcc::sleeppower::nativeWakeFacts.kernel(7,507,5,-1,entryJoinC,fixtureNow);ymcc::sleeppower::nativeWakeFacts.ready(7);}
+static void entryJoinInitial(){entryJoinReset();entryJoinOldPbt();entryJoinExit();arm(7);require(g_sleepRecoveryAutoPending&&state.phase=="waiting","unobserved-entry-precondition-not-admitted");require(state.wakeAdmission.value("source",std::string())=="interactive-resume-committed-ready","wrong-admission-source");}
+
+static constexpr ULONGLONG strictFirst=entryJoinE-20000ULL,strictEntry=entryJoinE+30000ULL,strictNext=entryJoinE+50000ULL;
+static void strictInitial(){entryJoinReset();ymcc::sleeppower::nativeWakeFacts.kernel(7,507,1,-1,strictFirst,fixtureNow);arm(7);require(state.phase=="waiting"&&g_sleepRecoveryAutoPending,"strict507-not-armed");require(state.wakeAdmission.value("source",std::string())=="kernel-power-507-reason-1","strict507-source-missing");}
+static void strictLateEntry(){fixtureTick+=100;fixtureNow+=1000000;ymcc::sleeppower::nativeWakeFacts.kernel(7,506,1,-1,strictEntry,fixtureNow);}
+static void strictSuccessor(){fixtureTick+=100;fixtureNow+=1000000;ymcc::sleeppower::nativeWakeFacts.interactive(7,7,fixtureTick,fixtureTick,fixtureNow);ymcc::sleeppower::nativeWakeFacts.kernel(7,507,1,-1,strictNext,fixtureNow);ymcc::sleeppower::nativeWakeFacts.ready(7);captureReady(7);}
+int main(int argc,char** argv){
+
+ if(argc==2&&std::string(argv[1])=="ready-entry-revocation"){
+ test("public-entry-revokes-old-ready-operation-before-window-dispatch",[]{
+    strictInitial();require(wakeOperationAllows(7,1),"original-strict-operation-not-admitted");
+    strictLateEntry();
+    require(g_powerLifecycle==PowerLifecycle::Ready&&fixtureClassified&&fixtureGeneration==7,"public-entry-did-not-precede-window-dispatch");
+    require(proofSupersededLocked(),"public-entry-did-not-supersede-admitted-exit");
+    require(!wakeOperationAllows(7,1),"old-ready-operation-still-allowed-after-public-entry");
+    require(state.phase=="waiting"&&queued==0,"permission-check-mutated-consumer");
+ });
+ test("older-entry-and-legacy-ready-do-not-revoke-operation",[]{
+    strictInitial();require(ymcc::sleeppower::nativeWakeFacts.kernel(7,506,1,-1,strictFirst-1,fixtureNow),"older-entry-not-recorded");
+    require(wakeOperationAllows(7,1),"older-entry-revoked-current-strict-proof");
+    entryJoinReset();entryJoinEntry();
+    require(wakeOperationAllows(7,1),"ready-precheck-without-strict-admission-changed");
+ });
+ test("qualified-successor-restores-ready-operation-without-resetting-clock",[]{
+    strictInitial();const auto first=state.armed;strictLateEntry();tick();strictSuccessor();
+    require(wakeOperationAllows(7,1),"qualified-public-successor-did-not-restore-operation");
+    require(state.armed==first&&queued==0,"successor-refunded-clock-or-dispatched-action");
+ });
+ std::cout<<"ENTRY_JOIN_CONSUMER "<<json{{"tests",rows.size()},{"fixtureChecks",fixtureChecks},{"failed",failed},{"cases",rows},{"selection","ready-entry-revocation"},{"nativeOsActions",0}}.dump()<<"\n";return failed?3:0;
+ }
+
+ if(argc==2&&std::string(argv[1])=="repeated-entry"){
+ const auto initial=[](){entryJoinReset();entryJoinOldPbt();ymcc::sleeppower::nativeWakeFacts.kernel(7,507,5,-1,entryJoinE+100000ULL,fixtureNow);ymcc::sleeppower::nativeWakeFacts.ready(7);arm(7);require(state.phase=="waiting"&&state.wakeAdmission.value("source",std::string())=="interactive-resume-committed-ready","repeated-initial-not-interactive");};
+ const auto twice=[](){entryJoinEntry();tick();require(state.wakeContinuation.awaiting(),"repeated-first-entry-not-parked");entryJoinNewPbt();captureReady(7);require(state.phase=="waiting"&&state.wakeAdmission.value("eventFileTime",std::string())==std::to_string(entryJoinNew),"repeated-first-successor-not-admitted");ymcc::sleeppower::nativeWakeFacts.kernel(7,506,1,-1,entryJoinE+30000ULL,fixtureNow);tick();require(state.wakeContinuation.awaiting(),"repeated-second-entry-not-parked");};
+ test("repeated-interactive-retirement-preserves-first-utc",[&]{initial();const auto first=state.armed,stage=state.stageSince;twice();require(state.wakeContinuation.retiredEvent()==entryJoinOld,"interactive-second-retirement-replaced-first-utc");require(state.armed==first&&state.stageSince==stage&&state.seenGeneration==7&&queued==0,"repeated-interactive-refunded-episode");ymcc::sleeppower::nativeWakeFacts.interactive(7,7,3004,4000,fixtureNow);captureReady(7);require(state.phase=="waiting"&&state.wakeContinuation.retiredEvent()==entryJoinOld&&state.armed==first,"repeated-interactive-successor-refunded");});
+ test("repeated-interactive-cannot-extend-original-utc-permit",[&]{initial();twice();ymcc::sleeppower::nativeWakeFacts.interactive(7,7,3004,4000,fixtureNow);captureReady(7);require(state.phase=="waiting"&&g_sleepRecoveryAutoPending,"repeated-final-successor-missing");fixtureNow=entryJoinOld+60000ULL*10000ULL;fixtureTick+=10;require(!wakeOperationAllows(7,1),"interactive-second-retirement-extended-original-utc-permit");require(queued==0,"repeated-interactive-submitted-action");});
+ test("repeated-public107-retirement-preserves-first-utc",[]{ymcc::sleeppower::WakeIdentity id{7,1,9,134392907000000000ULL,10708,134392903158823114ULL};ymcc::sleeppower::WakeContinuation kept;kept.begin(id,1000,1000);require(kept.park(id,1001,entryJoinOld,107,entryJoinOld,true,true),"repeated107-first-park-missing");kept.resumed();require(kept.park(id,1002,entryJoinNew,107,entryJoinNew,true,true),"repeated107-second-park-missing");require(kept.retiredEvent()==entryJoinOld,"second107-retirement-replaced-first-utc");require(!kept.operationCurrent(entryJoinOld+60000ULL*10000ULL),"repeated107-original-utc-window-refunded");});
+
+ test("repeated-mixed-public-retirement-keeps-first-utc",[]{ymcc::sleeppower::WakeIdentity id{7,1,9,134392907000000000ULL,10708,134392903158823114ULL};ymcc::sleeppower::WakeContinuation kept;kept.begin(id,1000,1000);require(kept.park(id,1001,entryJoinOld,107,entryJoinOld,true,true),"mixed-first107-not-parked");kept.resumed();require(kept.parkSupersededEntry(id,1002,entryJoinOld+100000ULL,entryJoinOld+10000ULL,entryJoinOld+20000ULL,true,true),"mixed-strict-entry-not-parked");kept.resumed();require(kept.parkInteractiveEntry(id,1003,entryJoinOld+100000ULL,entryJoinOld+30000ULL,entryJoinOld+60000ULL,entryJoinOld+40000ULL,true,true),"mixed-interactive-not-parked");require(kept.retiredEvent()==entryJoinOld&&kept.armed()==1000&&kept.stage()==1000,"mixed-retirement-replaced-first-anchors");require(!kept.canContinue(id,1004,entryJoinOld+60000ULL*10000ULL,true,true,true,false,true,507,entryJoinOld+50000ULL,0,0),"mixed-expired-original-utc-continued");});
+ test("repeated-retirement-identity-reservation-and-deadlines-refuse",[]{for(int kind=0;kind<2;++kind)for(int mode=0;mode<5;++mode){ymcc::sleeppower::WakeIdentity id{7,1,9,134392907000000000ULL,10708,134392903158823114ULL};ymcc::sleeppower::WakeContinuation kept;kept.begin(id,1000,1000);require(kept.park(id,1001,entryJoinOld,107,entryJoinOld,true,true),"veto-first-not-parked");kept.resumed();auto other=id;if(mode==0)++other.request;const auto tick=mode==3?31000ULL:1002ULL,utc=mode==4?entryJoinOld+60000ULL*10000ULL:entryJoinOld+100000ULL;const bool result=kind==0?kept.park(other,tick,utc,107,entryJoinNew,mode!=1,mode!=2):kept.parkInteractiveEntry(other,tick,utc,entryJoinNew,entryJoinNew+100000ULL,entryJoinNew+10000ULL,mode!=1,mode!=2);require(!result&&!kept.awaiting()&&kept.retiredEvent()==entryJoinOld,"repeated-veto-refunded-or-parked");}});
+ std::cout<<"ENTRY_JOIN_CONSUMER "<<json{{"tests",rows.size()},{"fixtureChecks",fixtureChecks},{"failed",failed},{"cases",rows},{"actualFunctionFragments",22},{"completeFunctions",20},{"actualRuntimeReaders",2},{"nativeOsActions",0},{"fullMainExecuted",false},{"selection","repeated-entry"}}.dump()<<"\n";return failed?3:0;
+ }
+ if(argc!=2||std::string(argv[1])!="strict-entry"){std::cerr<<"unknown selection\n";return 64;}
+ test("strict-late-entry-preserves-original-episode",[]{strictInitial();const auto first=state.armed,stage=state.stageSince;strictLateEntry();tick();require(state.armed==first&&state.stageSince==stage,"strict-entry-refunded-original-clocks");require(state.seenGeneration==7&&state.wakeContinuation.awaiting(),"strict-entry-surrendered-generation");require(!g_sleepRecoveryAutoPending&&queued==0,"strict-entry-submitted-action");strictSuccessor();require(g_sleepRecoveryAutoPending&&state.phase=="waiting","strict-successor-did-not-continue");require(state.armed==first&&state.stageSince==stage,"strict-successor-refunded-clocks");require(SteamOriginalRecovery::wakeProof(7,1).eventFileTime==strictNext,"strict-runtime-reader-not-current");});
+ test("strict-late-entry-uncertain-receipt-no-new-admission",[]{strictInitial();state.receipt={{"mutated",false}};strictLateEntry();tick();strictSuccessor();require(state.wakeAdmission.value("eventFileTime",std::string())!=std::to_string(strictNext),"strict-entry-uncertain-receipt-readmitted");require(queued==0,"strict-entry-uncertain-receipt-replayed");});
+
+ test("strict-current-facts-before-tick-continue",[]{strictInitial();const auto first=state.armed;strictLateEntry();strictSuccessor();tick();require(g_sleepRecoveryAutoPending&&state.phase=="waiting","strict-existing-facts-not-consumed");require(state.armed==first&&queued==0,"strict-existing-facts-refunded-or-dispatched");});
+ test("strict-original-ready-deadline-is-not-refunded",[]{strictInitial();const auto first=state.armed;strictLateEntry();tick();fixtureTick=first+30000;strictSuccessor();require(!g_sleepRecoveryAutoPending&&state.armed==first,"strict-expired-ready-rearmed");});
+ test("strict-reservations-and-unknown-receipts-refuse",[]{for(int i=0;i<6;++i){strictInitial();if(i==0)state.listAttempted=true;if(i==1)state.inputAttempted=true;if(i==2)state.inputDispatches=1;if(i==3)state.receipt={{"accepted",false}};if(i==4)state.receipt=json::array();if(i==5)state.receipt="unknown";strictLateEntry();tick();strictSuccessor();require(!g_sleepRecoveryAutoPending&&queued==0,"strict-reserved-or-unknown-rearmed");require(state.wakeAdmission.value("eventFileTime",std::string())!=std::to_string(strictNext),"strict-reserved-proof-replaced");}});
+ test("strict-original-owner-must-remain-current",[]{for(int i=0;i<4;++i){strictInitial();strictLateEntry();tick();if(i==0)fixtureAllowed=false;if(i==1)SleepSteamRecovery::captured.request->cancellation->value=false;if(i==2)g_exitRequested=true;if(i==3)++g_sleepRecoveryAutoConfigEpoch;strictSuccessor();require(!g_sleepRecoveryAutoPending&&queued==0,"strict-revoked-owner-rearmed");}});
+ test("strict-repeated-entry-keeps-first-utc-anchor",[]{strictInitial();const auto first=state.armed;strictLateEntry();tick();strictSuccessor();require(state.wakeContinuation.retiredEvent()==strictFirst,"strict-first-utc-not-retained");fixtureNow+=1000000;fixtureTick+=100;ymcc::sleeppower::nativeWakeFacts.kernel(7,506,1,-1,strictNext+10000ULL,fixtureNow);tick();require(state.wakeContinuation.awaiting()&&state.wakeContinuation.retiredEvent()==strictFirst&&state.armed==first,"strict-second-entry-refunded-anchors");fixtureNow=strictFirst+60000ULL*10000ULL;strictSuccessor();require(!g_sleepRecoveryAutoPending,"strict-expired-utc-rearmed");});
+ test("strict-incomplete-public-join-cannot-continue",[]{strictInitial();strictLateEntry();tick();fixtureTick+=100;fixtureNow+=1000000;ymcc::sleeppower::nativeWakeFacts.kernel(7,507,1,-1,strictNext,fixtureNow);ymcc::sleeppower::nativeWakeFacts.ready(7);captureReady(7);require(!g_sleepRecoveryAutoPending&&state.wakeContinuation.awaiting()&&queued==0,"strict-exit-ready-without-interactive-admitted");});
+ std::cout<<"ENTRY_JOIN_CONSUMER "<<json{{"tests",rows.size()},{"fixtureChecks",fixtureChecks},{"failed",failed},{"cases",rows},{"actualFunctionFragments",20},{"completeFunctions",17},{"actualRuntimeReaders",2},{"nativeOsActions",0},{"fullMainExecuted",false}}.dump()<<"\n";return failed?3:0;
+}

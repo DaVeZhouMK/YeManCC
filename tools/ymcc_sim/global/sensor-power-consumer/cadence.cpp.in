@@ -33,12 +33,13 @@ static std::atomic<bool> g_inputReady{true};
 // PRODUCTION_META
 static InputCaptureSensorMeta fixtureMeta;
 static InputCaptureSensorMeta inputCaptureSensorMetaSnapshot(){return fixtureMeta;}
-static int disables=0,enables=0,rebuilds=0;
+static int disables=0,enables=0,rebuilds=0,fixtureLocateCalls=0;
+static CONFIGRET fixtureLocateResult=CR_SUCCESS,fixtureDisableResult=CR_SUCCESS,fixtureEnableResult=CR_SUCCESS;
 static bool fixtureRog=true;
 static bool machineIsRogAllyFamily(){return fixtureRog;}
-static CONFIGRET testLocate(DEVINST* p,DEVINSTID_W,ULONG){*p=1;return CR_SUCCESS;}
-static CONFIGRET testDisable(DEVINST,ULONG){++disables;return CR_SUCCESS;}
-static CONFIGRET testEnable(DEVINST,ULONG){++enables;return CR_SUCCESS;}
+static CONFIGRET testLocate(DEVINST* p,DEVINSTID_W,ULONG){++fixtureLocateCalls;*p=1;return fixtureLocateResult;}
+static CONFIGRET testDisable(DEVINST,ULONG){++disables;return fixtureDisableResult;}
+static CONFIGRET testEnable(DEVINST,ULONG){++enables;return fixtureEnableResult;}
 static void testSleep(DWORD ms){fixtureTick+=ms;}
 #define CM_Locate_DevNodeW testLocate
 #define CM_Disable_DevNode testDisable
@@ -52,6 +53,7 @@ static void check(bool ok,const std::string& name){++checks;if(!ok)throw std::ru
 static const json* findEvent(const char* name){for(auto it=events.rbegin();it!=events.rend();++it)if((*it)["event"]==name)return &*it;return nullptr;}
 static void reset(const char* family="winrt",UINT32 interval=10,const char* device="\\\\?\\ACPI#BOSC0200#1#{sensor}",bool rog=true){
  g_gyroJudgeTaskEnabled.store(false);g_gyroJudgeTaskEpoch.fetch_add(1);inputCaptureSensorHighMagKeepaliveStep();
+ fixtureLocateResult=fixtureDisableResult=fixtureEnableResult=CR_SUCCESS;fixtureLocateCalls=0;
  fixtureTick=1000;events.clear();disables=enables=rebuilds=0;g_sensorRebindCount=0;fixtureRog=rog;
  g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;g_inputCaptureSensorsSuspended=false;
  g_inputCaptureSink=std::make_shared<InputCaptureSensorSink>();g_inputCaptureSink->SetBindingGeneration(1);
@@ -108,6 +110,37 @@ static void activationCases(){
  runtime.clear();input["gyroMotion"]["virtualPadLink"]=false;auto unlinked=runtime.toggle(input,"session","input.virtualGamepadToggle","steamdeck");check(!unlinked.effective["gyroMotion"]["enabled"].get<bool>(),"link OFF leaves gyro OFF");
 }
 int main(){try{
+#ifdef YMCC_CADENCE_PNP_EVIDENCE_ONLY
+ for(unsigned kind=0;kind<4;++kind){
+  reset();
+  const auto passive=findEvent("gyro-judge-observe");check(passive&&!passive->contains("pnpOutcome"),"passive observation does not invent a PnP outcome");
+  if(kind==0)fixtureLocateResult=static_cast<CONFIGRET>(0x35);
+  if(kind==1)fixtureDisableResult=static_cast<CONFIGRET>(0x37);
+  if(kind==2)fixtureEnableResult=static_cast<CONFIGRET>(0x39);
+  failInitialAndMove();
+  const auto row=findEvent("gyro-judge-rearm");check(row!=nullptr,"original motion caller reaches existing rearm carrier");
+  const char* phase=kind==0?"locate":kind==1?"disable":"enable";
+  const char* api=kind==0?"CM_Locate_DevNodeW":kind==1?"CM_Disable_DevNode":"CM_Enable_DevNode";
+  const unsigned long code=kind==0?0x35:kind==1?0x37:kind==2?0x39:0;
+  check(row->contains("pnpOutcome")&&(*row)["pnpOutcome"]["phase"]==phase&&(*row)["pnpOutcome"]["api"]==api&&
+    (*row)["pnpOutcome"]["codeKnown"]==true&&(*row)["pnpOutcome"]["codeDomain"]=="CONFIGRET"&&(*row)["pnpOutcome"]["code"]==code&&
+    (*row)["pnpOutcome"]["status"]==(kind==3?"succeeded":"failed"),"existing rearm carrier retains exact CONFIGRET stage and code");
+  check((*row)["pnpReset"]==(kind==3)&&fixtureLocateCalls==1&&disables==(kind==0?0:1)&&enables==(kind<2?0:1)&&rebuilds==1,
+    "raw API branch and original WinRT fallback counts remain unchanged");
+  unsigned rearm=0;for(const auto& item:events)rearm+=item["event"]=="gyro-judge-rearm";
+  const auto countBefore=events.size();for(unsigned repeat=0;repeat<50000;++repeat)inputCaptureSensorHighMagKeepaliveStep();
+  check(rearm==1&&events.size()==countBefore&&fixtureLocateCalls==1&&g_gyroJudgeState==GyroJudgeState::Sampling,
+    "50000 warmup observations create no extra PnP action or rearm row");
+ }
+ reset("winrt",10,"");failInitialAndMove();
+ const auto skipped=findEvent("gyro-judge-rearm");
+ check(skipped&&(*skipped)["pnpOutcome"]["status"]=="skipped"&&(*skipped)["pnpOutcome"]["phase"]=="admission"&&
+    (*skipped)["pnpOutcome"]["codeKnown"]==false&&(*skipped)["pnpOutcome"]["codeDomain"].is_null()&&(*skipped)["pnpOutcome"]["code"].is_null(),
+    "no instance skip keeps unknown code distinct from API success zero");
+ check(fixtureLocateCalls==0&&disables==0&&enables==0&&rebuilds==1&&(*skipped)["pnpReset"]==false,
+    "skip emits existing fallback result without an extra PnP call");
+ std::cout<<json{{"status","pass"},{"checks",checks},{"selection","pnp-evidence"},{"deviceIo",false}}.dump()<<std::endl;return 0;
+#endif
 #ifdef YMCC_CADENCE_HIGH_RATE_ONLY
  healthy(500);
  std::cout<<json{{"status","pass"},{"checks",checks},{"selection","high-rate"}}.dump()<<std::endl;return 0;

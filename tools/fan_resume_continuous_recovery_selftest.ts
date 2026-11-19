@@ -10,7 +10,7 @@
  *   原控制意图有效；睡前 Close 已结束且 OEM 软件恢复确认；唤醒通知遗漏 / 公共 phase 陈旧；
  *   native 与原 Host 都仍报 Suspended；用户手动开启/调节。
  *
- * 只替换系统/设备边界（adapter/launcher 夹具 + 可注入 native power.lifecycle 只读快照），
+ * 只替换系统/设备边界（adapter/launcher 夹具及 native 读/手动请求端口），
  * 不替代桥、准入、任务调度、UI 受理代码——全部走 FanHostLifecycle 的真实生产路径。
  * 无硬件写入、不启动真实 Host、不触 EC、不睡眠工作机。
  */
@@ -311,6 +311,7 @@ function makeLifecycle(
   readNativePowerState: NativeProbe,
   deadlineMs = 1200,
   launcher: FanHostLauncher = new FakeLauncher(),
+  requestManualWake?: (generation?: number) => Promise<{ ok: boolean; generation: number; phase: 'ready'; admitted: boolean }>,
 ): FanHostLifecycle {
   return new FanHostLifecycle({
     enabled: true,
@@ -319,7 +320,52 @@ function makeLifecycle(
     heartbeatIntervalMs: 0,
     resumeWaitDeadlineMs: deadlineMs,
     readNativePowerState,
+    requestManualWake,
   });
+}
+
+async function enterManualT4Fixture(adapter: FakeAdapter, inputReady: boolean, resumeReady: boolean) {
+  let native = nativeState(0, 'ready', inputReady, false);
+  let reads = 0;
+  let requests = 0;
+  const lifecycle = makeLifecycle(adapter, async () => { reads += 1; return native; }, 1200, new FakeLauncher(),
+    async generation => {
+      assert(generation === 2 && native.phase === 'suspended', 'T4: only the current stale boundary may receive a manual request');
+      assert(adapter.remoteStateName === 'Suspended', 'T4: no Host session may open before Native accepts the manual request');
+      requests += 1;
+      native = nativeState(generation, 'ready', inputReady, true);
+      return { ok: true, generation, phase: 'ready', admitted: true };
+    });
+  await enterPostSleepStaleSuspended(lifecycle, adapter);
+  native = nativeState(2, 'suspended', inputReady, resumeReady);
+  reads = 0;
+  return { lifecycle, reads: () => reads, requests: () => requests };
+}
+
+function makeMissedEdgeFixture(adapter: FakeAdapter, wakeGeneration: number) {
+  let native = nativeState(0, 'ready', true, false);
+  let reads = 0;
+  let requests = 0;
+  const lifecycle = makeLifecycle(adapter, async () => { reads += 1; return native; }, 1200, new FakeLauncher(),
+    async generation => {
+      assert(generation === wakeGeneration && native.phase === 'suspended', 'R7: only the latest suspended generation may receive the manual request');
+      assert(adapter.remoteStateName === 'Suspended' && !adapter.remoteOpenCalled, 'R7: the Host must remain closed until Native admits recovery');
+      requests += 1;
+      native = nativeState(wakeGeneration, 'ready', true, true);
+      return { ok: true, generation: wakeGeneration, phase: 'ready', admitted: true };
+    });
+  return {
+    lifecycle,
+    reads: () => reads,
+    requests: () => requests,
+    setPriorWake: () => { native = nativeState(1, 'ready', true, true); },
+    missCurrentEdge: () => {
+      native = nativeState(wakeGeneration, 'suspended', true, false);
+      adapter.markSleepClosedSuspended();
+      adapter.snapshotGeneration = wakeGeneration;
+      adapter.calls.length = 0;
+    },
+  };
 }
 
 /**
@@ -506,9 +552,14 @@ class CancelHeartbeatAdapter extends FakeAdapter {
 }
 
 type CaseResult = { name: string; ok: boolean; detail?: string };
+const runT4Only = process.argv[2] === '--t4-only';
+if (process.argv.length > (runT4Only ? 3 : 2)) throw new Error('Unknown continuous-recovery fixture selection');
+let selectedPasses = 0;
 async function runCase(name: string, fn: () => Promise<void>): Promise<void> {
+  if (runT4Only && !/^T4[abc](?: |-|$)/.test(name)) return;
   try {
     await fn();
+    selectedPasses += 1;
     console.log(`PASS  ${name}`);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -543,11 +594,9 @@ async function main(): Promise<void> {
     'T4a stale Suspended both sides + persisted resumeReady + manual start must be admitted, recover, and apply the latest curve',
     async () => {
       const adapter = new FakeAdapter();
-      let reads = 0;
-      const lifecycle = makeLifecycle(adapter, async () => { reads += 1; return nativeState(2, 'suspended', false, true); });
-      await enterPostSleepStaleSuspended(lifecycle, adapter);
+      const { lifecycle, reads, requests } = await enterManualT4Fixture(adapter, false, true);
 
-      const start = await lifecycle.start().then(
+      const start = await lifecycle.start({ manualRecovery: true }).then(
         (value) => ({ settled: 'fulfilled' as const, value, error: null as Error | null }),
         (error: Error) => ({ settled: 'rejected' as const, value: null, error }),
       );
@@ -555,7 +604,8 @@ async function main(): Promise<void> {
         start.settled === 'fulfilled',
         `P2: the manual request must be admitted as a recovery intent, not rejected (field failure reproduced): ${start.error?.message}`,
       );
-      assert(reads >= 1, 'P2: the Fan-specific compensation must consult the native power transaction');
+      assert(reads() >= 1, 'P2: the Fan-specific compensation must consult the native power transaction');
+      assert(requests() === 1, 'P2: the explicit click must request current Native admission once');
       assert(
         adapter.calls.filter((call) => call === 'resume').length === 1,
         `P2: exactly one bounded Host resume must be driven after the missed wake edge; got ${JSON.stringify(adapter.calls)}`,
@@ -580,14 +630,14 @@ async function main(): Promise<void> {
     'T4a-start-entry manual click must rescue a stale Suspended Host before the first curve write',
     async () => {
       const adapter = new FakeAdapter();
-      const lifecycle = makeLifecycle(adapter, async () => nativeState(2, 'suspended', true, false));
-      await enterPostSleepStaleSuspended(lifecycle, adapter);
+      const { lifecycle, requests } = await enterManualT4Fixture(adapter, true, false);
       adapter.calls.length = 0;
       const gate = await lifecycle.start({
         manualRecovery: true,
         reason: 'user-action-while-suspended',
       });
       assert(gate.allowed, 'T0 first-click entry must remain accepted while the stale wake is recoverable');
+      assert(requests() === 1, 'T0 first-click entry must request current Native admission once');
       assert(
         adapter.calls.filter((call) => call === 'resume').length === 1,
         `T0 first-click entry must issue exactly one Host resume, got ${JSON.stringify(adapter.calls)}`,
@@ -607,20 +657,21 @@ async function main(): Promise<void> {
     'R7 missed power edge while local Fan remains active: first control click is manual recovery, not disable',
     async () => {
       const adapter = new FakeAdapter();
-      let native = nativeState(0, 'ready', true, false);
-      const lifecycle = makeLifecycle(adapter, async () => native);
+      const { lifecycle, requests, missCurrentEdge } = makeMissedEdgeFixture(adapter, 2);
       await lifecycle.start();
       await lifecycle.applyPreset('balanced', CURVE);
-      native = nativeState(2, 'suspended', true, false);
+      missCurrentEdge();
       const manual = await lifecycle.needsManualRecoveryForControlAsync();
       assert(manual, 'R7: a current native Suspended snapshot must classify the first click as recovery');
       assert(lifecycle.state === 'suspended', `R7: snapshot sync must mark local lifecycle suspended, got ${lifecycle.state}`);
       assert(lifecycle.coordinatorSnapshot.powerGeneration === 2, 'R7: snapshot sync must adopt the native generation');
+      assert(requests() === 0 && adapter.calls.length === 0, 'R7: classification alone must not dispatch recovery or touch the Host');
       const gate = await lifecycle.start({ manualRecovery: true, reason: 'user-action-after-missed-power-edge' });
       assert(gate.allowed, 'R7: manual recovery must remain accepted after snapshot synchronization');
       assert(adapter.calls.filter((call) => call === 'resume').length === 1, `R7: recovery must issue one Host resume, calls=${JSON.stringify(adapter.calls)}`);
       await lifecycle.apply(curveShifted(8));
       assert(adapter.calls.includes('enable'), 'R7: recovery must make the first post-wake curve writable');
+      assert(requests() === 1 && adapter.enableNodes[1]?.dutyPercent === 33, 'R7: the first click must request admission once and write the new curve');
       await closeQuietly(lifecycle);
     },
   );
@@ -632,12 +683,11 @@ async function main(): Promise<void> {
     'R7b stale-local-generation ready cannot hide a newer native Suspended generation from the first manual click',
     async () => {
       const adapter = new FakeAdapter();
-      let native = nativeState(0, 'ready', true, false);
-      const lifecycle = makeLifecycle(adapter, async () => native);
+      const { lifecycle, requests, setPriorWake, missCurrentEdge } = makeMissedEdgeFixture(adapter, 2);
       try {
         await lifecycle.start();
         await lifecycle.applyPreset('balanced', CURVE);
-        native = nativeState(1, 'ready', true, true);
+        setPriorWake();
         lifecycle.setPowerGeneration(1);
         lifecycle.observePowerBoundary('resuming', 1);
         lifecycle.observePowerBoundary('resume-ready', 1);
@@ -645,16 +695,18 @@ async function main(): Promise<void> {
         assert(lifecycle.coordinatorSnapshot.powerGeneration === 1, 'R7b: fixture must begin at the prior wake-ready generation');
         assert(!lifecycle.needsManualRecoveryForControl(), 'R7b: the prior generation must look locally healthy before its missed next sleep edge');
 
-        native = nativeState(2, 'suspended', true, false);
+        missCurrentEdge();
         const manual = await lifecycle.needsManualRecoveryForControlAsync();
         assert(manual, 'R7b: explicit toggle must consult native even when local generation 1 is already wake-ready');
         assert(lifecycle.coordinatorSnapshot.powerGeneration === 2, 'R7b: local coordinator must adopt the native current generation');
         assert(lifecycle.state === 'suspended', 'R7b: stale local ready must reconcile to suspended, got ' + lifecycle.state);
+        assert(requests() === 0 && adapter.calls.length === 0, 'R7b: classification alone must not dispatch recovery or touch the Host');
         const gate = await lifecycle.start({ manualRecovery: true, reason: 'user-action-after-missed-next-generation-edge' });
         assert(gate.allowed, 'R7b: explicit recovery must be accepted after stale-generation reconciliation');
         assert(adapter.calls.filter((call) => call === 'resume').length >= 1, 'R7b: Host resume required, calls=' + JSON.stringify(adapter.calls));
         await lifecycle.apply(curveShifted(9));
         assert(adapter.calls.includes('enable'), 'R7b: the requested curve must be writable after Open/OpenEvents');
+        assert(requests() === 1 && adapter.enableNodes[1]?.dutyPercent === 34, 'R7b: the first click must request admission once and write the new curve');
       } finally {
         await closeQuietly(lifecycle);
       }
@@ -667,13 +719,11 @@ async function main(): Promise<void> {
     'R7c already-suspended local generation still reconciles the latest native power transaction before manual resume',
     async () => {
       const adapter = new FakeAdapter();
-      let native = nativeState(0, 'ready', true, false);
-      let reads = 0;
-      const lifecycle = makeLifecycle(adapter, async () => { reads += 1; return native; });
+      const { lifecycle, reads, requests, setPriorWake, missCurrentEdge } = makeMissedEdgeFixture(adapter, 3);
       try {
         await lifecycle.start();
         await lifecycle.applyPreset('balanced', CURVE);
-        native = nativeState(1, 'ready', true, true);
+        setPriorWake();
         lifecycle.setPowerGeneration(1);
         lifecycle.observePowerBoundary('resuming', 1);
         lifecycle.observePowerBoundary('resume-ready', 1);
@@ -682,17 +732,19 @@ async function main(): Promise<void> {
         lifecycle.observePowerBoundary('suspending', 2);
         await lifecycle.suspend();
         assert(lifecycle.state === 'suspended', 'R7c: local Fan must be suspended at the prior generation');
-        native = nativeState(3, 'suspended', true, false);
-        const readsBeforeManual = reads;
+        missCurrentEdge();
+        const readsBeforeManual = reads();
         const manual = await lifecycle.needsManualRecoveryForControlAsync();
         assert(manual, 'R7c: local suspended state remains a manual recovery request');
-        assert(reads > readsBeforeManual, 'R7c: local Suspended must not short-circuit the authoritative native read');
+        assert(reads() > readsBeforeManual, 'R7c: local Suspended must not short-circuit the authoritative native read');
         assert(lifecycle.coordinatorSnapshot.powerGeneration === 3, 'R7c: the manual path must adopt the current native generation');
+        assert(requests() === 0 && adapter.calls.length === 0, 'R7c: classification alone must not dispatch recovery or touch the Host');
         const gate = await lifecycle.start({ manualRecovery: true, reason: 'manual-control-after-missed-next-generation' });
         assert(gate.allowed, 'R7c: current generation manual recovery must be accepted');
         assert(adapter.calls.includes('resume'), 'R7c: current generation must reach Host resume');
         await lifecycle.apply(curveShifted(10));
         assert(adapter.calls.includes('enable'), 'R7c: the requested curve must be written after Host Open/OpenEvents');
+        assert(requests() === 1 && adapter.enableNodes[1]?.dutyPercent === 35, 'R7c: the first click must request admission once and write the new curve');
       } finally {
         await closeQuietly(lifecycle);
       }
@@ -898,11 +950,12 @@ async function main(): Promise<void> {
     'T4a-manual-rescue stale Suspended without resumeReady must rearm Host after an explicit apply',
     async () => {
       const adapter = new FakeAdapter();
-      const lifecycle = makeLifecycle(adapter, async () => nativeState(2, 'suspended', true, false));
-      await enterPostSleepStaleSuspended(lifecycle, adapter);
+      const { lifecycle, requests } = await enterManualT4Fixture(adapter, true, false);
       await lifecycle.start();
+      assert(requests() === 0, 'T0 ordinary startup must not promote a stale Native sleep phase');
       adapter.calls.length = 0;
       await lifecycle.apply(curveShifted(7));
+      assert(requests() === 1, 'T0 explicit apply must request current Native admission once');
       const resumeCalls = adapter.calls.filter((call) => call === 'resume').length;
       assert(resumeCalls === 1, `T0 manual rescue must issue exactly one Host resume, got ${JSON.stringify(adapter.calls)}`);
       assert(adapter.remoteOpenCalled === true, 'T0 manual rescue Host resume must prove Open/OpenEvents before write');
@@ -1047,14 +1100,18 @@ async function main(): Promise<void> {
       const lifecycle = new FanHostLifecycle({ enabled: true, adapter, launcher, heartbeatIntervalMs: 10,
         readNativePowerState: async () => nativeState(0, 'ready', true, false) });
       let submissions = 0;
-      const heartbeat = lifecycle.heartbeat.bind(lifecycle);
-      lifecycle.heartbeat = async () => { submissions++; return heartbeat(); };
+      const maintenance = lifecycle as unknown as { renewHeartbeat(fromTimer: boolean): Promise<FanLease> };
+      const renewHeartbeat = maintenance.renewHeartbeat.bind(lifecycle);
+      maintenance.renewHeartbeat = async (fromTimer) => {
+        if (fromTimer) submissions++;
+        return renewHeartbeat(fromTimer);
+      };
       try {
-        await lifecycle.start({ manualRecovery: true }); await lifecycle.apply(CURVE);
         adapter.holdHeartbeat();
+        await lifecycle.start({ manualRecovery: true }); await lifecycle.apply(CURVE);
         await waitFor(() => adapter.heartbeatEntered, 1000, 'timer heartbeat');
         await pause(85);
-        assert(submissions === 1, 'the real recurring timer must not enqueue many renewals behind its pending predecessor');
+        assert(submissions === 1, `the real recurring timer must submit exactly one renewal while its response is held; got ${submissions}`);
         const disabled = lifecycle.disable(); adapter.releaseHeartbeat(); await disabled;
         assert(!lifecycle.hasControlIntent, 'timer maintenance cannot revive a cancelled curve');
       } finally { adapter.releaseHeartbeat(); await closeQuietly(lifecycle); }
@@ -1356,9 +1413,12 @@ async function main(): Promise<void> {
     'R6.4 committed power.resumed compensates a lost fan.resume-ready edge',
     async () => {
       const adapter = new FakeAdapter();
-      const lifecycle = makeLifecycle(adapter, async () => nativeState(2, 'suspended', true, false));
+      let native = nativeState(2, 'suspended', true, false);
+      const lifecycle = makeLifecycle(adapter, async () => native);
       await enterPostSleepStaleSuspended(lifecycle, adapter);
       adapter.calls.length = 0;
+      // The notification is lost, not the authoritative Fan write admission.
+      native = nativeState(2, 'ready', true, true);
       lifecycle.observePowerBoundary('resumed', 2);
       await lifecycle.resumeAfterCommittedPowerWake(2);
       assert(adapter.calls.filter((call) => call === 'resume').length === 1,
@@ -1366,6 +1426,24 @@ async function main(): Promise<void> {
       assert(adapter.remoteOpenCalled === true, 'R6.4 committed wake must prove Open/OpenEvents before write');
       assert(adapter.enableCalls === 1, 'R6.4 committed wake must restore the remembered curve without a click');
       await lifecycle.close();
+    },
+  );
+
+  await runCase(
+    'R6.4 committed public wake cannot replace missing Fan write admission',
+    async () => {
+      const adapter = new FakeAdapter();
+      const lifecycle = makeLifecycle(adapter, async () => nativeState(2, 'suspended', true, false));
+      try {
+        await enterPostSleepStaleSuspended(lifecycle, adapter);
+        lifecycle.observePowerBoundary('resumed', 2);
+        const failure = await lifecycle.resumeAfterCommittedPowerWake(2).then(() => '', (error: Error) => error.message);
+        assert(failure.startsWith('FAN_MANUAL_WAKE_NOT_READY:'), 'R6.4: native Fan write admission must be required even after public commit');
+        assert(!adapter.calls.includes('acquire') && adapter.enableCalls === 0, 'R6.4: public commit alone must not acquire or write');
+        assert(lifecycle.hasControlIntent, 'R6.4: missing write admission must not discard the user curve');
+      } finally {
+        await closeQuietly(lifecycle);
+      }
     },
   );
 
@@ -1409,13 +1487,13 @@ async function main(): Promise<void> {
     'T4c no OEM/physical second evidence must not gate recovery (mutant that re-adds the OEM prerequisite fails here)',
     async () => {
       const adapter = new FakeAdapter();
-      const lifecycle = makeLifecycle(adapter, async () => nativeState(2, 'suspended', true, true));
-      await enterPostSleepStaleSuspended(lifecycle, adapter);
+      const { lifecycle, requests } = await enterManualT4Fixture(adapter, true, true);
       // 睡眠期 Host 已 Close；此后不再有任何 OEM 软件回执或物理第二证据可用。
       adapter.oemRestoreConfirmed = false;
 
-      await lifecycle.start();
+      await lifecycle.start({ manualRecovery: true });
       await lifecycle.apply(CURVE.map((node) => ({ ...node, dutyPercent: Math.min(100, node.dutyPercent + 5) })));
+      assert(requests() === 1, 'T4c: the original Native admission is still required when OEM evidence is unavailable');
       assert(adapter.calls.includes('enable'), 'T3/T4: first evidence must be sufficient to take over the route');
       // 关键的负向断言：enable 发生时没有任何 OEM 软件回执。
       assert(
@@ -1756,11 +1834,12 @@ async function main(): Promise<void> {
     },
   );
 
-  console.log('FAN-938 R5 T4: continuous-recovery load-bearing case (stale Suspended) + independent real-sleep counterexample + OEM-unknown non-gate counterexample PASS');
+  if (runT4Only) assert(selectedPasses === 5, 'T4-only selection must include all five cases');
+  console.log(`FAN-938 R5 ${runT4Only ? 'T4-only' : 'full suite'}: ${selectedPasses} PASS`);
 }
 
 void main().catch((error: unknown) => {
   const detail = error instanceof Error ? error.message : String(error);
-  console.error(`FAN-938 R5 T4: RED (expected before the P2 fix)\n${detail}`);
+  console.error(`FAN-938 R5 ${runT4Only ? 'T4-only' : 'full suite'}: FAIL\n${detail}`);
   process.exitCode = 1;
 });

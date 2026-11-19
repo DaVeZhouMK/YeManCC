@@ -128,7 +128,37 @@ struct Fixture {fs::path root,manifest,cache;std::string exe;Store store;
 static int run(const fs::path& requested,const std::string& selected){
  const auto root=fs::absolute(requested);if(fs::exists(root))throw std::runtime_error("fresh-identity-root-required");fs::create_directories(root);identityFixture::active=true;identityFixture::root=root.wstring();Json cases=Json::array();
  auto test=[&](const char* name,auto fn){if(!selected.empty()&&selected!=name)return;identityFixture::fault={};identityFixture::beforeStage={};identityFixture::afterCommit={};identityFixture::faults=0;Json row={{"name",name}};const auto start=assertions;try{Fixture f(root/std::to_wstring(cases.size()));fn(f);row["passed"]=true;}catch(const std::exception& e){row["passed"]=false;row["reason"]=e.what();}catch(...){row["passed"]=false;row["reason"]="unknown-exception";}row["assertions"]=assertions-start;cases.push_back(row);};
- test("identity-original-valid-roundtrip",[](auto& f){auto value=f.remember();require(value.value("verified",false)&&value.value("appId",0)==555,"valid-observation-not-reusable");require(f.store.identity(f.exe).value("appId",0)==555,"canonical-reread-failed");});
+ test("identity-original-valid-roundtrip",[](auto& f){
+  auto value=f.remember();require(value.value("verified",false)&&value.value("appId",0)==555,"valid-observation-not-reusable");require(f.store.identity(f.exe).value("appId",0)==555,"canonical-reread-failed");
+  Json rows=Json::array();unsigned failures=0;
+  const auto variant=[&](const char* name,auto action){Json row={{"name",name}};try{Fixture item(f.root.parent_path()/wide(name));action(item);row["passed"]=true;}catch(const std::exception& error){row["passed"]=false;row["error"]=error.what();++failures;}rows.push_back(std::move(row));};
+  for(const auto& version:Json::array({nullptr,1,2})){
+   const auto name=version.is_null()?"manifest-legacy":version==1?"manifest-v1":"manifest-v2";
+   variant(name,[&](auto& item){auto observation=Json::parse(bytes(item.manifest));if(!version.is_null())observation["schemaVersion"]=version;bytes(item.manifest,observation.dump());const auto result=item.remember();require(result.value("verified",false)&&result.value("appId",0)==555&&result.value("cachePersisted",false),"known-worker-manifest-rejected");const auto record=Json::parse(bytes(item.cache));require(record["schemaVersion"]==1&&item.store.identity(item.exe).value("appId",0)==555,"worker-schema-leaked-into-cache");});
+  }
+  unsigned index=0;for(const auto& version:Json::array({0,3,99,-1,"2",true,Json::object(),Json::array()})){
+   const auto name="manifest-unknown-"+std::to_string(index++);variant(name.c_str(),[&](auto& item){auto observation=Json::parse(bytes(item.manifest));observation["schemaVersion"]=version;bytes(item.manifest,observation.dump());const auto result=item.remember();require(!result.value("verified",false)&&!fs::exists(item.cache),"unknown-worker-schema-created-cache");});
+  }
+  variant("manifest-v2-tagged-future",[&](auto& item){auto observation=Json::parse(bytes(item.manifest));observation["schemaVersion"]=2;observation["schema"]="future.worker.v3";bytes(item.manifest,observation.dump());require(!item.remember().value("verified",false)&&!fs::exists(item.cache),"tagged-future-worker-accepted");});
+  variant("manifest-v2-wrong-target",[&](auto& item){auto observation=Json::parse(bytes(item.manifest));observation["schemaVersion"]=2;observation["exe"]=item.exe+"-foreign";bytes(item.manifest,observation.dump());require(!item.remember().value("verified",false)&&!fs::exists(item.cache),"worker-v2-target-check-bypassed");});
+  variant("manifest-v2-unverified-match",[&](auto& item){auto observation=Json::parse(bytes(item.manifest));observation["schemaVersion"]=2;observation["match"]={{"appId",555},{"formalName","Owned Game"}};bytes(item.manifest,observation.dump());require(!item.remember().value("verified",false)&&!fs::exists(item.cache),"worker-v2-unverified-hint-promoted");});
+  variant("manifest-v2-future-cache-preserved",[&](auto& item){auto record=item.record();record["schemaVersion"]=2;item.saved(record);const auto previous=bytes(item.cache);auto observation=Json::parse(bytes(item.manifest));observation["schemaVersion"]=2;bytes(item.manifest,observation.dump());const auto result=item.remember();require(!result.value("verified",false)&&!result.value("cachePersisted",false)&&bytes(item.cache)==previous&&item.unknown(),"worker-v2-downgraded-future-cache");});
+  variant("manifest-v2-newer-cache-preserved",[&](auto& item){auto record=item.record(match(777));record["updatedAt"]=now()+1000;item.saved(record);const auto previous=bytes(item.cache);auto observation=Json::parse(bytes(item.manifest));observation["schemaVersion"]=2;bytes(item.manifest,observation.dump());const auto result=item.remember();require(result.value("appId",0)==777&&!result.value("cachePersisted",false)&&bytes(item.cache)==previous,"worker-v2-overwrote-newer-cache");});
+  /* ORIGINAL_WORKER_MANIFEST_CAPTURE */
+  bytes(f.root.parent_path()/L"worker-manifest-observations.json",rows.dump(2));require(failures==0,"worker-manifest-contract-variant-failed");
+ });
+ test("identity-long-cache-staging-and-corrupt-preservation",[](auto& f){
+  for(const size_t length:{204u,217u,230u}){
+   const std::string prefix="G:\\IdentityLongPath\\",suffix="\\Game.exe";
+   f.exe=prefix+std::string(length-prefix.size()-suffix.size(),'x')+suffix;
+   f.cache=custom_steam_library::identity_cache::cachePath(f.root,f.exe);identityFixture::canonical=f.cache.wstring();f.observation();
+   require(f.exe.size()==length&&f.cache.filename().wstring().size()<=235,"long-cache-fixture-contract");
+   const auto original=f.remember();require(original.value("verified",false)&&original.value("cachePersisted",false)&&f.store.identity(f.exe).value("appId",0)==555,"long-cache-stage-roundtrip-failed");
+   const auto corrupt=std::string("{retained-long-cache-")+std::to_string(length);bytes(f.cache,corrupt);
+   const auto repaired=f.remember();require(repaired.value("verified",false)&&repaired.value("cachePersisted",false)&&f.preserved(corrupt),"long-cache-corrupt-bytes-not-preserved");
+   require(f.store.identity(f.exe).value("appId",0)==555,"long-cache-repair-reread-failed");
+  }
+ });
  test("identity-no-hints-grant-id",[](auto& f){f.observation({{"appId",555},{"formalName","Owned Game"}});require(!f.remember().value("verified",false)&&f.unknown(),"numeric-title-hints-granted-id");});
  test("identity-future-cache-unknown-preserved",[](auto& f){auto record=f.record();record["schemaVersion"]=99;f.saved(record);const auto raw=bytes(f.cache);require(f.unknown(),"future-cache-consumed");auto result=f.remember();require(!result.value("cachePersisted",false)&&bytes(f.cache)==raw,"future-cache-overwritten");});
  test("identity-future-manifest-unknown",[](auto& f){auto value=Json::parse(bytes(f.manifest));value["schemaVersion"]=99;bytes(f.manifest,value.dump());require(!f.remember().value("verified",false)&&f.unknown(),"future-worker-document-consumed");});
@@ -230,7 +260,114 @@ static int recoverDecodedPlayback(int argc,char** argv){
  }else receipt["wouldInvoke"]={{"action","playback-recovered"},{"key",key},{"slot",slot},{"assetId",assetId},{"bindingRevision",revision}};
  std::cout<<receipt.dump(2)<<std::endl;return 0;
 }
+
+static int storageIoProbe(const fs::path& base,const std::string& selected){
+ const std::set<std::string> names={"index","source","destination","server","capacity"};
+ if(!names.contains(selected))throw std::runtime_error("unknown-storage-io-case");
+ const auto evidence=fs::absolute(fs::path(__FILE__).parent_path()/L".."/L".."/L".."/L".."/L"Testing"/L"YMCC"/L"Evidence").lexically_normal();
+ if(normalized(utf8(fs::absolute(base).wstring())).rfind(normalized(utf8(evidence.wstring()))+"\\",0)!=0||fs::exists(base))throw std::runtime_error("unsafe-storage-io-root");
+ fs::create_directories(base);Json assertions=Json::array();std::string phase="setup";Json measurements=Json::object();
+ const auto check=[&](bool ok,const char* label){assertions.push_back({{"passed",ok},{"label",label}});if(!ok)throw std::runtime_error(label);};
+ const auto direct=[&](const fs::path& p,const std::string& value){fs::create_directories(custom_steam_library::ioPath(p.parent_path()));std::ofstream out(custom_steam_library::ioPath(p),std::ios::binary);out.write(value.data(),static_cast<std::streamsize>(value.size()));out.close();check(bool(out),"owned extended-path fixture write");};
+ const auto bytes=[](const fs::path& p){std::ifstream in(custom_steam_library::ioPath(p),std::ios::binary);return std::string(std::istreambuf_iterator<char>(in),{});};
+ try{
+  ymcc::powerSource::setExternalReader(+[]()noexcept{ymcc::powerSource::Snapshot value;value.readable=value.known=true;value.ac=1;value.status.ACLineStatus=1;value.revision=1;return value;});
+  auto deep=base;while(deep.wstring().size()<310)deep/=L"deep-media-owned-"+std::wstring(35,L'x');fs::create_directories(custom_steam_library::ioPath(deep));
+  const auto shortRoot=base/L"short";check(shortRoot.wstring().size()<220,"short control root is below long-path boundary");
+  measurements={{"deepRootWchars",deep.wstring().size()},{"shortRootWchars",shortRoot.wstring().size()}};
+  const std::string video("\0\0\0\x18" "ftypisom",12);const std::string id(32,'a');const Json asset={{"id",id},{"revision",id},{"extension","mp4"},{"kind","video"},{"mime","video/mp4"},{"bytes",video.size()}};
+  if(selected=="index"){
+   const auto index=deep/L"config"/L"game-media.json";const Json initial={{"schemaVersion",1},{"revision",7},{"keepRoot","preserve"},{"entries",{{"steam-570",{{"key","steam-570"},{"appId",570},{"name","Existing deep record"},{"bindingRevision",2},{"keepEntry","preserve"}}}}}};direct(index,initial.dump());phase="production-index-read";
+   Store store(deep);const auto before=store.snapshot();check(before["entries"].contains("steam-570")&&before["keepRoot"]=="preserve","long-root index read retained the existing media entry");
+   phase="production-index-write";store.registerEntry({{"appId",571},{"name","New deep record"}});const auto after=store.snapshot();check(after["entries"].contains("steam-570")&&after["entries"].contains("steam-571")&&after["entries"]["steam-570"]["keepEntry"]=="preserve"&&after["keepRoot"]=="preserve","long-root index write retained unrelated records and fields");
+  }else if(selected=="source"||selected=="destination"){
+   const auto root=selected=="source"?shortRoot:deep;const auto source=(selected=="source"?deep:base)/L"source.mp4";direct(source,video);phase="production-publication";
+   Store store(root);const auto lease=store.begin({{"appId",570},{"name","Owned IO video"},{"verified",true}});check(lease.value("acquired",false),"original preparation lease acquired");const auto published=store.publish(lease,source,false);store.finish(published);const auto current=store.resolve({{"appId",570}});
+   check(current.value("dynamicReady",false)&&current.value("ready",false),"deep-path publication resolves as ready");check(bytes(store.assetPath(current["assets"]["dynamic"]))==video,"deep-path published video bytes match source");
+   check(!utf8(store.assetPath(current["assets"]["dynamic"]).wstring()).starts_with("\\\\?\\"),"logical asset path remains portable without an IO prefix");
+   Server server;const auto url=server.expose(store,current);const auto response=httpGet(url);check(response.starts_with("HTTP/1.1 200")&&response.substr(response.find("\r\n\r\n")+4)==video,"published deep-path video streams through the original server");
+   if(selected=="destination"){
+    const auto imagePath=root/L"artwork"/L"overrides"/L"kept.jpg";const std::string image="\xff\xd8\xff\xe0" "owned-static";direct(imagePath,image);
+    const auto exe=utf8((base/L"game.exe").wstring());direct(root/L"config"/L"manual-overrides.json",Json{{"items",{{normalized(exe),{{"wallpaper",{{"portableFile",utf8(imagePath.wstring())}}}}}}}}.dump());
+    const auto imageEntry=store.registerEntry({{"appId",571},{"name","Deep static"},{"executable",exe}});check(imageEntry.value("staticReady",false)&&imageEntry["assets"]["static"].contains("storage"),"deep-root legacy static source is adopted through its real relative reference");
+    const auto logical=store.assetPath(imageEntry["assets"]["static"]);check(!utf8(logical.wstring()).starts_with("\\\\?\\")&&bytes(logical)==image,"deep-root relative static path remains portable and readable");
+    const auto picture=httpGet(server.expose(store,imageEntry));check(picture.starts_with("HTTP/1.1 200")&&picture.substr(picture.find("\r\n\r\n")+4)==image,"deep-root relative static image streams through the original server");
+    auto invalid=imageEntry["assets"]["static"];invalid["storage"]="artwork/../outside.jpg";bool rejected=false;try{(void)store.assetPath(invalid);}catch(const std::exception&){rejected=true;}check(rejected,"relative static storage still rejects parent traversal");
+   }
+
+  }else if(selected=="server"){
+   const auto path=deep/L"artwork"/L"video"/wide(id+".mp4");direct(path,video);Store store(deep);Server server;const Json entry={{"key","steam-570"},{"wallpaperMode","dynamic"},{"asset",asset},{"assets",{{"dynamic",asset}}},{"dynamicReady",true},{"ready",true}};phase="production-server";const auto url=server.expose(store,entry);
+   const auto response=httpGet(url);check(response.starts_with("HTTP/1.1 200")&&response.substr(response.find("\r\n\r\n")+4)==video,"existing deep-path media returns exact video bytes");
+   check(httpGet(url,"HEAD").starts_with("HTTP/1.1 200"),"existing deep-path media HEAD remains available");const auto range=httpGet(url,"GET","Range: bytes=4-7\r\n");check(range.starts_with("HTTP/1.1 206")&&range.substr(range.find("\r\n\r\n")+4)=="ftyp","existing deep-path media retains range streaming");check(httpGet(url,"GET","",false).starts_with("HTTP/1.1 403"),"deep-path server still rejects a missing token");
+  }else{
+   const auto path=deep/L"artwork"/L"video"/wide(id+".mp4");direct(path,video);phase="production-capacity";const auto quota=capacity::inspect(deep);check(quota.diskKnown&&quota.cacheKnown&&quota.owned==video.size(),"deep-path capacity counts owned cached media");check(!capacity::inspect(deep,0).cacheKnown,"deep-path capacity retains its enumeration bound");
+  }
+  Json result={{"ok",true},{"selectedCase",selected},{"phase",phase},{"assertions",assertions},{"checks",assertions.size()},{"measurements",measurements},{"scope","actual Store/capacity/server with owned extended-path setup, synthetic media and real loopback HTTP; no installed data"}};std::ofstream out(base/L"result.json",std::ios::binary);out<<result.dump(2);out.close();std::cout<<result.dump()<<std::endl;return 0;
+ }catch(const std::exception& e){Json result={{"ok",false},{"selectedCase",selected},{"phase",phase},{"error",e.what()},{"assertions",assertions},{"checks",assertions.size()},{"measurements",measurements}};std::ofstream out(base/L"result.json",std::ios::binary);out<<result.dump(2);out.close();std::cout<<result.dump()<<std::endl;return 1;}
+}
+
+template<class Check>
+static void playbackRedownloadProbe(const fs::path& root,const fs::path& mp4,const fs::path& jpg,Check check){
+ const Json target={{"appId",14001},{"verified",true}};
+ Store store(root);Server server;
+ auto seed=store.begin(target);seed=store.publish(seed,mp4,false);seed=store.publish(seed,jpg,false);store.finish(seed);
+ const auto original=store.resolve(target),video=original["assets"]["dynamic"],image=original["assets"]["static"];
+ const auto edit=[&](const Json& entry,const char* action,const char* slot){return store.edit({{"key",entry["key"]},{"bindingRevision",entry["bindingRevision"]},{"action",action},{"slot",slot},{"assetId",entry["assets"][slot]["id"]}});};
+ const auto oldUrl=server.expose(store,original);
+ check(httpGet(oldUrl).starts_with("HTTP/1.1 200"),"original video served before playback failure");
+ auto invalid=edit(original,"playback-failed","dynamic");
+ const auto fallback=server.expose(store,invalid);
+ check(!invalid.value("dynamicReady",true)&&invalid["asset"]==image&&httpGet(fallback).starts_with("HTTP/1.1 200"),"playback failure serves static fallback");
+ check(httpGet(oldUrl).starts_with("HTTP/1.1 404"),"old video URL revoked on failure");
+ // Emulate a resolve worker paused after reading, until the edit has reconciled.
+ const auto delayedUrl=server.expose(store,original);
+ const auto delayedResponse=httpGet(oldUrl);
+ const auto delayedDetail="stale resolve cannot re-expose a revoked URL (old URL: "+delayedResponse.substr(0,delayedResponse.find("\r\n"))+")";
+ check(delayedUrl.empty()&&delayedResponse.starts_with("HTTP/1.1 404"),delayedDetail.c_str());
+ auto pending=edit(invalid,"redownload","dynamic");
+ const auto reread=[&]{return Store(root).resolve(target);};
+ const auto revoked=[&](const Json& entry,const char* label){
+  const auto exposed=server.expose(store,entry);
+  const auto response=httpGet(oldUrl);
+  const auto detail=std::string(label)+" (old URL: "+response.substr(0,response.find("\r\n"))+")";
+  check(response.starts_with("HTTP/1.1 404"),detail.c_str());
+  check(!entry.value("dynamicReady",true)&&entry["invalidSlots"]["dynamic"]==video["id"]&&entry["assets"]["dynamic"]==video&&exposed==fallback,label);
+ };
+ revoked(reread(),"redownload pending keeps the failed video revoked");
+ check(pendingMediaRefresh(pending,"dynamic")&&!pendingMediaRefresh(pending,"static"),"redownload queues only the requested slot");
+ auto lease=store.begin(target);
+ check(lease.value("acquired",false)&&lease["taskSlots"]==Json::array({"dynamic"}),"replacement obtains the dynamic lease");
+ revoked(reread(),"download in progress keeps the failed video revoked");
+ lease["reason"]="download-network-failed";
+ const auto failed=store.fail(lease);
+ check(failed.value("error",std::string{})=="download-network-failed"&&pendingMediaRefresh(failed,"dynamic"),"failed download records error and preserves refresh intent");
+ revoked(reread(),"download failure keeps the failed video revoked");
+ edit(failed,"redownload","dynamic");lease=store.begin(target);
+ check(lease.value("acquired",false),"explicit retry obtains replacement lease");
+ const auto replacement=store.publish(lease,mp4,false);store.finish(replacement);
+ const auto replaced=reread();const auto newUrl=server.expose(store,replaced);
+ check(replaced.value("dynamicReady",false)&&!replaced["invalidSlots"].contains("dynamic")&&replaced["assets"]["dynamic"]["id"]!=video["id"]&&!pendingMediaRefresh(replaced,"dynamic"),"publication installs a new asset and clears its invalid and pending state");
+ check(httpGet(newUrl).starts_with("HTTP/1.1 200")&&httpGet(oldUrl).starts_with("HTTP/1.1 404"),"new URL serves without reviving the old URL");
+ server.reconcile(failed);
+ check(httpGet(newUrl).starts_with("HTTP/1.1 200")&&server.expose(store,failed).empty(),"late reconciliation cannot remove new publication or serve a stale projection");
+ const Json other={{"appId",14002}};
+ const auto otherVideo=store.publish(store.begin(other),mp4,false);store.finish(otherVideo);
+ check(httpGet(server.expose(store,otherVideo)).starts_with("HTTP/1.1 200")&&httpGet(newUrl).starts_with("HTTP/1.1 200"),"different media keys are not fenced by another entry revision");
+ pending=edit(replaced,"redownload","dynamic");
+ check(pendingMediaRefresh(pending,"dynamic")&&pending.value("dynamicReady",false)&&server.expose(store,pending)==newUrl&&httpGet(newUrl).starts_with("HTTP/1.1 200"),"healthy current video remains available while redownload is pending");
+ const auto staticFailed=edit(pending,"playback-failed","static");
+ const auto staticPending=edit(staticFailed,"redownload","static");
+ check(!staticPending.value("staticReady",true)&&staticPending["invalidSlots"]["static"]==image["id"]&&staticPending.value("dynamicReady",false)&&pendingMediaRefresh(staticPending,"dynamic")&&pendingMediaRefresh(staticPending,"static"),"static redownload preserves its invalidation and other slot readiness and intent");
+ invalid=edit(staticPending,"playback-failed","dynamic");
+ check(server.expose(store,invalid).empty()&&httpGet(newUrl).starts_with("HTTP/1.1 404"),"neither invalid slot is served");
+ check(server.expose(store,staticPending).empty()&&httpGet(newUrl).starts_with("HTTP/1.1 404"),"assetless current projection still fences previously ready video");
+ const auto restored=edit(invalid,"playback-recovered","dynamic");
+ const auto restoredUrl=server.expose(store,restored);
+ check(restored.value("dynamicReady",false)&&restored["assets"]["dynamic"]==replaced["assets"]["dynamic"]&&restored["invalidSlots"]["static"]==image["id"]&&pendingMediaRefresh(restored,"static")&&pendingMediaRefresh(restored,"dynamic")&&httpGet(restoredUrl).starts_with("HTTP/1.1 200"),"exact explicit recovery still restores only the verified video and preserves refresh intent");
+}
+
 int main(int argc,char** argv){try{
+ if(argc==4&&std::string(argv[1])=="--storage-io")return storageIoProbe(fs::absolute(fs::path(wide(argv[2]))),argv[3]);
  if(argc>1&&(std::string(argv[1])=="--recover-playback"||std::string(argv[1])=="--recover-playback-check"))return recoverDecodedPlayback(argc,argv);
  if(argc==3&&std::string(argv[1])=="--normalize-cost")return normalizationCost(fs::path(wide(argv[2])));
 #ifdef YMCC_IDENTITY_STORM_PORTS
@@ -239,11 +376,19 @@ int main(int argc,char** argv){try{
  if(argc==3&&std::string(argv[1])=="--inventory"){const auto root=fs::path(wide(argv[2]));return publishInventoryFile(root,root/L"state"/L"library-scan.json")?0:2;}
  if(argc==3&&std::string(argv[1])=="--lease"){Store(fs::path(wide(argv[2]))).begin({{"appId",333},{"name","dead-owner"}});return 0;}
  if(argc==4&&std::string(argv[1])=="--writer"){Store store(fs::path(wide(argv[2])));const int first=std::stoi(argv[3]);for(int i=0;i<12;i++)store.registerEntry({{"appId",first+i},{"name","concurrent fixture"}});return 0;}
- if(argc!=2)throw std::runtime_error("fixture-root-required");const auto fixtureRoot=fs::path(wide(argv[1]));fs::create_directories(fixtureRoot);Store store(fixtureRoot);int checks=0;
+ const bool playbackOnly=argc==3&&std::string(argv[1])=="--playback-redownload";
+ if(argc!=2&&!playbackOnly)throw std::runtime_error("fixture-root-required");const auto fixtureRoot=fs::path(wide(argv[playbackOnly?2:1]));
+ if(playbackOnly&&(!fixtureRoot.is_absolute()||fs::exists(fixtureRoot)))throw std::runtime_error("fresh absolute playback fixture root required");
+ fs::create_directories(fixtureRoot);Store store(fixtureRoot);int checks=0;
  const auto check=[&](bool ok,const char* label){++checks;if(!ok)throw std::runtime_error(label);};
  const auto mp4=fixtureRoot/L"sample.mp4",jpg=fixtureRoot/L"sample.jpg";
  {std::ofstream out(mp4,std::ios::binary);const char bytes[]={0,0,0,24,'f','t','y','p','i','s','o','m',0,0,0,0};out.write(bytes,sizeof bytes);}
  {std::ofstream out(jpg,std::ios::binary);const unsigned char bytes[]={0xff,0xd8,0xff,0xe0,0,0,0,0,0,0,0,0};out.write(reinterpret_cast<const char*>(bytes),sizeof bytes);}
+ if(playbackOnly){
+  Json passed=Json::array();
+  playbackRedownloadProbe(fixtureRoot/L"playback-redownload",mp4,jpg,[&](bool ok,const char* label){check(ok,label);passed.push_back(label);});
+  std::cout<<Json({{"ok",true},{"selection","playback-redownload"},{"checks",checks},{"passed",passed}}).dump()<<std::endl;return 0;
+ }
  Json target={{"appId",570},{"name","Fixture Game"}};
  check(!store.resolve(target).value("ready",false),"starts missing");auto lease=store.begin(target);check(lease.value("acquired",false),"first owner acquires preparation");check(lease["playback"].value("start",0)==8&&lease["playback"].value("end",0)==38,"wire default matches8-second skip and30-second duration");auto same=store.begin(target);check(!same.value("acquired",true)&&same["taskId"]==lease["taskId"],"second request reuses lease");
  auto video=store.publish(lease,mp4,false);check(store.resolve(target).value("dynamicReady",false),"video is durable");auto pair=store.publish(video,jpg,false);check(pair["assets"].contains("static")&&pair["assets"].contains("dynamic"),"paired variants retained");check(pair["asset"]["kind"]=="video","auto selects dynamic when ready");store.finish(pair);
@@ -360,6 +505,7 @@ int main(int argc,char** argv){try{
   auto otherFailure=saved;otherFailure["entries"]["steam-1361510"]["error"]="download-network-failed";atomicWrite(index,otherFailure);auto keptFailure=recovery.edit(recover);check(keptFailure.value("dynamicReady",false)&&keptFailure.value("error",std::string{})=="download-network-failed"&&keptFailure["retryAt"]==retained["retryAt"]&&keptFailure["attempts"]==retained["attempts"],"recovery never clears independent download failure or backoff");
   auto manualState=saved;manualState["entries"]["steam-1361510"]["manualSlots"]["dynamic"]=true;manualState["entries"]["steam-1361510"]["wallpaperMode"]="static";manualState["entries"]["steam-1361510"]["modeExplicit"]=true;atomicWrite(index,manualState);auto manualRestored=recovery.edit(recover);check(manualRestored.value("dynamicReady",false)&&manualRestored["manualSlots"].value("dynamic",false)&&manualRestored["asset"]["kind"]=="image","decode recovery retains manual ownership and explicit static selection");
  }
+ playbackRedownloadProbe(fixtureRoot/L"playback-redownload",mp4,jpg,check);
  // Cleanup excludes referenced media and original library artwork.
  const auto orphan=fixtureRoot/L"artwork"/L"video"/L"00000000000000000000000000000001.mp4";fs::copy_file(mp4,orphan);fs::last_write_time(orphan,fs::file_time_type::clock::now()-std::chrono::hours(48));const auto cleaned=store.collectOrphans();check(cleaned.value("removed",0)==1&&!fs::exists(orphan),"old owned orphan cleaned");check(fs::exists(store.assetPath(merged["assets"]["dynamic"]))&&fs::exists(existing),"cleanup retains live media and library original");
  check(shortcutAppId("4294967295")==UINT32_MAX,"full unsigned shortcut appid preserved");check(shortcutAppId(std::to_string((uint64_t{0xffffffff}<<32)|0x02000000ull))==UINT32_MAX,"full 64-bit GameID preserved");bool badId=false;try{shortcutAppId("18446744073709551615");}catch(...){badId=true;}check(badId,"unconfirmed GameID type rejected");

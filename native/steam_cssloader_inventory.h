@@ -4,13 +4,17 @@
 #include "decky_sidebar_launch.h"
 #include <sddl.h>
 #include <wincrypt.h>
+#include "steam_source_owner.h"
+#include <optional>
+#include "json.hpp"
 
 // The existing CSS-use worker services these requests. No thread, periodic
 // discovery, standalone inventory or cross-user endpoint is created here.
 namespace ymcc::steamcssinventory {
 class Bridge {
-    static constexpr DWORD capacity = 128, headerWords = 16;
-    static constexpr DWORD bytes = (headerWords + capacity * 5) * sizeof(DWORD);
+    static constexpr DWORD capacity = 128, headerWords = 32, payloadBytes = 65536;
+    static constexpr DWORD payloadOffset=(headerWords+capacity*5)*sizeof(DWORD);
+    static constexpr DWORD bytes=payloadOffset+payloadBytes*2;
     HANDLE map_ = nullptr, query_ = nullptr, reply_ = nullptr, mutex_ = nullptr;
     DWORD* view_ = nullptr;
     std::wstring name_;
@@ -48,17 +52,38 @@ public:
         LocalFree(descriptor);
         if (unique) view_ = static_cast<DWORD*>(MapViewOfFile(map_, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, bytes));
         if (!view_) { close(); return false; }
-        ZeroMemory(view_, bytes); view_[0] = 0x59435049; view_[1] = 1;
+        ZeroMemory(view_, bytes); view_[0] = 0x59435049; view_[1] = 2;
+        FILETIME birth{},exit{},kernel{},userTime{};
+        if(!GetProcessTimes(GetCurrentProcess(),&birth,&exit,&kernel,&userTime)){close();return false;}
+        view_[14]=GetCurrentProcessId();view_[15]=birth.dwLowDateTime;view_[16]=birth.dwHighDateTime;
         return true;
     }
     const std::wstring& name() const { return name_; }
     HANDLE event() const { return query_; }
-    void serve(const steamsession::Session& steam, bool allowed) noexcept {
+    using SharedRead=std::function<nlohmann::json(const nlohmann::json&,const std::function<bool()>&)>;
+    using SourceRead=std::function<steamsession::SourceOwner::Read()>;
+    void serve(const steamsession::Session& steam, bool allowed,const SharedRead& sharedRead,const SourceRead& sourceRead) noexcept {
         if (!view_) return;
         const auto serial = InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(view_ + 2), 0, 0);
-        DWORD rows[capacity * 5]{}; DWORD count = 0, error = ERROR_NOT_READY;
+        DWORD rows[capacity * 5]{}; DWORD count = 0, error = ERROR_NOT_READY;std::string output;
+        std::optional<steamsession::SourceOwner::Read> reading;
+        const auto current=[&]{return reading&&reading->current()&&view_&&InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(view_+2),0,0)==serial;};
         try {
-            if (allowed) {
+            if(allowed){
+                if(sourceRead)reading.emplace(sourceRead());
+                if(!reading||!reading->current())allowed=false;
+            }
+            const auto operation=view_[10],length=view_[11];
+            if(operation==1&&allowed&&sharedRead){
+                if(length>payloadBytes)throw std::runtime_error("CSS shared request too large");
+                const std::string input(reinterpret_cast<const char*>(view_)+payloadOffset,length);
+                const auto request=nlohmann::json::parse(input);
+                output=sharedRead(request,current).dump();
+                if(output.size()>payloadBytes)throw std::runtime_error("CSS shared response too large");
+                error=ERROR_SUCCESS;
+            }else if(operation!=0){error=ERROR_NOT_SUPPORTED;}
+            else if(length){error=ERROR_INVALID_DATA;}
+            else if (allowed) {
                 const auto topology = processInventory::read(); // Sole YMCC producer; 250ms shared coalescing.
                 error = !topology ? ERROR_NOT_READY : topology->status != processInventory::Status::Complete ? (topology->error ? topology->error : ERROR_NOT_READY) : ERROR_SUCCESS;
                 if (topology && topology->status == processInventory::Status::Complete) {
@@ -83,10 +108,15 @@ public:
                 }
             }
         } catch (...) { error = ERROR_GEN_FAILURE; }
+        // One actual source read covers acquisition, callback and publication.
+        // Stop/restart is Unknown even if the shared request serial is unchanged.
+        if(reading&&!reading->current()){allowed=false;error=ERROR_NOT_READY;count=0;output.clear();}
         // A timed-out old client cannot commit a reply for its replacement.
         if (InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(view_ + 2), 0, 0) != serial) return;
         view_[4] = error ? 0 : 1; view_[5] = error ? 0 : count;
         view_[6] = allowed ? steam.pid : 0; view_[7] = DWORD(steam.created); view_[8] = DWORD(steam.created >> 32); view_[9] = error;
+        view_[12]=error?0:static_cast<DWORD>(output.size());
+        if(!error&&!output.empty())CopyMemory(reinterpret_cast<char*>(view_)+payloadOffset+payloadBytes,output.data(),output.size());
         CopyMemory(view_ + headerWords, rows, sizeof(rows)); MemoryBarrier();
         InterlockedExchange(reinterpret_cast<volatile LONG*>(view_ + 3), serial); SetEvent(reply_);
     }

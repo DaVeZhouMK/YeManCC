@@ -56,7 +56,7 @@ test('all keyboard options and admitted defaults are source bound',async()=>{
 test('extracted snippets are byte identical to the current product',()=>{
  const source=fs.readFileSync(path.join(repoRoot,'native/main.cpp'),'utf8'),header=fs.readFileSync(path.join(repoRoot,'native/input_shortcut_toggle.h'),'utf8');
  const spans=extractNativeFollowup(source,{inputShortcutHeader:header});
- assert.equal(spans.length,19);
+ assert.equal(spans.length,20);
  for(const span of spans){
   const owner=span.path?header:source;
   assert(owner.includes(span.text),span.name+' extraction rewrote product text');
@@ -76,7 +76,7 @@ test('unknown or incomplete source shape fails closed',()=>{
 });
 test('global fingerprint inputs include both ends and exact C++ consumer headers',()=>{
  const inputs=followupSourceInputs();
- for(const file of ['native/main.cpp','native/input_shortcut_toggle.h','native/shortcut_frontend_button.h','deps/json/json.hpp','src/bridge/controllerShortcutRules.ts','tools/controller_shortcut_rules_selftest.ts','tools/ymcc_sim/global/input-signals/native-diagnostic-fixture.cpp','tools/ymcc_sim/global/input-signals/keyboard-contract.ts'])assert(inputs.includes(file),file);
+ for(const file of ['native/main.cpp','native/input_shortcut_toggle.h','native/shortcut_frontend_button.h','native/input_frame_submission.h','native/virtual_output_status.h','native/sleep_power_state.h','deps/json/json.hpp','src/bridge/controllerShortcutRules.ts','tools/controller_shortcut_rules_selftest.ts','tools/ymcc_sim/global/input-signals/native-diagnostic-fixture.cpp','tools/ymcc_sim/global/input-signals/keyboard-contract.ts'])assert(inputs.includes(file),file);
  assert.equal(new Set(inputs).size,inputs.length);
 });
 

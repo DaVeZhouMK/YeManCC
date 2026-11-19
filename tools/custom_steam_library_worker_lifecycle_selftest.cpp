@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <winsock2.h>
 #include <windows.h>
 #include <set>
@@ -13,9 +16,15 @@ static BOOL WINAPI queueFixtureReadFile(HANDLE handle,LPVOID data,DWORD bytes,LP
 #define ReadFile queueFixtureReadFile
 #include "custom_steam_library_test_runtime.h"
 #undef ReadFile
+#include "../native/shared_game_media_identity_worker.h"
 #include <iostream>
 static void check(bool ok,const char* why){if(!ok)throw std::runtime_error(why);}
 static void mustFail(const std::function<void()>& f){bool bad=false;try{f();}catch(const std::exception&){bad=true;}check(bad,"Expected controlled failure");}
+struct OwnedRetryEnvironment {
+    std::wstring previous;bool present=false;
+    OwnedRetryEnvironment(){SetLastError(ERROR_SUCCESS);const auto n=GetEnvironmentVariableW(L"YEMAN_MEDIA_IDENTITY_RETRY_OWNER",nullptr,0);present=n||GetLastError()!=ERROR_ENVVAR_NOT_FOUND;if(n){previous.resize(n);const auto count=GetEnvironmentVariableW(L"YEMAN_MEDIA_IDENTITY_RETRY_OWNER",previous.data(),n);previous.resize(count);}}
+    ~OwnedRetryEnvironment(){SetEnvironmentVariableW(L"YEMAN_MEDIA_IDENTITY_RETRY_OWNER",present?previous.c_str():nullptr);}
+};
 static json record(int requested=620,int canonical=620,const std::string& type="game",const std::string& name="Portal 2"){
     return {{std::to_string(requested),{{"success",true},{"data",{{"steam_appid",canonical},{"name",name},{"type",type}}}}}};
 }
@@ -37,6 +46,31 @@ static DWORD queueFixtureChild(const fs::path&,const std::vector<std::wstring>& 
 #endif
 
 int wmain(int argc,wchar_t** argv){try{
+    if(argc==5&&std::wstring_view(argv[2])==L"--retry-ownership-fixture-leaf"){
+        const auto data=custom_steam_library::configuredDataRoot();
+        const auto file=fs::path(argv[1]);
+        const auto build=fs::absolute(fs::path(__FILE__).parent_path()/L".."/L".."/L".."/L"Build").lexically_normal();
+        check(data.is_absolute()&&data.filename()==L"data"&&file.is_absolute()&&pathWithin(file,data.parent_path())&&
+            pathWithin(data,build)&&file.filename()==L"Game.exe","Unsafe retry leaf fixture root");
+        const std::wstring prefix=L"Local\\YeManRetryFixture-";
+        check(std::wstring_view(argv[3]).starts_with(prefix)&&std::wstring_view(argv[4]).starts_with(prefix),"Unsafe retry leaf fixture events");
+        HANDLE ready=OpenEventW(EVENT_MODIFY_STATE,FALSE,argv[3]);
+        HANDLE release=OpenEventW(SYNCHRONIZE,FALSE,argv[4]);
+        check(ready&&release,"Retry leaf fixture events are missing");
+        writeJsonAtomic(data.parent_path()/L"leaf.json",{{"pid",GetCurrentProcessId()}});
+        check(SetEvent(ready)!=FALSE,"Cannot signal retry leaf readiness");
+        CloseHandle(ready);
+        const auto outcome=WaitForSingleObject(release,12000);
+        CloseHandle(release);
+        return outcome==WAIT_OBJECT_0?0:2;
+    }
+    if(argc==4&&std::wstring_view(argv[1])==L"--wake-network-retries"&&
+        std::wstring_view(argv[2])==L"--reason"&&std::wstring_view(argv[3])==L"retry-ownership-fixture"){
+        const auto data=custom_steam_library::configuredDataRoot();
+        const auto build=fs::absolute(fs::path(__FILE__).parent_path()/L".."/L".."/L".."/L"Build").lexically_normal();
+        check(data.is_absolute()&&data.filename()==L"data"&&pathWithin(data,build),"Unsafe retry wake fixture root");
+        return workerMainNotUsedBySelftest(argc,argv);
+    }
     if (argc==3 && std::wstring(argv[1])==L"--backoff-fixture-action") {
         const auto build=fs::absolute(fs::path(__FILE__).parent_path()/L".."/L".."/L".."/L"Build").lexically_normal();
         const auto file=fs::absolute(argv[2]);
@@ -51,6 +85,20 @@ int wmain(int argc,wchar_t** argv){try{
         writeJsonAtomic(file.wstring()+L".result.json",loadMetadataBackoff(url));
         return 0;
     }
+    const bool titleOnly=argc==3&&std::wstring(argv[2])==L"--identity-title-scope";
+    const bool videoCatalogOnly=argc==3&&std::wstring_view(argv[2])==L"--wallpaper-video-catalog";
+    const bool identityLookupStageOnly=argc==3&&std::wstring_view(argv[2])==L"--identity-lookup-stage";
+    if(argc==3&&std::wstring_view(argv[2]).starts_with(L"--"))
+        check(titleOnly||videoCatalogOnly||identityLookupStageOnly||std::wstring_view(argv[2])==L"--identity-owner-receipt"||std::wstring_view(argv[2])==L"--network-queue-storm","Unknown directed selector");
+    const std::set<std::string> titleCases={
+        "automatic-dotted-title-base-game-and-dlc", "igdb-expanded-type-rejects-related-content",
+        "igdb-expanded-detail-cannot-replace-base-title", "dotted-title-token-controls",
+        "ambiguous-short-alias-needs-confirmation-BC", "ambiguous-short-alias-needs-confirmation-PZ",
+        "ambiguous-short-alias-needs-confirmation-APEX", "short-official-uppercase-title-still-accepted",
+        "old-short-alias-cache-cannot-reintroduce-wrong-identity",
+        "round6-igdb-detail-changed-to-dlc-cannot-use-base-game-search-type",
+        "weak-mixed-search-success-and-verification-timeout-remains-retryable"};
+    const bool identityReceiptOnly=argc==3&&std::wstring(argv[2])==L"--identity-owner-receipt";
     const bool queueOnly=argc==3&&std::wstring(argv[2])==L"--network-queue-storm";
     check(argc==2||argc==3,"Pass fresh Build fixture root and optional Steam evidence root");const auto root=fs::absolute(argv[1]);
     const auto build=fs::absolute(fs::path(__FILE__).parent_path()/L".."/L".."/L".."/L"Build").lexically_normal();
@@ -62,7 +110,7 @@ int wmain(int argc,wchar_t** argv){try{
     g_steamAcceleratorStatus.checked=true;g_steamAcceleratorStatus.state="fixture-direct";
     for(const auto* host:{"store.steampowered.com","steamstore-a.akamaihd.net","api.steampowered.com","shared.steamstatic.com","cdn.cloudflare.steamstatic.com"})g_steamAcceleratorStatus.localHostCache[host]=false;
     json cases=json::array();
-    auto test=[&](const char* name,const std::function<void(const fs::path&)>& action){if(queueOnly&&std::string(name).find("queuecfg-")!=0)return;wchar_t selected[256]{};if(queueOnly&&GetEnvironmentVariableW(L"YMCC_NETWORK_QUEUE_CASE",selected,256)>0){auto pick=toUtf8(selected);if(pick.ends_with("*")){pick.pop_back();if(!std::string(name).starts_with(pick))return;}else if(std::string(name)!=pick)return;}const auto p=root/std::to_wstring(cases.size());fs::create_directories(p);g_workerDataRoot=p/L"data";g_fastMetadataMode=false;g_identityNetworkDeadline=0;g_metadataBackoffs.clear();artworkTestTransport={};selftestMoveFault={};
+    auto test=[&](const char* name,const std::function<void(const fs::path&)>& action){if(titleOnly&&!titleCases.count(name))return;if(videoCatalogOnly&&!std::string_view(name).starts_with("wallpaper-video-catalog-"))return;if(identityReceiptOnly&&std::string_view(name)!="weak-mixed-search-success-and-verification-timeout-remains-retryable")return;if(identityLookupStageOnly&&!std::string_view(name).starts_with("identity-lookup-stage-"))return;if(queueOnly&&std::string(name).find("queuecfg-")!=0)return;wchar_t selected[256]{};if(queueOnly&&GetEnvironmentVariableW(L"YMCC_NETWORK_QUEUE_CASE",selected,256)>0){auto pick=toUtf8(selected);if(pick.ends_with("*")){pick.pop_back();if(!std::string(name).starts_with(pick))return;}else if(std::string(name)!=pick)return;}const auto p=root/std::to_wstring(cases.size());fs::create_directories(p);g_workerDataRoot=p/L"data";g_fastMetadataMode=false;g_identityNetworkDeadline=0;g_metadataBackoffs.clear();artworkTestTransport={};selftestMoveFault={};
         SetEnvironmentVariableW(L"YEMAN_SYSTEM_BLACKLIST_PATH",(p/L"system-blacklist.txt").c_str());SetEnvironmentVariableW(L"YEMAN_PLAYER_BLACKLIST_PATH",(p/L"player-blacklist.txt").c_str());
         try{action(p);cases.push_back({{"name",name},{"passed",true}});}catch(const std::exception& e){cases.push_back({{"name",name},{"passed",false},{"error",e.what()}});}artworkTestTransport={};selftestMoveFault={};};
 
@@ -98,6 +146,152 @@ int wmain(int argc,wchar_t** argv){try{
     test("queuecfg-next-main-changes-during-backup-not-overwritten",[](const auto& p){auto value=queueFixture(p);const auto data=p/L"data",file=networkRetryQueuePath(data),exe=p/L"Other"/L"Other.exe";queueText(exe,"fixture");writeJsonAtomic(file,value);auto foreign=value;foreign["unknownRoot"]["external"]=99;const auto external=foreign.dump();bool injected=false;selftestMoveFault=[&](const auto&,const auto& to)->DWORD{if(to==file.wstring()+L".bak"&&!injected){injected=true;queueText(file,external);}return ERROR_SUCCESS;};const auto job=enqueueNetworkRetry(data,networkRetryJobId(exe,std::nullopt,"windows"),exe,json::array({toUtf8(exe.wstring())}),json::object());check(injected&&job.value("queued",true)==false&&queueBytes(file)==external,"Observed later main overwritten");});
     test("queuecfg-next-corrupt-preservation-failure-never-overwrites",[](const auto& p){auto value=queueFixture(p);const auto data=p/L"data",file=networkRetryQueuePath(data);queueText(file,"{corrupt-keep");selftestMoveFault=[](const auto&,const auto& to)->DWORD{return to.find(L"corrupt")!=std::wstring::npos?ERROR_WRITE_FAULT:ERROR_SUCCESS;};const auto exe=fs::path(toWide(value["jobs"].begin().value()["executable"].template get<std::string>()));const auto failed=enqueueNetworkRetry(data,value["jobs"].begin().key(),exe,json::array({toUtf8(exe.wstring())}),json::object());check(failed.value("queued",true)==false&&queueBytes(file)=="{corrupt-keep","Failed preservation overwrote main");});
     test("queuecfg-next-output-read-limit-rejects-before-write",[](const auto& p){auto value=queueFixture(p);value["largeUnknown"]=std::string(4*1024*1024,'x');const auto data=p/L"data",file=networkRetryQueuePath(data);writeJsonAtomic(file,value);const auto before=queueBytes(file),id=value["jobs"].begin().key();const auto exe=fs::path(toWide(value["jobs"].begin().value()["executable"].template get<std::string>()));const auto failed=enqueueNetworkRetry(data,id,exe,json::array({toUtf8(exe.wstring())}),{{"large",std::string(5*1024*1024,'x')}});check(failed.value("queued",true)==false&&queueBytes(file)==before,"Oversized submitted queue corrupted disk");});
+    test("queuecfg-next-wake-launch-failure-backs-off",[](const auto& p){
+        const auto data=p/L"data", file=networkRetryQueuePath(data), missingWorker=p/L"missing-fixture-worker.exe";
+        check(!fs::exists(missingWorker),"Fixture worker unexpectedly exists");
+        auto value=queueFixture(p);
+        const auto id=value["jobs"].begin().key();
+        value["jobs"][id]["nextAttemptAt"]=uint64_t{0};
+        writeJsonAtomic(file,value);
+        struct RestoreDataRoot {
+            fs::path previous=custom_steam_library::configuredDataRoot();
+            ~RestoreDataRoot(){SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",previous.empty()?nullptr:previous.c_str());}
+        } restore;
+        check(SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",data.c_str())!=FALSE,"Cannot isolate Worker data root");
+        std::array<std::wstring,4> args{missingWorker.wstring(),L"--wake-network-retries",L"--reason",L"fixture-launch-failed"};
+        std::vector<wchar_t*> argv;for(auto& arg:args)argv.push_back(arg.data());
+        const auto wake=[&]{return workerMainNotUsedBySelftest(static_cast<int>(argv.size()),argv.data());};
+        const auto exitCode=wake();
+        const auto updated=loadNetworkRetryQueue(data);
+        const auto job=updated.at("jobs").at(id);
+        const auto bytesAfterFirst=queueBytes(file);
+        const auto earlyWakeExit=wake();
+        const bool earlyWakeUnchanged=queueBytes(file)==bytesAfterFirst;
+        writeJsonAtomic(p/L"launch-observed.json",{{"firstExit",exitCode},{"job",job},{"history",updated.at("history")},
+            {"earlyWakeExit",earlyWakeExit},{"earlyWakeUnchanged",earlyWakeUnchanged}});
+        check(exitCode==1&&job["status"]=="waiting-network","CreateProcess failure left the job running");
+        check(job["lastExitCode"]==ERROR_FILE_NOT_FOUND&&job["lastFailure"]["kind"]=="retry-worker-failed"&&
+            job["lastFailure"]["exitCode"]==ERROR_FILE_NOT_FOUND,"Lost the real launch error");
+        check(job["consecutiveFailures"]==2&&job["nextAttemptAt"].template get<uint64_t>()==job["updatedAt"].template get<uint64_t>()+30000,
+            "Launch failure did not use the existing backoff");
+        check(job["unknownJob"]=="keep"&&updated["jobs"].size()==1&&updated["unknownRoot"]==value["unknownRoot"]&&
+            updated["history"].empty(),"Launch failure did not preserve owned queue data");
+        check(earlyWakeExit==0&&earlyWakeUnchanged,"Early wake ignored backoff");
+    });
+    test("queuecfg-next-wake-interruption-reclaims-owned-child-and-backs-off",[&](const auto& p){
+        const auto data=p/L"data",file=networkRetryQueuePath(data),image=fs::absolute(argv[0]);
+        auto queue=queueFixture(p);
+        const auto id=queue["jobs"].begin().key();
+        const auto tag=L"Local\\YeManRetryFixture-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64());
+        const auto readyName=tag+L"-ready",releaseName=tag+L"-release";
+        struct Handle {HANDLE h=nullptr;~Handle(){if(h)CloseHandle(h);}};
+        struct WakeProcess {
+            PROCESS_INFORMATION process{};
+            ~WakeProcess(){if(process.hProcess){if(WaitForSingleObject(process.hProcess,0)==WAIT_TIMEOUT){TerminateProcess(process.hProcess,ERROR_CANCELLED);WaitForSingleObject(process.hProcess,1000);}CloseHandle(process.hProcess);}if(process.hThread)CloseHandle(process.hThread);}
+        } outer;
+        const Handle ready{CreateEventW(nullptr,TRUE,FALSE,readyName.c_str())};
+        const Handle release{CreateEventW(nullptr,TRUE,FALSE,releaseName.c_str())};
+        check(ready.h&&release.h,"Cannot create isolated child coordination events");
+        auto& row=queue["jobs"][id];row["nextAttemptAt"]=uint64_t{0};
+        const auto executable=row["executable"].template get<std::string>();
+        row["commandArgs"]={executable,"--retry-ownership-fixture-leaf",toUtf8(readyName),toUtf8(releaseName)};
+        const auto addControl=[&](int app,const char* status,const char* marker){
+            auto other=row;
+            const auto key=networkRetryJobId(fs::path(toWide(executable)),app,"windows");
+            other["id"]=key;other["status"]=status;
+            if(marker)other["retryWakeOwnership"]=marker;
+            queue["jobs"][key]=std::move(other);return key;
+        };
+        const auto old=addControl(110,"running-event-wakeup",nullptr),moved=addControl(220,"running-event-wakeup","other-root"),
+            legacy=addControl(330,"running",nullptr);
+        writeJsonAtomic(file,queue);
+        struct RestoreRoot {fs::path original=custom_steam_library::configuredDataRoot();~RestoreRoot(){SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",original.empty()?nullptr:original.c_str());}} restore;
+        check(SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",data.c_str())!=FALSE,"Cannot isolate wake data root");
+        std::wstring line=quoteWindowsCommandArgument(image.wstring())+L" --wake-network-retries --reason retry-ownership-fixture";
+        STARTUPINFOW startup{};startup.cb=sizeof(startup);
+        check(CreateProcessW(image.c_str(),line.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&startup,&outer.process)!=FALSE,"Cannot start actual wake consumer fixture");
+        check(WaitForSingleObject(ready.h,5000)==WAIT_OBJECT_0,"Actual wake consumer never launched its child");
+        const auto pid=loadJsonDocument(p/L"leaf.json",65536)["pid"].template get<DWORD>();
+        const Handle leaf{OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid)};
+        check(leaf.h&&WaitForSingleObject(leaf.h,0)==WAIT_TIMEOUT,"Could not hold actual live retry child");
+        FILETIME birth{},exit{},kernel{},user{};
+        check(GetProcessTimes(leaf.h,&birth,&exit,&kernel,&user)!=FALSE,"Could not prove actual retry child identity");
+        const auto claimed=loadNetworkRetryQueue(data);
+        const auto claimedBytes=queueBytes(file);
+        check(claimed["jobs"][id]["status"]=="running-event-wakeup","Actual child started without persisted claim");
+        const auto wake=[&](bool force){
+            std::array<std::wstring,5> args{image.wstring(),L"--wake-network-retries",L"--reason",L"retry-ownership-fixture",L"--force"};
+            std::array<wchar_t*,5> views{};for(size_t i=0;i<args.size();++i)views[i]=args[i].data();
+            return workerMainNotUsedBySelftest(force?5:4,views.data());
+        };
+        check(wake(true)==0&&queueBytes(file)==claimedBytes,"Second live wake touched an owned claim");
+        check(TerminateProcess(outer.process.hProcess,ERROR_CANCELLED)!=FALSE&&WaitForSingleObject(outer.process.hProcess,3000)==WAIT_OBJECT_0,"Actual outer wake process did not terminate");
+        const DWORD childTerminal=WaitForSingleObject(leaf.h,1500);
+        if(childTerminal!=WAIT_OBJECT_0)SetEvent(release.h);
+        check(WaitForSingleObject(leaf.h,3000)==WAIT_OBJECT_0,"Fixture child did not drain on cleanup");
+        const auto recoveryExit=wake(true);
+        const auto after=loadNetworkRetryQueue(data);
+        const auto afterBytes=queueBytes(file);
+        const auto& healed=after["jobs"][id];
+        check(wake(false)==0&&queueBytes(file)==afterBytes,"A repeat normal wake did not preserve backoff");
+        check(after["jobs"][old]==queue["jobs"][old]&&after["jobs"][moved]==queue["jobs"][moved]&&after["jobs"][legacy]==queue["jobs"][legacy],"Unproven claims were rewritten");
+        writeJsonAtomic(p/L"interruption-observed.json",{{"parentPid",outer.process.dwProcessId},{"childPid",pid},
+            {"childBirth",(uint64_t(birth.dwHighDateTime)<<32)|birth.dwLowDateTime},{"childTerminal",childTerminal},
+            {"claimBefore",claimed["jobs"][id]["status"]},{"claimAfter",healed["status"]},{"failure",healed.value("lastFailure",json::object())},
+            {"historySize",after["history"].size()},{"nextAttemptAt",healed["nextAttemptAt"]},{"updatedAt",healed["updatedAt"]},
+            {"baselineExit",recoveryExit}});
+        check(childTerminal==WAIT_OBJECT_0,"Terminated wake owner left its actual child alive");
+        check(recoveryExit==0&&healed["status"]=="waiting-network"&&healed["lastFailure"]["kind"]=="retry-worker-interrupted"&&
+            healed["nextAttemptAt"].template get<uint64_t>()==healed["updatedAt"].template get<uint64_t>()+30000&&
+            healed["consecutiveFailures"]==2&&!healed.contains("retryWakeOwnership")&&after["history"].empty(),"Owned interruption failed to return to existing backoff");
+        check(SetEvent(release.h)!=FALSE,"Cannot release next actual child");
+        check(wake(true)==0,"A subsequent explicitly forced wake could not replay the recovered request");
+        const auto retried=loadNetworkRetryQueue(data);
+        check(retried["jobs"].size()==3&&!retried["jobs"].contains(id)&&retried["history"].size()==1&&
+            retried["history"][0]["status"]=="completed"&&retried["history"][0]["id"]==id&&!retried["history"][0].contains("retryWakeOwnership"),
+            "Successful retry did not produce exactly one completion");
+    });
+    test("queuecfg-next-wake-capped-batches-prefer-overdue-jobs",[&](const auto& p){
+        const auto data=p/L"data",file=networkRetryQueuePath(data),image=fs::absolute(argv[0]);
+        auto queue=queueFixture(p);
+        const auto seed=queue["jobs"].begin().value();
+        const auto executable=fs::path(toWide(seed["executable"].template get<std::string>()));
+        std::vector<std::string> ids;
+        for(uint32_t i=1;i<=5;++i)ids.push_back(networkRetryJobId(executable,i,"windows"));
+        std::sort(ids.begin(),ids.end());
+        const auto now=unixTimeMs();
+        const std::array<uint64_t,5> due{now-2000,now+60000,now-40000,now-40000,now-50000};
+        queue["jobs"]=json::object();
+        for(size_t i=0;i<ids.size();++i){auto row=seed;row["id"]=ids[i];row["nextAttemptAt"]=due[i];queue["jobs"][ids[i]]=std::move(row);}
+        writeJsonAtomic(file,queue);
+        // A changed executable exercises actual claim ordering without running network work.
+        queueText(executable,"changed marker");
+        struct RestoreRoot {fs::path original=custom_steam_library::configuredDataRoot();~RestoreRoot(){SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",original.empty()?nullptr:original.c_str());}} restore;
+        check(SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",data.c_str())!=FALSE,"Cannot isolate wake data root");
+        const auto wake=[&]{
+            std::array<std::wstring,6> args{image.wstring(),L"--wake-network-retries",L"--reason",L"fixture-due-order",L"--max",L"1"};
+            std::array<wchar_t*,6> views{};for(size_t i=0;i<args.size();++i)views[i]=args[i].data();
+            return workerMainNotUsedBySelftest(static_cast<int>(views.size()),views.data());
+        };
+        for(size_t batch=0;batch<4;++batch){
+            check(wake()==0,"Capped wake failed");
+            const auto observed=loadNetworkRetryQueue(data);
+            const auto reviewed=std::count_if(observed["jobs"].begin(),observed["jobs"].end(),[](const auto& row){return row["status"]=="needs-manual-review-executable-changed";});
+            check(static_cast<size_t>(reviewed)==batch+1&&observed["jobs"][ids[1]]==queue["jobs"][ids[1]]&&observed["history"].empty(),"Wake exceeded the cap, touched a future row, or ran a child");
+        }
+        const auto after=queueBytes(file);
+        check(wake()==0&&queueBytes(file)==after,"No-due wake must leave the remaining queue unchanged");
+        const auto events=loadJsonDocument(data/L"state"/L"lifecycle-events.json",1u<<20);
+        json order=json::array();
+        for(const auto& event:events["events"])if(event["type"]=="network-retry-needs-manual-review"){
+            const auto id=event["jobId"].template get<std::string>();
+            const auto it=std::find(ids.begin(),ids.end(),id);
+            check(it!=ids.end(),"Wake reviewed a foreign row");
+            order.push_back(it-ids.begin());
+        }
+        writeJsonAtomic(p/L"due-order-observed.json",{{"observedHashRanks",order},{"cap",1},{"laterRowUntouched",true}});
+        check(order==json::array({4,2,3,0}),"Capped wake prioritized the hash over the earlier due time");
+    });
 #ifdef YMCC_NETWORK_QUEUE_FIXTURE
 
     test("queuecfg-next-same-job-reenqueue-preserves-extension-fields",[](const auto& p){const auto value=queueFixture(p);const auto data=p/L"data",file=networkRetryQueuePath(data);writeJsonAtomic(file,value);const auto id=value["jobs"].begin().key();const auto exe=fs::path(toWide(value["jobs"].begin().value()["executable"].template get<std::string>()));const auto job=enqueueNetworkRetry(data,id,exe,json::array({toUtf8(exe.wstring())}),json::object());check(job.value("queued",false)&&loadNetworkRetryQueue(data)["jobs"][id]["unknownJob"]=="keep","Same-job retry erased extensions");});
@@ -118,6 +312,82 @@ int wmain(int argc,wchar_t** argv){try{
     test("queuecfg-next-wake-late-future-after-child-not-overwritten",[&](const auto& p){resetQueueChild();const auto value=queueFixture(p);const auto data=p/L"data",file=networkRetryQueuePath(data);writeJsonAtomic(file,value);auto future=value;future["schemaVersion"]=2;const auto raw=future.dump();queueFixtureChildHook=[&]{queueText(file,raw);};check(queueFixtureWake(data,true)==1&&queueFixtureChildCalls==1&&queueBytes(file)==raw&&!queueFixtureWakeError.empty(),"Completion overwrote late unsupported queue or falsely ACKed");});
 #endif
     }
+    test("wallpaper-video-catalog-refreshes-stale-offers",[](const auto& p){
+        const std::string oldUrl="https://video.steamstatic.com/store_trailers/620/old/master.m3u8";
+        const std::string newUrl="https://video.steamstatic.com/store_trailers/620/new/master.m3u8";
+        const auto movies=[](const auto& url){return json::array({{{"name","Trailer"},{"hls_h264",url}}});};
+        auto oldDoc=record(), reply=record();
+        oldDoc["620"]["data"]["movies"]=movies(oldUrl);
+        reply["620"]["data"]["movies"]=movies(newUrl);
+        saveSteamDetailsCache(steamDetailsRecord(oldDoc,620));
+        int calls=0;
+        artworkTestTransport=[&](const auto&,const auto&,const auto& url,const auto&){
+            check(url=="https://store.steampowered.com/api/appdetails?appids=620&l=english&cc=us","Unexpected video metadata endpoint");
+            ++calls;return payload(reply);
+        };
+        json log=json::array();
+        check(fetchSteamDetails(620,log).data.at("movies")==movies(oldUrl)&&calls==0,"Ordinary metadata no longer reuses its cached result");
+        const auto oldRoot=custom_steam_library::configuredDataRoot();
+        check(SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",g_workerDataRoot.c_str())!=FALSE,"Cannot isolate video search data root");
+        const auto search=[&]{
+            std::vector<std::wstring> args={(p/L"SteamArtworkLab.exe").wstring(),L"--search-wallpaper-videos",L"620"};
+            std::vector<wchar_t*> argv;for(auto& arg:args)argv.push_back(arg.data());
+            std::ostringstream text;auto* previous=std::cout.rdbuf(text.rdbuf());int code;
+            try{code=workerMainNotUsedBySelftest(static_cast<int>(argv.size()),argv.data());}catch(...){std::cout.rdbuf(previous);throw;}
+            std::cout.rdbuf(previous);return std::make_pair(code,text.str());
+        };
+        try{
+            const std::string marker="VIDEO_SEARCH_JSON: ";
+            const auto catalog=[&]{const auto [code,output]=search();const auto offset=output.find(marker);check(code==0&&offset!=std::string::npos,"Actual video search did not return a catalog");return json::parse(output.substr(offset+marker.size()));};
+            const auto first=catalog();
+            check(first.at("candidates").size()==1&&first.at("candidates")[0].at("url")==newUrl&&calls==1,"Explicit video search re-offered a removed cached URL instead of current metadata");
+            reply["620"]["data"]["movies"]=json::array();
+            check(catalog().at("candidates").empty()&&calls==2,"Repeated search reused a catalog after the provider removed the remaining video");
+            reply["620"]["data"]["type"]="tool";
+            const auto [code,output]=search();
+            check(code!=0&&output.find(marker)==std::string::npos&&calls==3,"A typed non-game response produced a playable catalog");
+        }catch(...){SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",oldRoot.empty()?nullptr:oldRoot.c_str());throw;}
+        SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",oldRoot.empty()?nullptr:oldRoot.c_str());
+    });
+    test("wallpaper-video-catalog-shares-bounded-region-fallback",[](const auto& p){
+        const std::string video="https://video.steamstatic.com/store_trailers/620/jp/master.m3u8";
+        const json absent={{"620",{{"success",false}}}};
+        auto offered=record();offered["620"]["data"]["movies"]=json::array({{{"hls_h264",video}}});
+        saveSteamDetailsCache(steamDetailsRecord(record(),620));
+        const auto cached=queueBytes(steamDetailsCachePath(620));
+        const auto previousRoot=custom_steam_library::configuredDataRoot();
+        check(SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",g_workerDataRoot.c_str())!=FALSE,"Cannot isolate video search data root");
+        std::vector<std::string> countries;
+        const auto run=[&](const json& us,const json& cn,const json& jp){
+            countries.clear();
+            artworkTestTransport=[&](const auto&,const auto&,const auto& url,const auto&){
+                const std::string prefix="https://store.steampowered.com/api/appdetails?appids=620&l=english&cc=";
+                check(url.starts_with(prefix),"Video search probed a different AppID or endpoint");
+                countries.push_back(url.substr(prefix.size()));
+                if(countries.back()=="us")return payload(us);
+                if(countries.back()=="cn")return payload(cn);
+                check(countries.back()=="jp","Unexpected storefront");return payload(jp);
+            };
+            std::vector<std::wstring> args={(p/L"SteamArtworkLab.exe").wstring(),L"--search-wallpaper-videos",L"620"};
+            std::vector<wchar_t*> argv;for(auto& arg:args)argv.push_back(arg.data());
+            std::ostringstream text;auto* original=std::cout.rdbuf(text.rdbuf());int code;
+            try{code=workerMainNotUsedBySelftest(static_cast<int>(argv.size()),argv.data());}catch(...){std::cout.rdbuf(original);artworkTestTransport={};throw;}
+            std::cout.rdbuf(original);artworkTestTransport={};return std::make_pair(code,text.str());
+        };
+        try{
+            const std::string marker="VIDEO_SEARCH_JSON: ";
+            const auto [code,text]=run(absent,absent,offered);const auto start=text.find(marker);
+            check(code==0&&start!=std::string::npos,"Explicit video search stopped at the first unavailable storefront");
+            const auto result=json::parse(text.substr(start+marker.size()));
+            check(countries==std::vector<std::string>{"us","cn","jp"}&&result.at("appId")==620&&result.at("candidates").size()==1&&result.at("candidates")[0].at("url")==video,"Fallback did not return the exact AppID's offered video");
+            check(queueBytes(steamDetailsCachePath(620))==cached,"Fallback video metadata contaminated the US identity cache");
+            check(run(absent,offered,absent).first==0&&countries==std::vector<std::string>{"us","cn"},"Positive second-region record did not end the search");
+            check(run(absent,absent,absent).first!=0&&countries==std::vector<std::string>{"us","cn","jp"},"Unavailable storefronts did not remain a bounded failure");
+            check(run({{"620",{{"success",0}}}},offered,offered).first!=0&&countries==std::vector<std::string>{"us"},"Malformed success triggered a regional fallback");
+            check(run(absent,record(620,621),offered).first!=0&&countries==std::vector<std::string>{"us","cn"},"Foreign AppID triggered additional lookup or gained an eligible catalog");
+        }catch(...){SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",previousRoot.empty()?nullptr:previousRoot.c_str());throw;}
+        SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",previousRoot.empty()?nullptr:previousRoot.c_str());
+    });
     test("steam-exact-valid-appdetails",[](const auto&){auto r=steamDetailsRecord(record(),620);check(r.requestedAppId==620&&r.canonicalAppId==620&&r.type=="game","Valid Steam record rejected");});
     for(const auto& pair:std::vector<std::pair<std::string,json>>{{"null",nullptr},{"array",json::array()},{"string","error"},{"number",42},{"empty-object",json::object()},{"unrelated-app",record(570,570,"game","Dota 2")},{"failed-app",{{"620",{{"success",false}}}}},{"data-null",{{"620",{{"success",true},{"data",nullptr}}}}},{"envelope-array",{{"620",json::array()}}}}){
         const auto name="steam-rejects-"+pair.first;test(name.c_str(),[&](const auto&){mustFail([&]{steamDetailsRecord(pair.second,620);});});}
@@ -162,7 +432,7 @@ int wmain(int argc,wchar_t** argv){try{
     test("random-malformed-appdetails-1000-combinations-never-verify",[](const auto&){const std::vector<json> bad={nullptr,0,"",json::array(),json::object()};for(int i=0;i<1000;++i){auto r=record();if(i%3==0)r["620"]["success"]=bad[(i/3)%bad.size()];else if(i%3==1)r["620"]["data"]["steam_appid"]=bad[(i/3)%bad.size()];else r["620"]["data"]["type"]=bad[(i/3)%bad.size()];try{steamDetailsRecord(r,620);}catch(...){continue;}throw std::runtime_error("Malformed combination accepted at i="+std::to_string(i)+" value="+r.dump());}});
     test("atomic-write-and-read-beyond-max-path",[](const auto& p){auto dir=p;for(int i=0;i<8;++i)dir/=L"long-artwork-metadata-fixture-012345";const auto target=dir/L"manifest.json";check(target.wstring().size()>300,"Long-path fixture too short");writeJsonAtomic(target,{{"ok",true},{"id",620}});const auto b=readBinaryFile(target);check(json::parse(b.begin(),b.end())["id"]==620,"Long-path JSON did not roundtrip");writeJsonAtomic(target,{{"ok",true},{"id",570}});const auto replaced=readBinaryFile(target);check(json::parse(replaced.begin(),replaced.end())["id"]==570,"Long-path replacement failed");});
     test("io-path-supports-long-unc-without-changing-persisted-path",[](const auto&){const auto original=fs::path(L"\\\\server\\share")/std::wstring(260,L'a')/L"image.png";const auto result=custom_steam_library::ioPath(original).wstring();check(result.starts_with(L"\\\\?\\UNC\\server\\share\\"),"UNC IO prefix malformed");check(!original.wstring().starts_with(L"\\\\?\\"),"Original persisted path was mutated");});
-    if(argc==3&&!queueOnly){const auto evidence=fs::path(argv[2]);for(const int id:{620,570})test("live-captured-steam-appdetails-parses",[&](const auto&){const auto b=readBinaryFile(evidence/(L"app-"+std::to_wstring(id)+L".json"));auto r=steamDetailsRecord(json::parse(b.begin(),b.end()),id);check(r.canonicalAppId==id&&r.type=="game","Real Steam sample rejected");});test("live-captured-steam-invalid-app-is-rejected",[&](const auto&){const auto b=readBinaryFile(evidence/L"app-999999999.json");mustFail([&]{steamDetailsRecord(json::parse(b.begin(),b.end()),999999999);});});}
+    if(argc==3&&!queueOnly&&!titleOnly){const auto evidence=fs::path(argv[2]);for(const int id:{620,570})test("live-captured-steam-appdetails-parses",[&](const auto&){const auto b=readBinaryFile(evidence/(L"app-"+std::to_wstring(id)+L".json"));auto r=steamDetailsRecord(json::parse(b.begin(),b.end()),id);check(r.canonicalAppId==id&&r.type=="game","Real Steam sample rejected");});test("live-captured-steam-invalid-app-is-rejected",[&](const auto&){const auto b=readBinaryFile(evidence/L"app-999999999.json");mustFail([&]{steamDetailsRecord(json::parse(b.begin(),b.end()),999999999);});});}
 
     test("builtin-steam-tool-rejected-before-network-or-cache",[](const auto&){
         int calls=0;artworkTestTransport=[&](const auto&,const auto&,const auto&,const auto&)->HttpResponse{++calls;return payload(record(228980,228980,"game","Steamworks Common Redistributables"));};
@@ -330,6 +600,45 @@ int wmain(int argc,wchar_t** argv){try{
             check(!result||(!result->confident&&result->identityStatus=="needs-confirmation"),"Abbreviation attached an unrelated AppID");
         });
     }
+    test("automatic-dotted-title-base-game-and-dlc",[](const auto&){
+        g_fastMetadataMode=true;
+        artworkTestTransport=[](const auto&,const auto&,const auto& url,const auto&){
+            if(url.find("storesearch")!=std::string::npos)return payload({{"items",json::array({
+                {{"id",1643320},{"name","S.T.A.L.K.E.R. 2: Heart of Chornobyl"}},
+                {{"id",3765020},{"name","S.T.A.L.K.E.R. 2: Cost of Hope"}}})}});
+            if(url.find("search/results")!=std::string::npos)return payload({{"success",1},{"results_html",""}});
+            if(url.find("appids=3765020")!=std::string::npos)return payload(record(3765020,3765020,"dlc","S.T.A.L.K.E.R. 2: Cost of Hope"));
+            return payload(record(1643320,1643320,"game","S.T.A.L.K.E.R. 2: Heart of Chornobyl"));
+        };
+        json steam=json::array(),igdb=json::array(),decision;
+        const auto result=resolveMultiSource({{1,"pe-product-name","S.T.A.L.K.E.R. 2",{}}},{"Stalker2"},"pc",{},steam,igdb,decision,true);
+        check(result&&result->confident&&result->appId==1643320&&result->steamVerificationStatus=="steam-verified","Verified base game was lost to dotted PE/directory disagreement");
+        check(result->name=="S.T.A.L.K.E.R. 2: Heart of Chornobyl"&&igdb.empty(),"Secondary artwork renamed a verified base game");
+    });
+    test("igdb-expanded-type-rejects-related-content",[](const auto&){
+        for(const auto* type:{"DLC / Addon","Expansion","Bundle","Mod","Season","Pack","Update"}){
+            json data={{"id",7},{"name","Test Game"},{"game_type_expanded",{{"type",type}}}};
+            artworkTestTransport=[&](const auto&,const auto&,const auto&,const auto&){return payload({{"data",data}});};
+            json log=json::array();mustFail([&]{verifyIgdbId(7,"pc",log);});
+        }
+    });
+    test("igdb-expanded-detail-cannot-replace-base-title",[](const auto&){
+        artworkTestTransport=[](const auto&,const auto&,const auto& url,const auto&){
+            json base={{"id",101440},{"name","S.T.A.L.K.E.R. 2: Heart of Chornobyl"},{"platforms_expanded",json::array({{{"name","PC (Microsoft Windows)"}}})}};
+            json expansion={{"id",396025},{"name","S.T.A.L.K.E.R. 2: Cost of Hope"},{"parent_game",101440},{"game_type_expanded",{{"type","Expansion"}}},{"platforms_expanded",base["platforms_expanded"]}};
+            if(url.find("/search")!=std::string::npos){auto search=expansion;search.erase("game_type_expanded");return payload({{"data",json::array({search,base})}});}
+            return payload({{"data",url.ends_with("/396025")?expansion:base}});
+        };
+        json log=json::array();const auto result=resolveIgdbGame({{1,"pe-product-name","S.T.A.L.K.E.R. 2",{}}},{"Stalker2"},"pc",log);
+        check(result&&result->igdbId==101440&&result->name=="S.T.A.L.K.E.R. 2: Heart of Chornobyl","Expanded detail mislabeled a DLC as the base game");
+    });
+    test("dotted-title-token-controls",[](const auto&){
+        check(scoreTitle("Stalker2","S.T.A.L.K.E.R. 2: Heart of Chornobyl")>=0.90,"Joined directory lost dotted acronym");
+        check(scoreTitle("Stalker2","S.T.A.L.K.E.R. 3: Heart of Chornobyl")<=0.72,"Acronym handling erased sequel ordinal");
+        check(titleTokens("F.E.A.R. 2")==titleTokens("FEAR 2"),"Dotted acronym did not tokenize consistently");
+        check(titleTokens("Little.Fighter.2")!=titleTokens("Littlefighter2"),"Normal dotted words were merged");
+        check(titleTokens("S.T.A.L.K.E.R.")==titleTokens("STALKER"),"Noise-word filtering changed acronym letters");
+    });
     test("short-official-uppercase-title-still-accepted",[](const auto&){
         artworkTestTransport=[](const auto&,const auto&,const auto& url,const auto&){
             if(url.find("storesearch")!=std::string::npos)return payload({{"items",json::array({{{"id",620},{"name","DOOM"}}})}});
@@ -412,10 +721,150 @@ int wmain(int argc,wchar_t** argv){try{
     test("refining-collection-retains-old-ownership-alias-only-for-exact-exe",[&](const auto& p){const auto root=p/L"Library",d=root/L"DownloadShelf",exe=d/L"AlphaQuest"/L"AlphaQuest.exe";fixtureExe(exe);fixtureExe(d/L"BetaIsland"/L"BetaIsland.exe");writeJsonAtomic(g_workerDataRoot/L"state"/L"library-scan.json",{{"games",json::array({{{"gameDirectory",toUtf8(d.wstring())},{"primaryExecutable",toUtf8(exe.wstring())}}})}});const auto scan=scanLibraryRoots({root},{},5,defaultLibraryConfig());size_t matched=0;for(const auto& game:scan["games"]){if(game["primaryExecutable"]==toUtf8(exe.wstring())){check(game["alternateGameDirectories"].size()==1&&game["alternateGameDirectories"][0]==toUtf8(d.wstring()),"Exact legacy owner alias lost");++matched;}else check(!game.contains("alternateGameDirectories"),"Sibling inherited collapsed collection ownership");}check(matched==1,"Original primary EXE disappeared");});
 
     auto searchUrl=[](const std::string& query){return "https://store.steampowered.com/api/storesearch/?term="+query+"&l=english&cc=us";};
+    for(const auto* stage:{"no-parsed-candidate","no-verification-candidate","candidate-not-verified","candidate-needs-review","verified"}) {
+        const std::string expected=stage, name="identity-lookup-stage-"+expected;
+        test(name.c_str(),[&](const auto& p){
+            const auto data=g_workerDataRoot,out=data/L"cache"/L"jobs"/L"identity-receipt",exe=p/L"Test Game"/L"TestGame.exe";
+            fixtureExe(exe);
+            OwnedRetryEnvironment owner;
+            SetEnvironmentVariableW(L"YEMAN_MEDIA_IDENTITY_RETRY_OWNER",L"shared-media-v1");
+            SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",data.c_str());
+            unsigned searches=0, details=0;
+            artworkTestTransport=[&](const auto&,const auto&,const auto& url,const auto&){
+                if(url.find("storesearch")!=std::string::npos){
+                    ++searches;
+                    json items=json::array();
+                    if(expected!="no-parsed-candidate")items.push_back({{"id",620},{"name",expected=="no-verification-candidate"?"Volcanic Archipelago":"Test Game"},{"type","app"}});
+                    if(expected=="candidate-needs-review")items.push_back({{"id",621},{"name","Test Game"},{"type","app"}});
+                    return payload({{"items",items}});
+                }
+                if(url.find("search/results")!=std::string::npos)return payload({{"success",1},{"total_count",0},{"results_html",""}});
+                check(url.find("appdetails")!=std::string::npos,"Unexpected provider call");
+                ++details;
+                if(expected=="candidate-not-verified")return HttpResponse{404};
+                const int id=url.find("appids=621")!=std::string::npos?621:620;
+                return payload(record(id,id,"game","Test Game"));
+            };
+            std::vector<std::wstring> args={L"SteamArtworkLab.exe",exe.wstring(),out.wstring(),L"--metadata-only",L"--steam-identity-only",L"--name",L"Test Game"};
+            std::vector<wchar_t*> argv;for(auto& arg:args)argv.push_back(arg.data());
+            const auto code=workerMainNotUsedBySelftest(static_cast<int>(argv.size()),argv.data());
+            check(searches>0,"Official search fixture was not reached");
+            const auto failed=out/L"rounds-failed.json";
+            if(expected=="verified"){
+                check(code==0&&details==1&&!fs::exists(failed),"Verified result generated a failure receipt");
+            }else{
+                check(code!=0&&fs::is_regular_file(failed),"Unresolved lookup did not write the original receipt");
+                const auto receipt=loadJsonDocument(failed), failure=receipt.at("failure");
+                const auto diagnostic=failure.value("steamLookupStage",std::string{});
+                check(failure.at("kind")=="unrecognized"&&diagnostic==expected,("Expected "+expected+", observed "+diagnostic).c_str());
+                check(details==(expected=="candidate-needs-review"?2u:expected=="candidate-not-verified"?1u:0u),"AppDetails stage was not reached as expected");
+                json observation=json::object();
+                check(!ymcc::media::downloads::identityNetworkUnavailable(out,toUtf8(exe.wstring()),&observation)&&
+                    observation.value("steamLookupStage",std::string{})==expected,"Real producer and consumer diagnostics disagree");
+            }
+        });
+    }
     auto searchCache=[](const std::string& url){return g_workerDataRoot/L"cache"/L"steam-search"/toWide(sha256(std::vector<unsigned char>(url.begin(),url.end()))+".json");};
     const auto candidates=json{{"items",json::array({{{"id",620},{"name","Portal 2"},{"type","app"}}})}};
     auto seedSearch=[&](const std::string& url,const json& data,uint64_t age){const auto at=unixTimeMs()-age;writeJsonAtomic(searchCache(url),{{"schemaVersion",1},{"url",url},{"fetchedAt",at},{"data",data}});return at;};
-    test("weak-mixed-search-success-and-verification-timeout-remains-retryable",[](const auto&){const auto log=json::array({{{"attempt",1},{"freshSession",true},{"status",200}},{{"attempt",1},{"freshSession",true},{"retryable",true},{"win32Error",ERROR_WINHTTP_TIMEOUT}}});check(networkVerificationPending(log),"Partial network success hid verification timeout");const auto f=describeResolutionFailure(log,json::array(),false);check(f["kind"]=="network-unavailable"&&f["retryWhenNetworkReturns"]==true&&f["successfulResponses"]==1,"Incomplete search became permanent unrecognized");});
+    test("weak-mixed-search-success-and-verification-timeout-remains-retryable",[](const auto& p){const auto log=json::array({{{"attempt",1},{"freshSession",true},{"status",200}},{{"attempt",1},{"freshSession",true},{"retryable",true},{"win32Error",ERROR_WINHTTP_TIMEOUT}}});check(networkVerificationPending(log),"Partial network success hid verification timeout");const auto f=describeResolutionFailure(log,json::array(),false);check(f["kind"]=="network-unavailable"&&f["retryWhenNetworkReturns"]==true&&f["successfulResponses"]==1,"Incomplete search became permanent unrecognized");
+        OwnedRetryEnvironment restoreRetryEnvironment;json observed=json::array();
+        for(const auto* mode:{"timeout","not-found","recovered","managed-timeout","managed-not-found","managed-recovered","managed-existing-queue","managed-ordinary","ordinary-recovered","steam-only-recovered","recovered-newer","recovered-future","recovered-storage-error","queue-incompatible"}){
+            const auto base=p/toWide(mode),data=base/L"data",out=data/L"cache"/L"jobs"/L"identity-receipt",exe=base/L"Test Game"/L"TestGame.exe";
+            writeAtomic(exe,std::vector<unsigned char>{'i','n','e','r','t'});
+            SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",data.c_str());
+            g_workerDataRoot=data;g_metadataBackoffs.clear();g_identityNetworkDeadline=0;
+            const std::string variant=mode;const bool managed=variant.starts_with("managed-");
+            SetEnvironmentVariableW(L"YEMAN_MEDIA_IDENTITY_RETRY_OWNER",managed?L"shared-media-v1":nullptr);
+            const std::string state=variant=="managed-existing-queue"||variant=="managed-ordinary"||variant=="queue-incompatible"?"timeout":variant.find("recovered")!=std::string::npos?"recovered":managed?variant.substr(8):variant;unsigned calls=0;
+            std::string legacyBytes;
+            if(variant=="managed-existing-queue"){const auto legacy=queueFixture(base);writeJsonAtomic(networkRetryQueuePath(data),legacy);legacyBytes=queueBytes(networkRetryQueuePath(data));}
+            if(variant=="queue-incompatible"){
+                writeJsonAtomic(networkRetryQueuePath(data),{{"schemaVersion",99},{"keep","unknown queue version"}});
+                legacyBytes=queueBytes(networkRetryQueuePath(data));
+            }
+            const auto identityFile=custom_steam_library::identity_cache::cachePath(data,toUtf8(exe.wstring()));
+            std::string protectedBytes;
+            artworkTestTransport=[&](const auto&,const auto&,const auto& url,const auto&)->HttpResponse{
+                ++calls;
+                if(protectedBytes.empty()&&(variant=="recovered-newer"||variant=="recovered-future")){
+                    const json winner={{"schemaVersion",variant=="recovered-future"?3:1},{"executable",toUtf8(exe.wstring())},{"updatedAt",unixTimeMs()+1000},
+                        {"match",{{"appId",777},{"storefrontAppId",777},{"formalName","Newer Choice"},{"identityStatus","verified"},{"primaryProvider","steam"},
+                        {"steamVerificationStatus","steam-verified"},{"resolverVersion","steam-official-fuzzy-global-v4"}}}};
+                    writeJsonAtomic(identityFile,winner);protectedBytes=queueBytes(identityFile);
+                }
+                if(variant=="recovered-storage-error"&&!fs::exists(identityFile.parent_path()))queueText(identityFile.parent_path(),"owned storage fault");
+                if(url.find("api2.playnite.link/api/igdb/search")!=std::string::npos)return payload({{"Data",json::array({{{"id",7},{"name","Test Game"},{"game_type",0}}})}});
+                if(url.find("api2.playnite.link/api/igdb/game/7")!=std::string::npos)return payload({{"Data",{{"id",7},{"name","Test Game"},{"game_type",0}}}});
+                if(url.find("storesearch")!=std::string::npos)return payload({{"items",json::array({{{"id",620},{"name","Test Game"},{"type","app"}}})}});
+                if(url.find("search/results")!=std::string::npos)return payload({{"success",1},{"results_html",""}});
+                if(state=="recovered")return payload(record(620,620,"game","Test Game"));
+                if(state=="not-found")return HttpResponse{404};
+                throw HttpTransportError("fixture official verification timeout",ERROR_WINHTTP_TIMEOUT,true);
+            };
+            std::vector<std::wstring> args={L"SteamArtworkLab.exe",exe.wstring(),out.wstring(),L"--metadata-only",L"--steam-comprehensive-identity-only",L"--name",L"Test Game"};
+            if(variant=="managed-ordinary"||variant=="ordinary-recovered")args.erase(std::find(args.begin(),args.end(),L"--steam-comprehensive-identity-only"));
+            if(variant=="steam-only-recovered")*std::find(args.begin(),args.end(),L"--steam-comprehensive-identity-only")=L"--steam-identity-only";
+            std::vector<wchar_t*> argv;for(auto& arg:args)argv.push_back(arg.data());
+            const auto code=workerMainNotUsedBySelftest(static_cast<int>(argv.size()),argv.data());
+            json match=json::object();if(fs::exists(out))for(const auto& entry:fs::recursive_directory_iterator(out))if(entry.path().filename()==L"manifest.json")match=loadJsonDocument(entry.path()).value("match",json::object());
+            json receipt=json::object();const auto file=out/L"rounds-failed.json";if(fs::is_regular_file(file))receipt=loadJsonDocument(file);
+            json detail=json::object();const auto retryable=ymcc::media::downloads::identityNetworkUnavailable(out,toUtf8(exe.wstring()),&detail);
+            const auto queue=loadNetworkRetryQueue(data);
+            json enqueueEvents=json::array();
+            const auto logPath=data/L"state"/L"lifecycle-events.json";
+            if(fs::is_regular_file(logPath)){
+                const auto lifecycle=loadJsonDocument(logPath);
+                for(const auto& event:lifecycle.at("events")){
+                    const auto type=event.value("type",std::string{});
+                    if(type=="network-retry-enqueued"||type=="network-retry-enqueue-failed")enqueueEvents.push_back(event);
+                }
+            }
+            observed.push_back({{"mode",mode},{"code",code},{"calls",calls},{"cachedIdentity",ymcc::media::Store(data).identity(toUtf8(exe.wstring()))},{"workerPlanIdentity",cachedVerifiedSteamIdentity(data,toUtf8(exe.wstring())).has_value()},{"identityFilePresent",fs::is_regular_file(identityFile)},{"protectedUnchanged",protectedBytes.empty()||queueBytes(identityFile)==protectedBytes},{"receiptPresent",fs::is_regular_file(file)},{"parentRetryable",retryable},{"parentObservation",detail},
+                {"failure",receipt.value("failure",json::object())},{"match",match},{"queue",queue},{"queueFilePresent",fs::exists(networkRetryQueuePath(data))},{"legacyUntouched",legacyBytes.empty()||queueBytes(networkRetryQueuePath(data))==legacyBytes},{"enqueueEvents",enqueueEvents}});
+        }
+        writeJsonAtomic(p/L"terminal-observations.json",observed);
+        const auto timeout=observed[0],absent=observed[1],recovered=observed[2];
+        check(timeout["code"]==4&&timeout["match"].value("primaryProvider",std::string{})=="playnite-igdb"&&timeout["match"].value("steamVerificationStatus",std::string{})=="network-pending","Fixture must execute real secondary-only identity exit");
+        check(!custom_steam_library::verifiedSteamIdentityMatch(timeout["match"]),"Secondary metadata cannot grant Steam identity");
+        check(timeout["receiptPresent"]==true&&timeout["parentRetryable"]==true,"Secondary-only network failure must reach caller terminal receipt");
+        check(timeout["failure"]["retryWhenNetworkReturns"]==true&&timeout["failure"]["retryableFailures"].get<int>()>0,"Terminal receipt retains original retry evidence");
+        check(timeout["queue"]["jobs"].size()==1&&timeout["queue"]["jobs"].begin().value().value("consecutiveFailures",0)==1,"Terminal receipt reuses existing retry without another enqueue");
+        check(absent["code"]==4&&absent["receiptPresent"]==true&&absent["parentRetryable"]==false&&absent["failure"]["kind"]=="unrecognized","Definitive identity absence stays bounded and distinguishable");
+        check(absent["queue"]["jobs"].empty()&&!custom_steam_library::verifiedSteamIdentityMatch(absent["match"]),"Permanent rejection neither enqueues nor grants Steam identity");
+        check(recovered["code"]==0&&custom_steam_library::verifiedSteamIdentityMatch(recovered["match"])&&recovered["receiptPresent"]==false,"Official recovery succeeds without stale terminal refusal");
+        check(recovered["queue"]["jobs"].empty(),"Healthy identity adds no retry job");
+        const auto managedTimeout=observed[3],managedAbsent=observed[4],managedRecovered=observed[5],legacy=observed[6],ordinary=observed[7];
+        check(managedTimeout["code"]==4&&managedTimeout["parentRetryable"]==true,"Managed identity retains original network retry evidence");
+        check(managedTimeout["queue"]["jobs"].empty()&&managedTimeout["queueFilePresent"]==false,"Shared identity owner must not enqueue a second legacy retry");
+        check(managedTimeout["failure"]["networkRetryOwner"]=="shared-media"&&managedTimeout["failure"]["networkRetryQueued"]==false,"Managed retry is reported as delegated rather than failed enqueue");
+        check(managedAbsent["code"]==4&&managedAbsent["parentRetryable"]==false&&managedAbsent["queue"]["jobs"].empty(),"Managed permanent absence stays refused");
+        check(managedRecovered["code"]==0&&custom_steam_library::verifiedSteamIdentityMatch(managedRecovered["match"])&&managedRecovered["queue"]["jobs"].empty(),"Managed official recovery retains original identity authority");
+        check(legacy["parentRetryable"]==true&&legacy["legacyUntouched"]==true&&legacy["queue"]["jobs"].size()==1,"Managed owner preserves existing legacy history bytes");
+        check(ordinary["queue"]["jobs"].size()==1,"Ordinary metadata still owns its original retry even with an inherited marker");
+        check(recovered["cachedIdentity"].value("appId",0)==620&&recovered["workerPlanIdentity"]==true,
+            "Recovered automatic identity must reach the durable cache and real Worker plan reader");
+        for(const auto index:{0,1,3,4,5,6,7,8,9})check(observed[index]["identityFilePresent"]==false,
+            "Unverified, managed or unsaved manual/diagnostic preview published identity");
+        check(observed[8]["code"]==0&&observed[9]["code"]==0,"Manual/diagnostic success changed");
+        check(observed[10]["code"]==0&&observed[10]["cachedIdentity"].value("appId",0)==777&&observed[10]["protectedUnchanged"]==true,
+            "Late recovery overwrote newer identity");
+        check(observed[11]["code"]!=0&&observed[11]["protectedUnchanged"]==true,"Future cache was consumed or overwritten as success");
+        check(observed[12]["code"]!=0&&!observed[12]["identityFilePresent"].get<bool>(),"Cache publication failure reported successful retry");
+        const auto& committed=timeout.at("enqueueEvents");
+        check(committed.size()==1&&committed[0]["type"]=="network-retry-enqueued"&&
+            committed[0]["nextAttemptAt"]==timeout["queue"]["jobs"].begin().value()["nextAttemptAt"],"Confirmed enqueue lost its single success event or deadline");
+        check(timeout["failure"].value("networkRetryQueued",false)&&timeout["failure"]["networkRetryJobId"]==committed[0]["jobId"]&&
+            timeout["failure"]["networkRetryNextAttemptAt"]==committed[0]["nextAttemptAt"],"Reused enqueue acknowledgement was lost from the final failure receipt");
+        check(managedTimeout.at("enqueueEvents").empty(),"Shared media produced an independent enqueue event");
+        const auto& unavailable=observed[13];
+        check(unavailable["code"]==4&&unavailable["parentRetryable"]==true&&unavailable["legacyUntouched"]==true&&
+            unavailable["failure"]["networkRetryQueued"]==false&&!unavailable["failure"].contains("networkRetryJobId")&&
+            !unavailable["failure"].value("networkRetryQueueError",std::string{}).empty(),"Unavailable queue must preserve original bytes and retryable result");
+        const auto& refused=unavailable.at("enqueueEvents");
+        check(refused.size()==1&&refused[0]["type"]=="network-retry-enqueue-failed"&&
+            refused[0]["reason"]=="queue-write-unconfirmed"&&!refused[0].contains("nextAttemptAt"),"Unconfirmed retry queue was logged as enqueued");
+    });
     test("weak-permanent-transport-error-is-not-network-retry",[](const auto&){const auto log=json::array({{{"attempt",1},{"freshSession",true},{"retryable",false},{"win32Error",ERROR_INVALID_DATA}}});check(!networkVerificationPending(log)&&describeResolutionFailure(log,json::array(),true)["kind"]=="manual-id-rejected","Permanent invalid data became pending network");});
     test("weak-definitive-404-stays-nonretryable",[](const auto&){const auto log=json::array({{{"attempt",1},{"freshSession",true},{"status",404}}});check(!networkVerificationPending(log)&&!describeResolutionFailure(log,json::array(),false)["retryWhenNetworkReturns"].get<bool>(),"404 retried as outage");});
     test("weak-shared-identity-budget-prevents-new-endpoint-request",[](const auto&){int calls=0;g_fastMetadataMode=true;artworkTestTransport=[&](const auto&,const auto&,const auto&,const auto&){++calls;return payload(record());};g_identityNetworkDeadline=GetTickCount64()-1;json log=json::array();mustFail([&]{getJson("https://store.steampowered.com/api/storesearch/?term=A","steam",&log);});mustFail([&]{getJson("https://api.igdb.com/v4/games","igdb",&log);});check(calls==0&&log.size()==2&&networkVerificationPending(log),"Per-endpoint call reset job budget");});
@@ -796,5 +1245,8 @@ int wmain(int argc,wchar_t** argv){try{
         test("round6-real-steam-soundtrack-cannot-be-a-base-game",[&](const auto&){const auto detail=loadJsonDocument(source/L"portal2-soundtrack.json");artworkTestTransport=[&](const auto&,const auto&,const auto&,const auto&){return payload(detail);};json log=json::array();mustFail([&]{verifySteamAppId(323180,log);});});
         test("round6-real-steam-redistributable-stays-excluded-before-network",[&](const auto&){int calls=0;const auto detail=loadJsonDocument(source/L"steam-common-redist.json");artworkTestTransport=[&](const auto&,const auto&,const auto&,const auto&){++calls;return payload(detail);};json log=json::array();mustFail([&]{fetchSteamDetails(228980,log);});check(calls==0,"Real system tool entered metadata queue");});
     }
+    check(!identityReceiptOnly||cases.size()==1,"Directed identity receipt case selection is incomplete");
+    check(!identityLookupStageOnly||cases.size()==5,"Directed identity lookup stage selection is incomplete");
+    check(!videoCatalogOnly||cases.size()==2,"Directed video catalog case selection is incomplete");
     size_t failures=0;for(const auto& t:cases)if(!t["passed"].get<bool>())++failures;json report={{"allPassed",failures==0},{"caseCount",cases.size()},{"failedCount",failures},{"cases",cases},{"realSteamFilesModified",false},{"liveNetworkUsedByFixtures",false}};selftestMoveFault={};writeJsonAtomic(root/L"summary.json",report);std::cout<<report.dump(2)<<"\n";return failures?1:0;
 }catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}}

@@ -52,13 +52,14 @@ public:
         row.rateKnown = true; row.status = "observed"; return row;
     }
 };
-inline nlohmann::json toJson(const Observation& row) {
+inline constexpr char ProcessScope[] = "Whole Native process, including all its threads; not virtual-input-only, not Host or WebView child processes";
+inline nlohmann::json toJson(const Observation& row, bool includeScope = true) {
     const auto& c = row.current;
     nlohmann::json result = {{"schemaVersion",1},{"pid",c.processId},{"sampleTick",c.tick},
         {"cpuCounterSource","GetProcessTimes"},{"cpuCounterUnit","100ns"},
         {"cpuCounterAvailable",c.cpuKnown},{"cpuRateAvailable",row.rateKnown},{"cpuStatus",row.status},
-        {"memorySource","GetProcessMemoryInfo"},{"memoryAvailable",c.memoryKnown},
-        {"scope","Whole Native process, including all its threads; not virtual-input-only, not Host or WebView child processes"}};
+        {"memorySource","GetProcessMemoryInfo"},{"memoryAvailable",c.memoryKnown}};
+    if (includeScope) result["scope"] = ProcessScope;
     if (c.cpuKnown) {
         result["processCreation100ns"] = c.creation100ns;
         result["kernelTotal100ns"] = c.kernel100ns;

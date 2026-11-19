@@ -1,7 +1,12 @@
 {
   "schemaVersion": 1,
-  "inventoryReference": "D:/Codex/2026-10-22/new-chat/g3e-freeze-080106/pnp-regression-final/RESULT.json",
-  "meaning": "Dependency inventory only; no historical PASS is reused. Every front-door run hashes these frozen inputs and checks the new actual compiler/linker closure.",
+  "inventoryReference": "Reviewed boundToolchainInputs from the existing PnP selftest; provenance only, no receipt is an execution dependency",
+  "inventorySource": {
+    "sha256": "4671bef02b95d8f9c0d4e5620ab48798ea12ff60f756e35f2284bb46482eae79",
+    "boundInputs": 280,
+    "retainedPreviousMembers": 280
+  },
+  "meaning": "Dependency inventory only. Previous authority members retained and rebound through original/frozen manifest mapping to current captured hashes. Each invocation verifies its selected capture, tools and actual compiler/linker closure; historical PASS is not reused.",
   "dependencies": [
     {
       "original": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\__msvc_bit_utils.hpp",
@@ -604,523 +609,523 @@
       "sha256": "35bd82cfb02a0146ff9c0ca6bf7dbde61d49c6d4f3493befe584218c370ff41d"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\apiset.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\apiset.h",
       "sha256": "e984e20681fd3de73ce14ab09d759d5b4faf03f7d66a78602da2ac9234b24df4"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\apisetcconv.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\apisetcconv.h",
       "sha256": "1093683104f97c8c9725bb2e7539dca22722dc8c5618cd846287e9458698abfe"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\basetsd.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\basetsd.h",
       "sha256": "d35b73f885d7ef7dfd27fce3762c190c1c952a21e10a3945bcb3d1860c673b12"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\cfg.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\cfg.h",
       "sha256": "6e2aa35c540ec4754d8e13666b0b17f83cb174c4dfd34cf9076565f72361f5e3"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\devpkey.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\devpkey.h",
       "sha256": "132ad3ea096996fbbf79ea8b23c4adb5b348d95a9d2d854bc076cc7fa6a091ab"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\devpropdef.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\devpropdef.h",
       "sha256": "79e4631e9e0cfda0975270f71c9970d731352ad8d198d6706ac13a3970ceaa98"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\driverspecs.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\driverspecs.h",
       "sha256": "9cf7e9e1c9b55c7c351e87ff5a98e362b6ffdb511c3309ab9cf46b62b0dace42"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\guiddef.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\guiddef.h",
       "sha256": "0c08463fbc5a23a8862e57699e2f30dd14cd3db4a40903e4fca9392a57942dae"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\initguid.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\initguid.h",
       "sha256": "422ebcf50b8e8ad2f21a06e7281540f759237eabe37e445605fc45cc45d88314"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\kernelspecs.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\kernelspecs.h",
       "sha256": "e844c7726c42736df74445b36351dc01e29bccee7d57ea208f77f61aa4c2b191"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\ktmtypes.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\ktmtypes.h",
       "sha256": "68d2848d00ae33282fb265880f8166f2b5dc60cd7a26db652450a5b44d44ee11"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\minwindef.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\minwindef.h",
       "sha256": "a9cf08be8407a196104124d5ade2308e204e47d3252bcd2ad20d0f2137843d62"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\poppack.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\poppack.h",
       "sha256": "a50d0ef5cfe96d634a41ee9a97749c147165f8656cdfed5df53bc24c8adb1210"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\pshpack1.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\pshpack1.h",
       "sha256": "dee27f2712b9e72ca78a404834735303d16bdb21c8aa3addaca7dbca22664529"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\pshpack2.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\pshpack2.h",
       "sha256": "971d19074639cb36134bb40776cb2f817c53cbd05d748b52468f571932bbcc49"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\pshpack4.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\pshpack4.h",
       "sha256": "1cb4d07a218ec43c7935b431b16146fc0f3d29d43bd192f12959051d62c48d57"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\pshpack8.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\pshpack8.h",
       "sha256": "47f3972a1211e3a5ac32b18fae1a824db087dc7dc562d152e9ccab9b297faef0"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\sdkddkver.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\sdkddkver.h",
       "sha256": "2472140e0a4d56595743bb74002a51aee9b58667bd178fc43742e19debfeb774"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\sdv_driverspecs.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\sdv_driverspecs.h",
       "sha256": "99fd81f9464150f56963c3bbafaa95f93b837c221c4237e6e399a85e00ea9f39"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\specstrings_strict.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\specstrings_strict.h",
       "sha256": "49b12898b42bcf53e5f8fb75e6db1a5d3ffb7a9f394e50df3351e0824d4a8b42"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\specstrings_undef.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\specstrings_undef.h",
       "sha256": "6aba76eabbec627edadba5ab29304d9e2ff4eb9da165fd81a9095c851f405a01"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\specstrings.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\specstrings.h",
       "sha256": "3b83b1cd3b4f9bf46009bfdccf01d5c3a6fa6eed3f823d1ef497ed6d1b9bce0e"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\stralign.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\stralign.h",
       "sha256": "f7d2f48b6a9154937ad907e91b70faf6c68044fbe9d4042c392ac3c0eb1a82ef"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\tvout.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\tvout.h",
       "sha256": "8c359d2dff894d546f3eced2fe9463dfa4824bffc6c8c71ecd8feef02e7eae21"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\winapifamily.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\winapifamily.h",
       "sha256": "bda507d14f2e40023d344cb943cbd98af26de8a47f3b0f5fac694d2025711af1"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\windef.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\windef.h",
       "sha256": "040535b19a60264e5fe6971f7cb13cbf24be17abeeaa8acd21e44f5d7dfe8d22"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\winerror.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\winerror.h",
       "sha256": "0284ea46280c14063bb714d08c9ec48de18de6a7f0384323b263fec234428833"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\winpackagefamily.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\winpackagefamily.h",
       "sha256": "8f74e254896094a3884e6975fd24b3493846514065f47d2666df53cdea45b8ea"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\shared\\wnnc.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\\wnnc.h",
       "sha256": "fb3aaeef324b5d00ce0a6ae11702dcc3c1de65fa0a10caaab4336b97d3adf493"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\assert.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\assert.h",
       "sha256": "9f49681f2534ac2f12fe866ba174bb5f64adfc4d91c817ce2ddc32e9ba653ea8"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_malloc.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_malloc.h",
       "sha256": "44bd1bb518e730ba0be045f44a4735869e08f7d54ab85c298270770812fcff80"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_math.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_math.h",
       "sha256": "ca2f0f25b2e07b3613984efd1135dd9f1d0786fabaa56da2ba3c83b1a23eb918"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_memcpy_s.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_memcpy_s.h",
       "sha256": "359f3ce9e84bc00c983f01d9c3375d0ca9e0ef6a42e797d16e119c62b2ef333b"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_memory.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_memory.h",
       "sha256": "18ca520416579183bc369c0a8e555914db5c7577075b9359173fc6bc45595560"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_search.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_search.h",
       "sha256": "fe06c4dd27c3df5ca6bed52a433b8848f32e14ed0f3712d00f7e602416471c1b"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_share.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_share.h",
       "sha256": "08e7a7eb0b0c7ebdd7e5fa9f9a65f626f5a725b688502ac178ca67334328b898"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_stdio_config.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_stdio_config.h",
       "sha256": "a7e100624320a8e0123890c5008bcb2281c1273ca7ce5bb1d297f987fdbe79a0"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_terminate.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_terminate.h",
       "sha256": "c8dc9a2497bcae0a9084eb1120f25660a575c7957997301c4f017fc44c908f54"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_wconio.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_wconio.h",
       "sha256": "6cfdcfd9e1ec60014c4e7e87913275ce3cacda008dbc397a17306976266aa5b6"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_wctype.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_wctype.h",
       "sha256": "b622b24cbda842a1736987f38c9deb5076e51af018630842a127bebd9104076e"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_wdirect.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_wdirect.h",
       "sha256": "b8477593983d23ed4ef93c3efcabb8239375b518ba589a65338db29bb0dc2237"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_wio.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_wio.h",
       "sha256": "e6a08ad4c75ef96fd5fafcff334048c4cc610f990f39c15e07c03af14d607197"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_wprocess.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_wprocess.h",
       "sha256": "e75c5cdf244070ddcebac8920dd4cc96c33d0e21fdfbc82446c0374950e98487"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_wstdio.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_wstdio.h",
       "sha256": "a10bbf4667b3aada380a6b80df853f9fbddc3cc691ca57389b3b6759f119e515"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_wstdlib.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_wstdlib.h",
       "sha256": "98b62ac5fb4291961c19ecf5c1b2e641b437f9042054f1a56ebdfd0deb71eca1"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_wstring.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_wstring.h",
       "sha256": "c485f918d43f0f846d77a36eaee9e111f57bf2eec32db7d9719ff924771744c6"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt_wtime.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt_wtime.h",
       "sha256": "4e487fddafbc724cf4e6df45feb920bc46dae80f54ffe5d983bf742a1fd9a12f"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\corecrt.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\corecrt.h",
       "sha256": "822e503b81dd7b3d7df93ca22fced3672a5154484fd42054d5941e619bcf6cbc"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\crtdbg.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\crtdbg.h",
       "sha256": "d9ebd063f0243dd122ec33901661d1ae175359adbb019f0d815fb902e6f617e4"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\ctype.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\ctype.h",
       "sha256": "6a10e9f0505b896d356d986d671c939b7fb0602012e463314ff7bfd0182a861f"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\errno.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\errno.h",
       "sha256": "c64e8df96f057fdebc0474bd765cee3ae17de34a2b1fc9d197597321f2d1e447"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\float.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\float.h",
       "sha256": "0fbf87532c053b666940a65360f2488f5b6bb2e601632e32a0f1a8a078d8fdcd"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\locale.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\locale.h",
       "sha256": "877aa49e1f22814dd5634e785d305210d3c7ac0a1274e8552ce4f687a91ac4cb"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\malloc.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\malloc.h",
       "sha256": "8acfe0c7a33a4d5ae2253f7167f92b0e728dea86f83289cee9d583c45b175b6e"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\math.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\math.h",
       "sha256": "fb747990091c8c6e4ed8b4cfb40ed14eadd37547153607459e9ddef71c64edff"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\share.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\share.h",
       "sha256": "f706b5df86d1bdf22cfe8d86dc798b255ce1bd2719d5d25f8f491595075a2bc2"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\stddef.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\stddef.h",
       "sha256": "3f1f7eeefad270928749c89a2a2094ccc3f38829b1d8c197f6ce7483ead2284c"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\stdio.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\stdio.h",
       "sha256": "06cbab3a501306fdd9176a00a83e5bb92ea4d7863cfd666355743527cf99edc6"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\stdlib.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\stdlib.h",
       "sha256": "1576fdb40eb225dff53489db2fd52e41c7bb24f1e621e4a95c2c7f4a7216949c"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\string.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\string.h",
       "sha256": "39767b2e1963b8ef679b62d5e27cb2d0ca1de6a6173b75389b79c9d575da92fc"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\sys\\stat.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\sys\\stat.h",
       "sha256": "2b720dd0426cf0a74eefdb684ac559c8b4f84b1d7d345e3582ce0dfeb01b9aa7"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\sys\\types.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\sys\\types.h",
       "sha256": "dfb9ebc7d527c30d71f1056ddd85e33fb931df573b41424bb1db9a48457bebd7"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\time.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\time.h",
       "sha256": "b775fe03a3288dfcd68a72caad43e8198283164eae94b665fdd3375a3baea44c"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\ucrt\\wchar.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\wchar.h",
       "sha256": "802dc6f33d128ac94cb0e8a978c65382c7c18e85dc2eb7d340b038d79ad10ea5"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\apiquery2.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\apiquery2.h",
       "sha256": "56c61c2ee306428d38037a578b66a49ef347a14a3760936416035b0d45da2b11"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\cfgmgr32.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\cfgmgr32.h",
       "sha256": "5c7cec278e684cf89591331391622441f660c5b9852351312fd910ae5930ae22"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\CommCtrl.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\CommCtrl.h",
       "sha256": "6b8fa0799817fd438a9a3539c3e743b40acf6c77763c8f5acdbc91988e4736b0"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\consoleapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\consoleapi.h",
       "sha256": "a0e727e696f3599ef0b570942f28646dbd94374e62c812659eba5ebe2a42a99f"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\consoleapi2.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\consoleapi2.h",
       "sha256": "f2134e1d2c01611e60ff939ccd45561884aa0ccbce590136ffd1d95161892d17"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\consoleapi3.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\consoleapi3.h",
       "sha256": "0a00bf6ca901d0d980fe8c2b9bb91a39fb84c3a99e9c87498149a04cf7cf5925"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\datetimeapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\datetimeapi.h",
       "sha256": "a4325c76b9bc900c22ef3d766c739ccd3a71894e81833ad637d50f9e45417117"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\debugapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\debugapi.h",
       "sha256": "d63f6c4aad9787bb8ff2e54966c8db156b0ef1570be58201d74dff12cd6f1e22"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\dpa_dsa.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\dpa_dsa.h",
       "sha256": "e0d5490bf2c73c0dc5e94746b2704c2a6efdf0543de1e00447b8f781fc6a186f"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\enclaveapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\enclaveapi.h",
       "sha256": "9467c4bc6400057c3d3205d53667000be525cad64a381552291e869430af6a76"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\errhandlingapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\errhandlingapi.h",
       "sha256": "b73cccce6dac8ce02c6a399862ec2a6e22fe27a4d09874d86ec2be3bd5d17fbf"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\fibersapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\fibersapi.h",
       "sha256": "f8eeadc28f8e3e4c7bfd1217d55315eb31d63f3d86c66a3948d74ceb8e7a00d0"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\fileapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\fileapi.h",
       "sha256": "f8927178c75de487c0e57f044a215e455522bf6eaa0b660421be09cd06ae05a1"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\fileapifromapp.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\fileapifromapp.h",
       "sha256": "d07110e7f7989aeef7eed77d5f584f3ee60ff2ce58bc1a374d70151a18b4a664"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\handleapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\handleapi.h",
       "sha256": "c967fdf1a98e4ce8d501dae26b905f6452173b2be1c25e6aa2e5eeae415369cc"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\heapapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\heapapi.h",
       "sha256": "22b606b0a4096295272bcae6fc353c4f159f0cdfc90b5f1a9a712b2fff50b53f"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\ime_cmodes.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\ime_cmodes.h",
       "sha256": "27904e900938749c12a4d1e741afd564198a57a24724c1ddd36cd3302224df26"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\imm.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\imm.h",
       "sha256": "942d0b80eb7d186ee935fce8064ccdcdea3a49b39bcc03f55208b7c37e289779"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\interlockedapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\interlockedapi.h",
       "sha256": "4b0d3bc138eaab8dc9dd40bfb109f5fea4cbd2caaf92d63a4cf60a8edcfb0e3a"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\ioapiset.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\ioapiset.h",
       "sha256": "7c3f659f98b3f1748a314bd64106583d01649333e0419b66232b4f64b3f85b0c"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\jobapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\jobapi.h",
       "sha256": "08ddff85ec80f12b156837bbce4f969480fea0e32a08dade7cc16acecb0892d1"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\jobapi2.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\jobapi2.h",
       "sha256": "a8f9591dc2b0bd249d03150b70abd47c0068c6eda2a1d74d24bc8964bcd68549"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\libloaderapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\libloaderapi.h",
       "sha256": "8ad0ba5600d6c2e9aed318ca9d2f48f2bdf9f47ed3cd5d9f243e6f779c8e04c4"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\mcx.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\mcx.h",
       "sha256": "4ee416b2d24e45cfc5d35ce5b34833b64b34fd9a39957c66d75509f6d3b8f972"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\memoryapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\memoryapi.h",
       "sha256": "58edcc2090c411a1821e04a6a2954c258fd59ded44440bdd671984027e0a852f"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\minwinbase.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\minwinbase.h",
       "sha256": "7d1408f4b8eeba96ae45892209132258cde80cab6dab192b4cceea591972c78b"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\namedpipeapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\namedpipeapi.h",
       "sha256": "37062eba19e35b391cf050519c9403e19c6782663ea644ff38b2b5eb71dfce6b"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\namespaceapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\namespaceapi.h",
       "sha256": "3257ad8af53c5809be4d5d17ed0ffd8b49451d3f27c1fd747ffde3e0a7a81583"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\processenv.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\processenv.h",
       "sha256": "c10dd3bd48a2416e0aece2259ea57cc47d6c8b9fdbae085a4c7a5b29c71a85dd"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\processthreadsapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\processthreadsapi.h",
       "sha256": "436ae4cbb017d1cdb381aaf2119a3f89b04bae257fd4c881ef251daa02533540"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\processtopologyapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\processtopologyapi.h",
       "sha256": "4507a5e0c4f41d19a80d1543833f1a9d90277bc376441b277884bb043be24ba5"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\profileapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\profileapi.h",
       "sha256": "cfa8e3626dba11689997d8fcd65b5dfbf4bcef8de09dd7e4e881769d48d165a2"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\prsht.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\prsht.h",
       "sha256": "c894f54ac5e0584457f176f668b20b14577b06aa2ba5ce321e243c46248ea242"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\realtimeapiset.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\realtimeapiset.h",
       "sha256": "00c874b981a1242ee4ebc21e6ae96a69d7aa70662d820ceffbabcfea859b03e4"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\reason.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\reason.h",
       "sha256": "30540eb35daa79c7a5cb98059430df480e86b549b7980247288da8a2801add1d"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\securityappcontainer.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\securityappcontainer.h",
       "sha256": "85cc13ed7028960bd7f97c91f98b96825b46f4b8bc386aed2f2a6a9bccbe4083"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\securitybaseapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\securitybaseapi.h",
       "sha256": "a443b4183d3ec5b8e1ae40db5824f002a34eb0415f38227fa1dddbbf02a448d4"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\SetupAPI.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\SetupAPI.h",
       "sha256": "3c027fd246aa6828287b0ac2496806fef70fb8cb05ed75fbceb57eb0e9369eeb"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\spapidef.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\spapidef.h",
       "sha256": "fec825710e44812d9033981b846ca7eb555a3180ce8a8067bcaa8aa591f45af4"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\stringapiset.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\stringapiset.h",
       "sha256": "624c82fb73517a3829f3766a50a0235e2f9a51cb4bda95a0c39981e39fa4d42d"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\synchapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\synchapi.h",
       "sha256": "d962588974e5e100205f683160b351dee70ea100aa736e14d878b7a74577a9c5"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\sysinfoapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\sysinfoapi.h",
       "sha256": "077088cb53ec69d454916aac5f00e45dda79e09da64054acc141120eb67a5700"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\systemtopologyapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\systemtopologyapi.h",
       "sha256": "8bfd1a78cc30b6d33c88e3f61ae2ac6468cee0607352ee8d096ba5375b4d401c"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\threadpoolapiset.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\threadpoolapiset.h",
       "sha256": "e91d7dee4d22ca848e3110a4c55f32e1918dc865479343896aec9ab653ee5110"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\threadpoollegacyapiset.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\threadpoollegacyapiset.h",
       "sha256": "87c1630abf7dc4ed7978f2c4dbacf418f6bcf94cb946e277cb7250770bd44200"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\timezoneapi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\timezoneapi.h",
       "sha256": "621c0252a8a831813592c4a95e183a2e7ae55efbbd7b8ad886af7d8871fc4d50"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\utilapiset.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\utilapiset.h",
       "sha256": "a8e0f6001c784b3ad9feb44c61d96b58c57366c473832ca8b2ea5de05877b470"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\verrsrc.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\verrsrc.h",
       "sha256": "ff9bee8ee5b7aa81eaf79a1eab0e93bd307601e87d3b80a73f24984e9c951c61"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\WinBase.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\WinBase.h",
       "sha256": "ec538199f5ebe8cec2dfd4f1ba48316ef776c82d37277aed3a677965e494f192"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\wincon.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\wincon.h",
       "sha256": "98e33720f9ec8fded808ab94f111b8335d0ba2fd2246a5adab3aab2ce05503d9"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\wincontypes.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\wincontypes.h",
       "sha256": "209e79fdbbb30971740e59b2da2d6c86e27c0e9dd02bee9cbc21736fbd2426ad"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\Windows.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\Windows.h",
       "sha256": "b337d661d03a4abefb7b86a2742ce1ad5d19b57cd8b858bd13e7bbcc1dbeeaaa"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\wingdi.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\wingdi.h",
       "sha256": "96f3528cabc7e5fe30e2f2c51daa01c018dd6cedb3768121202434758629b8a2"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\winnetwk.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\winnetwk.h",
       "sha256": "7c7412df502fb6ea390c96d7c9f805a2a211609b95b8fdb4740540f789d9c4ce"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\WinNls.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\WinNls.h",
       "sha256": "e47861762a4b51a2689c8a99798a1a7e68335573e03c857e545172b095c5c829"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\winnt.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\winnt.h",
       "sha256": "8693f0ad4ada355c912d40ca41ce929b480e92291bda2f9227acf56736bffbff"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\winreg.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\winreg.h",
       "sha256": "bff833e8d092a0cb657837e3162b8bb0cf35b43105203f4ce880972a501d61d6"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\winsvc.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\winsvc.h",
       "sha256": "8108fe3f099960014f36d1b2da425a8382e9d839de3477eb06f181289a0685c8"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\WinUser.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\WinUser.h",
       "sha256": "014e26f0041535ebcc53c7b46f1d280f66283ec5eb4612b4e82f5b0f6c0d428c"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\winver.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\winver.h",
       "sha256": "c60e137e7ff88582f72e50fe74904f5773502d229f78234ea83abb2688f6e8ae"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.26100.0\\um\\wow64apiset.h",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um\\wow64apiset.h",
       "sha256": "6b14e2b59ae5b9f22bfd9a1e989a5589adf5790832ff24cb9d8828d4e8d45cda"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\lib\\10.0.26100.0\\ucrt\\x64\\libucrt.lib",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64\\libucrt.lib",
       "sha256": "2b247d6a27c22c520c34134b8acf2da3366175a4690886927a51929f37725fdd"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\lib\\10.0.26100.0\\um\\x64\\cfgmgr32.lib",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\cfgmgr32.lib",
       "sha256": "c09d8bbd1512d9b03d0648a82f335b983cd301277fe3551afcedb047f0a0f9ba"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\lib\\10.0.26100.0\\um\\x64\\kernel32.Lib",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\kernel32.Lib",
       "sha256": "341c7d56125a03b458e4d5093e4c79b33123ccfdfd610fe236937b8e6f3134bb"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\lib\\10.0.26100.0\\um\\x64\\SetupAPI.Lib",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\SetupAPI.Lib",
       "sha256": "2ca195cf81e21253fdb47cdfcc900aa0398769f3d916e66e02d31668957feb99"
     },
     {
-      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\lib\\10.0.26100.0\\um\\x64\\Uuid.Lib",
+      "original": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\Uuid.Lib",
       "sha256": "d077ffb106503e057428dc7bb4c5daac019c269ffc714edb18ca028723cc840a"
     }
   ]

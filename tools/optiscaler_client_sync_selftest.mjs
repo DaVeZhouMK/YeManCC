@@ -28,7 +28,9 @@ export const fs={
  writeTextFileAtomic:async(p,s)=>{f().writes.push(p);if(p===f().failWrite)throw Error('denied write');return actualFs.writeTextFileAtomic(p,s)}
 };
 export const losslessRuntime=new Proxy(Object.create(null),{get(){throw Error('Lossless control is outside this opti-client fixture')}});
-export const proc={running:async names=>{f().processNames.push(names);const r=f().runningChecks?.length?f().runningChecks.shift():f().running;return {OptiscalerClient:r}}};
+export const steamInformation={installationRoots:async()=>{throw Error('Steam discovery is outside this opti-client fixture')}};
+export const optiClient={prepareCatalog:async()=>{f().preparations=(f().preparations||0)+1;if(f().prepareHook)await f().prepareHook();return f().prepareResult||{status:'prepared'};}};
+export const proc={running:async names=>{f().processNames.push(names);if(f().runningHook)await f().runningHook();const r=f().runningChecks?.length?f().runningChecks.shift():f().running;return {OptiscalerClient:r}}};
 export const registry={read:async()=>f().appData};
 export const app={powerControlDir:async()=> 'C:\\\\Fixture\\\\PowerControl',exeDir:async()=> 'C:\\\\Fixture\\\\YMCC'};
 export const shell={run:async(exe,args)=>{f().runs.push({exe,args});return {exitCode:f().exitCode??0,stdout:JSON.stringify(f().result),stderr:''}},execute:async(p,args)=>{f().executions.push({path:p,args});return true}};
@@ -222,7 +224,64 @@ await test('failed install never registers; registration failure keeps install s
 });
 await test('open-client flushes pending records before issuing open request',async()=>{
  const f=fixture({running:true});await m.syncOptiClientGame(game,true);f.running=false;const notice=await m.openOptiConsole();
- assert.match(notice,/已同步/);assert.equal(catalog().length,1);assert.equal(f.executions.length,1);assert(f.executions[0].path.endsWith('OptiscalerClient.exe'));
+ assert.equal(f.preparations,1,'opening skipped the library supplement');assert.match(notice,/已同步/);assert.equal(catalog().length,1);assert.equal(f.executions.length,1);assert(f.executions[0].path.endsWith('OptiscalerClient.exe'));
+});
+await test('opening waits for paced catalog preparation and shares repeated clicks',async()=>{
+ let release;const wait=new Promise(resolve=>{release=resolve});
+ const f=fixture({prepareHook:()=>wait});
+ const first=m.openOptiConsole(),second=m.openOptiConsole();
+ assert.strictEqual(first,second);assert.equal(f.preparations,1);assert.equal(f.executions.length,0);assert.equal(f.writes.length,0);
+ release();await first;assert.equal(f.executions.length,1);
+ await m.openOptiConsole();assert.equal(f.preparations,2);assert.equal(f.executions.length,2);
+});
+await test('cancelled, busy or unavailable native preparation never opens another client',async()=>{
+ for(const status of ['busy','cancelled','unavailable']){
+  const f=fixture({prepareResult:{status}});await assert.rejects(m.openOptiConsole());assert.equal(f.executions.length,0);assert.equal(f.writes.length,0);
+ }
+});
+await test('catalog preparation failure remains visible and does not prevent opening the client',async()=>{
+ for(const extra of [{prepareResult:{status:'error'}},{prepareHook:()=>{throw Error('old native IPC')}}]){
+  const f=fixture(extra);const notice=await m.openOptiConsole();assert.match(notice,/补齐未完成/);assert.equal(f.executions.length,1);assert.equal(f.writes.length,0);
+ }
+});
+await test('running-client deferral is explained without pretending the catalog was filled',async()=>{
+ const f=fixture({prepareResult:{status:'running'},running:true});const notice=await m.openOptiConsole();
+ assert.match(notice,/补齐已暂缓/);assert.match(notice,/正常关闭/);assert.equal(f.executions.length,0);assert.equal(f.writes.length,0);
+});
+await test('first open reports missing YMCC inventory and still opens OPT once',async()=>{
+ const f=fixture({prepareResult:{status:'error',exitCode:22}});
+ const notice=await m.openOptiConsole();
+ assert.match(notice,/尚无可用的扫描结果/);assert.match(notice,/本次未补齐/);
+ assert.equal(f.preparations,1);assert.equal(f.executions.length,1);assert.equal(f.writes.length,0);
+ const steamOnly=fixture({prepareResult:{status:'error',exitCode:23}});
+ const limitedNotice=await m.openOptiConsole();
+ assert.match(limitedNotice,/已同步 Steam 原生游戏/);assert.match(limitedNotice,/其他游戏待游戏库扫描/);
+ assert.doesNotMatch(limitedNotice,/本次未补齐游戏|重试/);
+ assert.equal(steamOnly.preparations,1);assert.equal(steamOnly.executions.length,1);assert.equal(steamOnly.writes.length,0);
+});
+await test('running-client reuse leaves pending install registration untouched',async()=>{
+ const pending=JSON.stringify([{executablePath:game,name:'Example',installed:true}]);
+ for(const focused of [true,false]){
+  const f=fixture({prepareResult:{status:'running',focused},running:true,files:{[paths.pending]:pending,[paths.games]:'[]'}});
+  const notice=await m.openOptiConsole();assert.match(notice,focused?/已切回/:/现有窗口/);
+  assert.equal(f.files[paths.pending],pending);assert.equal(f.files[paths.games],'[]');
+  assert.equal(f.io.length,0);assert.equal(f.processNames.length,0);assert.equal(f.executions.length,0);
+ }
+});
+await test('metadata failure cannot launch a client that is running or unknown',async()=>{
+ let f=fixture({prepareResult:{status:'error'},running:true});
+ assert.match(await m.openOptiConsole(),/正在运行/);assert.equal(f.executions.length,0);
+ for(const running of [undefined,null,'false']){
+  f=fixture({prepareResult:{status:'error'},running});await assert.rejects(m.openOptiConsole(),/运行状态/);assert.equal(f.executions.length,0);
+ }
+ f=fixture({runningHook:()=>{throw Error('PROCESS_QUERY_DENIED')}});
+ await assert.rejects(m.openOptiConsole(),/PROCESS_QUERY_DENIED/);assert.equal(f.executions.length,0);
+});
+await test('client appearing after pending flush prevents a second launch',async()=>{
+ const f=fixture({running:true});await m.syncOptiClientGame(game,true);f.running=false;
+ f.afterWrite=(p,text)=>{if(p===paths.pending&&text.trim()==='[]')f.running=true;};
+ assert.match(await m.openOptiConsole(),/正在运行/);assert.equal(catalog().length,1);
+ assert.equal(f.executions.length,0);assert.equal(f.files[paths.pending].trim(),'[]');
 });
 await test('anti-cheat imports never offer launch; normal imports still can',()=>{
  assert.equal(m.optiMayOfferLaunch(true,false),false);assert.equal(m.optiMayOfferLaunch(false,true),false);assert.equal(m.optiMayOfferLaunch(false,false),true);

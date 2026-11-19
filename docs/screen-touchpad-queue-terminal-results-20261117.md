@@ -1,0 +1,15 @@
+# 已完成队列的终态结果读取异常
+
+已写入主线，未导出部署。本轮仅screen_touchpad_input_channel.h一个hunk；正式fixture/main/UI/monitor/Steam/公共睡眠不写，不新增poll/timer/thread/刷新率、等待或自动恢复额度。
+
+先验证再修改：原Shutdown action的Status真实Completed，额外调用实际action.Close，随后原GetResults自然返回0x8000000E；没有替换HRESULT或伪造State。旧线程退出但queue/action引用留存、closed=false/error=0，7检查3必要FAIL；负例COM债明确park到测试进程退出，不计产品归还。此自有受控分支不当Win5原0x8000FFFF内部原因。
+
+候选仅在已经Completed的原GetResults局部catch，以CAS只替换S_OK保留真实首错误，然后仍在原worker STA清action/queue/delegate引用。Started原等待、非Completed原cleaned=false、其它旧清理失败均保持；不重调Shutdown、不复活线程或队列。closed表明资源已经退役，结果读取失败仍留在error，不将通知/读取成功和资源归还混为一件事。
+
+候选实际8检查：原队列ShutdownCompleted事件1次、TryEnqueue拒绝新任务且0执行，表明真实关闭完成；GetResults错误0x8000000E保留，queue/action/completion全空，原shutdown第一次确认资源退役。相同EXE正常参数8检查error0，复用编译图0重编。原手动恢复17与前轮0x80000018注册失败+无唤醒回调/真实pending任务11亦在同最终产品通过，选择名逐项等既有原件；原wait仍实际进入，任务/回调各一次。
+
+4实际编译图/5实际Job，关闭前active0全部核；旧负例business=false、自然与准确工具收尾/root原值分列。不能把负例进程退出当COM归还，不拼默认父门/完整Native。独审1产品1hunk范围无阻塞，未运行编译/测试；起止未独立测量，不声称120/180秒内。各私有Close/event/指针观察全头逆除同产品，产品无私有friend或故障口。
+
+1target+22dep全部share0同持106.8198ms/23HANDLE归还，整源正逆和导后23源同实编候选，git空白差异检查通过。此前通知注册修复继续保留，正式自有退出3轮信号与3repair/3episode/5秒不变。原额外Close只存在于测试，产品没有引入预先Close。
+
+UI已说明固定r19只含ManualPublishedRetirement epoch，不追本轮或上轮队列后继；本侧保固定包来源、不修改冻结snapshot或现场应用。下一自然匹配Native/runtime/source-PDB；ShutdownQueueAsync/Status其它异常、永久OS停滞、Win5新链loaded/实体全屏触摸捕获及睡眠稳定、原E_UNEXPECTED和长期CPU仍OPEN，持续修复ACTIVE。

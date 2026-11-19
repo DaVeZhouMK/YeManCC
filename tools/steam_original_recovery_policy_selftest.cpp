@@ -671,6 +671,194 @@ void previewDoesNotReserveOrSkipRecheck() {
 }
 #endif
 
+#ifndef YMCC_STEAM_ORIGINAL_POLICY_LEGACY_HEADER
+void runningLostPreviewAndCompatibility() {
+  CHECK(static_cast<int>(Trigger::Startup) == 0 &&
+        static_cast<int>(Trigger::TargetChanged) == 1 &&
+        static_cast<int>(Trigger::SteamChanged) == 2 &&
+        static_cast<int>(Trigger::SuspendCapture) == 3 &&
+        static_cast<int>(Trigger::Wake) == 4 &&
+        static_cast<int>(Trigger::RunningLost) == 5,
+        "RunningLost appends without renumbering existing triggers");
+  CHECK(std::strcmp(name(Trigger::RunningLost), "running-lost") == 0,
+        "RunningLost has its exact diagnostic name");
+  Admission policy;
+  const Admission& readOnly = policy;
+  const auto scope = sample();
+  for (std::uint64_t i = 0; i != 3; ++i)
+    EXPECT(readOnly.preview(scope, {Trigger::RunningLost, i, i}, true),
+           true, true, "running-lost-bound-original-check");
+  CHECK(!policy.observedPair(scope, Trigger::RunningLost),
+        "previews neither reserve nor observe a running-loss pair");
+  EXPECT(policy.admit(scope, {Trigger::RunningLost}, true),
+         true, true, "running-lost-bound-original-check");
+  CHECK(policy.observedPair(scope, Trigger::RunningLost),
+        "admit records the running-loss pair");
+  EXPECT(readOnly.preview(scope, {Trigger::RunningLost, 99, 99}, true),
+         false, false, "running-lost-already-admitted");
+}
+
+void runningLostPairBudgetDoesNotRefund() {
+  Admission policy;
+  const auto original = sample();
+  EXPECT(policy.admit(original, {Trigger::RunningLost}, true),
+         true, true, "running-lost-bound-original-check");
+  for (int field = 0; field != 3; ++field) {
+    auto changed = original;
+    if (field == 0) ++changed.parent.pid;
+    if (field == 1) ++changed.parent.birth;
+    if (field == 2) changed.parent.path += L".new";
+    ++changed.rulesEpoch;
+    policy.invalidate();
+    CHECK(policy.observedPair(changed, Trigger::RunningLost),
+          "parent and rule changes preserve the observed Steam plus game pair");
+    EXPECT(policy.preview(changed, {Trigger::RunningLost, 99, 99}, true),
+           false, false, "running-lost-already-admitted");
+    EXPECT(policy.admit(changed, {Trigger::RunningLost, 99, 99}, true),
+           false, false, "running-lost-already-admitted");
+  }
+  EXPECT(policy.admit(original, {Trigger::RunningLost}, false),
+         false, false, "disabled");
+  EXPECT(policy.admit(original, {Trigger::RunningLost}, true),
+         false, false, "running-lost-already-admitted");
+  for (auto role : {&Scope::game, &Scope::steam}) {
+    for (int field = 0; field != 3; ++field) {
+      auto changed = original;
+      if (field == 0) ++(changed.*role).pid;
+      if (field == 1) ++(changed.*role).birth;
+      if (field == 2) (changed.*role).path += L".new";
+      EXPECT(policy.preview(changed, {Trigger::RunningLost}, true),
+             true, true, "running-lost-bound-original-check");
+      EXPECT(policy.admit(changed, {Trigger::RunningLost}, true),
+             true, true, "running-lost-bound-original-check");
+      EXPECT(policy.admit(changed, {Trigger::RunningLost}, true),
+             false, false, "running-lost-already-admitted");
+    }
+  }
+  auto changedSession = original;
+  for (auto role : roles) ++(changedSession.*role).session;
+  EXPECT(policy.admit(changedSession, {Trigger::RunningLost}, true),
+         true, true, "running-lost-bound-original-check");
+  EXPECT(policy.admit(original, {Trigger::RunningLost}, true),
+         false, false, "running-lost-already-admitted");
+}
+
+void runningLostInvalidAndDisabledConsumeNothing() {
+  const auto scope = sample();
+  Admission disabled;
+  EXPECT(disabled.preview(scope, {Trigger::RunningLost}, false),
+         false, false, "disabled");
+  EXPECT(disabled.admit(scope, {Trigger::RunningLost}, false),
+         false, false, "disabled");
+  EXPECT(disabled.admit(scope, {Trigger::RunningLost}, true),
+         true, true, "running-lost-bound-original-check");
+  for (auto role : roles) {
+    for (int field = 0; field != 4; ++field) {
+      Admission policy;
+      auto bad = scope;
+      auto& identity = bad.*role;
+      if (field == 0) identity.pid = 0;
+      if (field == 1) identity.birth = 0;
+      if (field == 2) identity.path.clear();
+      if (field == 3) ++identity.session;
+      EXPECT(policy.preview(bad, {Trigger::RunningLost}, true),
+             false, false, "unique-game-or-steam-unavailable");
+      EXPECT(policy.admit(bad, {Trigger::RunningLost}, true),
+             false, false, "unique-game-or-steam-unavailable");
+      EXPECT(policy.admit(scope, {Trigger::RunningLost}, true),
+             true, true, "running-lost-bound-original-check");
+    }
+  }
+}
+
+void runningLostKeepsStartupWakeAndPowerContracts() {
+  const auto scope = sample();
+  for (bool lossFirst : {false, true}) {
+    Admission policy;
+    OfflineJobSink engine;
+    if (lossFirst)
+      EXPECT(policy.admit(scope, {Trigger::RunningLost}, true),
+             true, true, "running-lost-bound-original-check");
+    const auto startup = policy.admit(scope, {Trigger::Startup}, true);
+    EXPECT(startup, true, true, "startup-bound-original-check");
+    engine.dispatch(startup, JobOutcome::Healthy);
+    CHECK(engine.qualificationChecks == 1 && engine.mutationAttempts == 0,
+          "healthy startup consumes dispatch without a simulated mutation");
+    EXPECT(policy.admit(scope, {Trigger::Wake, 20}, true),
+           true, true, "wake-bound-original-check");
+    if (!lossFirst)
+      EXPECT(policy.admit(scope, {Trigger::RunningLost}, true),
+             true, true, "running-lost-bound-original-check");
+    EXPECT(policy.admit(scope, {Trigger::RunningLost, 999, 999}, true),
+           false, false, "running-lost-already-admitted");
+    auto parentChanged = scope;
+    ++parentChanged.parent.birth;
+    EXPECT(policy.admit(parentChanged, {Trigger::Startup}, true),
+           false, false, "startup-already-observed");
+    EXPECT(policy.admit(scope, {Trigger::Wake, 20}, true),
+           false, false, "wake-already-admitted");
+    EXPECT(policy.admit(scope, {Trigger::Wake, 19}, true),
+           false, false, "stale-power-generation");
+    EXPECT(policy.admit(scope, {Trigger::Wake, 21}, true),
+           true, true, "wake-bound-original-check");
+  }
+  Admission noPowerFence;
+  const auto maximum = (std::numeric_limits<std::uint64_t>::max)();
+  EXPECT(noPowerFence.preview(scope, {Trigger::RunningLost, maximum}, true),
+         true, true, "running-lost-bound-original-check");
+  EXPECT(noPowerFence.admit(scope, {Trigger::RunningLost, maximum}, true),
+         true, true, "running-lost-bound-original-check");
+  EXPECT(noPowerFence.admit(scope, {Trigger::Wake, 1}, true),
+         true, true, "wake-bound-original-check");
+}
+
+void runningLostOutcomesAndCapacityStayConsumed() {
+  const auto scope = sample();
+  for (auto outcome : {JobOutcome::Healthy, JobOutcome::UnknownHealth,
+                       JobOutcome::IdentityMismatch, JobOutcome::MissingBaseline,
+                       JobOutcome::GuardRevoked, JobOutcome::Cancelled,
+                       JobOutcome::Failed, JobOutcome::MutationEligible}) {
+    Admission policy;
+    OfflineJobSink engine;
+    const auto first = policy.admit(scope, {Trigger::RunningLost}, true);
+    EXPECT(first, true, true, "running-lost-bound-original-check");
+    engine.dispatch(first, outcome);
+    auto changed = scope;
+    ++changed.parent.birth;
+    ++changed.rulesEpoch;
+    policy.invalidate();
+    const auto duplicate = policy.admit(changed, {Trigger::RunningLost, 7, 7}, true);
+    EXPECT(duplicate, false, false, "running-lost-already-admitted");
+    engine.dispatch(duplicate, JobOutcome::MutationEligible);
+    CHECK(engine.dispatches == 1 && engine.qualificationChecks == 1 &&
+          engine.mutationAttempts == (outcome == JobOutcome::MutationEligible ? 1 : 0),
+          "every simulated outcome keeps the dispatch consumed");
+  }
+  Admission full;
+  auto other = scope;
+  ++other.game.birth;
+  for (std::size_t i = 1; i < Admission::ledgerCapacity; ++i) {
+    auto filler = scope;
+    filler.game.birth += i + 1;
+    CHECK(full.admit(filler, {Trigger::TargetChanged}, true).accepted,
+          "fixture leaves one common ledger slot");
+  }
+  EXPECT(full.preview(scope, {Trigger::RunningLost}, true),
+         true, true, "running-lost-bound-original-check");
+  EXPECT(full.preview(other, {Trigger::RunningLost}, true),
+         true, true, "running-lost-bound-original-check");
+  EXPECT(full.admit(scope, {Trigger::RunningLost}, true),
+         true, true, "running-lost-bound-original-check");
+  EXPECT(full.admit(other, {Trigger::RunningLost}, true),
+         false, false, "event-ledger-exhausted");
+  EXPECT(full.preview(other, {Trigger::RunningLost}, true),
+         false, false, "event-ledger-exhausted");
+  full.invalidate();
+  EXPECT(full.admit(scope, {Trigger::RunningLost}, true),
+         false, false, "running-lost-already-admitted");
+}
+#endif
+
 void run(const char* title, void (*test)()) {
   ++cases;
   const int before = failures;
@@ -705,6 +893,11 @@ int main() {
   run("preview uses the same consumption keys and reasons", previewUsesTheSameConsumptionKeys);
   run("full-ledger preview never advances or evicts", previewFullLedgerNeverMutates);
   run("admit rechecks unreserved previews after intervening events", previewDoesNotReserveOrSkipRecheck);
+  run("running-lost preview and enum compatibility", runningLostPreviewAndCompatibility);
+  run("running-lost Steam plus game budget never refunds", runningLostPairBudgetDoesNotRefund);
+  run("running-lost invalid and disabled requests consume nothing", runningLostInvalidAndDisabledConsumeNothing);
+  run("running-lost preserves startup wake and power contracts", runningLostKeepsStartupWakeAndPowerContracts);
+  run("running-lost outcomes and capacity stay consumed", runningLostOutcomesAndCapacityStayConsumed);
 #endif
   std::printf("%d cases, %d checks, %d failures\n", cases, checks, failures);
   return failures == 0 ? 0 : 1;

@@ -1,18 +1,19 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import test from 'node:test';
 import {getExtraAdapters} from './extra-adapters.mjs';
 import {assertReviewedRegistryRow} from './registry-maintenance/assert-lists.mjs';
 
 test('actual extra registry exposes the reviewed original TDP consumer exactly once',()=>{
- const rows=getExtraAdapters();
- const matches=rows.filter(row=>row.id==='performance.tdp-frontend-consumer');
+ const id='performance.tdp-frontend-consumer';
+ const matches=getExtraAdapters(undefined,{selectedIds:[id]});
  assert.equal(matches.length,1,'an import without the shared registry invocation must not count as integration');
  const row=matches[0];
+ assert.equal(row.id,id);
  assert.equal(row.path,'tools/ymcc_sim/global/tdp-consumer-signals/run.mjs');
  assert(row.evidenceInputs.includes('tools/tdp_frontend_static_selftest.ts'));
  assert(row.evidenceInputs.includes('src/bridge/yeman.ts'));
- assert.deepEqual(row.resultFiles,['tdp-consumer/result.json']);
- assert.equal(new Set(rows.map(row=>row.id)).size,rows.length);
+ assert.deepEqual(row.resultFiles,['tdp-consumer/result.json','tdp-consumer/output-evidence.json']);
 });
 
 
@@ -66,7 +67,9 @@ test('user-excluded generic UI remains outside the active capability registry',a
  assert.equal(entry.countsTowardsCompletionDenominator,false);
  assert.equal(entry.automaticallyReimportOnUpgrade,false);
  assert.equal(entry.excludedSimulationCase,'sleep.wake-password-ui-consumer');
- assert(!getExtraAdapters().some(row=>row.id===entry.excludedSimulationCase));
+ const rows=getExtraAdapters();
+ assert(!rows.some(row=>row.id===entry.excludedSimulationCase));
+ assert.equal(new Set(rows.map(row=>row.id)).size,rows.length);
 });
 
 
@@ -111,19 +114,33 @@ test('marker ownership consumer binds the repaired real functions and immutable 
 });
 
 
-test('fan Close refusal consumer binds actual public lifecycle and unchanged original case source once',()=>{
- const matches=getExtraAdapters().filter(row=>row.id==='fan.close-observation-refusal-consumer');assert.equal(matches.length,1);const row=matches[0];
+test('fan Close refusal consumer binds actual public lifecycle and unchanged original case source once',async()=>{
+ const id='fan.close-observation-refusal-consumer';
+ const matches=getExtraAdapters(undefined,{selectedIds:[id]});assert.equal(matches.length,1);const row=matches[0];assert.equal(row.id,id);
  assert.equal(row.path,'tools/ymcc_sim/global/fan-close-observation-refusal-consumer/run.mjs');assert.deepEqual(row.resultFiles,['close-observation/result.json']);
  for(const source of ['tools/fan_close_observation_refusal_selftest.ts','src/bridge/fanHost.ts','tools/ymcc_sim/global/fan-close-observation-refusal-consumer/spec.json','tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])assert(row.evidenceInputs.includes(source),source);
- assert.equal(row.evidenceInputs.length,78);assert.equal(row.scope,'behavioral-mock');assert.equal(row.artifactInputs.length,58);
+ // The observed current compiler graph and pinned tool profile supply independent path identities.
+ const {createHash}=await import('node:crypto');
+ const pathDigest=(paths,normalize)=>createHash('sha256').update(JSON.stringify(paths.map(normalize).sort())).digest('hex');
+ const slash=file=>file.replaceAll('\\','/');
+ assert.equal(pathDigest(row.evidenceInputs,slash),'dd8ba9f94a9c297aa71a3003a82cd567b2a2f1d64905b5f15e98210baafa46a4','fan Close source closure changed');
+ assert.equal(pathDigest(row.artifactInputs,file=>slash(file).toLowerCase()),'f957a6bcb178c3d6801a60da50dff460b2a5b7682e28fdc98b8810549c9e6c27','fan Close tool closure changed');
+ assert.equal(row.scope,'behavioral-mock');
 });
 
 
 test('lighting ordering consumer binds actual component and maintained shared helper once',()=>{
- const matches=getExtraAdapters().filter(row=>row.id==='lighting.ui-feedback-ordering-consumer');assert.equal(matches.length,1);const row=matches[0];
+ const id='lighting.ui-feedback-ordering-consumer';
+ const matches=getExtraAdapters(undefined,{selectedIds:[id]});assert.equal(matches.length,1);const row=matches[0];assert.equal(row.id,id);
  assert.equal(row.path,'tools/ymcc_sim/global/lighting-ui-feedback-ordering-consumer/run.mjs');assert.deepEqual(row.resultFiles,['feedback-ordering/result.json']);
  for(const source of ['src/components/ControllerFeedbackCapabilitiesCard.vue','tools/ymcc_sim/global/lighting-signals/ui-feedback.mjs','tools/controller_lighting_operations_browser_selftest.mjs','tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/host-process.ps1','tools/ymcc_sim/global/execution-completion/index.mjs'])assert(row.evidenceInputs.includes(source),source);
- assert.equal(row.evidenceInputs.length,26);assert.equal(row.artifactInputs.length,332);assert.equal(row.scope,'behavioral-mock');
+ // Path-set identities from the independently retained 2026-11-01 run (Lgt1101).
+ // Hash declarations only: local existence and contents are checked by the runner.
+ const pathDigest=(paths,normalize)=>createHash('sha256').update(JSON.stringify(paths.map(normalize).sort())).digest('hex');
+ const slash=file=>file.replaceAll('\\','/');
+ assert.equal(pathDigest(row.evidenceInputs,slash),'129431d04fa3b5a058fb76a92b2a1bd61856c071305f98ccdb8247347d0da3c7','lighting source closure changed');
+ assert.equal(pathDigest(row.artifactInputs,file=>slash(file).toLowerCase()),'e5f42267feb80f304bd0f47b354c01443d2cd1ac3a4131cf93c3b0813a49f234','lighting tool closure changed');
+ assert.equal(row.scope,'behavioral-mock');
 });
 
 
@@ -226,4 +243,15 @@ test('unified registry invokes original Decky and game-library consumers with ex
   assert(row.profiles.includes('desktop')&&row.profiles.includes('full'));assert.equal(row.scope,'behavioral-mock');assert(row.resultFiles.length>0);assert(row.artifactInputs.length>0&&row.artifactInputs.length<=640);
  }
  assert.equal(new Set(rows.map(row=>row.id)).size,rows.length);
+});
+
+test('parent fixture exact selection is parsed before execution',async()=>{
+ const {parseInputHostParentLifecycleArgs:parse}=await import('../../inputhost_parent_lifecycle_selftest.mjs');
+ assert.deepEqual([...parse([])],[]);
+ const args=['--out','local-evidence','--source-root','local-source','--runtime-pool','windows','--fault','ignore-parent-cancellation','--case','parent-loss-during-read,parent-loss-during-write','--configs','Debug'];
+ assert.deepEqual([...parse(args)],[['--out','local-evidence'],['--source-root','local-source'],['--runtime-pool','windows'],['--fault','ignore-parent-cancellation'],['--case','parent-loss-during-read,parent-loss-during-write'],['--configs','Debug']]);
+});
+test('parent fixture rejects malformed scopes before execution',async()=>{
+ const {parseInputHostParentLifecycleArgs:parse}=await import('../../inputhost_parent_lifecycle_selftest.mjs');
+ for(const args of [['--casee','healthy-idle'],['--case','healthy-idle','--case','pipe-break'],['--case'],['--case',''],['--case',' '],['--case','--configs'],['--case','unknown'],['--case','healthy-idle,healthy-idle'],['--case','healthy-idle,'],['--configs','Release,Release'],['--configs','Checked'],['--fault','unknown'],['--runtime-pool','unknown']])assert.throws(()=>parse(args));
 });

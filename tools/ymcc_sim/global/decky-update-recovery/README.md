@@ -1,3 +1,17 @@
+<!-- DECKY-CURRENT-RECOVERY-SCOPE-20261112 -->
+## 当前规则与历史回归的边界（2026-11-12）
+
+本文件后面的日期段落保留各自当时的策略和验收范围，不能用旧段落覆盖用户后续批准的分级自愈。当前实现以主线 `AGENTS.md` 的 Decky 全局恢复/新构建恢复例外、`native/decky_sidebar_recovery.h`、`native/decky_sidebar_manual_repair.h` 和 `main.cpp` 的 `connectionHealth`/`connectionStep` 为准。
+
+普通 `Origin::Automatic` 仍不能借用手动修复接口重建界面，原 `repair-auto-ui-negative` 有效且必须保留。用户后来获准的高阶恢复使用独立的 `FinalCleanup`（页面重建）与 `ReopenBigPicture`（关闭/重开大屏）入口：Decky ON、当前已验证大屏确实不可用时，原工作线程按阶段失败/回执和持久额度升阶；该例外不扩大 CSS、普通 Steam 启动或整个 Steam 进程重启权限。
+
+镜像接通不能单独结束恢复。当前健康同时核对认证镜像、官方后端、菜单挂钩与当前插件客户端；已提交的新共享健康结果唤醒原线程，三个点打开时复用有限状态检查。源调用接线、原生线程组件、完整原生构建、配套包和实机画面各有独立证据，不能相互代签。
+
+新实际构建仅在原额度不足、构建来源已验证且原主备记录一致时补页面/大屏各一次；同构建重开、睡眠、重装和已观察版本回滚不退款。当前官方 Windows Loader 的 `restart_webhelper` 返回成功占位值，不能用它的“正在重启”文本或 RPC 成功当成实际恢复。
+
+本次仅订正文档索引，不改变原测试 ID、断言、负例、预算、默认选择或产品代码。持续项目仍是 `Docs/Research/Sleep/SteamNonSteamRecovery-20261011/STEAM-SLEEP-EXECUTION-BASELINE.md` 及同名 JSON；完整配套包和真实 S3/S0、离线/换号、额外次数实际派发与可见界面仍按各自原件验收。
+<!-- /DECKY-CURRENT-RECOVERY-SCOPE-20261112 -->
+
 <!-- NO-AUTO-STEAM-UI-REBUILD-20261022 -->
 2026-10-22 本机回归裁决：自动自愈只能接续服务/transport，不得重建整个Steam UI。20:16:55自动连接修复调用RestartJSContext后，20:16:57原Steam进程创建BPM窗口并抢前台。此要求覆盖下文历史“automatic refresh”许可；保留历史证据不沿用错误准入。native ManualRepair::request拒绝Origin::Automatic，实际JS recoverConnection在模式读/marker/定时器前拒绝；必须点击显式修复才允许完整UI刷新。既有无整页重建的认证绑定、后端事件准备、CSS刷新保留。现场见field-record-no-auto-ui-20261022.json；run.mjs新增repair-auto-ui-negative，移除原生禁止必须在真实自动dispatch断言失败，实际JS/embedded对应负例必须复现一次RestartJSContext。普通启动、100重复事件、新文档/Ready/替换Steam均不可据此刷新；手动修复回归继续保留。证据Build/V/SteamNoAutoFront22/REPORT.md，未据软件回归宣称安装版/真机验收。
 <!-- /NO-AUTO-STEAM-UI-REBUILD-20261022 -->
@@ -73,7 +87,7 @@ TDP回执和状态快照可以先后到达：客户端保留草稿到新值/新�
 
 ### 2026-10-22 Decky 外部修改器交互启动试用
 
-正式消费入口仍为 TrainerLaunch.ps1；同目录 TrainerForeground.ps1 仅承接一次交互式 Shell 启动。新前端只在 Decky ready-only 调用显式传 InteractiveShell；原菜单保持默认 Process.Start。已安装旧前端在已核验的同会话 Steam 前台，或精确匹配的 YMCC 父进程主窗口已隐藏/最小化时，使用原 AppDirectory 参数兼容选择该分支，无须改官方 Loader、添加 EXE、注册 URI 或重开 Steam。
+正式消费入口仍为 TrainerLaunch.ps1。新前端只在 Decky ready-only 调用显式传 InteractiveShell；原菜单保持默认 Process.Start。对旧前端的同版后台调用，YMCC 在派发原训练器脚本前用公共 Steam 层核实同会话前台，确认时补传原 InteractiveShell 开关。脚本不再单独查询 Steam；精确匹配的 YMCC 父进程主窗口已隐藏/最小化时，仍使用原 AppDirectory 兼容路径，无须改官方 Loader、添加 EXE、注册 URI 或重开 Steam。
 
 独立修改器仍由原 GCM 当前库、文件 SHA、当前游戏 PID/创建时间校验。交互路径通过桌面视图的 Application 执行，保留参数、工作目录和 open/runas 设置；已运行实例仍走原恢复入口。只有获取 Shell 对象失败且尚未派发，才可使用原启动器；派发异常、PID 未确认或窗口未到前台均不触发第二次启动。前台不确定时返回 launched=true、ok=false、trainer-window-unconfirmed 及真实 PID，保留可读原因。
 
@@ -169,3 +183,29 @@ Targeted evidence: `Testing/YMCC/Evidence/Decky-WakeHealing-20261029/REPORT.md`.
 The original `native.typed-history-resource-{recover,ready,off,hash,cleanup,admission}` cases now also execute a successful initial resource read, a safe pre-write bootstrap refusal, and a resource failure on the second read after bootstrap resumes. The production Runtime uses the same finite resource retry window for both read positions. Retrying rechecks launch admission and resource validity; it neither replays a settings mutation nor renews crash/launch consent. Consecutive timeouts retain the original absolute 1/3/8/20-second offsets. Hash errors, incomplete cleanup, lost admission and OFF stay stopped.
 
 The original typed gate requires the nested `afterDeferredBootstrap` evidence, including the fresh owned Loader/healthy binding on recovery, zero owned resources on rejection and exit, unchanged 3200ms stop deadline, and the original external CEF remaining alive. The added boundary stays under the existing IDs; no new permanent parent or default export fixture is introduced. Evidence: `Testing/YMCC/Evidence/DeckyLifecycleGoal-20261031/deferred-resource-20261101`. These isolated production Runtime/Client/Owner tests do not certify real Steam sleep, installed deployment or future upstream APIs.
+
+
+## Shared native power proof for the recovery service (2026-11-13)
+
+The existing shared-power producer accepts `--recovery-shared-power-only`, optional `--case exact-name` or `--case from:exact-name`, and a fresh explicit evidence directory. The canonical ID remains `plugins.decky-update-recovery`; this explicit native consumer does not join the default baseline or module minimum. `committed-delivery.mjs` forwards to `tools/fixtures/recovery_shared_power.mjs`; the original baseline entry and source collector also declare this selection. No original Decky parent acceptance is implied.
+
+The original `tools/recovery_ui_progress_win32_selftest.cpp` includes the complete current recovery service. The new explicit variant extracts the original native power reader, recovery projection capture, Ready commit, copy helper and complete one-shot recovery publisher. Real private mappings are read through the production reader; the final power callback is also extracted byte for byte from the production service. Native device/Steam/UI fanout leaves, termination and spawn are inert. The new cases use a declared clock port. The original default Win32 fixture still uses its real hidden window, message pump, production mapping reader and real Windows clock, with its original mocked kill/spawn. Neither entry runs normal YMCC, real sleep or recovery actions.
+
+The old 152-byte RecoveryState/schema-1 prefix remains fixed. Its optional 72-byte tail carries the existing 48-byte shared Native power facts and a paired commit generation/tick; the complete mapping is 224 bytes. A missing Resume can clear only the local watchdog protection after an identity-bound coherent fresh Native Ready commit newer than the local Suspend. Unknown, stale, future, torn, legacy and mismatched observations cannot create this witness. The original 15-second grace uses the commit tick once. A newer Suspend at the original final termination boundary returns Continue, preserving the observer.
+
+Twenty-one new cases are recorded as thirteen completed cases before the original failed-parent assertion, followed by eight directed cases after correcting the fixture Torn expectation. The failed parent remains FAIL. Only the final case was additionally rechecked using the exact production callback; the other twenty were not rerun. The original four default Win32 groups and three necessary semantic controls are separate receipts. Sources, actual include/link graphs and owned Job completion are qualified in `Testing/YMCC/Evidence/SharedSleepLifecycle-20261112/all-consumers/recovery-shared-power`.
+
+An ambiguous late Suspend newer than the only known commit remains protected until newer authoritative evidence arrives. The optional projection is not a live cross-process revocation lease; final current-authority revocation, all-consumer integration, actual publisher startup/shutdown, full Native/link/package and physical Modern Standby remain separate open scopes.
+
+
+## RecoveryService final termination fence (2026-11-13)
+
+The same explicit `--recovery-shared-power-only` consumer now defines 29 cases. The original 21 are retained; `--case from:termination-suspend-after-check-before-real-api` selects only the eight new boundaries. No new canonical ID, default producer or minimum is added. The existing native Win32 fixture contains the full service and extracts both production power-check and termination callback assignments.
+
+A termination request binds the local completed-notification sequence plus the exact target PID/process creation key. It is consumed on every attempted use. The original final native termination helper rechecks the request, local sleep/grace and held process identity under the same short SRW lock as the callback; error capture occurs there, while diagnostics and the original process-exit wait remain outside. A later Suspend or Resume invalidates older requests, including when its grace later expires. Missing final mappings and exhausted counters fail closed. A failed kernel call can heal only through a new current observation. This is a watchdog request fence, not a new Native power generation or device capability.
+
+The eight new cases execute real private wait children. The existing fixture launches only its own current executable with an explicit three-handle list, includes the complete original native publisher in each publishing child and reads it through the real cross-process service reader. The TerminateProcess test port refuses targets outside the owned PID/birth table, records whether the local SRW lock is held, then invokes the real kernel API. App restart and device/Steam leaves remain inert. Candidate8/20 observed9 children returned and4 real kernel calls, with zero calls outside the lock, zero external targets, no forced fixture cleanup and no handle-close failure. Two one-case controls run the verbatim original termination body and permit a newer notification sequence; both fail at their required original assertions. Their two additional owned children also return.
+
+Original raw `killAndSpawnMocked`/`physicalSleepOrKill` labels were inherited from the earlier memory-only cases and are invalid for the new real-child executions. They are preserved and explicitly superseded by `SCOPE-METADATA-CORRECTION.json`; the formal producer now emits separate owned-child kernel scope. The metadata consumer was evaluated on the original raw results, without recompiling or rerunning passed business. The old21/default UI groups were not rerun, and no complete29-parent PASS is asserted.
+
+Current Native cross-process immediate revocation and contradictory late Resume/Suspend evidence remain separate open work. The current projection is not a live revocation lease; this fence proves completed local-callback ordering at the final action boundary. It does not establish physical Modern Standby, a whole application build or installed recovery.

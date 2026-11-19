@@ -159,7 +159,7 @@ export function getExtraFactories(_repoRoot,{selectedIds}={}) {
 ()=>[...getFanExplicitOffHostChainAdapters().map(adapter=>({...adapter,evidenceInputs:[...new Set([...adapter.evidenceInputs,'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])]}))],
 ()=>[...getControllerGameMotorPipeConsumerAdapters()],
 ()=>[...getLightingUiFeedbackOrderingConsumerAdapters()],
-()=>[...getFanCloseObservationRefusalAdapters().map(adapter=>({...adapter,evidenceInputs:[...new Set([...adapter.evidenceInputs,'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])]}))],
+()=>[...getFanCloseObservationRefusalAdapters(_repoRoot).map(adapter=>({...adapter,evidenceInputs:[...new Set([...adapter.evidenceInputs,'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])]}))],
 ()=>[...getMarkerOwnershipConsumerAdapters().map(adapter=>({...adapter,evidenceInputs:[...new Set([...adapter.evidenceInputs,'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])]}))],
 ()=>[...getFanAdoptedStartRefusalAdapters().map(adapter=>({...adapter,evidenceInputs:[...new Set([...adapter.evidenceInputs,'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])]}))],
 ()=>[...getFanFailedReadIdentityAdapters().map(adapter=>({...adapter,evidenceInputs:[...new Set([...adapter.evidenceInputs,'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])]}))],
@@ -261,7 +261,8 @@ export function getExtraFactories(_repoRoot,{selectedIds}={}) {
 
   profiles:['desktop','full'],scope:'behavioral-mock',resultFiles:['fan-log-result.json'],
 
-  evidenceInputs:['src/bridge/fanHost/startupConfiguration.ts','src/bridge/fanHost/deployment.ts','src/bridge/fanHost/capabilityAdmission.ts','src/bridge/fanHost.ts','src/bridge/fanApi.ts','src/bridge/fanDiagnostics.ts','src/bridge/fanSessionEvidence.ts','src/bridge/hardwareCoordinator.ts','src/bridge/aiFanMock.ts','src/bridge/fanHostInstallerRepair.ts','src/bridge/fanHostInstallerAsset.json','tools/fixtures/fan_no_io_host.ts'],
+  evidenceInputs:['src/bridge/fanHost/startupConfiguration.ts','src/bridge/fanHost/deployment.ts','src/bridge/fanHost/capabilityAdmission.ts','src/bridge/fanHost.ts','src/bridge/fanApi.ts','src/bridge/fanDiagnostics.ts','src/bridge/fanSessionEvidence.ts','src/bridge/hardwareCoordinator.ts','src/bridge/aiFanMock.ts','src/bridge/fanHostInstallerRepair.ts','src/bridge/fanHostInstallerAsset.json','tools/fixtures/fan_no_io_host.ts',
+   'src/bridge/bootModeGlobalPreferences.ts','src/bridge/inputConfigHash.ts','src/bridge/settingsBaseline.ts','PowerControl/settings-baseline.json'],
 
  }],
 ()=>[{
@@ -308,7 +309,8 @@ export function getExtraFactories(_repoRoot,{selectedIds}={}) {
 }
 
 const extraIndexBytes=fs.readFileSync(new URL('./extra-adapter-index.json',import.meta.url));
-if(createHash('sha256').update(extraIndexBytes).digest('hex')!=='c3f15d5489dfba84fdf8a753eabe1eadbd934caf2063d91068b172cb1ce4e01f')throw Error('EXTRA_REGISTRATION_INDEX_IDENTITY_CHANGED');
+// Refresh this raw-byte pin with the source pins; registration-only plans do not load this module.
+if(createHash('sha256').update(extraIndexBytes).digest('hex')!=='2185ddfa242624ec7d328feb516f4fe9b50e6f97a8b3ef93fbadfd8e905a4242')throw Error('EXTRA_REGISTRATION_INDEX_IDENTITY_CHANGED');
 const extraIndex=JSON.parse(extraIndexBytes);
 export function getExtraAdapters(repoRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..'),{selectedIds,auditReceiptIds}={}){
  const current=registrationIndexCurrent(extraIndex,repoRoot);

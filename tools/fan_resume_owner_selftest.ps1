@@ -3,9 +3,10 @@ $ErrorActionPreference='Stop'
 if(-not $EvidenceRoot){$EvidenceRoot=Join-Path $env:TEMP ('fan-resume-owner-'+[guid]::NewGuid().ToString('N'))}
 New-Item -ItemType Directory -Force -Path $EvidenceRoot | Out-Null
 $text=[IO.File]::ReadAllText((Join-Path $ProjectRoot 'native/main.cpp'))
-if($text -notmatch 'g_fanResumeRequestOwner.begin\(generation\)'){throw 'production admission no longer uses tested owner'}
-if($text -notmatch 'g_fanResumeRequestOwner.finish\(generation\)'){throw 'production completion no longer uses tested owner'}
-if($text -notmatch 'fanHostScheduleFanResume\(next\);'){throw 'production owner does not consume queued wake'}
+if($text -notmatch 'g_fanResumeRequestOwner.offer\('){throw 'production admission no longer uses original request ledger'}
+if($text -notmatch 'g_fanResumeRequestOwner.reservePost\('){throw 'production POST bypasses cumulative slots'}
+if($text -notmatch 'g_fanResumeRequestOwner.finishRequest\('){throw 'production completion no longer returns ticket owner'}
+if($text -notmatch 'fanHostStartResumeTicket\(next\);'){throw 'production owner does not drain exact retained ticket'}
 if($text -match 'g_fanResumeRecoveryInFlight'){throw 'obsolete drop-on-busy owner reappeared'}
 $vcvars='C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
 $lines=& $env:ComSpec /d /s /c "`"$vcvars`" >nul && set"

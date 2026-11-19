@@ -6,7 +6,7 @@ The wrapper executes the unchanged `tools/virtual_target_return_pnp_absence_self
 
 `toolchain-inputs.json` inventories the 280 frozen compiler headers/linker libraries observed in the existing final selftest receipt. It reuses only that dependency inventory. Each new run binds capture/manifest, Node, compiler/linker/dumpbin and every listed frozen dependency as simulator artifact inputs, checks pinned dependency identities and refuses an actual compile closure outside that registration. A future dependency change needs explicit inventory review.
 
-The required receipt is `pnp-absence/RESULT.json`. Acceptance checks `pass`, all six variants, source/selected-Host-rule fences and actual dependency closure. The selftest retains the historical `BOUNDED_PNP_ABSENCE_FAKE_READER_VERIFIED_RUNTIME_NOT_INTEGRATED` status label. The production header is now connected through cold_runtime/main.cpp; that label is not interpreted as a current absence of production integration. This run executes only the actual helper with fake Reader. The actual ProductionReader ABI compiles, but its export is never called.
+The required receipt is `pnp-absence/RESULT.json`. Acceptance checks `pass`, all seven variants, source/selected-Host-rule fences and actual dependency closure. The selftest retains the historical `BOUNDED_PNP_ABSENCE_FAKE_READER_VERIFIED_RUNTIME_NOT_INTEGRATED` status label. The production header is now connected through cold_runtime/main.cpp; that label is not interpreted as a current absence of production integration. This run executes only the actual helper with fake Reader. The actual ProductionReader ABI compiles, but its export is never called.
 
 Run the exact front-door case from the repository:
 
@@ -21,3 +21,5 @@ node --test tools/ymcc_sim/global/controller-pnp-absence/runner.test.mjs
 ```
 
 `field-record.json` records the supplied ZIP observation: 29 cold-return unknown/device-id-invalid results from 07:56:43.529 to 08:00:48.653 on 2026-10-22. The old log has no exact rejected G3E ID. Every fixture ID is a contract regression input, never a claim about that G3E node. No physical hardware acceptance, product/Host execution, device/driver/service operations or new authority follows from this test.
+
+The explicit PS-profile policy is a negative-evidence reader for no-pin PS return only. Default SD/Elite family rules remain on the original policy. Release/Checked run 124 cases; five compiled semantic controls run one original required case each. The consumer verifies raw JSON and executable identities, exact negative selection and the observed compiler/linker dependency inventory. A stale default toolchain remains rejected; an explicit absolute capture override is required until its registered environment is renewed. This does not prove hardware restoration.

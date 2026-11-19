@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {installUpdaterFixtureEnvironment} from './lib/updater_fixture_environment';
 import { APP_VERSION } from '../src/version';
 const p=APP_VERSION.split('.').map(Number),v=(n:number)=>p[0]+'.'+p[1]+'.'+(p[2]+n),sha=(c:string)=>c.repeat(64);
 const A={version:v(1),sha256:sha('A')},B={version:v(2),sha256:sha('B')},C={version:v(3),sha256:sha('C')};
@@ -15,7 +16,8 @@ const win=new EventTarget() as any;win.chrome={webview:{addEventListener(_name:s
  else if(req.cmd==='app.updatePredownloadTarget'){hints.push(req);if(!holdHint)response(req.id,true);}
  else if(req.cmd==='app.cancelUpdateDownload')response(req.id,true);
  else throw Error('FORBIDDEN '+req.cmd);
-});}}};(globalThis as any).window=win;
+});}}};installUpdaterFixtureEnvironment(win, event => receive(event));
+(globalThis as any).window=win;
 const m=await import('../src/bridge/updateManager');let checks=0;
 function check(label:string,fn:()=>void){fn();checks++;console.log('PASS '+label);}
 const flush=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};

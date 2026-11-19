@@ -22,13 +22,15 @@ namespace ymcc::targetReturn::pnpAbsence {
 inline constexpr unsigned maxNodes=1024,maxKnownExactIds=1024;
 inline constexpr std::size_t maxHardwareIdBytes=16*1024;
 enum class State { Unknown, Present, Absent };
+// Explicit PS scope is only for no-pin PS return. Existing verify entry points retain AllSupported.
+enum class FamilyPolicy { AllSupported, PsProfile };
 enum class Reason {
     InvalidKnownIds, OpenFailed, EnumerationFailed, EnumerationDataInvalid,
     NodeLimit, MissingDevinst, RepeatedDevinst, DeviceIdReadFailed,
     DeviceIdMissing, DeviceIdTruncated, DeviceIdInvalid, RepeatedInstance,
     HardwareIdsReadFailed, HardwareIdsTruncated, HardwareIdsType,
     HardwareIdsShape, ExactIdPresent, SupportedFamilyPresent,
-    CompleteAbsence, CleanupFailed, ReaderException
+    CompleteAbsence, CleanupFailed, ReaderException, UnclassifiedProfileRoot
 };
 struct Result {
     State state=State::Unknown;
@@ -70,6 +72,7 @@ inline const char* reasonName(Reason r)noexcept{
     case Reason::SupportedFamilyPresent:return "supported-target-family-present";
     case Reason::CompleteAbsence:return "complete-present-snapshot-without-target";
     case Reason::CleanupFailed:return "present-set-close-failed";
+    case Reason::UnclassifiedProfileRoot:return "ps-profile-undetermined-virtual-root";
     default:return "reader-or-allocation-exception";
     }
 }
@@ -99,6 +102,23 @@ inline bool supported(std::wstring_view text){
     return normalized==L"USB\\VID_28DE&PID_1205"||
         (normalized.rfind(L"USB\\VID_28DE&PID_1205&",0)==0&&normalized.find(L"&MI_")==std::wstring::npos);
 }
+inline bool psHardware(std::wstring_view text){
+    const auto value=fold(trim(text));const std::wstring_view prefix=L"ROOT\\VID_054C&PID_0DF2";
+    return value==prefix || (value.size()>prefix.size() && value.compare(0,prefix.size(),prefix)==0 && value[prefix.size()]==L'&');
+}
+inline bool psInstance(std::wstring_view text){
+    const auto value=fold(trim(text));const std::wstring_view prefix=L"ROOT\\VID_054C&PID_0DF2";
+    return value==prefix || (value.size()>prefix.size() && value.compare(0,prefix.size(),prefix)==0 &&
+        (value[prefix.size()]==L'&'||value[prefix.size()]==L'\\'));
+}
+inline bool psCandidate(std::wstring_view text){
+    const auto value=fold(trim(text));
+    // Candidate identity never grants ownership. Unknown/new SDK shapes retain
+    // the old return duty until the profile can be proved absent.
+    return value.rfind(L"ROOT\\HIDCLASS\\HM_",0)==0 ||
+        value==L"ROOT\\HIDMAESTRO" || value.rfind(L"ROOT\\HIDMAESTRO\\",0)==0 ||
+        value.rfind(L"SWD\\HIDMAESTRO_VID_054C_PID_0DF2",0)==0;
+}
 inline bool utf16(std::wstring_view text)noexcept{
     for(std::size_t i=0;i<text.size();++i){const auto c=std::uint32_t(text[i]);
         if((c<0x20||c==0x7f)&&!space(wchar_t(c)))return false;
@@ -108,8 +128,8 @@ inline bool utf16(std::wstring_view text)noexcept{
 }
 // Parse the entire returned byte range before admitting a family match. A valid
 // first entry cannot conceal an unterminated tail, empty middle or junk suffix.
-inline bool multiSz(const wchar_t* data,ULONG bytes,bool& family){
-    family=false;
+inline bool multiSz(const wchar_t* data,ULONG bytes,bool& family,FamilyPolicy policy=FamilyPolicy::AllSupported,bool* unclassified=nullptr){
+    family=false;if(unclassified)*unclassified=false;
     // CM can return a valid empty DEVPROP_TYPE_STRING_LIST as a single UTF-16
     // terminator (observed on Windows LampArray nodes). Nonempty lists still
     // require their member terminator plus the final empty-list terminator.
@@ -124,7 +144,9 @@ inline bool multiSz(const wchar_t* data,ULONG bytes,bool& family){
         if(index==count||index==begin)return false;
         const std::wstring_view member(data+begin,index-begin);
         if(!utf16(member)||trim(member).empty())return false;
-        family=family||supported(member);++index;
+        family=family||(policy==FamilyPolicy::AllSupported?supported(member):psHardware(member));
+        if(policy==FamilyPolicy::PsProfile && unclassified && fold(trim(member))==L"ROOT\\HIDMAESTRO")*unclassified=true;
+        ++index;
     }
     return index==count-1;
 }
@@ -165,8 +187,8 @@ template<class Reader> struct Set {
 };
 }
 template<class Reader>
-inline Result verify(const std::vector<std::string>& knownExactIds,Reader& reader){
-    unsigned scanned=0;
+inline Result verifyWithPolicy(const std::vector<std::string>& knownExactIds,Reader& reader,FamilyPolicy policy){
+    unsigned scanned=0;bool profileUnknown=false;
     try{
         if(knownExactIds.size()>maxKnownExactIds)return {State::Unknown,Reason::InvalidKnownIds};
         std::set<std::string> known;
@@ -182,7 +204,10 @@ inline Result verify(const std::vector<std::string>& knownExactIds,Reader& reade
             SP_DEVINFO_DATA info{};info.cbSize=sizeof(info);
             if(!reader.enumerate(handle,index,&info)){
                 const DWORD error=reader.error();
-                if(error==ERROR_NO_MORE_ITEMS)return finish({State::Absent,Reason::CompleteAbsence,scanned});
+                if(error==ERROR_NO_MORE_ITEMS){
+                    if(profileUnknown)return finish({State::Unknown,Reason::UnclassifiedProfileRoot,scanned});
+                    return finish({State::Absent,Reason::CompleteAbsence,scanned});
+                }
                 return finish({State::Unknown,Reason::EnumerationFailed,scanned,error});
             }
             if(index==maxNodes)return finish({State::Unknown,Reason::NodeLimit,scanned});
@@ -210,7 +235,11 @@ inline Result verify(const std::vector<std::string>& knownExactIds,Reader& reade
             std::array<wchar_t,maxHardwareIdBytes/sizeof(wchar_t)> hardware;hardware.fill(wchar_t(0xffff));
             DEVPROPTYPE type=DEVPROP_TYPE_EMPTY;ULONG bytes=ULONG(maxHardwareIdBytes);
             const auto property=reader.hardwareIds(info.DevInst,&DEVPKEY_Device_HardwareIds,&type,reinterpret_cast<PBYTE>(hardware.data()),&bytes,0);
-            if(property==CR_NO_SUCH_VALUE)continue;
+            if(property==CR_NO_SUCH_VALUE){
+                if(policy==FamilyPolicy::PsProfile && leafDetail::psInstance(observed))return finish({State::Present,Reason::SupportedFamilyPresent,scanned});
+                if(policy==FamilyPolicy::PsProfile && leafDetail::psCandidate(observed))profileUnknown=true;
+                continue;
+            }
             if(property==CR_BUFFER_SMALL)return finish({State::Unknown,Reason::HardwareIdsTruncated,scanned,0,property});
             if(property!=CR_SUCCESS)return finish({State::Unknown,Reason::HardwareIdsReadFailed,scanned,0,property});
             const auto invalidProperty=[&](Reason reason){
@@ -222,13 +251,20 @@ inline Result verify(const std::vector<std::string>& knownExactIds,Reader& reade
                 return finish(std::move(result));
             };
             if(type!=DEVPROP_TYPE_STRING_LIST)return invalidProperty(Reason::HardwareIdsType);
-            bool family=false;
-            if(!leafDetail::multiSz(hardware.data(),bytes,family))return invalidProperty(Reason::HardwareIdsShape);
+            bool family=false,unclassified=false;
+            if(!leafDetail::multiSz(hardware.data(),bytes,family,policy,&unclassified))return invalidProperty(Reason::HardwareIdsShape);
             if(family)return finish({State::Present,Reason::SupportedFamilyPresent,scanned});
+            if(policy==FamilyPolicy::PsProfile && leafDetail::psInstance(observed))return finish({State::Present,Reason::SupportedFamilyPresent,scanned});
+            if(policy==FamilyPolicy::PsProfile && (unclassified||leafDetail::psCandidate(observed)))profileUnknown=true;
         }
         return finish({State::Unknown,Reason::NodeLimit,scanned});
     }catch(...){return {State::Unknown,Reason::ReaderException,scanned};}
 }
+template<class Reader>
+inline Result verify(const std::vector<std::string>& knownExactIds,Reader& reader){return verifyWithPolicy(knownExactIds,reader,FamilyPolicy::AllSupported);}
 inline Result verify(const std::vector<std::string>& knownExactIds){ProductionReader reader;return verify(knownExactIds,reader);}
+template<class Reader>
+inline Result verifyPsProfile(Reader& reader){return verifyWithPolicy({},reader,FamilyPolicy::PsProfile);}
+inline Result verifyPsProfile(){ProductionReader reader;return verifyPsProfile(reader);}
 } // namespace ymcc::targetReturn::pnpAbsence
 #endif

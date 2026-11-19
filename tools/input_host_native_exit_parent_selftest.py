@@ -14,6 +14,8 @@ FIX=ROOT/'tools/fixtures/input_host_native_exit_parent'
 DEFAULT_SCENARIOS=('healthy-ordinary','unprotected-uncooperative','protected-primary-pipe','capture-nonproducer-debt','capture-worker-retained','capture-timer-retained','capture-generation-mismatch','capture-stop-exception','busy-host-budget','permanent-close-budget','busy-pipe-independent-force')
 SCENARIOS=DEFAULT_SCENARIOS+('coordinator-observer-close',)
 PROCESS=ROOT/'tools/input_host_process_retirement_selftest.py'
+FIXED_BUILD_FILES=('tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json',
+                   'tools/ymcc_sim/global/controller-host-exit/tool-profile.json','tools/input_host_exit_build_inputs.py')
 spec=importlib.util.spec_from_file_location('existing_process_fixture_tools',PROCESS)
 process=importlib.util.module_from_spec(spec);spec.loader.exec_module(process)
 helper=process.helper
@@ -21,6 +23,13 @@ sha=lambda data:hashlib.sha256(data).hexdigest()
 def need(value,message):
     if not value:raise RuntimeError(message)
 def save(path,value):path.write_text(json.dumps(value,ensure_ascii=False,indent=2)+'\n',encoding='utf-8',newline='\n')
+def load_fixed_native_build(snapshot,inputs,run):
+    source={name:inputs[ROOT/name] for name in FIXED_BUILD_FILES}
+    module_file=snapshot/FIXED_BUILD_FILES[-1]
+    need(module_file.read_bytes()==source[FIXED_BUILD_FILES[-1]],'Fixed Native reader snapshot differs')
+    spec=importlib.util.spec_from_file_location('host_exit_fixed_native_build',module_file)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    return module.FixedNativeBuild(source,run)
 def function(text,name):
     return process.block(text,r'^static[^\n;{}]*\b'+name+r'\s*\([^;{}]*\)\s*(?:noexcept\s*)?\{')
 def declaration(text,name):
@@ -41,15 +50,28 @@ def observer_function(text):
     value=text[start:end]
     return {'text':value,'line':text.count('\n',0,start)+1,'sha256':sha(value.encode())}
 
-def load_managed_child(file):
+def managed_toolchain_contract(spec,toolchain_root=None):
+    original=Path(spec['dotnetRoot']).resolve()
+    selected=Path(toolchain_root) if toolchain_root is not None else original
+    need(selected.is_absolute(),'Explicit managed toolchain root must be absolute')
+    selected=selected.resolve();expected={}
+    for row in spec['pinned']:
+        declared=Path(row['path']).resolve()
+        actual=selected/declared.relative_to(original) if declared.is_relative_to(original) else declared
+        key=str(actual.resolve()).lower()
+        need(key not in expected,'Managed toolchain mapping must preserve unique input roles')
+        expected[key]=row['sha256']
+    return selected,expected
+
+def load_managed_child(file,toolchain_root=None):
     data=file.read_bytes();value=json.loads(data)
     need(value.get('kind')=='ymcc-managed-retained-child-v1' and value.get('preparedOnly') is True and value.get('executedCases')==0,'Prepared-only managed child descriptor required')
     spec=json.loads((ROOT/'tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json').read_bytes())
-    need(Path(value['program']['path']).resolve()==(Path(spec['dotnetRoot'])/'dotnet.exe').resolve(),'Exact pinned dotnet host required')
+    selectedToolchainRoot,expected=managed_toolchain_contract(spec,toolchain_root)
+    need(Path(value['program']['path']).resolve()==(selectedToolchainRoot/'dotnet.exe').resolve(),'Exact pinned dotnet host required')
     need(value.get('runtimeVersion')==spec['runtimeVersion'],'Pinned managed runtime version required')
     need(Path(value['assembly']['path']).resolve()==(file.parent/'integrated/bin/Release/net10.0/Fixture.dll').resolve(),'Exact prepared managed assembly required')
     need(value.get('argumentsTemplate')==['<assembly>','--retained-owner-child','<proofPath>','<nonce>','<nativeParentPid>'],'Managed retained child exact command contract')
-    expected={str(Path(row['path']).resolve()).lower():row['sha256'] for row in spec['pinned']}
     actual={str(Path(row['path']).resolve()).lower():row['sha256'] for row in value['toolchainInputs']}
     need(actual==expected and len(actual)==len(value['toolchainInputs']),'Exact original managed toolchain closure required')
     need(value.get('sourceStable') is True and value.get('runtimeSourceClosureStable') is True and value.get('toolchainStable') is True and value.get('fixtureExecuted') is False and value.get('behaviorPass') is None,'Actual preparation closure required without a business PASS')
@@ -83,7 +105,9 @@ def main():
     parser.add_argument('--expected-main-sha256',required=True)
     parser.add_argument('--profiles',nargs='+',choices=('Release','Checked'),default=['Release','Checked'])
     parser.add_argument('--build-only',action='store_true')
+    parser.add_argument('--fixed-native-build',action='store_true',help='Pin and validate actual compile/link inputs before runtime')
     parser.add_argument('--managed-retained-child',type=Path,help='Explicit prepared existing managed permanent-output child; only unprotected-uncooperative')
+    parser.add_argument('--managed-toolchain-root',type=Path,help='Explicit same-byte toolchain relocation used by the managed preparation; default retains the declared root')
     parser.add_argument('--scenarios',nargs='+',choices=SCENARIOS,default=list(DEFAULT_SCENARIOS))
     parser.add_argument('--exit-owner-reference',type=Path,help='Explicit frozen historical header for a bounded negative control; never changes product')
     parser.add_argument('--coordinator-observer-reference',type=Path,help='Frozen original pipe_cases.inc only for the isolated coordinator-observer-close negative; never changes product')
@@ -91,21 +115,24 @@ def main():
     observerOnly=args.scenarios==['coordinator-observer-close']
     need(not args.managed_retained_child or args.scenarios==['unprotected-uncooperative'] and not args.exit_owner_reference and not args.coordinator_observer_reference,'Managed handoff requires the exact existing unprotected scenario and current product owner')
     managedFile=args.managed_retained_child.resolve() if args.managed_retained_child else None
-    managed,managedPins=load_managed_child(managedFile) if managedFile else (None,[])
+    need(not args.managed_toolchain_root or managedFile,'Managed toolchain override requires the actual prepared managed child')
+    managed,managedPins=load_managed_child(managedFile,args.managed_toolchain_root) if managedFile else (None,[])
     need('coordinator-observer-close' not in args.scenarios or observerOnly,'Observer case must be selected alone')
     need(not args.coordinator_observer_reference or observerOnly and args.coordinator_observer_reference.is_absolute() and args.coordinator_observer_reference.is_file(),'Observer reference requires the single observer case and an existing absolute file')
     need(not observerOnly or not args.exit_owner_reference,'Observer case cannot replace the product exit-owner header')
     out=args.out.resolve();need(not out.exists(),'Fresh evidence required');out.mkdir(parents=True)
     files=[Path(__file__).resolve(),PROCESS,process.HELPER,*sorted(FIX.glob('*')),
       ROOT/'tools/fixtures/input_host_process_retirement/environment.hpp',ROOT/'tools/fixtures/input_host_process_retirement/suite.cpp.in',
-      *[ROOT/'native'/name for name in ('main.cpp','input_host_process_retirement.h','virtual_controller_stop_runtime.h','virtual_controller_runtime_contract.h','virtual_start_protection.h','input_capture_completion.h','exit_cleanup_wait.h','input_host_exit_retirement.h','input_host_exit_owner_runtime.h','input_host_pipe_transport.h')],ROOT/'deps/json/json.hpp']
+      *[ROOT/'native'/name for name in ('main.cpp','input_host_process_retirement.h','virtual_controller_stop_runtime.h','virtual_controller_runtime_contract.h','virtual_start_protection.h','input_capture_completion.h','exit_cleanup_wait.h','input_host_exit_retirement.h','input_host_exit_owner_runtime.h','input_host_pipe_transport.h','input_host_diagnostic_dispatch.h','virtual_target_return_record.h','virtual_target_return_runtime.h',
+        'auto_close_wait.h','log_snapshot_state.h','input_host_shared_power.h','sleep_power_observation.h','sleep_power_revocation.h','sleep_power_state.h','virtual_recovery_intent.h','game_input_override.h','virtual_controller_queued_start_runtime.h','screen_touchpads.h')],ROOT/'deps/json/json.hpp']
     files.extend([ROOT/'tools/input_pipe_retirement_memory_selftest.cpp',ROOT/'tools/input_pipe_test_allocation_fault.h'])
     files.append(ROOT/'tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc')
     if args.coordinator_observer_reference:files.append(args.coordinator_observer_reference.resolve())
     if args.exit_owner_reference:files.append(args.exit_owner_reference.resolve())
+    if args.fixed_native_build:files.extend(ROOT/name for name in FIXED_BUILD_FILES)
     inputs={p:p.read_bytes() for p in files if p.is_file()}
     receipt={'createdAt':dt.datetime.now(dt.timezone.utc).isoformat(),'status':'PREPARING','parentStatus':'INCOMPLETE','productPass':False,'localOwnerRegressionVerified':False,
-      'realHostOrSdkExecuted':False,'realMainExecuted':False,'productionModified':False,'inputs':[{'path':str(p),'sha256':sha(data)} for p,data in inputs.items()]}
+      'realHostOrSdkExecuted':False,'realMainExecuted':False,'productionModified':False,'managedToolchainRoot':str(Path(managed['program']['path']).resolve().parent) if managedFile else None,'inputs':[{'path':str(p),'sha256':sha(data)} for p,data in inputs.items()]}
     try:
         mainText=inputs[ROOT/'native/main.cpp'].decode('utf-8-sig');stopText=inputs[ROOT/'native/virtual_controller_stop_runtime.h'].decode('utf-8-sig')
         receipt['mainSha256']=sha(inputs[ROOT/'native/main.cpp']);need(receipt['mainSha256']==args.expected_main_sha256.lower(),'Explicit main freeze mismatch')
@@ -119,14 +146,32 @@ def main():
             receipt['historicalHeaderReference']={'path':str(ref),'sha256':sha(inputs[ref]),'compiledAs':'native/input_host_exit_owner_runtime.h','isCurrentProductHeader':False}
         bindings={}
         for name in ('inputHostPrimaryThreadRetirementProvenLocked','inputHostClearLocked','ymStartHostExitWait','inputHostQuiesceForCaptureExit',
-          'inputHostPipeCloseOwned','inputHostPipeRetirementProvenLocked','inputHostPipeOnlyReturnAdmittedLocked','inputHostReconcileQuarantineOnLifecycleThread','inputHostExitFenceRaised','inputCaptureClearExitConfiguration','inputCaptureAwaitStopForExit','inputCaptureExitOwnershipReleased','inputCaptureExitProducerOwnershipReleased','postExitReadyOnce','exitCleanupThreadProc','tryStartExitCleanupWorker','inputCaptureEnsureExitOwner'):
+          'inputHostPipeCloseOwned','inputHostPipeRetirementProvenLocked','inputHostPipeOnlyReturnAdmittedLocked','inputHostReconcileQuarantineOnLifecycleThread','inputHostExitFenceRaised','inputCaptureClearExitConfiguration','inputCaptureAwaitStopForExit','inputCaptureExitOwnershipReleased','inputCaptureExitProducerOwnershipReleased','postExitReadyOnce','exitCleanupThreadProc','tryStartExitCleanupWorker','inputCaptureBeginExitOwner','inputCaptureEnsureExitOwner'):
             bindings[name]={'file':'native/main.cpp',**function(mainText,name)}
+        quarantineType=process.block(mainText,r'^struct InputHostQuarantineLogState\s*:[^\n{]+\{')
+        bindings['fixture.quarantineLogStateType']={'file':'native/main.cpp','bindingKind':'type',**quarantineType}
+        logFunction=process.block(mainText,r'^template\s*<\s*(?:class|typename)\s+Build\s*>\s*static void inputHostLogQuarantineObservationLocked\(')
+        bindings['inputHostLogQuarantineObservationLocked']={'file':'native/main.cpp','bindingKind':'template',**logFunction}
+        wakeType=process.block(mainText,r'^struct InputHostKeptTupleWakeProof\s*\{')
+        bindings['fixture.keptTupleWakeProofType']={'file':'native/main.cpp','bindingKind':'type',**wakeType}
+        transportReason=process.block(inputs[ROOT/'native/screen_touchpads.h'].decode('utf-8-sig'),r'^enum class NativeTransportReason\s*:[^\n{]+\{')
+        bindings['fixture.transportReason']={'file':'native/screen_touchpads.h','bindingKind':'type',**transportReason}
+        partialScope=process.block(inputs[ROOT/'native/virtual_controller_queued_start_runtime.h'].decode('utf-8-sig'),r'^namespace ymcc::inputHost::partialStartCleanup\s*\{')
+        bindings['partialStartCleanup']={'file':'native/virtual_controller_queued_start_runtime.h',**partialScope}
         for name in ('inputHostStopRestoresVisibilityWithoutProof','inputHostStopHoldsPhysicalVisibility','inputHostOwnedCleanupProvenLocked','inputHostDisabledCleanupProvenLocked','inputHostStopLocked','inputHostStop'):
             bindings[name]={'file':'native/virtual_controller_stop_runtime.h',**function(stopText,name)}
         hostNames=('g_inputHostCreatedIdentity','g_inputHostExitForceSpent','g_inputHostUnadoptedPipe','g_inputHostProcess','g_inputHostPrimaryThread','g_inputHostServerPipe','g_inputHostRunId','g_inputHostEpoch','g_exitSessionId','g_inputHostFrameReplyBinding','g_inputHostFaultHoldsStart')
         exitNames=('g_hwnd','g_summonQuit','g_autoCloseThread','g_exitRequested','g_exitReadyPosted','g_exitCode','g_exitCleanupThread','g_exitCleanupCompleted','g_exitCleanupStage',
           'g_exitBeginTick','g_exitCleanupWorkerFailureReported','g_recoveryExitEvent','g_captureExitReleased','g_inputHostExitFence','g_captureExitProducerReturned','g_captureExitProducerGeneration','g_inputCaptureStop','g_captureGeneration','g_captureMmTimerRetired')
-        for name in hostNames+exitNames:bindings['global.'+name]={'file':'native/main.cpp',**declaration(mainText,name)}
+        hostNames=(*hostNames,'g_inputHostCompactFrameRequest')
+        extraNames=('g_autoCloseWait','g_inputHostInputPowerCache','g_inputHostRecoveryIntent','g_hidHidePhysicalIdentityMx','g_xinputReconfirmPhysicalRoot',
+           'g_inputHostQuarantineBusLogState','g_inputHostQuarantineLifecycleLogState','g_inputHostQuarantineHeldLogState','g_inputHostKeptTupleWakeProof')
+        for name in hostNames+exitNames+extraNames:bindings['global.'+name]={'file':'native/main.cpp',**declaration(mainText,name)}
+        targetReturnText=inputs[ROOT/'native/virtual_target_return_runtime.h'].decode('utf-8-sig')
+        targetState=process.block(targetReturnText,r'^struct State\s*\{')
+        need('std::vector<ymcc::targetReturn::Origin> proven;' in targetState['text'],'Actual current-proof collection type changed')
+        bindings['inputHostTargetReturnCurrentProofPendingLocked']={'file':'native/virtual_target_return_runtime.h',**function(targetReturnText,'inputHostTargetReturnCurrentProofPendingLocked')}
+        bindings['fixture.targetCurrentProofPort']={'file':'native/virtual_target_return_runtime.h','sha256':targetState['sha256'],'sourceStateSha256':targetState['sha256'],'compiledCollectionMember':'std::vector<ymcc::targetReturn::Origin> proven;','fixtureOnly':True,'scope':'Only the actual current-proof getter is executed; durable session/history and physical-return consumers remain separate.'}
         globals='\n'.join(bindings['global.'+name]['text'] for name in hostNames)
         envDir=source/'tools/fixtures/input_host_native_exit_parent'
         (envDir/'actual_host_handle_globals.hpp').write_bytes((globals+'\n').encode())
@@ -173,17 +218,28 @@ def main():
         need(AssignProcessToJobObject(job,process)!=FALSE,"assign only newly created private child");
         need(ResumeThread(primary)!=static_cast<DWORD>(-1),"resume private child after job ownership");''')
         child=child.replace('        if(release)::CloseHandle(release);','        if(primary){SetHandleInformation(primary,HANDLE_FLAG_PROTECT_FROM_CLOSE,0);::CloseHandle(primary);}\n        if(release)::CloseHandle(release);\n        if(job)::CloseHandle(job);',1)
-        production='\n'.join(bindings[name]['text'] for name in ('ymStartHostExitWait','inputHostPipeCloseOwned','inputHostPipeRetirementProvenLocked','inputHostPrimaryThreadRetirementProvenLocked','inputHostClearLocked','inputHostStopRestoresVisibilityWithoutProof','inputHostStopHoldsPhysicalVisibility',
+        production=bindings['inputHostTargetReturnCurrentProofPendingLocked']['text']+'\n'+logFunction['text']+'\n'+partialScope['text']+'\n'
+        production+='\n'.join(bindings[name]['text'] for name in ('ymStartHostExitWait','inputHostPipeCloseOwned','inputHostPipeRetirementProvenLocked','inputHostPrimaryThreadRetirementProvenLocked','inputHostClearLocked','inputHostStopRestoresVisibilityWithoutProof','inputHostStopHoldsPhysicalVisibility',
           'inputHostOwnedCleanupProvenLocked','inputHostDisabledCleanupProvenLocked','inputHostStopLocked','inputHostStop','inputHostPipeOnlyReturnAdmittedLocked','inputHostReconcileQuarantineOnLifecycleThread','inputHostExitFenceRaised','inputHostQuiesceForCaptureExit','inputCaptureClearExitConfiguration','inputCaptureAwaitStopForExit','inputCaptureExitOwnershipReleased','inputCaptureExitProducerOwnershipReleased'))
         production+='\n#include "input_host_exit_owner_runtime.h"\n'
-        production+='\n'.join(bindings[name]['text'] for name in ('postExitReadyOnce','exitCleanupThreadProc','tryStartExitCleanupWorker','inputCaptureEnsureExitOwner'))
+        production+='\n'.join(bindings[name]['text'] for name in ('postExitReadyOnce','exitCleanupThreadProc','tryStartExitCleanupWorker','inputCaptureBeginExitOwner','inputCaptureEnsureExitOwner'))
         template=inputs[FIX/'suite.cpp.in'].decode('utf-8-sig')
-        for marker,value in [('@@EXIT_GLOBALS@@','\n'.join(bindings['global.'+name]['text'] for name in exitNames)),('@@PRODUCTION@@',production),('@@PRIVATE_CHILD@@',child),('@@COORDINATOR_OBSERVER_CONSUMER@@',observer['text'])]:
+        for marker,value in [('@@EXIT_GLOBALS@@','\n'.join([*(bindings['global.'+name]['text'] for name in exitNames),quarantineType['text']+';',wakeType['text']+';',*(bindings['global.'+name]['text'] for name in extraNames)])),('@@TRANSPORT_REASON@@',transportReason['text']+';'),('@@PRODUCTION@@',production),('@@PRIVATE_CHILD@@',child),('@@COORDINATOR_OBSERVER_CONSUMER@@',observer['text'])]:
             need(template.count(marker)==1,'Fixture marker '+marker);template=template.replace(marker,value)
         fixture=out/'fixture.cpp';fixture.write_bytes(template.encode())
         save(out/'source-bindings.json',bindings)
-        compiler,envVars=helper.compiler_environment(out)
-        receipt['compiler']={'path':str(compiler),'sha256':sha(compiler.read_bytes()),'vcvarsSha256':sha(helper.VCVARS.read_bytes()),'windowsSDKVersion':envVars.get('WindowsSDKVersion')}
+        fixed=load_fixed_native_build(source,inputs,out) if args.fixed_native_build else None
+        if fixed:
+            compiler,envVars=fixed.compiler,dict(fixed.env)
+            receipt['compiler'],receipt['fixedNativeBuild']=fixed.compiler_receipt,fixed.receipt
+            local_pins={source/p.relative_to(ROOT):sha(data) for p,data in inputs.items() if p.is_relative_to(ROOT)}
+            generated={envDir/name for name in ('environment.hpp','actual_pipe_leaves.hpp','actual_host_handle_globals.hpp')}
+            local_pins.update({p:sha(p.read_bytes()) for p in generated})
+            local_pins[source/'native/input_host_exit_owner_runtime.h']=sha(inputs[ownerPath])
+            required_local=generated|{source/'native/input_host_exit_owner_runtime.h',source/'deps/json/json.hpp'}
+        else:
+            compiler,envVars=helper.compiler_environment(out)
+            receipt['compiler']={'path':str(compiler),'sha256':sha(compiler.read_bytes()),'vcvarsSha256':sha(helper.VCVARS.read_bytes()),'windowsSDKVersion':envVars.get('WindowsSDKVersion')}
         receipt['profiles']=[]
         managedEnvKeys=('YMCC_NATIVE_EXIT_MANAGED_PROGRAM','YMCC_NATIVE_EXIT_MANAGED_ASSEMBLY','YMCC_NATIVE_EXIT_MANAGED_PROOF','YMCC_NATIVE_EXIT_MANAGED_NONCE','YMCC_NATIVE_EXIT_MANAGED_PROOF_MUTATION')
         for key in managedEnvKeys:envVars.pop(key,None)
@@ -197,8 +253,11 @@ def main():
             flags={'Release':['/MT','/O2','/DNDEBUG'],'Checked':['/MTd','/Od','/D_DEBUG']}[profile]
             target=out/profile;target.mkdir();exe=target/'fixture.exe'
             argv=[compiler,'/nologo','/std:c++20','/utf-8','/EHsc','/W4','/WX','/wd4505','/permissive-',*flags,'/I'+str(source/'native'),'/I'+str(source/'deps/json'),'/I'+str(envDir),'/I'+str(source/'tools'),fixture,'/Fo'+str(target/'fixture.obj'),'/Fe'+str(exe)]
-            save(target/'build-command.json',[str(v) for v in argv]);built=helper.execute(argv,target,envVars,target/'build.log',60)
-            need(built.returncode==0,'Compile failed '+str(target/'build.log'))
+            if fixed:
+                binary=fixed.compile(helper.execute,argv,target,fixture,exe,profile,'parent',local_pins,required_local,60)
+            else:
+                save(target/'build-command.json',[str(v) for v in argv]);built=helper.execute(argv,target,envVars,target/'build.log',60)
+                need(built.returncode==0,'Compile failed '+str(target/'build.log'))
             scenarios=[]
             if args.build_only:
                 receipt['profiles'].append({'name':profile,'binarySha256':sha(exe.read_bytes()),'executedThisRun':False,'status':'BUILD_ONLY_NOT_RUN'})
@@ -209,6 +268,7 @@ def main():
                     proof=target/'managed-retained-proof.json';need(not proof.exists(),'Fresh managed proof required')
                     envVars.update({'YMCC_NATIVE_EXIT_MANAGED_PROGRAM':managed['program']['path'],'YMCC_NATIVE_EXIT_MANAGED_ASSEMBLY':managed['assembly']['path'],'YMCC_NATIVE_EXIT_MANAGED_PROOF':str(proof),'YMCC_NATIVE_EXIT_MANAGED_NONCE':uuid.uuid4().hex})
                     save(target/'managed-invocation.json',{'scenario':scenario,'program':managed['program'],'assembly':managed['assembly'],'proof':str(proof),'nonce':envVars['YMCC_NATIVE_EXIT_MANAGED_NONCE'],'environment':{key:envVars.get(key) for key in (*managedEnvKeys,'DOTNET_ROOT','DOTNET_ROLL_FORWARD','DOTNET_MULTILEVEL_LOOKUP')}})
+                if fixed:fixed.admit_runtime(binary)
                 ran=helper.execute([exe,scenario],target,envVars,target/(scenario+'-run.log'),30)
                 need(ran.stdout.strip(),'No scenario output: '+scenario)
                 result=json.loads(ran.stdout);save(target/(scenario+'-result.json'),result)
@@ -220,6 +280,7 @@ def main():
                     receipt['managedChild'].setdefault('proofs',[]).append({'path':str(proof),'bytes':len(raw),'sha256':sha(raw)})
                 need(result['fixtureCleanup']['privateHandlesClosed'] and not result['fixtureCleanup']['childKillOrEventBackstop'],'Production must retire child/primary/pipe before fixture handle cleanup')
                 scenarios.append({'name':scenario,'exitCode':ran.returncode,'wallSeconds':time.perf_counter()-scenarioStart,'executedThisRun':True,'result':result})
+            if fixed:fixed.check_tools()
             imported=helper.execute([compiler.parent/'dumpbin.exe','/imports',exe],target,envVars,target/'imports.txt',15)
             need(imported.returncode==0 and not any(v in imported.stdout.lower() for v in helper.FORBIDDEN),'Unexpected device/UI/product import')
             receipt['profiles'].append({'name':profile,'binarySha256':sha(exe.read_bytes()),'scenarios':scenarios})
@@ -230,7 +291,10 @@ def main():
         for name,bound in bindings.items():
             if bound.get('file')!='native/main.cpp':continue
             text=(ROOT/'native/main.cpp').read_bytes().decode('utf-8-sig')
-            current=declaration(text,name[7:]) if name.startswith('global.') else function(text,name)
+            if name.startswith('global.'):current=declaration(text,name[7:])
+            elif bound.get('bindingKind')=='type':current=process.block(text,r'^struct '+re.escape(bound['text'].split()[1])+r'[^\n{]*\{')
+            elif bound.get('bindingKind')=='template':current=process.block(text,r'^template\s*<\s*(?:class|typename)\s+Build\s*>\s*static void '+name+r'\(')
+            else:current=function(text,name)
             continuity[name]={'boundSha256':bound['sha256'],'currentSha256':current['sha256'],'identical':bound['text']==current['text']}
         save(out/'main-fragment-continuity.json',{'boundMainSha256':receipt['mainSha256'],'currentMainSha256':sha((ROOT/'native/main.cpp').read_bytes()),'wholeMainIdentical':receipt['wholeMainIdentical'],'bindings':continuity})
         receipt['boundMainFragmentsStable']=all(v['identical'] for v in continuity.values())

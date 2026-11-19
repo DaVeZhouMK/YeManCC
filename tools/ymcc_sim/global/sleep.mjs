@@ -43,7 +43,7 @@ export function getSleepAdapters(repoRoot, { identityOnly = false, selectedIds }
     // native symbol/membership assertions; all behavioral expectations remain.
     adapter('power-resume', 'Product wake transaction: ordering, bounded retries and generation fencing',
       'node', 'tools/ymcc_sim/global/sleep-fixtures/power-resume-entry.mjs',
-      ['tools/power_resume_selftest.ts', 'src/bridge/powerResume.ts', 'src/App.vue', 'native/main.cpp', ...POWER_RESUME_TOOL_SOURCES],
+      ['tools/power_resume_selftest.ts', 'src/bridge/powerResume.ts', 'src/bridge/powerLifecycleState.ts', 'src/App.vue', 'native/main.cpp', ...POWER_RESUME_TOOL_SOURCES],
       { args: ['--output', '{outDir}/power-resume.json'], resultFiles: ['power-resume.json'],
         ...(deferred('sleep.power-resume') ? {registrationIdentityOnly:true,blockedReason:'POWER_RESUME_EXECUTION_IDENTITY_DEFERRED'} : powerResumeToolDeclaration(repoRoot)) }),
     adapter('steam-dispatch', 'Production Steam sleep dispatch with isolated API transports',

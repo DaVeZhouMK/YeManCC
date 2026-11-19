@@ -5,7 +5,7 @@ import pathlib
 import tempfile
 import unittest
 import zipfile
-from controller_signal_reverse_audit import analyze_records, audit_archive, chain_ack_check, frame_check, window_check
+from controller_signal_reverse_audit import analyze_records, audit_archive, chain_ack_check, frame_check, signal_analysis, window_check
 
 def frame():
     return {"event": "input-host-frame-evidence", "formatVersion": 2, "pid": 100, "powerGeneration": 2,
@@ -22,6 +22,33 @@ def counts(samples=1, meaningful=0, small=0):
     return {"samples": samples, "rawActiveFrames": meaningful + small, "meaningfulFrames": meaningful, "smallAnalogOnlyFrames": small}
 
 class ReverseSignalTests(unittest.TestCase):
+    def test_foreground_observation_is_bound_to_its_native_row(self):
+        row = {"event": "input-native-signal-window", "pid": 100, "writerProcessCreation100ns": "134394800080357544",
+               "foregroundObservation": {"schemaVersion": 1, "pid": 200, "threadId": 300, "windowBefore": 21,
+                   "windowAfter": 21, "windowStableDuringRead": True, "className": "StartMenuExperienceHost",
+                   "classReadSucceeded": True, "classReadError": 0}}
+        observation = signal_analysis([rec(row)])["nativeEvidence"][0]
+        self.assertEqual(observation["nativeWriter"], {"pid": 100, "processCreation100ns": "134394800080357544"})
+        self.assertEqual(observation["foregroundObservation"]["pid"], 200)
+        self.assertTrue(observation["foregroundObservation"]["stableWindowObserved"])
+        self.assertFalse(observation["foregroundObservation"]["consumerReceiptProven"])
+
+    def test_foreground_missing_unstable_and_unreadable_remain_distinct(self):
+        row = {"event": "input-native-signal-window", "pid": 100, "writerProcessCreation100ns": "0"}
+        self.assertIsNone(signal_analysis([rec(row)])["nativeEvidence"][0]["foregroundObservation"])
+        for version in (True, "1", 2):
+            row["foregroundObservation"] = {"schemaVersion": version}
+            self.assertIsNone(signal_analysis([rec(row)])["nativeEvidence"][0]["foregroundObservation"])
+        row["foregroundObservation"] = {"schemaVersion": 1, "pid": True, "threadId": 7, "windowBefore": 2, "windowAfter": 3,
+            "windowStableDuringRead": True, "classReadSucceeded": False, "classReadError": 5, "className": "stale"}
+        observation = signal_analysis([rec(row)])["nativeEvidence"][0]
+        self.assertIsNone(observation["nativeWriter"]["processCreation100ns"])
+        foreground = observation["foregroundObservation"]
+        self.assertFalse(foreground["stableWindowObserved"])
+        self.assertIsNone(foreground["pid"])
+        self.assertIsNone(foreground["className"])
+        self.assertEqual(foreground["classReadError"], 5)
+
     def test_valid_local_ack_does_not_prove_external_delivery(self):
         result = frame_check(frame())
         self.assertTrue(result["localAckBound"])
@@ -175,6 +202,51 @@ class ReverseSignalTests(unittest.TestCase):
         result = self.archive({"native-lifecycle.log": [frame()], "virtual-gamepad.log": [frame()]})
         self.assertEqual(result["summary"]["frameEvidenceRows"], 1)
         self.assertEqual(result["coverage"]["crossFileDuplicates"], 1)
+
+    @staticmethod
+    def activity():
+        return {"event": "input-signal-activity", "schemaVersion": 1, "writerEnvelopeSchema": 1,
+                "writerPid": 100, "writerProcessCreation100ns": "134394800080357544",
+                "configEpoch": 1, "windowId": 0, "drainTick": 2000, "time": "2026-11-18T20:57:00.000"}
+
+    def test_focus_activity_first_window_mirrors_but_focus_frame_rows_are_not_imported(self):
+        first = self.activity()
+        mirror = dict(first, time="2026-11-18T20:57:00.001")
+        focus_only = dict(first, windowId=1, drainTick=7020)
+        result = self.archive({r"nested\focus-trace.log.1": [first, focus_only, frame()], "virtual-gamepad.log": [mirror]})
+        self.assertEqual(result["summary"]["activityDrainRows"], 2)
+        self.assertEqual(result["coverage"]["activityDrains"], {"focusRows": 2, "virtualRows": 1,
+                         "otherRows": 0, "unboundRows": 0, "crossFileDuplicates": 1})
+        self.assertEqual(result["summary"].get("frameEvidenceRows", 0), 0)
+
+    def test_activity_missing_or_invalid_binding_is_retained_in_each_carrier(self):
+        for change in ({"writerProcessCreation100ns": None}, {"writerPid": True}, {"schemaVersion": 2},
+                       {"writerEnvelopeSchema": True}, {"configEpoch": 0}, {"windowId": True}, {"drainTick": 1 << 64}):
+            with self.subTest(change=change):
+                row = dict(self.activity(), **change)
+                result = self.archive({"focus-trace.log": [row], "virtual-gamepad.log": [row]})
+                self.assertEqual(result["summary"]["activityDrainRows"], 2)
+                self.assertEqual(result["coverage"]["activityDrains"]["unboundRows"], 2)
+                self.assertEqual(result["coverage"]["crossFileDuplicates"], 0)
+
+    def test_compact_activity_mirrors_keep_original_binding_and_loss_counts(self):
+        row = dict(self.activity(), activityScopeSchema=1, droppedContention=2)
+        mirror = dict(row, time="2026-11-18T20:57:00.001")
+        changed = dict(mirror, droppedContention=3)
+        result = self.archive({"focus-trace.log": [row], "virtual-gamepad.log": [mirror, changed]})
+        self.assertEqual(result["summary"]["activityDrainRows"], 2)
+        self.assertEqual(result["coverage"]["activityDrains"]["unboundRows"], 0)
+        self.assertEqual(result["coverage"]["activityDrains"]["crossFileDuplicates"], 1)
+
+    def test_activity_duplicate_scope_preserves_changed_payload_lifetime_and_same_file_multiplicity(self):
+        row = self.activity()
+        changed = dict(row, droppedOverflow=1)
+        another_lifetime = dict(row, writerProcessCreation100ns="134394800080357545")
+        result = self.archive({"focus-trace.log": [row, row, changed],
+                               "virtual-gamepad.log.prev": [row, another_lifetime]})
+        self.assertEqual(result["summary"]["activityDrainRows"], 4)
+        self.assertEqual(result["coverage"]["activityDrains"]["unboundRows"], 0)
+        self.assertEqual(result["coverage"]["activityDrains"]["crossFileDuplicates"], 1)
 
     def test_domain_wrapper_time_and_writer_pid_are_normalized_by_frame_token(self):
         native = frame(); native["time"] = "2026-10-16T18:43:42.667"

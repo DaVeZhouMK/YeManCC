@@ -27,6 +27,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <chrono>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -58,7 +59,9 @@ struct Scenario {
     size_t failAfter = SIZE_MAX;
     bool cancelAtFailure = false;
     bool gameAfterFirstRead = false;
-    bool stallHeaders = false, failCallbackRegistration = false, failCallbackContext = false;
+    bool stallHeaders = false, stallBody = false, failCallbackRegistration = false, failCallbackContext = false;
+    size_t chunkLimit=SIZE_MAX;
+    ULONGLONG readTickMs=0;
 };
 static std::vector<Scenario> scenarios;
 static size_t requestCount = 0, cursor = 0;
@@ -127,8 +130,10 @@ static BOOL fakeWinHttpQueryDataAvailable(HINTERNET, LPDWORD available) {
     return TRUE;
 }
 static BOOL fakeWinHttpReadData(HINTERNET, LPVOID output, DWORD wanted, LPDWORD read) {
+    if(current.stallBody){if(fixtureHeadersEvent)SetEvent(fixtureHeadersEvent);return TRUE;}
     if(cursor>=current.failAfter){if(current.cancelAtFailure)g_poolCancel=true;SetLastError(ERROR_WINHTTP_CONNECTION_ERROR);return FALSE;}
-    const DWORD bytes=static_cast<DWORD>((std::min)({static_cast<size_t>(wanted),current.body.size()-cursor,current.failAfter-cursor}));
+    const DWORD bytes=static_cast<DWORD>((std::min)({static_cast<size_t>(wanted),current.body.size()-cursor,current.failAfter-cursor,current.chunkLimit}));
+    fixtureTick+=current.readTickMs;
     std::memcpy(output,current.body.data()+cursor,bytes);cursor+=bytes;if(current.gameAfterFirstRead)g_updateGameDetected=true;
     if(read)*read=bytes;else if(fixtureCallback&&fixtureCallbackContext)fixtureCallback(reinterpret_cast<HINTERNET>(3),fixtureCallbackContext,WINHTTP_CALLBACK_STATUS_READ_COMPLETE,output,bytes);
     return TRUE;
@@ -249,16 +254,23 @@ static Scenario partial(size_t offset, const std::string& whole, const std::stri
     s.headers[WINHTTP_QUERY_CONTENT_RANGE] = "bytes " + std::to_string(offset) + '-' + std::to_string(whole.size()-1) + '/' + std::to_string(whole.size()); return s;
 }
 
-static int updaterConfigStorm() {
-    json rows=json::array();const auto test=[&](const std::string& name,const std::function<void()>& run){try{run();rows.push_back({{"name",name},{"ok",true}});}catch(const std::exception& e){rows.push_back({{"name",name},{"ok",false},{"error",e.what()}});}};
+static int updaterConfigStorm(const std::string& selected = {}) {
+    json rows=json::array();const auto test=[&](const std::string& name,const std::function<void()>& run){if(!selected.empty()&&name!=selected)return;try{run();rows.push_back({{"name",name},{"ok",true}});}catch(const std::exception& e){rows.push_back({{"name",name},{"ok",false},{"error",e.what()}});}};
     const auto putPolicy=[&](const std::string& raw){writeText(updatePredownloadPolicyPath(),raw);};
     const auto policyFile=[&](){return readText(updatePredownloadPolicyPath());};
-    for(const auto& raw:std::vector<std::string>{"", "{broken", "[]", "null", std::string(65537,'x')})test("invalid policy stops automatic work "+std::to_string(rows.size()),[&]{reset("storm-policy-"+std::to_string(rows.size()),{});putPolicy(raw);const auto policy=updatePredownloadPolicyRead();check(policy.is_object()&&policy.at("enabled")==false&&policyFile()==raw,"bad policy authorized automatic work or changed original");});
+    for(const auto& raw:std::vector<std::string>{"", "{broken", "[]", "null", std::string(65537,'x')})test("invalid policy uses new defaults with diagnostic "+std::to_string(rows.size()),[&]{reset("storm-policy-"+std::to_string(rows.size()),{});putPolicy(raw);const auto policy=updatePredownloadPolicyRead();check(policy.is_object()&&policy.at("enabled")==true&&policy.contains("configReadError")&&policyFile()==raw,"bad policy authorized automatic work or changed original");});
     const json valid={{"schemaVersion",1},{"enabled",false},{"failureCount",2},{"nextCheckAt",42},{"lastNotifiedBoot","fixture-boot-A"}};
-    for(const auto& field:std::vector<std::pair<std::string,std::vector<json>>>{{"schemaVersion",{1.0,true,2,"1",nullptr}},{"enabled",{1,"true",nullptr}},{"failureCount",{-1,1.5,true,18446744073709551615ULL}},{"nextCheckAt",{-1,2.5,"10",18446744073709551615ULL}},{"lastNotifiedBoot",{false,json::array(),std::string(256,'x')}}})for(const auto& wrong:field.second)test("policy bad "+field.first+"="+wrong.dump(),[&]{reset("storm-policy-"+std::to_string(rows.size()),{});auto document=valid;document[field.first]=wrong;const auto raw=document.dump();putPolicy(raw);const auto policy=updatePredownloadPolicyRead();check(policy.at("enabled")==false&&policy.value("failureCount",0)==0&&policyFile()==raw,"invalid policy partially consumed or mutated original");});
-    test("duplicate policy cannot enable background",[&]{reset("storm-policy-duplicate",{});const auto raw="{\"schemaVersion\":1,\"enabled\":false,\"enabled\":true}";putPolicy(raw);const auto policy=updatePredownloadPolicyRead();check(policy.at("enabled")==false&&policyFile()==raw,"duplicate enabled value authorized background");});
+    for(const auto& field:std::vector<std::pair<std::string,std::vector<json>>>{{"schemaVersion",{1.0,true,2,"1",nullptr}},{"enabled",{1,"true",nullptr}},{"failureCount",{-1,1.5,true,18446744073709551615ULL}},{"nextCheckAt",{-1,2.5,"10",18446744073709551615ULL}},{"lastNotifiedBoot",{false,json::array(),std::string(256,'x')}}})for(const auto& wrong:field.second)test("policy bad "+field.first+"="+wrong.dump(),[&]{reset("storm-policy-"+std::to_string(rows.size()),{});auto document=valid;document[field.first]=wrong;const auto raw=document.dump();putPolicy(raw);const auto policy=updatePredownloadPolicyRead();check(policy.at("enabled")==true&&policy.value("failureCount",0)==0&&policy.contains("configReadError")&&policyFile()==raw,"invalid policy partially consumed or mutated original");});
+    test("duplicate policy cannot supply persisted authority",[&]{reset("storm-policy-duplicate",{});const auto raw="{\"schemaVersion\":1,\"enabled\":false,\"enabled\":true}";putPolicy(raw);const auto policy=updatePredownloadPolicyRead();check(policy.contains("configReadError")&&policy.at("failureCount")==0&&policyFile()==raw,"duplicate enabled value authorized background");});
     test("policy unknown field survives save",[&]{reset("storm-policy-unknown",{});auto document=valid;document["opaque"]={{"note","preserve"}};putPolicy(document.dump());auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;updatePredownloadPolicyWrite(policy);const auto actual=json::parse(policyFile());check(actual.contains("opaque")&&actual["opaque"]==document["opaque"],"saving policy erased unknown properties");});
-    test("future policy cannot be downgraded by old writer",[&]{reset("storm-policy-future",{});auto document=valid;document["schemaVersion"]=99;const auto raw=document.dump();putPolicy(raw);auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;bool refused=false;try{updatePredownloadPolicyWrite(policy);}catch(...){refused=true;}check(refused&&policyFile()==raw,"old writer downgraded future policy");});
+    test("obsolete future pause cannot permanently veto native download",[&]{
+        reset("storm-future-pause",{});auto saved=valid;saved["nextCheckAt"]=INT64_MAX;saved["cacheQuietUntil"]=INT64_MAX;putPolicy(saved.dump());
+        const auto recovered=updatePredownloadPolicyRead();check(recovered.at("enabled")==false&&recovered.at("nextCheckAt")==0&&recovered.at("cacheQuietUntil")==0&&recovered.contains("configReadError"),"far future pause retained native veto or bypassed explicit OFF");
+        auto ordinary=valid;const auto now=static_cast<int64_t>(time(nullptr))*1000;
+        ordinary["cacheQuietUntil"]=now+60000;ordinary["nextCheckAt"]=now+300000;putPolicy(ordinary.dump());
+        const auto kept=updatePredownloadPolicyRead();check(kept.at("cacheQuietUntil")==ordinary.at("cacheQuietUntil")&&kept.at("nextCheckAt")==ordinary.at("nextCheckAt")&&!kept.contains("configReadError"),"current bounded user pause was dropped");
+    });
+    test("future disposable policy cannot block replacement",[&]{reset("storm-policy-future",{});auto document=valid;document["schemaVersion"]=99;putPolicy(document.dump());auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;updatePredownloadPolicyWrite(policy);check(updatePredownloadPolicyRead().at("enabled")==true&&json::parse(policyFile()).at("schemaVersion")==1,"future old policy blocked a valid replacement");});
     test("source read sharing fault returns inactive then retry",[&]{reset("storm-policy-lock",{});putPolicy(valid.dump());HANDLE held=CreateFileW(updatePredownloadPolicyPath().c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);check(held!=INVALID_HANDLE_VALUE,"fixture lock setup");bool safe=false;try{const auto policy=updatePredownloadPolicyRead();safe=policy.at("enabled")==false;}catch(...){safe=false;}CloseHandle(held);check(safe,"read fault throws or opens background");check(updatePredownloadPolicyRead().at("failureCount")==2,"released fault does not reload current policy");});
     const auto progressFile=[&](const json& document){writeText(updateProgressPath(),document.dump());g_updateProgress=json::object();};
     test("uncommitted started marker is never completion",[&]{reset("storm-started",{});fixtureRecoveryJournal=json::object();progressFile({{"phase","installing"},{"stage","install"},{"version","0.0.99"}});writeText(updateTransactionStatePath(),"{\"phase\":\"started\",\"pid\":1}");const auto value=fixtureActualStateRead();check(value.value("phase",std::string())!="completed","started marker became completed without commit proof");});
@@ -268,19 +280,27 @@ static int updaterConfigStorm() {
 
     const auto archives=[&](const fspath::path& source){std::set<fspath::path> out;for(const auto& file:fspath::directory_iterator(source.parent_path()))if(file.path().filename().wstring().starts_with(source.filename().wstring()+L".ymcc-invalid-"))out.insert(file.path());return out;};
     const auto exactArchive=[&](const fspath::path& path,const std::set<fspath::path>& old,const std::string& raw){auto current=archives(path);std::vector<fspath::path> fresh;for(const auto& file:current)if(!old.contains(file)&&readText(file)==raw)fresh.push_back(file);check(fresh.size()==1,"original updater preimage not preserved exactly once");};
-    for(const auto& raw:std::vector<std::string>{"", "{broken", std::string(65537,'x')})test("explicit policy repair keeps original "+std::to_string(rows.size()),[&]{reset("storm-repair-"+std::to_string(rows.size()),{});putPolicy(raw);const auto old=archives(updatePredownloadPolicyPath());auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;updatePredownloadPolicyWrite(policy);exactArchive(updatePredownloadPolicyPath(),old,raw);check(updatePredownloadPolicyRead().at("enabled")==true,"explicit policy repair did not become readable");});
+    for(const auto& raw:std::vector<std::string>{"", "{broken", std::string(65537,'x')})test("explicit policy repair does not require original archive "+std::to_string(rows.size()),[&]{reset("storm-repair-"+std::to_string(rows.size()),{});putPolicy(raw);const auto old=archives(updatePredownloadPolicyPath());auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;updatePredownloadPolicyWrite(policy);check(ymcc::updateconfig::policyValid(json::parse(policyFile())),"policy replacement invalid");check(updatePredownloadPolicyRead().at("enabled")==true,"explicit policy repair did not become readable");});
     test("failed repaired policy write restores damaged original",[&]{reset("storm-repair-fault",{});putPolicy("{broken");auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;failMetadataWrite=metadataWrites+1;bool refused=false;try{updatePredownloadPolicyWrite(policy);}catch(...){refused=true;}failMetadataWrite=0;check(refused&&policyFile()=="{broken","failed repair lost original or reported success");updatePredownloadPolicyWrite(policy);check(updatePredownloadPolicyRead().at("enabled")==true,"repair did not retry after release");});
     test("removed update target remains absent after save",[&]{reset("storm-target-remove",{});auto p=valid;p["targetVersion"]="0.0.99";p["targetSha256"]=std::string(64,'a');putPolicy(p.dump());auto policy=updatePredownloadPolicyRead();policy.erase("targetVersion");policy.erase("targetSha256");updatePredownloadPolicyWrite(policy);check(!updatePredownloadPolicyRead().contains("targetVersion"),"merge resurrected explicitly retired target");});
     test("protected unfinished receipt overrides lost progress",[&]{reset("storm-protected-open",{});g_updateProgress=json::object();writeText(updateProgressPath(),"{broken");fixtureRecoveryJournal={{"schema",1},{"owner","YMCC.FullInstall"},{"operationId","protected-op"},{"phase","applying"},{"version","0.0.99"},{"sha256",std::string(64,'a')},{"exePath",ymcc::updaterecovery::utf8(fixtureExe)},{"powerControl",ymcc::updaterecovery::utf8(POWER_CONTROL_DIR)}};const auto value=fixtureActualStateRead();check(value.at("repairAuthorized")==true&&value.at("phase")=="interrupted"&&value.at("version")=="0.0.99","trusted unfinished transaction lost to bad diagnostics");});
     test("protected committed receipt is the completion authority",[&]{reset("storm-protected-complete",{});g_updateProgress=json::object();fixtureRecoveryJournal={{"schema",1},{"owner","YMCC.FullInstall"},{"operationId","protected-op"},{"phase","committed"},{"version","0.0.99"},{"sha256",std::string(64,'a')},{"exePath",ymcc::updaterecovery::utf8(fixtureExe)},{"powerControl",ymcc::updaterecovery::utf8(POWER_CONTROL_DIR)}};const auto value=fixtureActualStateRead();check(value.at("phase")=="completed"&&value.at("percent")==100&&!value.at("repairAuthorized").get<bool>(),"trusted committed transaction could not complete safely");});
     test("protected commit for different version cannot complete current job",[&]{reset("storm-protected-wrong-version",{});progressFile({{"phase","installing"},{"version","0.0.99"}});fixtureRecoveryJournal={{"phase","committed"},{"version","0.0.98"}};check(fixtureActualStateRead().at("phase")!="completed","other version receipt completed current operation");});
-    test("actual progress writer preserves corrupted preimage",[&]{reset("storm-progress-write",{});g_updateProgress=json::object();writeText(updateProgressPath(),"{broken");const auto old=archives(updateProgressPath());fixtureActualProgressPost({{"phase","downloading"},{"version","0.0.99"},{"percent",10}});exactArchive(updateProgressPath(),old,"{broken");check(fixtureActualProgressRead().at("percent")==10,"runtime progress not retained after persistence");});
+    test("actual progress writer replaces corrupt snapshot without archive dependency",[&]{reset("storm-progress-write",{});g_updateProgress=json::object();writeText(updateProgressPath(),"{broken");const auto old=archives(updateProgressPath());fixtureActualProgressPost({{"phase","downloading"},{"version","0.0.99"},{"percent",10}});check(json::parse(readText(updateProgressPath())).at("percent")==10,"valid new diagnostic snapshot blocked by old bytes or archive dependency");check(fixtureActualProgressRead().at("percent")==10,"runtime progress not retained after persistence");});
     test("progress persistence failure stays live but reports unknown durable state",[&]{reset("storm-progress-write-failure",{});g_updateProgress=json::object();writeText(updateProgressPath(),"{broken");failMetadataWrite=metadataWrites+1;fixtureActualProgressPost({{"phase","downloading"},{"percent",10}});failMetadataWrite=0;const auto value=fixtureActualProgressRead();check(value.at("percent")==10&&value.contains("snapshotPersistenceError")&&readText(updateProgressPath())=="{broken","failed diagnostic save hid live state or pretended persistence");fixtureActualProgressPost({{"phase","downloading"},{"percent",11}});check(!fixtureActualProgressRead().contains("snapshotPersistenceError")&&json::parse(readText(updateProgressPath())).at("percent")==11,"released progress persistence fault cannot retry");});
     const std::string payload="UPDATER CONFIG INERT PAYLOAD";writeText(fixtureRoot/"config-expected.bin",payload);const auto hash=sha256File((fixtureRoot/"config-expected.bin").wstring());
     const auto target=std::to_string(APP_VER_MAJOR)+"."+std::to_string(APP_VER_MINOR)+"."+std::to_string(APP_VER_PATCH+1);
     const json args={{"url","https://fixture.invalid/YeManCC.zip"},{"version",target},{"sha256",hash},{"operationId","config-op"}};
     const json meta={{"url",args["url"]},{"version",target},{"sha256",hash},{"etag","\"A\""},{"totalBytes",payload.size()}};
-    for(const auto& kind:std::vector<std::string>{"future","locked","directory"})test("resume "+kind+" remains protected before HTTP",[&]{reset("storm-resume-"+kind,{full(payload)});const auto part=dataRoot/"update/package.zip.part",side=dataRoot/"update/package.zip.part.json";writeText(part,payload.substr(0,4));HANDLE held=INVALID_HANDLE_VALUE;auto document=meta;document["schemaVersion"]=99;const auto raw=document.dump();if(kind=="directory")fspath::create_directory(side);else writeText(side,kind=="future"?raw:meta.dump());if(kind=="locked")held=CreateFileW(side.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);bool refused=false;try{fixtureDownloadUpdate(args);}catch(...){refused=true;}if(held!=INVALID_HANDLE_VALUE)CloseHandle(held);check(refused&&requestCount==0&&readText(part)==payload.substr(0,4),"unknown resume record authorized request or lost data");if(kind=="future")check(readText(side)==raw,"future resume source downgraded");if(kind=="directory")fspath::remove(side);else if(kind=="locked")writeText(side,meta.dump());});
+    for(const auto& kind:std::vector<std::string>{"future","locked","directory"})test("resume "+kind+" uses bounded new-data-first recovery",[&]{
+        reset("storm-resume-"+kind,{full(payload)});const auto part=dataRoot/"update/package.zip.part",side=dataRoot/"update/package.zip.part.json";
+        writeText(part,payload.substr(0,4));HANDLE held=INVALID_HANDLE_VALUE;auto document=meta;document["schemaVersion"]=99;
+        if(kind=="directory")fspath::create_directory(side);else writeText(side,kind=="future"?document.dump():meta.dump());
+        if(kind=="locked")held=CreateFileW(side.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+        bool refused=false;try{fixtureDownloadUpdate(args);}catch(...){refused=true;}if(held!=INVALID_HANDLE_VALUE)CloseHandle(held);
+        if(kind=="locked")check(refused&&requestCount==0,"locked metadata must fail bounded before network");
+        else check(!refused&&requestCount==1&&requestHeaders[0].find(L"Range:")==std::wstring::npos&&readText(dataRoot/"update/package.zip")==payload,"old resume annotations blocked fresh verified download");
+    });
     test("duplicate resume identity preserved before fresh download",[&]{reset("storm-resume-duplicate",{full(payload)});const auto part=dataRoot/"update/package.zip.part",side=dataRoot/"update/package.zip.part.json";const auto raw=std::string("{\"url\":\"foreign\",")+meta.dump().substr(1);writeText(part,payload.substr(0,4));writeText(side,raw);const auto old=archives(side),oldPart=archives(part);fixtureDownloadUpdate(args);check(requestCount==1&&requestHeaders[0].find(L"Range:")==std::wstring::npos,"duplicate resume data was appended");exactArchive(side,old,raw);exactArchive(part,oldPart,payload.substr(0,4));check(readText(dataRoot/"update/package.zip")==payload,"fresh resumed recovery did not require final SHA");});
 
     test("actual fractional download speed remains valid progress",[&]{reset("storm-progress-fractional",{});g_updateProgress=json::object();fixtureActualProgressPost({{"phase","downloading"},{"version","0.0.99"},{"speedBps",12.345},{"etaSeconds",3},{"percent",42.1}});const auto value=fixtureActualProgressRead();check(value.at("phase")=="downloading"&&value.at("speedBps")==12.345&&value.at("percent")==42.1,"strict validation broke actual floating-point speed producer");});
@@ -288,25 +308,62 @@ static int updaterConfigStorm() {
     test("invalid input diagnostic preserves an actionable failure",[&]{reset("storm-invalid-request",{});g_updateProgress=json::object();fixtureActualProgressPost({{"phase","failed"},{"version","bad"},{"sha256","bad"},{"error","invalid-version"},{"message","cannot start invalid input"}});const auto value=fixtureActualProgressRead();check(value.at("phase")=="failed"&&value.at("error")=="invalid-version"&&!value.contains("version"),"invalid request erased the actual failure or kept false identity");});
 
     for(const auto& kind:std::vector<std::string>{"short","flush","publish"})test("actual atomic writer "+kind+" refuses and retries",[&]{reset("storm-real-atomic-"+kind,{});putPolicy(valid.dump());const auto original=policyFile();auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;ioShortWrite=kind=="short";ioFailFlush=kind=="flush";ioFailPublish=kind=="publish";bool refused=false;try{updatePredownloadPolicyWrite(policy);}catch(...){refused=true;}ioShortWrite=ioFailFlush=ioFailPublish=false;check(refused&&policyFile()==original,"failed real atomic writer changed source or acknowledged saved");for(const auto& file:fspath::directory_iterator(dataRoot/"update"))check(file.path().extension()!=L".tmp","failed real writer retained owned temp");updatePredownloadPolicyWrite(policy);check(updatePredownloadPolicyRead().at("enabled")==true,"released atomic failure cannot retry");});
-    test("actual atomic writer post-publication fault is detected",[&]{reset("storm-real-readback",{});putPolicy(valid.dump());auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;ioCorruptAfterPublish=true;bool refused=false;try{updatePredownloadPolicyWrite(policy);}catch(...){refused=true;}ioCorruptAfterPublish=false;check(refused&&policyFile()=="{external-publication-corruption"&&updatePredownloadPolicyRead().at("enabled")==false,"unconfirmed actual write reported enabled");updatePredownloadPolicyWrite(policy);check(updatePredownloadPolicyRead().at("enabled")==true,"postpublish corruption cannot repair explicitly");});
+    test("actual atomic writer post-publication fault is detected",[&]{reset("storm-real-readback",{});putPolicy(valid.dump());auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;ioCorruptAfterPublish=true;bool refused=false;try{updatePredownloadPolicyWrite(policy);}catch(...){refused=true;}ioCorruptAfterPublish=false;check(refused&&policyFile()=="{external-publication-corruption"&&updatePredownloadPolicyRead().contains("configReadError"),"unconfirmed actual write lost diagnostic");updatePredownloadPolicyWrite(policy);check(updatePredownloadPolicyRead().at("enabled")==true,"postpublish corruption cannot repair explicitly");});
 
     for(const auto& mode:std::vector<std::string>{"utf8-bom","utf16-le","utf16-be"})test("supported policy encoding "+mode,[&]{reset("storm-encoding-"+mode,{});const auto text=valid.dump();std::string raw;if(mode=="utf8-bom")raw="\xef\xbb\xbf"+text;else{raw=mode=="utf16-le"?std::string("\xff\xfe",2):std::string("\xfe\xff",2);for(unsigned char c:text){raw+=mode=="utf16-le"?std::string({static_cast<char>(c),'\0'}):std::string({'\0',static_cast<char>(c)});}}putPolicy(raw);check(updatePredownloadPolicyRead().at("failureCount")==2&&policyFile()==raw,"valid encoded policy rejected or changed by read");auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;updatePredownloadPolicyWrite(policy);check(updatePredownloadPolicyRead().at("enabled")==true,"encoded policy cannot save normally");});
-    test("deep policy is inactive and bounded before normalization",[&]{reset("storm-depth",{});std::string nested="0";for(unsigned i=0;i<1500;++i)nested="{\"next\":"+nested+"}";const auto raw="{\"schemaVersion\":1,\"enabled\":true,\"unknown\":"+nested+"}";putPolicy(raw);check(updatePredownloadPolicyRead().at("enabled")==false&&policyFile()==raw,"deep policy consumed or rewritten by read");const auto old=archives(updatePredownloadPolicyPath());auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;updatePredownloadPolicyWrite(policy);exactArchive(updatePredownloadPolicyPath(),old,raw);check(updatePredownloadPolicyRead().at("enabled")==true,"deep original cannot be preserved and repaired");});
-    test("decoded escaped duplicate policy fields are rejected",[&]{reset("storm-escaped-key",{});const std::string raw="{\"schemaVersion\":1,\"enabled\":false,\"enab\\u006ced\":true}";putPolicy(raw);check(updatePredownloadPolicyRead().at("enabled")==false&&policyFile()==raw,"escaped duplicate bypassed key check");});
-    test("bad encoding does not grant policy defaults",[&]{reset("storm-encoding-bad",{});const auto raw=std::string("{\"schemaVersion\":1,\"enabled\":true,\"x\":\"")+std::string(1,static_cast<char>(255))+"\"}";putPolicy(raw);check(updatePredownloadPolicyRead().at("enabled")==false&&policyFile()==raw,"invalid UTF8 granted enabled preference");});
+    test("deep policy is inactive and bounded before normalization",[&]{reset("storm-depth",{});std::string nested="0";for(unsigned i=0;i<1500;++i)nested="{\"next\":"+nested+"}";const auto raw="{\"schemaVersion\":1,\"enabled\":true,\"unknown\":"+nested+"}";putPolicy(raw);check(updatePredownloadPolicyRead().contains("configReadError")&&policyFile()==raw,"deep policy consumed or rewritten by read");const auto old=archives(updatePredownloadPolicyPath());auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;updatePredownloadPolicyWrite(policy);check(ymcc::updateconfig::policyValid(json::parse(policyFile())),"policy replacement invalid");check(updatePredownloadPolicyRead().at("enabled")==true,"deep original cannot be preserved and repaired");});
+    test("decoded escaped duplicate policy fields are rejected",[&]{reset("storm-escaped-key",{});const std::string raw="{\"schemaVersion\":1,\"enabled\":false,\"enab\\u006ced\":true}";putPolicy(raw);check(updatePredownloadPolicyRead().contains("configReadError")&&policyFile()==raw,"escaped duplicate bypassed key check");});
+    test("bad encoding is discarded without importing fields",[&]{reset("storm-encoding-bad",{});const auto raw=std::string("{\"schemaVersion\":1,\"enabled\":true,\"x\":\"")+std::string(1,static_cast<char>(255))+"\"}";putPolicy(raw);check(updatePredownloadPolicyRead().contains("configReadError")&&policyFile()==raw,"invalid UTF8 granted enabled preference");});
     test("well formed writable completed progress is still unconfirmed",[&]{reset("storm-writable-complete",{});progressFile({{"phase","completed"},{"version","0.0.99"},{"sha256",std::string(64,'a')},{"percent",100}});fixtureRecoveryJournal=json::object();check(fixtureActualStateRead().at("phase")!="completed","writable progress promoted itself to committed");});
-    unsigned failed=0;for(const auto& row:rows)if(!row.at("ok").get<bool>())++failed;
-    const json report={{"status",failed?"FAIL":"PASS"},{"caseCount",rows.size()},{"failed",failed},{"cases",rows},{"actualExtractedConsumer",true},{"networkIo",false},{"installedOperation",false}};
+    unsigned failed=(!selected.empty()&&rows.size()!=1)?1:0;for(const auto& row:rows)if(!row.at("ok").get<bool>())++failed;
+    const json report={{"status",failed?"FAIL":"PASS"},{"caseCount",rows.size()},{"failed",failed},{"cases",rows},{"selectedCase",selected},{"actualExtractedConsumer",true},{"networkIo",false},{"installedOperation",false}};
     writeText(fixtureRoot/"config-storm.json",report.dump(2));std::cout<<"UPDATER_CONFIG_STORM "<<report.dump()<<"\n";return failed?1:0;
 }
+
+// Directed continuation of the original native updater consumer. Time/network
+// are inert ports; file IO, actual request owner, cancellation and SHA are real.
+static int updaterWeakNetwork(){
+ const std::string payload="WEAK NETWORK EXACT PRODUCTION PAYLOAD";
+ writeText(fixtureRoot/"weak-expected.bin",payload);const auto hash=sha256File((fixtureRoot/"weak-expected.bin").wstring());
+ const std::string version=std::to_string(APP_VER_MAJOR)+"."+std::to_string(APP_VER_MINOR)+"."+std::to_string(APP_VER_PATCH+1);
+ const json args={{"url","https://fixture.invalid/YeManCC.zip"},{"version",version},{"sha256",hash},{"operationId","weak-network"}};
+ json records=json::array();const auto pass=[&](const char* name){records.push_back({{"name",name},{"pass",true}});};
+ reset("slow-progressing-body",{});auto slow=full(payload);slow.chunkLimit=1;slow.readTickMs=10000;scenarios={slow};
+ const auto began=fixtureTick;fixtureDownloadUpdate(args);
+ check(requestCount==1&&fixtureTick-began>120000&&readText(dataRoot/"update/package.zip")==payload,"slow progressing transfer restarts at a total deadline or loses bytes");
+ check(fixtureClosedHandles==3&&g_updateDownloadControl.status().operation.empty(),"slow success retains transport or operation owner");pass("slow progress survives total duration above per-IO idle timeout");
+ for(bool exit:{false,true}){
+  reset(exit?"exit-with-pending-body":"game-with-pending-body",{});auto body=full(payload);body.stallBody=true;scenarios={body};
+  fixtureHeadersEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);check(fixtureHeadersEvent!=nullptr,"owned pending-body event setup");
+  auto background=args;background["background"]=!exit;std::atomic<bool> signalled{false};
+  std::thread cancel([&]{if(WaitForSingleObject(fixtureHeadersEvent,2000)==WAIT_OBJECT_0){signalled=true;if(exit)g_poolCancel=true;else g_updateGameDetected=true;}});
+  const auto started=std::chrono::steady_clock::now();bool stopped=false;
+  try{fixtureDownloadUpdate(background);}catch(const std::exception&){stopped=true;}
+  cancel.join();CloseHandle(fixtureHeadersEvent);fixtureHeadersEvent=nullptr;
+  const auto elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count();
+  check(signalled&&stopped&&elapsed<3000&&requestCount==1,"silent body ignores exit/game cancellation");
+  check(!fspath::exists(dataRoot/"update/package.zip")&&fixtureClosedHandles==3&&fixtureCallbackContext==0&&g_updateDownloadControl.status().operation.empty(),"cancelled silent-body transfer leaves a ready cache or owned native handles");
+  pass(exit?"pending body cancelled by exit with handles returned":"pending body cancelled by game with handles returned");
+ }
+ reset("offline-round-then-recover",{});Scenario outage;outage.status=503;scenarios={outage,outage,outage};auto background=args;background["background"]=true;bool exhausted=false;
+ try{fixtureDownloadUpdate(background);}catch(const std::exception&){exhausted=true;}
+ check(exhausted&&requestCount==3&&g_updateDownloadControl.status().operation.empty(),"offline background round does not release ownership after bounded retries");
+ scenarios={full(payload)};requestCount=0;cursor=0;requestHeaders.clear();fixtureDownloadUpdate(background);
+ check(requestCount==1&&readText(dataRoot/"update/package.zip")==payload,"released network outage cannot self-heal on next admitted round");pass("three offline attempts release ownership and next healthy round recovers");
+ const json report={{"status","PASS"},{"records",records},{"checks",checks},{"networkIo",false},{"installedOperation",false},{"actualExtractedConsumer",true}};
+ writeText(fixtureRoot/"weak-network.json",report.dump(2));std::cout<<"UPDATER_WEAK_NETWORK "<<report.dump()<<"\n";return 0;
+}
+
 int wmain(int argc, wchar_t** argv) {
     try {
-        if (argc != 2 && argc != 3) throw std::runtime_error("UNIQUE_FIXTURE_ROOT_REQUIRED");
+        if (argc<2 || argc>4 || (argc>=3 && std::wstring(argv[2])!=L"--config-storm" && !(argc==3&&std::wstring(argv[2])==L"--weak-network")))
+            throw std::runtime_error("UNIQUE_FIXTURE_ROOT_REQUIRED");
         fixtureRoot = fspath::absolute(argv[1]);
         wchar_t ownExe[32768]{};if(!GetModuleFileNameW(nullptr,ownExe,32768))throw std::runtime_error("FIXTURE_EXE_IDENTITY_MISSING");fixtureExe=ownExe;
         if (fspath::exists(fixtureRoot)) throw std::runtime_error("FIXTURE_ROOT_ALREADY_EXISTS");
         fspath::create_directories(fixtureRoot);
-        if(argc==3&&std::wstring(argv[2])==L"--config-storm")return updaterConfigStorm();
+        if((argc==3||argc==4)&&std::wstring(argv[2])==L"--config-storm")return updaterConfigStorm(argc==4?W2U(argv[3]):std::string{});
+        if(argc==3&&std::wstring(argv[2])==L"--weak-network")return updaterWeakNetwork();
         using namespace ymcc::update_download;
         uint64_t number = 0;
         check(parseUnsigned64("4294967297",number) && number == 4294967297ULL,"64-bit length above 4 GiB");
@@ -344,6 +401,8 @@ int wmain(int argc, wchar_t** argv) {
             check(rejected&&requestCount==0,"actual version admission rejects same/old/malformed versions without authority or network");
         }
         const json metadata={{"url",args["url"]},{"sha256",sha},{"version",targetVersion},{"etag","\"A\""},{"totalBytes",payload.size()}};
+        reset("old-file-in-update-directory",{full(payload)});fspath::remove(dataRoot/"update");writeText(dataRoot/"update","old-file-in-directory-slot");
+        fixtureDownloadUpdate(args);check(requestCount==1&&readText(dataRoot/"update/package.zip")==payload,"old file in cache directory slot blocked new download");
         reset("completed-cache-offline",{}); writeText(dataRoot/"update/package.zip",payload); fixtureDownloadUpdate(args);
         check(requestCount==0 && progressEvents.back()["phase"]=="downloaded","completed SHA-bound cache reused without HTTP");
         reset("complete-part-offline",{}); seed(payload.size(),metadata); fixtureDownloadUpdate(args);
@@ -351,6 +410,32 @@ int wmain(int argc, wchar_t** argv) {
         reset("complete-part-without-total",{}); auto unknown=metadata; unknown.erase("totalBytes"); seed(payload.size(),unknown); fixtureDownloadUpdate(args);
         check(requestCount==0 && readText(dataRoot/"update/package.zip")==payload,"legacy complete partial without saved headers finalized offline");
         auto broken=full(payload); broken.failAfter=4; broken.cancelAtFailure=true;
+        // Old resume annotations cannot veto a fresh hash-bound package. This
+        // uses the actual handler, transport, file operations and SHA consumer.
+        for(const auto& kind:std::vector<std::string>{"future","invalid","wrong-types","duplicate","directory","readonly"}){
+            reset("obsolete-cache-"+kind,{full(payload)});seed(4,metadata);
+            const auto side=dataRoot/"update/package.zip.part.json";
+            if(kind=="directory"){fspath::remove(side);fspath::create_directory(side);writeText(side/"owned-marker.txt","keep isolated old contents");}
+            else if(kind=="invalid")writeText(side,"{broken");
+            else if(kind=="duplicate")writeText(side,"{\"version\":\"foreign\","+metadata.dump().substr(1));
+            else {auto obsolete=metadata;obsolete["schemaVersion"]=99;if(kind=="wrong-types")obsolete["etag"]=17;writeText(side,obsolete.dump());
+                if(kind=="readonly")check(SetFileAttributesW(side.c_str(),FILE_ATTRIBUTE_READONLY)!=FALSE,"readonly cache fixture setup");}
+            fixtureDownloadUpdate(args);
+            check(requestCount==1&&requestHeaders[0].find(L"Range:")==std::wstring::npos&&readText(dataRoot/"update/package.zip")==payload,"obsolete resume metadata blocked download or appended wrong bytes");
+        }
+        reset("readonly-old-complete",{full(payload)});writeText(dataRoot/"update/package.zip","old-wrong-package");
+        check(SetFileAttributesW((dataRoot/"update/package.zip").c_str(),FILE_ATTRIBUTE_READONLY)!=FALSE,"readonly old package setup");
+        fixtureDownloadUpdate(args);check(requestCount==1&&readText(dataRoot/"update/package.zip")==payload,"readonly obsolete package blocked replacement");
+        reset("directory-in-complete-slot",{full(payload)});writeText(dataRoot/"update/package.zip/marker.txt","do not recurse");
+        fixtureDownloadUpdate(args);check(readText(dataRoot/"update/package.zip")==payload,"old directory in package slot blocked update");
+        reset("verified-cache-with-locked-annotations",{});seed(payload.size(),metadata);
+        const auto lockedSide=dataRoot/"update/package.zip.part.json";
+        HANDLE obsoleteLock=CreateFileW(lockedSide.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+        check(obsoleteLock!=INVALID_HANDLE_VALUE,"locked optional metadata fixture setup");
+        auto offline=args;offline["cacheOnly"]=true;bool accepted=false;
+        try{fixtureDownloadUpdate(offline);accepted=true;}catch(...){CloseHandle(obsoleteLock);throw;}
+        CloseHandle(obsoleteLock);
+        check(accepted&&requestCount==0&&readText(dataRoot/"update/package.zip")==payload&&progressEvents.back()["phase"]=="downloaded","optional locked metadata overrode proven completed cache");
         reset("cross-restart",{broken}); bool cancelled=false;
         try {fixtureDownloadUpdate(args);} catch(const std::exception&){cancelled=true;}
         check(cancelled && readText(dataRoot/"update/package.zip.part")==payload.substr(0,4),"interruption retains exactly the written prefix");
@@ -482,9 +567,9 @@ int wmain(int argc, wchar_t** argv) {
         auto before=readText(updatePredownloadPolicyPath());failMetadataWrite=metadataWrites+1;bool saveFailed=false;
         try{policyHandlers.at("app.updatePredownloadSet")({{"enabled",true}});}catch(const std::exception&){saveFailed=true;}
         check(saveFailed && readText(updatePredownloadPolicyPath())==before,"atomic persistence failure cannot report a fictitious enabled state");failMetadataWrite=0;
-        writeText(updatePredownloadPolicyPath(),"{broken JSON");check(readPolicy()["enabled"]==false,"malformed policy disables automatic work until explicit recovery");
-        writeText(updatePredownloadPolicyPath(),"");check(readPolicy()["enabled"]==false,"zero-byte policy disables automatic work after interrupted write");
-        writeText(updatePredownloadPolicyPath(),std::string(65537,'x'));check(readPolicy()["enabled"]==false,"oversized policy is bounded and deactivates automatic work");
+        writeText(updatePredownloadPolicyPath(),"{broken JSON");check(readPolicy()["enabled"]==true&&readPolicy().contains("configReadError"),"malformed disposable policy blocks default background preparation");
+        writeText(updatePredownloadPolicyPath(),"");check(readPolicy()["enabled"]==true&&readPolicy().contains("configReadError"),"empty old policy blocks default background preparation");
+        writeText(updatePredownloadPolicyPath(),std::string(65537,'x'));check(readPolicy()["enabled"]==true&&readPolicy().contains("configReadError"),"oversized disposable policy blocks bounded default recovery");
         policyHandlers.at("app.updatePredownloadSet")({{"enabled",false}});check(readPolicy()["enabled"]==false,"recovered policy can be saved and read back normally");
         Control control;
         { Control::Lease lease(control,"background-owner",true);

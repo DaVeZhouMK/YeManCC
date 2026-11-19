@@ -9,15 +9,17 @@ static json virtualAdaptationSanitized(const json& value){
 static ymcc::adaptlog::VirtualFacts& virtualAdaptationFacts(){static ymcc::adaptlog::VirtualFacts value;return value;}
 static ymcc::adaptlog::Journal& virtualAdaptationJournal(){static ymcc::adaptlog::Journal value(8ull*1024*1024,4096,32768);return value;}
 static std::atomic<unsigned long long> g_virtualAdaptationBuildFailures{0};
+static std::atomic<unsigned long long> g_virtualAdaptationStepBuildFailures{0};
 static ymcc::virtualAdaptation::FrameSelector& virtualAdaptationSelector(){static ymcc::virtualAdaptation::FrameSelector value;return value;}
 static void virtualAdaptationFlush() noexcept {
     if(!virtualAdaptationFacts().pending())return;
     try{static std::mutex mx;std::unique_lock<std::mutex> lock(mx,std::try_to_lock);if(!lock)return;
         static ULONGLONG retryAt=0;const auto now=GetTickCount64();if(now<retryAt)return;
         for(unsigned n=0;n<8;++n){size_t index=0;ymcc::adaptlog::Fact value;if(!virtualAdaptationFacts().take(index,value))break;
-            auto result=ymcc::adaptlog::RecordResult::retry;try{value.sample["capturedTickMs"]=value.capturedAt;
-                result=virtualAdaptationJournal().recordResult(fspath::path(yemancc_data_dir())/L"virtual-adaptation.log",value.model,value.category.c_str(),value.identity,value.sample,nativeLifecycleTimestamp());}catch(...){}
-            virtualAdaptationFacts().finish(index,result!=ymcc::adaptlog::RecordResult::retry);if(result==ymcc::adaptlog::RecordResult::retry){retryAt=now+5000;break;}
+            auto result=ymcc::adaptlog::RecordResult::retry;auto outcome=ymcc::adaptlog::JournalDrainOutcome::unknown;
+            try{value.sample["capturedTickMs"]=value.capturedAt;
+                result=virtualAdaptationJournal().recordResult(fspath::path(yemancc_data_dir())/L"virtual-adaptation.log",value.model,value.category.c_str(),value.identity,value.sample,nativeLifecycleTimestamp(),&outcome);}catch(...){}
+            virtualAdaptationFacts().finish(index,result!=ymcc::adaptlog::RecordResult::retry,outcome);if(result==ymcc::adaptlog::RecordResult::retry){retryAt=now+5000;break;}
         }
     }catch(...){}
 }
@@ -33,6 +35,7 @@ static void virtualAdaptationObserveRecord(const char* event,const json& detail)
         bool selected=false;for(const auto* allowed:{"input-host-onex-start-refresh","input-host-switch-execution","input-host-switch-recovery",
             "input-host-wake-execution","input-host-open-result","input-host-open-skipped","input-host-stop-request","input-host-stop-result",
             "input-host-cleanup-evidence","input-host-transport-fault","input-host-persona-transition","input-host-persona-transition-requested",
+            "input-host-runtime-recovery","input-host-recovery-exhausted","input-host-recovery-fallback",
             "input-host-switch-audit","input-host-switch-verification","input-host-rog-off-execution","input-host-player-start-work","input-host-command-result","input-host-native-helper-diagnostic",
             "gamepad-openxinput-slot-guard","gamepad-openxinput-assign-slot","gamepad-vibrate-request","gamepad-vibrate","gamepad-vibrate-stop",
             "physical-controller-identity","virtual-start-protection","input-target-intent-evidence","input-host-started",
@@ -49,6 +52,57 @@ static void virtualAdaptationObserveRecord(const char* event,const json& detail)
             "requestId","ticket","runId","hostEpoch","epoch","hostInstanceId","powerGeneration","requestGeneration","sourceGeneration","generation","wakeSerial","episodeId","writerInstanceId","intentRevision","presentationGeneration",
             "driverOperationMayHaveIssued","freshSameRootSource","externalSuppressionVerified","filterAttachmentProven","newTargetCreatedHere","visibilityRestored","visibilityHeld","quarantined","hostExitConfirmed","candidateOutcome","stopInvoked","spent","awaitingCleanup"})
             if(detail.contains(key))identity[key]=detail[key];
+        const bool recovery=std::strcmp(event,"input-host-runtime-recovery")==0||
+            std::strcmp(event,"input-host-recovery-exhausted")==0||std::strcmp(event,"input-host-recovery-fallback")==0;
+        bool recoveryContextKnown=false;
+        if(recovery){
+            const auto positive=[&](const char* key){const auto it=detail.find(key);return it!=detail.end()&&
+                ((it->is_number_unsigned()&&it->get<unsigned long long>()>0)||
+                 (it->is_number_integer()&&it->get<long long>()>0));};
+            const auto& writer=ymcc::sleepfactlog::writerIdentity();
+            json context={{"serialDomain",std::strcmp(event,"input-host-runtime-recovery")==0?"runtime-incident":"terminal-physical-fallback"},
+                {"writerPid",writer.pid},{"writerProcessCreation100ns",writer.creation100ns?json(std::to_string(writer.creation100ns)):json(nullptr)}};
+            for(const auto* key:{"serial","requestId"})context[key]=detail.contains(key)?detail[key]:json(nullptr);
+            recoveryContextKnown=writer.pid!=0&&writer.creation100ns!=0&&positive("serial")&&positive("requestId");
+            const auto nativeType=[&](const char* key){const auto it=detail.find(key);return it==detail.end()?"missing":
+                it->is_number_unsigned()?"unsigned-integer":it->is_number_integer()?"signed-integer":it->is_number_float()?"float":it->type_name();};
+            context["serialType"]=nativeType("serial");context["requestIdType"]=nativeType("requestId");
+            context["operationContextKnown"]=recoveryContextKnown;
+            identity["recoveryOperationContext"]=std::move(context);
+            json shape=json::object();
+            for(const auto* key:{"recoveryRequestId","wave","origin","nativeWriterAttempt","demandRevision","via","error",
+                "pending","queued","monitoring","wavePermit","automaticAttemptLimit","ownedCleanupProven","ownedVisibilityRestored","freshPhysicalRead"})
+                shape[key]=detail.contains(key)?detail[key]:json(nullptr);
+            identity["recoveryStepShape"]=std::move(shape);
+        }
+        const bool cleanup=std::strcmp(event,"input-host-cleanup-evidence")==0;
+        const bool visibility=std::strcmp(event,"input-host-release-visibility")==0;
+        bool cleanupRequestKnown=false;
+        if(cleanup){
+            json shape=json::object();
+            for(const auto* key:{"localCleanupResult","coldReturnContinuationArmed"})
+                shape[key]=detail.contains(key)?detail[key]:json(nullptr);
+            const auto evidence=detail.find("cleanupEvidence");
+            for(const auto* key:{"checks","blockers","unknown","physicalReturnVerified","msiReturnDutyApplies",
+                "msiReturnOwedSampled","historySessionReady","runIdPresent"})
+                shape[key]=evidence!=detail.end()&&evidence->is_object()&&evidence->contains(key)?(*evidence)[key]:json(nullptr);
+            identity["cleanupResultShape"]=std::move(shape);
+            const auto request=detail.find("closingRequestId");
+            cleanupRequestKnown=request!=detail.end()&&((request->is_number_unsigned()&&request->get<unsigned long long>()>0)||
+                (request->is_number_integer()&&request->get<long long>()>0));
+            identity["cleanupRequestContext"]=nullptr;
+            if(cleanupRequestKnown){const auto& writer=ymcc::sleepfactlog::writerIdentity();
+                identity["cleanupRequestContext"]={{"closingRequestId",*request},{"writerPid",writer.pid},
+                    {"writerProcessCreation100ns",writer.creation100ns?json(std::to_string(writer.creation100ns)):json(nullptr)}};
+            }
+        }
+        if(visibility){
+            json shape=json::object();
+            for(const auto* key:{"snapshotPhase","disposition","hostAlive","localReleaseAck","shutdownAck",
+                "physicalHiddenByHidHide","virtualEndpointAbsent","cloakOn"})
+                shape[key]=detail.contains(key)?detail[key]:json(nullptr);
+            identity["releaseVisibilityShape"]=std::move(shape);
+        }
         const bool startup=std::strcmp(event,"input-host-xbox-startup")==0;
         if(startup){
             // The producer may have no operation ID. Retain first distinct check
@@ -71,12 +125,23 @@ static void virtualAdaptationObserveRecord(const char* event,const json& detail)
             }
             identity["startupReadbackShape"]=std::move(shape);
         }
-        json sample={{"observedFrom",event},{"producer",virtualAdaptationSanitized(detail)},{"producerFieldsUnmodifiedExceptTransportSecrets",true},
-            {"scope",startup?"first-unique-startup-readback-shape;missing-operation-context-unknown;not-complete-operation-timeline-or-external-game-success":
-                "first-step-witness-within-operation;not-complete-timeline-or-external-game-success"}};
-        if(startup)sample["operationContextKnown"]=detail.contains("requestId")&&!detail["requestId"].is_null();
-        virtualAdaptationFacts().offer({modelAdaptationMachine(),std::move(identity),std::move(sample),"virtual-step-witness"});
-    }catch(...){}
+        virtualAdaptationFacts().offerLazy(modelAdaptationMachine(),std::move(identity),"virtual-step-witness",[&]{
+            json sample={{"observedFrom",event},{"producer",virtualAdaptationSanitized(detail)},{"producerFieldsUnmodifiedExceptTransportSecrets",true},
+                {"scope",startup?"first-unique-startup-readback-shape;missing-operation-context-unknown;not-complete-operation-timeline-or-external-game-success":
+                    "first-step-witness-within-operation;not-complete-timeline-or-external-game-success"}};
+            if(recovery){
+                sample["operationContextKnown"]=recoveryContextKnown;
+                sample["recoveryEvidenceScope"]="first-step/result-shape;cached-writer+serial-domain+serial+request;not-complete-recovery-timeline-or-game-input-success";
+                sample["runtimeAndFallbackSerialDomainsAreDistinct"]=true;
+            }
+            if(startup)sample["operationContextKnown"]=detail.contains("requestId")&&!detail["requestId"].is_null();
+            if(cleanup||visibility){
+                sample["operationContextKnown"]=cleanup&&cleanupRequestKnown;
+                sample["terminalEvidenceScope"]="first-result-shape;positive-closingRequestId-scoped-by-cached-writer;absent-operation-id-unknown;not-complete-stop-timeline-or-physical-return";
+            }
+            return sample;
+        });
+    }catch(...){g_virtualAdaptationStepBuildFailures.fetch_add(1,std::memory_order_relaxed);}
 }
 static void virtualAdaptationFrameReceipt(const ymcc::virtualAdaptation::FrameStamp& stamp,const json& frame,const std::string& wireText,
     const std::string& requestId,const json& receipt) noexcept {
@@ -117,9 +182,42 @@ static void virtualAdaptationFrameReceipt(const ymcc::virtualAdaptation::FrameSt
         virtualAdaptationFacts().offer({modelAdaptationMachine(),std::move(identity),std::move(sample),sdkWitness?"virtual-sdk-first-witness":"virtual-submit-first-witness"});
     }catch(...){++g_virtualAdaptationBuildFailures;}
 }
-static json virtualAdaptationStatus(){return {{"file","virtual-adaptation.log"},{"alwaysOn",true},{"maxBytes",8ull*1024*1024},
-    {"maxRecords",4096},{"firstFramePolicy","up to8 outcome/neutral/admission combinations per exact context;64 contexts per native process;no eviction"},
+static json virtualAdaptationCapacityWitness(unsigned shape,const ymcc::virtualAdaptation::FrameStamp& s){
+    return {{"shape",shape},{"selectionDecision","capacity-rejected"},
+        {"epoch",s.epoch},{"power",s.power},{"sourceContinuityGeneration",s.sourceGeneration},{"topologyGeneration",s.topology},
+        {"semanticNeutral",s.neutral},{"nativeAccepted",s.accepted},{"sourceAdmitted",s.sourceAdmitted},
+        {"commandSequence",s.commandSequence},{"wireSampleSequence",s.wireSample},{"wireTickMs",s.wireTick},
+        {"fastReceiptUsed",s.fastReceipt},{"bindingTruncated",s.bindingTruncated},
+        {"runId",std::string(s.runId.data())},{"hostInstanceId",std::string(s.hostId.data())}};
+}
+static json virtualAdaptationContextEvidence(const ymcc::virtualAdaptation::FrameSelector::ExportSnapshot& observed){
+    json result={{"schemaVersion",1},{"snapshotAvailable",observed.available},
+        {"snapshotAtomicWithSiblingStats",false},{"selectionOnly",true},
+        {"scope","retained selector tuples and first capacity-rejected outcome shapes;not all contexts,raw frames,or external delivery"}};
+    if(!observed.available){result["reason"]="selector-lock-busy;context-evidence-unknown";return result;}
+    result["knownContextsAtSnapshot"]=observed.knownContexts;
+    result["maxCapacityOutcomeWitnesses"]=8;
+    result["retainedContexts"]=json::array();result["capacityFirstOutcomes"]=json::array();
+    for(unsigned i=0;i<observed.knownContexts;++i){const auto& c=observed.contexts[i];
+        result["retainedContexts"].push_back({{"contextOrdinal",i+1},{"epoch",c.epoch},{"power",c.power},
+            {"sourceContinuityGeneration",c.source},{"topologyGeneration",c.topology},{"selectedOutcomeMask",c.selectedOutcomeMask}});
+    }
+    auto& highest=result["capacityHighestPowerEvidence"];
+    highest={{"schemaVersion",1},{"power",observed.capacityHighestPower?json(observed.capacityHighestPower):json(nullptr)},
+        {"firstOutcomes",json::array()}};
+    for(unsigned i=0;i<8;++i){
+        if(observed.capacityShapeMask&(1u<<i))result["capacityFirstOutcomes"].push_back(virtualAdaptationCapacityWitness(i,observed.capacityFirst[i]));
+        if(observed.capacityHighestPowerMask&(1u<<i))highest["firstOutcomes"].push_back(virtualAdaptationCapacityWitness(i,observed.capacityHighestPowerFirst[i]));
+    }
+    result["outcomeMaskEncoding"]="bit index=neutral:1|nativeAccepted:2|sourceAdmitted:4;seen-mask has bit(1<<index)";
+    result["rejectedWitnessScope"]="first per8 outcome shapes across all unretained tuples;not first per context,unique-context count,SDK receipt,or complete timeline";
+    return result;
+}
+static json virtualAdaptationStatus(){const auto contexts=virtualAdaptationSelector().knownContexts();return {{"file","virtual-adaptation.log"},{"alwaysOn",true},{"maxBytes",8ull*1024*1024},
+    {"maxRecords",4096},{"frameKnownContexts",contexts},{"frameMaxContexts",64},{"frameContextLimitReached",contexts==64},
+    {"frameCapacityDropScope","attempts-with-unretained-context;not-unique-input-types-or-game-delivery-failures;known-context-new-outcomes-and-SDK-witnesses-remain-eligible"},{"firstFramePolicy","up to8 outcome/neutral/admission combinations per exact context;64 contexts per native process;no eviction"},
     {"facts",virtualAdaptationFacts().status()},{"journal",virtualAdaptationJournal().status()},
-    {"frameBuildFailures",g_virtualAdaptationBuildFailures.load()},{"frameSelected",virtualAdaptationSelector().selected()},{"frameCapacityDrops",virtualAdaptationSelector().capacityDrops()},
+    {"stepBuildFailures",g_virtualAdaptationStepBuildFailures.load()},{"frameBuildFailures",g_virtualAdaptationBuildFailures.load()},{"frameSelected",virtualAdaptationSelector().selected()},{"frameCapacityDrops",virtualAdaptationSelector().capacityDrops()},
     {"frameBusyDrops",virtualAdaptationSelector().busyDrops()},{"frameUnknownContextDrops",virtualAdaptationSelector().unknownDrops()},
+    {"frameContextEvidence",virtualAdaptationContextEvidence(virtualAdaptationSelector().snapshotForExport())},
     {"scope","sample gaps explicit;missing stage is unknown;API/ACK is not external Steam/game/rumble proof"}};}

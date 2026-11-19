@@ -8,7 +8,60 @@
 using namespace ymcc::media;using namespace ymcc::media::downloads;
 static int checks=0;static void check(bool result,const char* label){++checks;if(!result)throw std::runtime_error(label);}
 static bool rejected(const std::function<void()>& fn){try{fn();return false;}catch(const std::exception&){return true;}}
+static int refreshIntentProbe(const fs::path& base){
+ if(fs::exists(base))throw std::runtime_error("fresh refresh-intent root required");fs::create_directories(base);
+ const auto video=base/L"sample.mp4",poster=base/L"sample.jpg";
+ {std::ofstream out(video,std::ios::binary);out.write("\0\0\0\x18" "ftypisom",12);}{std::ofstream out(poster,std::ios::binary);out.write("\xff\xd8\xff\xe0",4);}
+ const Json target={{"appId",570},{"verified",true}},choice={{"appId",570},{"url","https://video.steamstatic.com/store_trailers/570/chosen/master.m3u8"}};
+ const auto seed=[&](Store& store){auto e=store.registerEntry(target);e=store.publish(e,poster,true);e=store.publish(e,video,true);store.finish(e);return store.resolve(target);};
+ const auto request=[&](Store& store,const std::string& action,const std::string& slot){auto e=store.resolve(target);e["action"]=action;e["slot"]=slot;if(action=="select-video")e["selectedVideo"]=choice;return store.edit(e);};
+ const auto both=[](const Json& e){return pendingMediaRefresh(e,"dynamic")&&pendingMediaRefresh(e,"static");};
+ const auto exactSlots=[](const Json& e,const Json& slots){return e.value("taskSlots",Json::array())==slots;};
+ Store forward(base/L"a");auto original=seed(forward);request(forward,"select-video","dynamic");auto combined=request(forward,"redownload","static");atomicWrite(base/L"combined-before-claim.json",combined);
+ check(both(combined),"static refresh must retain the pending selected dynamic video");
+ check(!pendingMediaRefresh(combined,"unrecognized-slot"),"paired intent grants work only for the two existing media slots");
+ check(combined["selectedVideo"]==choice&&combined["assets"]==original["assets"],"combined request retains exact chosen trailer and both playable fallback assets");
+ check(both(Store(forward.root()).resolve(target)),"both independent refresh intents survive a cold Store read");
+ Queue queue(forward.root());queue.enqueue(Json::array({target}));check(queue.document()["jobs"].contains("steam-570"),"combined refresh remains eligible despite both existing assets");
+ auto lease=forward.begin(target);check(lease.value("acquired",false)&&exactSlots(lease,Json::array({"dynamic","static"})),"one original lease claims both requested slots");
+ auto image=forward.publish(lease,poster,false);check(pendingMediaRefresh(image,"dynamic")&&!pendingMediaRefresh(image,"static")&&image["assets"]["dynamic"]==original["assets"]["dynamic"],"static completion clears only static intent and retains old video fallback");
+ auto movie=forward.publish(image,video,false);forward.finish(movie);auto finished=forward.resolve(target);
+ check(!pendingMediaRefresh(finished,"dynamic")&&!pendingMediaRefresh(finished,"static")&&complete(finished,now()),"only both successful publications complete the combined replacement");
+ check(!forward.begin(target).value("acquired",false),"completed paired replacement does not create recurring background work");
+
+ Store reverse(base/L"b");original=seed(reverse);request(reverse,"redownload","static");combined=request(reverse,"select-video","dynamic");check(both(combined),"selecting dynamic later preserves an earlier static refresh");
+ lease=reverse.begin(target);movie=reverse.publish(lease,video,false);check(!pendingMediaRefresh(movie,"dynamic")&&pendingMediaRefresh(movie,"static")&&movie["assets"]["static"]==original["assets"]["static"],"dynamic completion clears only dynamic and retains old static fallback");
+ reverse.finish(movie);lease=reverse.begin(target);check(lease.value("acquired",false)&&exactSlots(lease,Json::array({"static"})),"unfinished static work survives lease release without redownloading completed dynamic");
+ image=reverse.publish(lease,poster,false);reverse.finish(image);check(complete(reverse.resolve(target),now())&&!reverse.begin(target).value("acquired",false),"reverse completion returns to an idle fully cached entry");
+
+ Store deletion(base/L"c");seed(deletion);request(deletion,"select-video","dynamic");request(deletion,"redownload","static");auto removed=request(deletion,"delete","dynamic");
+ check(!removed.contains("selectedVideo")&&!pendingMediaRefresh(removed,"dynamic")&&pendingMediaRefresh(removed,"static"),"deleting one slot cancels only its own intent");
+ lease=deletion.begin(target);check(lease.value("acquired",false)&&exactSlots(lease,Json::array({"static"})),"deleted dynamic is never reclaimed by the surviving static request");
+ image=deletion.publish(lease,poster,false);deletion.finish(image);check(deletion.resolve(target)["deletedSlots"].value("dynamic",false)&&!deletion.begin(target).value("acquired",false),"surviving static completion preserves the dynamic tombstone and goes idle");
+
+ Store imported(base/L"d");seed(imported);request(imported,"select-video","dynamic");combined=request(imported,"redownload","static");image=imported.publish(combined,poster,true);
+ check(pendingMediaRefresh(image,"dynamic")&&!pendingMediaRefresh(image,"static")&&image["selectedVideo"]==choice&&image["manualSlots"].value("static",false),"local static import preserves the pending online video and owns only static");
+ lease=imported.begin(target);check(lease.value("acquired",false)&&exactSlots(lease,Json::array({"dynamic"})),"manual static replacement permits only outstanding dynamic work");
+ const auto retainedStatic=image["assets"]["static"];movie=imported.publish(lease,video,false);imported.finish(movie);check(imported.resolve(target)["assets"]["static"]==retainedStatic,"later selected video publication preserves manually imported static bytes");
+
+ Store stale(base/L"e");seed(stale);request(stale,"select-video","dynamic");const auto oldLease=stale.begin(target);combined=request(stale,"redownload","static");const auto retained=read(stale.root()/L"config"/L"game-media.json");
+ check(rejected([&]{stale.publish(oldLease,video,false);})&&read(stale.root()/L"config"/L"game-media.json")==retained,"combined edit still fences old publication without changing current intent");
+ lease=stale.begin(target);check(lease.value("acquired",false)&&exactSlots(lease,Json::array({"dynamic","static"})),"new combined revision owns both tasks after stale lease rejection");
+ stale.cancel(lease);check(both(stale.resolve(target)),"cancelling a worker lease does not discard either accepted edit");
+
+ Store unavailable(base/L"f");seed(unavailable);request(unavailable,"redownload","dynamic");combined=request(unavailable,"redownload","static");check(both(combined),"two ordinary redownloads also combine without a selected video");
+ lease=unavailable.begin(target);lease["videoUnavailable"]=true;lease["staticUnavailable"]=true;unavailable.finish(lease);finished=unavailable.resolve(target);
+ check(!pendingMediaRefresh(finished,"dynamic")&&!pendingMediaRefresh(finished,"static")&&!unavailable.begin(target).value("acquired",false),"explicit unavailable receipts settle both slots without an empty retry loop");
+
+ Store legacy(base/L"g");seed(legacy);auto doc=read(legacy.root()/L"config"/L"game-media.json");auto& old=doc["entries"]["steam-570"];old["selectedVideo"]=choice;old["refreshRequested"]=false;old["taskSlots"]=Json::array({"dynamic"});old["status"]="error";atomicWrite(legacy.root()/L"config"/L"game-media.json",doc);
+ check(pendingMediaRefresh(legacy.resolve(target),"dynamic"),"legacy selected task still recovers its singular dynamic intent");
+ combined=request(legacy,"redownload","static");check(both(combined),"an edit of legacy pending media preserves both recovered and new requests");
+ const Json inactive={{"refreshRequested",false},{"refreshSlot",42}};
+ check(!pendingMediaRefresh(inactive,"dynamic")&&!pendingMediaRefresh(inactive,"static"),"inactive legacy refresh data keeps the original short-circuit and creates no work");
+ std::cout<<Json({{"ok",true},{"checks",checks},{"selection","refresh-intent"},{"scope","original Store and Queue, real owned media files and cold reads; no HTTP, target/helper/installed process or Steam mutation"}}).dump()<<std::endl;return 0;
+}
 int wmain(int argc,wchar_t** argv){try{
+ if(argc==3&&std::wstring_view(argv[1])==L"--refresh-intent")return refreshIntentProbe(fs::absolute(argv[2]));
  if(argc!=2)throw std::runtime_error("fresh evidence root required");const auto base=fs::absolute(argv[1]);if(fs::exists(base))throw std::runtime_error("fresh root required");fs::create_directories(base);
  const std::string url="https://video.steamstatic.com/store_trailers/570/a/master.m3u8";
  Json entry={{"key","steam-570"},{"appId",570},{"identityVerified",true},{"bindingRevision",9}};

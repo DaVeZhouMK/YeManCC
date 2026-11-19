@@ -82,9 +82,9 @@ export class FanCoordinatorGate {
       this.wakeReadyGeneration = null;
     } else if (event === 'resuming' || event === 'manual-resume-start') {
       // `manual-resume-start` is a Fan-local explicit-control rescue. It is
-      // never emitted by native and does not claim that the OS broadcast a
-      // wake; it only opens the coordinator's bounded Host recovery window
-      // after the user has interacted with the live renderer.
+      // mapped locally from explicit control or native's wake-Close catchup;
+      // it does not claim a new OS wake. It only opens the bounded recovery
+      // window; native readiness and Host Open still gate every write.
       this.phase = 'resuming';
       this.wakeReadyGeneration = null;
     } else if (event === 'resume-ready' || event === 'manual-resume-ready') {

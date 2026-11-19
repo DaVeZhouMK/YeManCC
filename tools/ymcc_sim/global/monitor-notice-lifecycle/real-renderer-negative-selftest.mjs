@@ -1,4 +1,4 @@
-import fs from 'node:fs';import {createRequire} from 'node:module';import {createHash} from 'node:crypto';import path from 'node:path';import assert from 'node:assert/strict';import {begin,compile,verify,receipt,sha,save,source,generated,unique,LIMIT,executeReviewed,bindBuild,inputPlugin} from '../../../fixtures/radial_private/scope.mjs';
+import fs from 'node:fs';import {createRequire} from 'node:module';import {createHash} from 'node:crypto';import path from 'node:path';import assert from 'node:assert/strict';import {begin,compile,verify,receipt,sha,save,source,generated,unique,REAL_MONITOR_RUNTIME_LIMIT as LIMIT,executeReviewed,bindBuild,inputPlugin} from '../../../fixtures/radial_private/scope.mjs';
 const repo=path.resolve(import.meta.dirname,'../../../..'),entry='tools/ymcc_sim/global/monitor-notice-lifecycle/real-renderer-negative-selftest.mjs',argv=process.argv.slice(2),option=name=>{const i=argv.indexOf(name);return i<0?null:argv[i+1];},out=path.resolve(option('--out')??''),prepare=argv.includes('--prepare-only');
 assert(option('--out')&&path.isAbsolute(option('--out'))&&[true,false].includes(prepare));
 const read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'')),key=file=>path.resolve(file).toLowerCase(),runtimeRoot=path.resolve(option('--runtime')??''),runtimeVersion=option('--runtime-version');assert(option('--runtime')&&path.isAbsolute(option('--runtime'))&&/^\d+\.\d+\.\d+\.\d+$/.test(runtimeVersion??''));
@@ -21,7 +21,8 @@ function prepareRendererNative(scope){
  const base=path.join(import.meta.dirname,'real-webview-selftest.cpp'),checks=path.join(import.meta.dirname,'real-renderer-checks.h');source(scope,base);source(scope,checks);
  const original=fs.readFileSync(base,'utf8');let native=original;const transforms=[];
  function replace(before,after){assert.equal(native.split(before).length,2,'EXACT_RENDERER_FIXTURE_INSERTION');native=native.replace(before,after);transforms.push({before,after});}
- replace('static int worker(const std::filesystem::path& web,const std::filesystem::path& out){','#include "'+checks.replaceAll('\\','/')+'"\nstatic int worker(const std::filesystem::path& web,const std::filesystem::path& out){');
+ const worker='static int worker(const std::filesystem::path& web,const std::filesystem::path& out,HANDLE jobHandle,const std::wstring& desktopName){';
+ replace(worker,'#include "'+checks.replaceAll('\\','/')+'"\n'+worker);
  replace('{"syntheticLocalRendererHandshake",true},{"actualProductRendererVue",false}','{"syntheticLocalRendererHandshake",false},{"actualProductRendererVue",true}');
  replace('auto completion=probe->completions.back();need(completion->realController,"No actual composition controller");','actualRendererChecks(carrier,owner,check);auto completion=probe->completions.back();need(completion->realController,"No actual composition controller");');
  let restored=native;for(const {before,after}of [...transforms].reverse())restored=restored.replace(after,before);assert.equal(restored,original,'ORIGINAL_REAL19_ASSERTIONS_AND_BUDGETS_MUST_BE_UNCHANGED');

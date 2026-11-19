@@ -1,0 +1,86 @@
+#define NOMINMAX
+#include <windows.h>
+#include <algorithm>
+#include <atomic>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+#include "settings_baseline.h"
+#include "boot_mode_preferences.h"
+using json=nlohmann::json;
+static json document;
+static std::mutex settingsMx;
+static const std::wstring YM_SETTINGS_FILE=L"owned-memory/display-settings.json";
+struct SettingsFileGuard{std::lock_guard<std::mutex> lock{settingsMx};};
+static unsigned settingsReads=0,preferenceWrites=0;
+static std::string ymSettingsReadRaw(const std::wstring& path){if(path!=YM_SETTINGS_FILE)throw std::runtime_error("Unexpected settings address");++settingsReads;return document.dump();}
+// ORIGINAL_OWNER
+static std::map<std::string,std::function<json(const json&)>> chargeHandlers;
+static void ipc_on(const std::string& name,std::function<json(const json&)> handler){chargeHandlers[name]=std::move(handler);}
+// ORIGINAL_DISPLAY_TYPES
+// ORIGINAL_DISPLAY_PORTS
+static bool nativeRememberDisplayPreference(const json& patch){++preferenceWrites;return ymcc::bootPreferences::rememberDisplay(document,patch);}
+#define ChangeDisplaySettingsExW fixtureChangeDisplaySettingsExW
+#define EnumDisplaySettingsExW fixtureEnumDisplaySettingsExW
+// ORIGINAL_DISPLAY_REGISTRATION
+#undef EnumDisplaySettingsExW
+#undef ChangeDisplaySettingsExW
+static void need(bool value,const std::string& message){if(!value)throw std::runtime_error(message);}
+static std::string stage,change;
+static bool changed=false;
+static void mutate(){
+ if(changed)return;changed=true;
+ if(change=="revision")document["input"]["revision"]=8;
+ if(change=="hash")document["input"]["diagnostics"]["inputLoggingEnabled"]=!document["input"]["diagnostics"]["inputLoggingEnabled"].get<bool>();
+ if(change=="mode")document["extensions"]["bootModes"]["revision"]=4;
+ if(change=="result")document["extensions"]["bootModesStartupResult"]={{"schema",1},{"revision",99}};
+ if(change=="observed")document["input"]["startupObservedBoot"]="replacement-boot";
+ if(change=="ack")document["input"]["hostAcknowledgedRevision"]=17;
+ if(change=="unrelated")document["extensions"]["peer"]=true;
+}
+static void reset(const json& defaults,const json& wire){
+ document=defaults;document["input"]=wire.at("expectedBootContext").at("input");document["extensions"]=wire.at("expectedBootContext").at("extensions");
+ fixtureDisplayCurrent={};fixtureDisplayCurrent.dmSize=sizeof(DEVMODEW);fixtureDisplayCurrent.dmPelsWidth=1920;fixtureDisplayCurrent.dmPelsHeight=1080;fixtureDisplayCurrent.dmDisplayFrequency=120;
+ fixtureDisplayModes={{displayModeId(1920,1080,120,0),1920,1080,120,0},{displayModeId(1280,720,60,0),1280,720,60,0}};
+ fixtureDisplayTests=fixtureDisplayApplies=settingsReads=preferenceWrites=0;fixtureDisplayReadback=true;fixtureDisplayMismatch=false;
+ fixtureDisplayTestCode=fixtureDisplayApplyCode=DISP_CHANGE_SUCCESSFUL;fixtureDisplayBeforeReturn=nullptr;fixtureDisplayBoundary=nullptr;changed=false;
+}
+int main(int argc,char** argv){
+ json rows=json::array(),controls=json::array();
+ try{
+  need(argc==5,"Expected defaults, API wire, selection and owned observations");
+  std::ifstream defaultsFile(argv[1]),wireFile(argv[2]);json defaults,wires;defaultsFile>>defaults;wireFile>>wires;
+  const bool before=std::string(argv[3])=="before";need(before||std::string(argv[3])=="all","Unknown display selection");
+  std::ofstream observations(argv[4],std::ios::app|std::ios::binary);need(bool(observations),"Owned observation stream unavailable");reg_display();
+  for(const auto& wire:wires.at("modes"))for(const char* boundary:{"dispatch","enumerate","test","apply","readback"})for(const char* kind:{"revision","hash","mode","result","observed","ack","unrelated","current"}){
+   const auto mode=wire.at("mode").get<std::string>();stage=boundary;change=kind;
+   if(before&&(mode!="global"||stage!="test"||change!="hash"))continue;
+   reset(defaults,wire);json args=wire.at("request");
+   if(before)args["bootContext"]=wire.at("expectedBootContext"); // Explicit native negative control: old API dropped this field, separately recorded.
+   fixtureDisplayBoundary=[](const char* at){if(stage==at)mutate();};if(stage=="dispatch")mutate();
+   std::string error;json reply;try{reply=chargeHandlers.at("display.setMode")(args);}catch(const std::exception& e){error=e.what();}
+   const bool allowed=change=="ack"||change=="unrelated"||change=="current";
+   json row{{"mode",mode},{"stage",stage},{"kind",change},{"changed",changed},{"allowed",allowed},{"error",error},{"reply",reply},{"tests",fixtureDisplayTests},{"applies",fixtureDisplayApplies},{"settingsReads",settingsReads},{"preferenceWrites",preferenceWrites}};
+   rows.push_back(row);observations<<row.dump()<<'\n';observations.flush();need(changed,"Selected display boundary not reached");
+   if(allowed){need(error.empty()&&reply.value("ok",false)&&fixtureDisplayApplies==1,"Current native display request failed");}
+   else {need(!error.empty(),"expired native display request was accepted");need(error.find("BOOT_DISPLAY_REQUEST_EXPIRED")!=std::string::npos,"Unrelated native error is not owner rejection");need(fixtureDisplayApplies==((stage=="apply"||stage=="readback")?1u:0u),"Expired display request reached later application");}
+   need(preferenceWrites==0,"Scoped display request wrote ordinary preference");
+  }
+  if(!before){
+   const auto& wire=wires.at("modes").at(0);const auto args=wire.at("request");
+   reset(defaults,wire);const auto ordinary=chargeHandlers.at("display.setMode")(wires.at("ordinary"));need(ordinary.value("ok",false)&&settingsReads==0&&preferenceWrites==1&&fixtureDisplayApplies==1,"Ordinary display route gained owner reads or lost projection");controls.push_back("ordinary-zero-owner-reads");
+   reset(defaults,wire);fixtureDisplayCurrent.dmPelsWidth=1280;fixtureDisplayCurrent.dmPelsHeight=720;fixtureDisplayCurrent.dmDisplayFrequency=60;const auto same=chargeHandlers.at("display.setMode")(args);need(same.value("ok",false)&&fixtureDisplayTests==0&&fixtureDisplayApplies==0&&preferenceWrites==0,"Matching mode replayed an OS write");controls.push_back("matching-mode-no-replay");
+   reset(defaults,wire);fixtureDisplayTestCode=DISP_CHANGE_BADMODE;std::string error;try{chargeHandlers.at("display.setMode")(args);}catch(const std::exception& e){error=e.what();}need(error=="Display mode test failed"&&fixtureDisplayApplies==0,"Failed mode test applied a display");controls.push_back("test-failure-no-apply");
+   reset(defaults,wire);fixtureDisplayMismatch=true;const auto mismatch=chargeHandlers.at("display.setMode")(args);need(!mismatch.value("ok",true)&&preferenceWrites==0,"Mismatched readback accepted");controls.push_back("readback-mismatch");
+   reset(defaults,wire);auto malformed=args;malformed["bootContext"]=nullptr;error.clear();try{chargeHandlers.at("display.setMode")(malformed);}catch(const std::exception& e){error=e.what();}need(error=="INVALID_BOOT_MOUSE_CONTEXT"&&fixtureDisplayTests==0&&fixtureDisplayApplies==0,"Malformed context reached monitor");controls.push_back("invalid-context-before-monitor");
+   reset(defaults,wire);auto invalid=args;invalid["width"]=4096;error.clear();try{chargeHandlers.at("display.setMode")(invalid);}catch(const std::exception& e){error=e.what();}need(error=="Display mode is not supported by the current monitor"&&fixtureDisplayTests==0&&fixtureDisplayApplies==0,"Unsupported mode reached monitor write");controls.push_back("unsupported-mode");
+  }
+  observations.close();need(!observations.fail(),"Owned observation stream did not close");
+  std::cout<<json{{"status","PASS"},{"rows",rows},{"controls",controls},{"realMonitorWrites",0},{"settingsPort","owned-memory"}}.dump()<<'\n';return 0;
+ }catch(const std::exception& e){std::cout<<json{{"status","FAIL"},{"error",e.what()},{"rows",rows},{"controls",controls},{"realMonitorWrites",0}}.dump()<<'\n';return 1;}
+}

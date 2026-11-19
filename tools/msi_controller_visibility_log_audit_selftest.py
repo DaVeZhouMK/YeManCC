@@ -271,6 +271,14 @@ class OfflineScopeTests(unittest.TestCase):
         self.assertEqual(len(result["unassignedObserverRecords"]), 1)
         self.assertFalse(result["sessions"][0]["rightCensored"])
 
+    def test_session_marker_does_not_cut_off_later_native_cleanup_configuration(self):
+        for extra in ({},{'schemaVersion':1,'scope':'session-marker-file-write-result;not-host-process-or-device-retirement','sessionMarkerWriteSucceeded':True}):
+            rows=[start(),device(when=BASE+3000)];config=[native('boot-single-instance-acquired',BASE+20),native('session-clean-exit',BASE+1500,**extra),native('hidhide.visibility-snapshot',BASE+2000,cloakOn=True)]
+            scope=self.report(rows,config)['sessions'][0]['nativeScope'];self.assertEqual(scope['config']['visibilitySnapshots'],1);self.assertEqual(scope['sessionMarkerObservationCount'],1);self.assertFalse(scope['sessionMarkersBoundLifetime']);self.assertEqual(scope['scopeEndUtc'],audit.utc_text(BASE+3000))
+    def test_session_marker_does_not_override_original_next_boot_boundary(self):
+        rows=[start(),device(when=BASE+5000)];config=[native('boot-single-instance-acquired',BASE+20),native('session-clean-exit',BASE+1500),native('hidhide.visibility-snapshot',BASE+2000,cloakOn=True),native('boot-single-instance-acquired',BASE+3000),native('hidhide.visibility-snapshot',BASE+4000,cloakOn=False)]
+        scope=self.report(rows,config)['sessions'][0]['nativeScope'];self.assertTrue(scope['nextSamePidBootBounded']);self.assertEqual(scope['config']['visibilitySnapshots'],1);self.assertFalse(scope['sessionMarkersBoundLifetime'])
+
     def test_12_native_config_rejects_wrong_parent_and_old_lifetime(self):
         current = BASE + 4000
         rows = [start(creation=current, when=current + 100, tick=4100), device(when=current + 200)]

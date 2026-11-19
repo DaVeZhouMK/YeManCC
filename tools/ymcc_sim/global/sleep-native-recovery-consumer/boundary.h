@@ -33,6 +33,16 @@ namespace YmccSleepBoundary {
 inline std::filesystem::path root,events;
 inline unsigned dynamicUnknown=0,denied=0;
 inline bool inside(const std::filesystem::path& p){const auto a=std::filesystem::absolute(p).lexically_normal().wstring(),b=root.wstring()+L"\\";return a==root.wstring()||a.rfind(b,0)==0;}
+// The real journal pins every parent of its owned directory with read-attributes access only.
+inline bool strictAncestor(const std::filesystem::path& candidate){
+ if(!candidate.is_absolute()||candidate!=candidate.lexically_normal())return false;
+ for(auto current=root;current.has_parent_path();){
+  auto parent=current.parent_path();if(parent==current)break;
+  if(parent==candidate)return true;
+  current=std::move(parent);
+ }
+ return false;
+}
 inline void event(const char* kind,const char* port){std::ofstream log(events,std::ios::app);if(!log)ExitProcess(92);log<<"{\"kind\":\""<<kind<<"\",\"port\":\""<<port<<"\"}\n";log.flush();}
 [[noreturn]] inline void refuse(const char* port){++denied;event("DENIED",port);std::fprintf(stderr,"YMCC_SLEEP_EXTERNAL_PORT_DENIED:%s\n",port);ExitProcess(91);}
 struct Guard {
@@ -51,7 +61,16 @@ inline BOOL WINAPI suspendState(BOOLEAN,BOOLEAN,BOOLEAN){refuse("SetSuspendState
 inline HINTERNET WINAPI http(LPCWSTR,DWORD,LPCWSTR,LPCWSTR,DWORD){refuse("WinHttpOpen");}
 inline BOOL WINAPI createProcess(LPCWSTR,LPWSTR,LPSECURITY_ATTRIBUTES,LPSECURITY_ATTRIBUTES,BOOL,DWORD,LPVOID,LPCWSTR,LPSTARTUPINFOW,LPPROCESS_INFORMATION){refuse("CreateProcessW");}
 inline HINSTANCE WINAPI shell(HWND,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR,INT){refuse("ShellExecuteW");}
-inline HANDLE WINAPI createFile(LPCWSTR file,DWORD access,DWORD share,LPSECURITY_ATTRIBUTES security,DWORD disposition,DWORD attributes,HANDLE templ){if(!file||!inside(file))refuse("CreateFileW-outside-owned-root");const auto result=::CreateFileW(file,access,share,security,disposition,attributes,templ);const DWORD error=result==INVALID_HANDLE_VALUE?GetLastError():0;if(error){std::ofstream log(events,std::ios::app);log<<"{\"kind\":\"FILE_ERROR\",\"port\":\"CreateFileW\",\"characters\":"<<std::wcslen(file)<<",\"error\":"<<error<<"}\n";log.flush();SetLastError(error);}return result;}
+inline HANDLE WINAPI createFile(LPCWSTR file,DWORD access,DWORD share,LPSECURITY_ATTRIBUTES security,DWORD disposition,DWORD attributes,HANDLE templ){
+ if(!file)refuse("CreateFileW-outside-owned-root");
+ if(!inside(file)){
+  if(access!=FILE_READ_ATTRIBUTES||share!=(FILE_SHARE_READ|FILE_SHARE_WRITE)||security||disposition!=OPEN_EXISTING||
+     attributes!=(FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT)||templ||!strictAncestor(file))
+   refuse("CreateFileW-outside-owned-root");
+  event("READONLY_ANCESTOR","CreateFileW");
+ }
+ const auto result=::CreateFileW(file,access,share,security,disposition,attributes,templ);const DWORD error=result==INVALID_HANDLE_VALUE?GetLastError():0;if(error){std::ofstream log(events,std::ios::app);log<<"{\"kind\":\"FILE_ERROR\",\"port\":\"CreateFileW\",\"characters\":"<<std::wcslen(file)<<",\"error\":"<<error<<"}\n";log.flush();SetLastError(error);}return result;
+}
 inline BOOL WINAPI createDirectory(LPCWSTR file,LPSECURITY_ATTRIBUTES security){if(!file||!inside(file))refuse("CreateDirectoryW-outside-owned-root");return ::CreateDirectoryW(file,security);}
 }
 #define GetProcAddress YmccSleepBoundary::resolve

@@ -1,3 +1,165 @@
+HC193 Hook诊断限定软件ACCEPTED：旧main同新兼容header首新断言FAIL，候选9PASS；两图各424include/12完整函数/7Bv/自然Job0，2产品2原配套10hunk正逆保持。仅本callback新row补vk/up/真实forwarded-buffered-suppressed，3metadata函数/9策略函数保持，外部默认屏蔽=false。10256refs两移动引用经固定before闭合0未决，345.043612/900；旧995d包不含后继，下一自然Native。033035三writer0规则另核不签实体，HC192/165和全族OPEN，库零业务。裁决：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-193-KEYBOARD-HOOK-DECISION-DIAGNOSTICS.json。
+
+---
+
+HC192显式鼠标/键鼠组合来源PARTIAL：6官方原源/31当前完整函数（逐体等HC191固定包）已核，Ayn五继承OEM1与KUN独立OEM6原Guide路线保持。HC192-C01明确typed mouse含任一鼠标VK被纯keyboard all_of整条排除，剩GetAsync采样，无同等显式短边沿/条件吞键；OEM鼠标对ledger/observer不代替。保持source mouse及键盘保存、无单设备来源外推，原消费任务实施，库零产品/测试/构建。HC191限定包通过不撤，实体/全族OPEN/ACTIVE。裁决：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-192-EXPLICIT-MOUSE-CHORD-SOURCE-SUPPORT.json。
+
+---
+
+HC191固定匹配测试包限定软件ACCEPTED：1822索引源/29登记函数所在实际Native/235载荷/619 ZIP及Release同，公开包SHA995d222c、Native ID d52b8694/PE6afdaab2。原nonce/锁CAS/7Job0及旧FAIL/UNKNOWN/越窗保留，不拼整父。Host工具图3历史UNKNOWN公开保留，不签完整Host/正式发布/loaded/物理；fixtures NOT_RUN，12组102/352及ROG专属Raw仍OPEN/ACTIVE。库零产品/测试/构建；下一原任务只读显式鼠标/键鼠保存源消费。裁决：G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-191-MATCHED-PACKAGE-IDENTITY.json。
+
+---
+
+HC186（2026-11-15）：ROG设备限定逐键抑制/MCU单键mute的最终当前源边界见下。固定HC实际是F18/F17重映射+global hook+内部controller注入，虚拟输出创建非此调用前提；当前Raw仅观测、LL无设备身份，前HID+服务租约非单键mute。14官方源27函数15数组已核，0x02整Xbox面禁用不可替代。HC165-C01仍OPEN；先核最近普通匹配包及183/184/185消费，缺则原owner一次固定普通包，不造API/新writer，不操作设备。
+
+裁决：[HC-CODEX-186-ROG-FINAL-SUPPRESSION-SOURCE-DECISION](G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-186-ROG-FINAL-SUPPRESSION-SOURCE-DECISION.json)。
+
+---
+
+HC185（2026-11-15）：MSI键盘fallback与ROG原验证Raw-inactive LL的posted录入限定软件核收；原权威过滤、来源/规则/neutral/owner门保持。候选50有效与更正观察后独立4取消分列，不拼54整父；编译FAIL保持，4图各298/13函数/7Bv及4Job0已核。未验provider/hook吞键、ROG专属Raw mute、OEM原行为/匹配包/物理；交下一自然Native。
+
+裁决：[HC-CODEX-185-MSI-ROG-FALLBACK-RECORDING](G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-185-MSI-ROG-FALLBACK-RECORDING.json)。
+
+---
+
+HC184（2026-11-15）：Zotac GamingZone/SuiPlay0X1原已投递键盘录入已限定软件核收，56检查18FAIL→56PASS；同原fixture/各6函数298输入7Bv、两Job0及3精确hunk已核。只补原消费者，不改能力/屏蔽/协议，不称10静态操作为设备实测。前一Native未含后继，MSI/ROG另审，完整包/物理OPEN。
+
+裁决：[HC-CODEX-184-ZOTAC-SUIPLAY-POSTED-RECORDING](G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-184-ZOTAC-SUIPLAY-POSTED-RECORDING.json)。
+
+---
+
+HC183（2026-11-15）：Ayn既有Guide/LCC原投递录入漏接已限定软件核收，原16/6FAIL→候选16PASS，真实来源/规则/焦点/录入取消保持。1产品/2fixture hunk、两epoch6函数/298输入/7Bv及2Job0已核；误写before事故严格恢复701原前像，实际测试源/raw未改。未验hook/OS屏蔽/实机或入新包。
+
+HC182实际来源合同已交：Zotac/SuiPlay、MSI键盘fallback、ROG Raw-inactive LL有原post；Lenovo走HID producer，Valve无真实reader，不按名字放行。
+
+裁决：[HC-CODEX-183-AYN-POSTED-RECORDING-CONSUMER](G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-183-AYN-POSTED-RECORDING-CONSUMER.json)。
+
+---
+
+HC181（2026-11-15）：HC179消费进入固定完整原生编译链接，7TU/5PE、21完整函数、原对象main重链及同marker已核。原OneCore身份未知保持，新link46searched库前后核对；不是整包/运行/物理抑制证明，不追赶移动main。原准备/后置FAIL与越窗费用保持，累计2700内2537.154147s。
+
+裁决：[HC-CODEX-181-NATIVE-BUILD-SOURCE-COMPLETENESS](G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-181-NATIVE-BUILD-SOURCE-COMPLETENESS.json)。
+
+---
+
+HC180（2026-11-15）：KUN及五Ayn Loki机型鼠标Guide源支持已固定。两个声明根的HC OEM号分别6/1，YMCC按实体Guide统一；保留oem:guide与显式录入MouseLeft+MouseForward不同saved source。原R15已覆盖两mouse profile，无新增产品/夹具或执行；HC179纯键盘不能代签鼠标录入抑制/短按。六静态源不等六实机，无虚拟生产生命周期由原按键任务续核，全族/ROG未决保持。
+
+裁决：[HC-CODEX-180-MOUSE-COMBINATION-FAMILY-SOURCE](G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-180-MOUSE-COMBINATION-FAMILY-SOURCE.json)。
+
+---
+
+HC179（2026-11-15）：显式保存纯键盘组合的短按保留/条件式配对吞键已限定软件核收，无虚拟Host可执行原动作；saved source/code与OEM别名分列。21完整函数、34hunk正逆/并行保留、12Job0与分epoch原消费16/定义8/cold2/原初始化118已核，旧FAIL及guard时钟范围保持。ROG设备专属Raw屏蔽HC165-C01、厂商原行为/匹配包与物理仍OPEN，12组102静态范围不是实机通过。
+
+裁决：[HC-CODEX-179-RECORDED-KEYBOARD-CONSUMER](G:\YeManCC-Work\Docs\Tasks\HC\Capability-Library-TraeCode-CN\Codex\reviews\HC-CODEX-179-RECORDED-KEYBOARD-CONSUMER.json)。
+
+---
+
+HC177（2026-11-15）：GpdLegacy19静态源支持，6个实际OEM声明根/固定21源（Win2、Win5为排除对照）及当前12完整消费函数+2表已核。旧系L4=F11+L、R4=F12+R，原canonical按实体左右；Win3原HC数字1/2与其它根2/3不同，不能直接套序号。Max2/Mini silenced Menu不激活，Win5接口/代门不继承。
+
+保存oem:l4/r4与keyboard:F11+KeyL/F12+KeyR分列；同表达式不是设备同源/跨源改名。固定源要求GPD app预配置，不等本机已配置或授权修改。当前录入键盘短脉冲由原消费任务验证，库不写产品/夹具、不运行；19源行/6根不等19设备通过。ROG HC174/175软件、HC176源计划和全家族未决范围保持，整体PARTIAL。
+
+裁决：[HC177 GPD旧系源合同](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/reviews/HC-CODEX-177-GPD-LEGACY-RECORDED-KEYBOARD-SUPPORT.json)。
+
+---
+
+HC176（2026-11-15）：ROG三路线源计划/旧现场限定PARTIAL。LL系统键盘fallback的软件配对/UI/真实neutral参考HC174/175；设备专属Raw保持捕获/动作，HC165-C01 selective抑制OPEN；前侧LIB147/HID+原ASUS可逆lease的queue→worker→真实readback/原动作/归还单独补证。193736原ZIP保存oem:lib/press，四条accepted只为派发，usage先于新意图，不签此后服务/默认行为或后键实测。
+
+32引用15文件/19完整函数、5原成员/8原行与12组102静态模型352关系核对；库无产品/测试/协议修改。下一自然包/实机缺证仍OPEN，既有GpdLegacy19源差异可由原按键任务并行接续，不套Win5门或重复跑19机型。
+
+裁决：[HC176 ROG三路线证据计划](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/reviews/HC-CODEX-176-ROG-THREE-ROUTE-SOURCE-PLAN.json)。
+
+---
+
+HC175（2026-11-15）：ROG返LL真实neutral后继限定软件ACCEPTED_SOFTWARE_SCOPE。实际UI Raw-off从原真实physical ledger重建LL发布，旧按住/重复不会获新press，已吞UP仍吞、Raw期间已透传UP仍透传；真正松开后新对动作一次，无虚拟Host。旧4前置后targetFAIL/新11与13完整函数、1产品+2原配套4hunk正逆、两实际图/两Job0已核；先前18/8+8/54/9/5/init118未重跑。
+
+四ROG原profile/保存定义不改，当前单identity软件非全机硬件。HC174原UI归属仍按其范围；HC165-C01专属Raw屏蔽、前侧LIB/HID/厂商默认行为、完整Native/匹配包/loaded实机及全族目标继续OPEN，整体PARTIAL。
+
+裁决：[HC175返LL真实松开核收](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/reviews/HC-CODEX-175-ROG-LL-RETURN-NEUTRAL.json)。
+
+---
+
+HC174（2026-11-15）：ROG共用来源切换的原UI归属，限定软件ACCEPTED_SOFTWARE_SCOPE。实际Raw/LL切换、允许键表/受理缓存、旧LL发布撤销由原UI reconcile执行；worker仅发布期望，同hook也投递，失败Post由原维护接续。真实repeat/UP债和独立Raw状态保持，旧排队动作按原epoch拒绝；无Host/虚拟目标的新Raw与返回LL实际动作成立。
+
+HC172-C01/HC173-C01仅软件范围关闭：有效旧源2前置后目标FAIL、修后18项，初C3538编译FAIL保留。13完整函数/1产品+2原配套12hunk正逆、3实际编译图/9头派生和3Job0已核；旧8+8/54/9/5/118不重跑。最早wrapper为同SHA事后精确重建，非原运行前保存。四ROG静态绑定共用profile，当前18仅一个XboxROGAllyX身份，不签四台机器或全族。
+
+系统键盘fallback来源披露、saved source/code与能力协议保持。HC165-C01设备专属Raw同时屏蔽、前侧LIB/HID与厂商默认行为、完整Native/link/匹配包/loaded实机仍OPEN。12组102模型352关系原矩阵继续，库不接管产品实施，整体PARTIAL。
+
+裁决：[HC174 ROG UI来源归属核收](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/reviews/HC-CODEX-174-ROG-UI-SOURCE-OWNER.json)。
+
+---
+
+HC173（2026-11-14）：ROGAlly／ROGAllyX／XboxROGAlly／XboxROGAllyX共用原Rog键盘profile的“屏蔽＋触发”来源支持。HC固定原源已有OEM chord全局hook抑制后交自身热键链；YMCC原LL降级是系统键盘范围，不能当设备专属Raw来源或厂商默认行为已屏蔽。现有来源定义与保存source/code保持。
+
+原LL备用吞键后继已补held来源切换，原3前置后FAIL、修后8＋对称/UP债8有软件进展；但新增gate清理可由capture worker直写UI私有状态，HC173-C01仍待原按键任务把撤旧发布归回原UI入口。此为NEEDS_REVISION，未签生产线程闭合；HC172原件、54/9/5/init118旧组和历史FAIL不改。Raw设备专属抑制、前侧HID/厂商动作、完整Native/包和物理继续OPEN。库仅支持/独立核收，不接管产品。
+
+裁决：[HC173 ROG来源切换后继核对](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/reviews/HC-CODEX-173-ROG-LL-HELD-SUCCESSOR.json)。
+
+---
+
+HC171（2026-11-14）：纯保存keyboard/mouse组合的无虚拟动作准入，限定软件ACCEPTED_SOFTWARE_SCOPE。只豁免requiredMask0且有desktop VK的规则；混合controller仍走原门。采样原power随vk0收据到最终guard，桌面epoch/true neutral/原预算保持；单F13-F24原FIFO/配对债不变。此步不保证极短脉冲，也不签Windows原动作屏蔽。
+
+257引用/179不同路径SHA、1产品+4原配套13精确hunk正逆前像、8完整函数/4实际生成epoch核收。22/14为前驱有效power分支限定等价，最终7/3分开；shape负例实际是control-witness3e266，不能按before名字冒称完整dee519运行。12Job关前0（6自然终态/6限定工具收尾）；原编译/准备FAIL保留，录入器仅原native-oem-init118。三份能力头拷贝同轮派生闭合，不新跑全族。
+
+saved source/code和能力机型协议保持。HC169单F键核收/HC170ROG接口边界继续有效；HC165-C01设备专属ROG原动作屏蔽、家族物理、完整Native/link/包与loaded身份仍OPEN。原按键任务持有产品；库只支持来源和核收，整体PARTIAL。
+
+裁决：[HC171纯桌面准入核收](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/reviews/HC-CODEX-171-DESKTOP-CHORD-CONSUMER-REVIEW.json)。
+
+---
+
+HC170（2026-11-14）：ROG普通OEM屏蔽的固定源/API咨询。HC后键在同一全局hook请求抑制后，把OEM态写入所选IController.InjectedButtons；XInput状态泵再向原InputsUpdated/热键消费，VirtualManager输出在后。InjectState不是创建虚拟输出调用，但GetTarget为空仍无注入。前侧IDevice事件也由HC桥转入该状态泵；YMCC无虚拟原生动作不应照抄为Host前置。
+
+不能凭HID字典造后键源：0xA5/OEM3没有HandleEvent执行分支，0xA7/0xA8实际为ArmoryCrate hold/release，非已证M2。微软LL结构无hDevice，Raw有设备句柄；未找到“同步吞键后仍可靠到达同设备Raw消息”的公开保证，结论NOT_PROVEN而非断言必丢。RIDEV_NOLEGACY仅注册应用传统消息，不是其它应用全局屏蔽。
+
+独立显式全局抑制策略可以保留saved OEM字符串，但若动作依赖未保证交付的Raw，现有证据不能同时保证设备来源/可靠动作/屏蔽。用LL驱动动作就必须标系统键盘、deviceVerified=false，不能按VK/时间/当前ROG引用转签身份；全局F17/F18影响其它键盘，是明确策略范围，不能默认放宽Rog掩码。HC169显式keyboard核收保持，HC165-C01/物理继续OPEN，原按键任务持有产品实现。
+
+合同：[HC170 ROG接口及来源边界](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-170-ROG-SUPPRESSION-SOURCE-API-CONTRACT/ROG-OEM-SUPPRESSION-INTERFACE-CONTRACT.json)。
+
+---
+
+HC169（2026-11-14）：显式保存 keyboard、单个 F13-F24 的无虚拟Host消费和LL生命周期，限定软件范围ACCEPTED_SOFTWARE_SCOPE。原power凭据到最终守卫、失效held/录入epoch、短促边沿及配对归还已按各自来源核对；otherPassed时原键可保留，不能概称全部绑定均吞键。撤钩残留归属由两处随原LL账本重置的清位修正，同ROG真实设置/来源回退9项及旧源反例、Win5显式生命周期API12分开。
+
+12唯一文件（2产品/10原夹具）先66、后同3文件5个应用hunk正逆核收；16函数/2类型/4头在后继并行主线仍一致。25Job关前0，历史FAIL/计数前向勘误及15旧epoch头身份UNKNOWN保持；新定向425条/351唯一路径编译图分421原before-after绑定出现项与4派生项，不签完整产品、精确链接库、包或实机。
+
+HC168-C01～C07按各自范围关闭，C06只关闭正确披露；原HC165-C01普通ROG设备专属OEM屏蔽继续OPEN。saved OEM source/code、Raw/HID/WMI资格、原model/interface/neutral门保持；显式全局键盘不自动成为OEM设备来源。家族R3仍12组/102静态型号/352型号键，既有Win5成功现场不转签到新二进制。下一步仅向原按键任务提供ROG同步抑制/事件来源接口研究；总库及完整家族目标PARTIAL/ACTIVE。
+
+裁决：[HC169限定软件核收](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/reviews/HC-CODEX-169-EXPLICIT-KEYBOARD-SOFTWARE-REVIEW.json)。
+
+---
+
+HC168（2026-11-14）：家族无虚拟绑定/原动作屏蔽支持矩阵补齐12组、102静态源型号、352型号键；58完整selector/profile/catalog片段仅LF归一逐字同源。这些不是实机数。此前11组只83型号，现补回原GpdLegacy19类：L4=F11+L、R4=F12+R，不能套Win5门或新F13-F24单键。
+
+键盘吞键、共享HID/WMI捕获与精确厂商前端租约按家族分列；无来源不造producer/协议，既有saved source/code保持。显式F13-F24候选只作中途反馈：原power到最终动作、失效held不重建、录入无中途Evaluate的历史撤销须闭合。7a35后继已有Witness/per-key取消源码进展，尚未最终核收，配对UP/旧release窗口继续核；HC165-C01仍OPEN。
+
+库侧零产品/夹具/测试/构建/设备/goal修改。矩阵：[家族来源及屏蔽路线](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-168-EXPLICIT-FUNCTION-EDGE-INTERIM/FAMILY-SUPPRESSION-SUPPORT.zh-CN.md)。
+
+---
+
+HC167（2026-11-14）：厂商前端队列归属/异常结算及阶段诊断，限定软件范围ACCEPTED_SOFTWARE_SCOPE。1产品+3原夹具13精确hunk及正逆前像已核；失败父16中的cancel8、tail55、final12按各自来源保留，不拼整父。final12另补实际XboxROGAlly与混合原服务状态归还，旧4 tuple/3类的范围说明已纠正。
+
+7自有Job关前0，2自然/5限定vctip回收。依赖图为失败准备295和5次成功编译各297条；63406ms是含重叠累计，七wrapper窗口并集59687ms不含准备/后处理。最早头文件以精确20字节逆补丁重建并核原TU前缀，不冒称幸存原件；vcvars历史身份UNKNOWN，未签完整工具/链接图。原FAIL/原件及前向勘误均保留。
+
+库侧只更新导航/通信，未改型号/协议或输入来源。HC165-C01、真实原动作屏蔽、配套包仍OPEN；显式F13/F17/F18边沿消费由原按键任务接续，既存绑定source/code和OEM来源分开。裁决：[HC167有限软件核收](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/reviews/HC-CODEX-167-ROG-VENDOR-QUEUE-SOFTWARE-REVIEW.json)。
+
+---
+
+HC165（2026-11-14）：ROG家族“屏蔽原动作+触发”固定HC源码合同已核，状态PARTIAL。背键是F18/F17固件映射及键盘钩子抑制意图；CC/AC/LIB为共享HID点击，原厂动作另走厂商前端管理，未发现逐键LIB MCU静音。12官方文本blob与15命令数组身份已核，不混旧frozen InputsManager。
+
+当前YMCC普通Rog被EligibleMask排除，rawExclusive又关闭动作hook，HC165-C01交原消费端修复。193736日志保存LIB/press及4个HID动作接受回执，不签背键或原动作屏蔽。来源门、单producer、配对松开、原租约归还和各型号差异保持；不增加/隐藏能力，不引DLL，不运行产品/测试/设备。完整合同：[ROG家族屏蔽与触发合同](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-165-ROG-SUPPRESS-AND-TRIGGER-CONTRACT/REPORT.zh-CN.md)。
+
+---
+
+HC164（2026-11-14，香港时间）：家族无虚拟手柄录入定义后继已精确导入主线，限定源码/受控软件范围 `ACCEPTED_SOFTWARE_SCOPE`，整库仍 `PARTIAL`。原 `oemUnifiedInputBindingFor`、profile、catalog 与 canonical 位提供只读表达式；保留 OR 替代、原规则顺序/group 先行竞争、左右修饰键、subset/exact 两层和接口/代次条件，不新增型号/协议表或输入权限。
+
+Win5 raw F13 显示 Gamepad 映射而仍保存 keyboard:F13/press；OEM Gamepad、Home、Keyboard、L4/R4 及额外 Ctrl/左右 Meta 保留，不按名称/时间自动删并。F14/F15 raw 入口补条件名及背键接口/发布代次说明，鼠标与键盘/鼠标贡献措辞分开，HC163 两条件在这份固定源码关闭。旧 Native 没有新解释字段时保留原始录入。
+
+核收 native-r4 的158项定义投影（受控端口）、ui-final 的31项实际组件/正式engine（720/800、合成DOM/内存IPC）、model19与固定类型检查，各epoch不相加；14自有Job关前零。8文件前/后净改动与逆向字节保持已核。原脚本 ed22 全文由两处精确逆补丁重建并严格核SHA，重建身份与幸存原件分列；最终生成体仅一条自有头路径差异，未重跑158。旧155/31、FAIL与UNKNOWN保留。
+
+本后继没有新完整Native/Web包、部署或设备动作；下次自然配套构建接入，不追包。HC161本人同一Win5鼠标/手柄切换键成功仍限原现场epoch，不代签此新源码实机。物理同源、长按/原厂抑制、完整退出与全族验收继续OPEN。
+
+固定原件：`G:\YeManCC-Work\Testing\YMCC\Evidence\ControllerFiveConsumerAudit-20261109\Repair-019-NoVirtualBoundOem\recording-definitions-20261113\SOURCE_READY.json`（SHA256 `60801d165dbbeba9e06cfa4f8a840251b0921851def9b2a4f7e50100818df969`）。裁决：[HC164](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/reviews/HC-CODEX-164-RECORDED-KEY-DEFINITIONS-SOURCE-ACCEPTANCE.json)；条件与来源见同名 observations。以下历史原文保留。
+
+---
+
 # HC079：OXP3 WMI 最终准入与 OXP3／MiniPro 灯光取样锁已修，普通主线包已导出
 
 更新 2026-11-05T07:41:05.273+08:00（香港时间）。本批 PARTIAL，明确方法级软件范围及实际普通包身份 ACCEPTED_SOFTWARE_SCOPE；全家族未完成。
@@ -22,9 +184,25 @@ APEX HIDv2灯光单色/彩虹/亮度/关闭仍在包中，等待新实机日志�
 
 ---
 
+<!-- BATTERY-CAPABILITY-AUDIT-20261118 -->
+> **2026-11-18 充电审计：** [身份、现场与消费边界](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-221-BATTERY-ROUTE-IDENTITY/REPORT.zh-CN.md)及[全量规则与原厂对账](G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-221-BATTERY-ROUTE-IDENTITY/BATTERY-CAPABILITY-AUDIT.md)。43 条规则 / 13 条 Windows 路线。11 月 18 日的 `-OP3.zip` 是 X2 Mini Pro（BIOS 0.22、EC 0.12），11 月 5 日旧 `OP3` 包中的充电记录是 APEX，两者都不能验收真正的 OP3。当前库内三者按不同身份和条件处理。审计不参与准入、不改变运行规则；下方 11 月 5 日为历史。
+<!-- /BATTERY-CAPABILITY-AUDIT-20261118 -->
+
 <!-- BATTERY-CAPABILITY-AUDIT-20261105 -->
 > **2026-11-05 充电域现势：** [全部充电能力复核](BATTERY-CAPABILITY-AUDIT.md)及[逐类来源/条件/现场证据](BATTERY-CAPABILITY-AUDIT.json)已进入本唯一能力总库。当前 42 组身份、12 条协议；新 HC 90 个可识别类中 41 个充电候选、40 个有 YMCC 路线，另补 GPD Mini 与 Super X；SuiPlay Windows 未开放。OXP3 WMI、Super X 75–100% 双传输已存在于源码，不沿用旧“未适配”结论。最新 02:33 用户包名虽为 onexplayer3，DMI 上报 APEX，已明确 BIOS/EC=0.12；新会话 2 次查询因 EC 主版本 0 不满足继承 X1 的 >=1 条件而在 provider 打开前拒绝。旧包 12 次查询及当时缺版本的证据保留；Linux Apex ACPI8 0xE5 与 HC X1 EC16 0x04A3 仍不可互推，此实机失败保持 open。ROG/MSI 按用户反馈保留，不扩大为全型号实测。审计表不参与运行准入；仍由原 battery policy → routes → 生成总库 → 原 Controller/provider 消费。
 <!-- /BATTERY-CAPABILITY-AUDIT-20261105 -->
+
+<!-- MOTION-CALLBACK-DIRECTION-REVIEW-20261109 -->
+## 体感配方维护：不能只按 AxisSwap 字典或 CPU 型号套方向
+
+2026-11-09 的 Win5 修正后，本人新现场包已实际运行 Reviewed 配方；1221 个完整六轴样本与新公式一致，新校准已保存并回读，43 个非零 IMU 的 SDK 参数样本与报告轴序一致。用户反馈方向正常。这不是群友 388、所有游戏或自定义转摇杆的全量验收。原证据继续位于 Testing/YMCC/Evidence/Win5-Gyro-Direction-20261109-114352/owner-192710；主线升级记录的 Win5 条目链接本次现场核收。
+
+后续新增或调整体感配方，必须先核相应版本的实际 callback、provider 原始坐标、有效资源加载／继承和缓存刷新语义；三轴循环的 input→output 与 output→input 不能混用。不能凭 ±1／双射、向量长度、同家族或 CPU 名称判断真实方向，也不能将 Windows 机身矩阵套到 controller decoder。
+
+原 reviewed_resources.mjs 现对 18 个既有 JSON 导入模型，绑定已执行的 loader／callback 回执原始 SHA 和两 callback 来源 SHA，并比较实际轴／swap、三个基向量与混合值；合法的反循环也须拒绝。Win5 历史 output→input 专例单独保留。新断言的 36 矩阵／180 向量比较及五个拒绝负例已通过；旧回执是历史引用，本轮没有重跑 HC callback 或完整 producer。
+
+此补强只约束原 oracle，未改变运行轴表或建立新的发布父门。其他 10 个 canonical 类的三轴循环仍是待核来源风险，不能据此全局反转、宣称物理错误或批量标为已验收。跨版本 JSON 不能默认为 callback 语义兼容；确有不同坐标的修正沿同一能力库精确 Reviewed override，并版本化校准键。旧工具资格失败继续保留。
+<!-- /MOTION-CALLBACK-DIRECTION-REVIEW-20261109 -->
 
 # HC067：OneX 消费事实修正已入当前普通主线包，全家族继续
 

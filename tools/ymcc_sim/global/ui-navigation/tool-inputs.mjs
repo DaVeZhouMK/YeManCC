@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
-export const UI_TOOL_INPUT_LIMIT=3072;
+export const UI_TOOL_INPUT_LIMIT=4096;
 export const UI_REPO_ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
 const DEFAULT_MANIFEST=fileURLToPath(new URL('./toolchain-inputs.json',import.meta.url));
 const need=(ok,message)=>{if(!ok)throw Error(message);};
@@ -18,7 +18,7 @@ function resolved(spec,repoRoot){
 }
 export function validateToolManifest(manifest,{repoRoot=UI_REPO_ROOT}={}){
  need(manifest?.schemaVersion===1&&manifest.kind==='ymcc-ui-navigation-selected-toolchain'&&manifest.caseId==='controller.ui-navigation','UI_TOOL_MANIFEST_SCHEMA');
- need(manifest.maxArtifactInputs===UI_TOOL_INPUT_LIMIT&&Array.isArray(manifest.files)&&manifest.files.length>0&&manifest.files.length<=UI_TOOL_INPUT_LIMIT,'UI_TOOL_INPUT_LIMIT');
+ need(Number.isInteger(manifest.maxArtifactInputs)&&manifest.maxArtifactInputs>0&&manifest.maxArtifactInputs<=UI_TOOL_INPUT_LIMIT&&Array.isArray(manifest.files)&&manifest.files.length>0&&manifest.files.length<=manifest.maxArtifactInputs,'UI_TOOL_INPUT_LIMIT');
  const files=manifest.files.map(row=>{need(/^[a-f0-9]{64}$/.test(row.sha256??''),'UI_TOOL_HASH_SCHEMA');return {...row,path:resolved(row,repoRoot)};});
  const byPath=new Map(files.map(x=>[key(x.path),x]));need(byPath.size===files.length,'UI_TOOL_DUPLICATE_FILE');
  const executables={};for(const name of ['node','powershell','edge','esbuild']){const spec=manifest.executables?.[name],p=resolved(spec,repoRoot);need(path.extname(p).toLowerCase()==='.exe','UI_TOOL_EXECUTABLE_PATH_INVALID:'+name);need(/^[a-f0-9]{64}$/.test(spec.sha256??'')&&byPath.get(key(p))?.sha256===spec.sha256,'UI_TOOL_EXECUTABLE_NOT_DECLARED:'+name);executables[name]=p;}

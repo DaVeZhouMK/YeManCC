@@ -139,11 +139,26 @@ inline bool parseArmed(const std::string& text,const Inventory& inv,std::set<std
     names=std::move(parsed);return true;
 }
 inline std::wstring property(HDEVINFO list,SP_DEVINFO_DATA& dev,DWORD prop) {
+    ULONG cmProperty=0;
+    switch(prop) {
+    case SPDRP_SERVICE: cmProperty=CM_DRP_SERVICE;break;
+    case SPDRP_HARDWAREID: cmProperty=CM_DRP_HARDWAREID;break;
+    case SPDRP_FRIENDLYNAME: cmProperty=CM_DRP_FRIENDLYNAME;break;
+    case SPDRP_DEVICEDESC: cmProperty=CM_DRP_DEVICEDESC;break;
+    default: break;
+    }
+    const auto query=[&](DWORD* type,BYTE* data,DWORD capacity,DWORD* required) {
+        if(!cmProperty)return SetupDiGetDeviceRegistryPropertyW(list,&dev,prop,type,data,capacity,required)!=FALSE;
+        ULONG length=capacity,kind=0;
+        const auto result=CM_Get_DevNode_Registry_PropertyW(dev.DevInst,cmProperty,&kind,data,&length,0);
+        *type=kind;if(required)*required=length;
+        return result==CR_SUCCESS;
+    };
     DWORD type=0,bytes=0;
-    SetupDiGetDeviceRegistryPropertyW(list,&dev,prop,&type,nullptr,0,&bytes);
+    query(&type,nullptr,0,&bytes);
     if(!bytes||bytes>131072)return {};
     std::vector<BYTE> buffer(bytes+sizeof(wchar_t)*2,0);
-    if(!SetupDiGetDeviceRegistryPropertyW(list,&dev,prop,&type,buffer.data(),bytes,nullptr)||(type!=REG_SZ&&type!=REG_MULTI_SZ&&type!=REG_EXPAND_SZ))return {};
+    if(!query(&type,buffer.data(),bytes,nullptr)||(type!=REG_SZ&&type!=REG_MULTI_SZ&&type!=REG_EXPAND_SZ))return {};
     const auto* w=reinterpret_cast<const wchar_t*>(buffer.data());
     if(type!=REG_MULTI_SZ)return w;
     std::wstring all;
@@ -195,7 +210,7 @@ struct Native {
             return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count());
         },[this,&e](){return time(e);},[](std::uint64_t slice){
-            // <=4-ms waits recheck original cancellation and the 180-s deadline;
+            // <=16-ms waits recheck original cancellation and the 180-s deadline;
             // no UI wait, new worker, timer, catch-up or deadline extension.
             Sleep(static_cast<DWORD>(slice));
         });
@@ -269,9 +284,11 @@ struct Native {
             HKEY child=nullptr;
             const auto opened=RegOpenKeyExW(root,category,0,KEY_QUERY_VALUE|KEY_WOW64_64KEY,&child);
             if(opened!=ERROR_SUCCESS){e="override-name-class-open:"+std::to_string(opened);ok=false;break;}
+            // RegEnumValueW returns an explicit length; previous bytes outside it are never consumed.
+            std::vector<wchar_t> name(32768,0);
             for(DWORD valueIndex=0;;++valueIndex) {
                 if(!time(e)){ok=false;break;}
-                std::vector<wchar_t> name(32768,0);DWORD length=static_cast<DWORD>(name.size()),kind=0,bytes=0;
+                DWORD length=static_cast<DWORD>(name.size()),kind=0,bytes=0;
                 const auto value=RegEnumValueW(child,valueIndex,name.data(),&length,nullptr,&kind,nullptr,&bytes);
                 if(value==ERROR_NO_MORE_ITEMS)break;
                 if(value!=ERROR_SUCCESS||kind!=REG_DWORD||bytes!=sizeof(DWORD)){e="override-name-value-layout-unsupported";ok=false;break;}
@@ -403,7 +420,7 @@ struct Native {
         else {
             PROCESSENTRY32W process{};process.dwSize=sizeof(process);
             if(!Process32FirstW(snapshot,&process))problem("software",winError("process-first"));
-            else do {if(!time(e))break;if(process.th32ProcessID){if(fanHostProcessName(W2U(process.szExeFile)))fanPids.insert(process.th32ProcessID);add("PROCESS",process.szExeFile);}}while(Process32NextW(snapshot,&process));
+            else do {if(!paceCollectionRead(e))break;if(process.th32ProcessID){if(fanHostProcessName(W2U(process.szExeFile)))fanPids.insert(process.th32ProcessID);add("PROCESS",process.szExeFile);}}while(Process32NextW(snapshot,&process));
             if(GetLastError()!=ERROR_NO_MORE_FILES&&time(e))problem("software",winError("process-next"));CloseHandle(snapshot);
         }
         SC_HANDLE manager=OpenSCManagerW(nullptr,nullptr,SC_MANAGER_ENUMERATE_SERVICE);
@@ -411,13 +428,16 @@ struct Native {
         else {
             DWORD resume=0;
             do {
-                if(!time(e))break;
+                if(!paceCollectionRead(e))break;
                 std::vector<BYTE> buffer(256*1024);DWORD needed=0,count=0;
                 const BOOL done=EnumServicesStatusExW(manager,SC_ENUM_PROCESS_INFO,SERVICE_TYPE_ALL,SERVICE_STATE_ALL,buffer.data(),static_cast<DWORD>(buffer.size()),&needed,&count,&resume,nullptr);
                 const DWORD code=done?ERROR_SUCCESS:GetLastError();
                 if(!done&&code!=ERROR_MORE_DATA){problem("software","service-enumeration:"+std::to_string(code));break;}
                 const auto* values=reinterpret_cast<ENUM_SERVICE_STATUS_PROCESSW*>(buffer.data());
-                for(DWORD i=0;i<count;++i)add("SERVICE",values[i].lpServiceName,fanPids.count(values[i].ServiceStatusProcess.dwProcessId)!=0);
+                for(DWORD i=0;i<count;++i) {
+                    if(!paceCollectionRead(e))break;
+                    add("SERVICE",values[i].lpServiceName,fanPids.count(values[i].ServiceStatusProcess.dwProcessId)!=0);
+                }
                 if(done)break;
                 if(!count){problem("software","service-enumeration-no-progress");break;}
             }while(resume);
@@ -487,7 +507,16 @@ struct Native {
         e="invalid-item-kind";return false;
     }
     bool read(const Json& item,Json& value,std::string& e) {return sample(item,value,e,false);}
-    bool observe(const Json& item,Json& value,std::string& e) {return sample(item,value,e,true);}
+    bool observe(const Json& item,Json& value,std::string& e) {
+        // Yield between planning candidates, never within a snapshot load: its
+        // existing 1-second cache age starts before loading and must not be stretched.
+        {
+            struct RestorePacing {bool& flag;bool previous;~RestorePacing(){flag=previous;}} restore{pacingCollection,pacingCollection};
+            pacingCollection=true;
+            if(!paceCollectionRead(e))return false;
+        }
+        return sample(item,value,e,true);
+    }
     bool write(const Json& item,const Json& value,std::string& e) {
         // Every attempt invalidates observations, including a failed lease or a
         // command that fails after changing a setting. Write/readback stay fresh.
@@ -624,7 +653,7 @@ inline Json run(bool restore,std::function<bool()> canceled) {
             {"softwareSnapshot",native.softwareCircuit.evidence()},
             {"collectionReadPacing",{{"minimumGapMs",ymcc::staticwake::CollectionReadPace::gapMs},
                 {"admittedReads",native.collectionReadPace.admitted},{"requestedWaitMs",native.collectionReadPace.requestedWaitMs},
-                {"scope","initial-collection-only;not-CPU-time;strict-readback-and-restore-unpaced"}}},
+                {"scope","discovery-collection-and-between-observations-only;snapshot-loads-unpaced;not-CPU-time;strict-readback-and-restore-unpaced"}}},
             {"diagnosticOnly",true},{"mandatoryEvidence",true},{"detailLogsRequired",false}};
         return result;
     };

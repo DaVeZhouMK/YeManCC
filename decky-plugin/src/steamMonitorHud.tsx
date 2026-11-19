@@ -168,35 +168,54 @@ export function installSteamMonitorHud({host,react:React,reactDom,ui,routerHook,
     const store=(getter!.fn as any)(),mode=(useMode! as any)();
     const [,render]=React.useState(0);const binding=bindingFrom(store),identity=JSON.stringify(binding);
     React.useEffect(()=>{
+      if(disposed)return;
       roots.set(owner,{store,mode,binding});report();const listener=()=>render((n:number)=>n+1);listeners.add(listener);
       return()=>{listeners.delete(listener);roots.delete(owner);report();};
     },[store,mode,identity]);
-    const selected=liveGame(),paint=frame?.show&&frame.expiresAt>Date.now()&&!closing&&selected?.store===store&&mode===modes.Overlay&&binding&&JSON.stringify(binding)===JSON.stringify(frame.game);
+    const selected=liveGame(),paint=!disposed&&frame?.show&&frame.expiresAt>Date.now()&&!closing&&selected?.store===store&&mode===modes.Overlay&&binding&&JSON.stringify(binding)===JSON.stringify(frame.game);
     return paint?React.createElement(NativeLease,{key:frame!.session+'-'+binding.overlayPid,store,owner,binding}):null;
   }
   function syncBootstrap(){
+    if(disposed)return;
     const enabled=host.__YMCC_DECKY_MIRROR__?.hudProtocol===1;
     if(enabled===protocol)return;protocol=enabled;lastStatus='';
-    client.setPassiveVisible(enabled);if(!enabled){frame=null;lastSeq=-1;retiredSessions.clear();revoke('host-protocol-unavailable');}
+    passiveOwned=enabled;client.setPassiveVisible(enabled);if(!enabled){frame=null;lastSeq=-1;retiredSessions.clear();revoke('host-protocol-unavailable');}
   }
-  const offFrame=client.subscribeExtra(accept);
+  let offFrame=()=>{},offClient=()=>{},registrationAttempted=false,bootstrapInstalled=false,passiveOwned=false;
   let previousConnected=false,previousRun='';
-  const offClient=client.subscribe(state=>{
-    const run=host.__YMCC_DECKY_MIRROR__?.runId??'';
-    if(!state.connected){if(previousConnected){frame=null;lastSeq=-1;retiredSessions.clear();revoke('authenticated-link-lost');}previousConnected=false;return;}
-    if(!previousConnected||run!==previousRun){frame=null;lastSeq=-1;retiredSessions.clear();lastStatus='';previousRun=run;previousConnected=true;report();}
-  }, {connectionOnly:true});
-  const bootstrap=()=>{syncBootstrap();};host.addEventListener('ymcc-decky-bootstrap',bootstrap);
-  if(capable)routerHook.addGlobalComponent(registered,Root);
-  syncBootstrap();
+  const bootstrap=()=>{syncBootstrap();};
   const diagnostic=Object.freeze({protocol:1,inspect:()=>({capable,capabilities:{popup:caps.available,portal:typeof portal==='function',composition:!!composition,context:!!getter,modeGetter:!!useMode,modes:!!modes,pixelFlags:pixelFlags.every(key=>Number.isSafeInteger(caps.flags?.[key])&&caps.flags![key]>0)},protocol,registered:capable&&!disposed,roots:roots.size,children:children.size,
     visible:children.size>0,frame:frame?{session:frame.session,seq:frame.seq,operation:frame.operation,source:frame.data.source}:null,
     inputPolicy:'Steam pinned notification / NotFocusable / no DOM hit targets',physicalMousePassVerified:false,desktopFallback:false,traces:structuredClone(traces)})});
-  Object.defineProperty(host,property,{value:diagnostic,configurable:true,writable:false});
-  return()=>{
-    if(disposed)return;frame=null;revoke('plugin-unload');disposed=true;
-    if(closeTimer!==null)host.clearTimeout(closeTimer);clearLease();offFrame();offClient();host.removeEventListener('ymcc-decky-bootstrap',bootstrap);
-    if(capable)routerHook.removeGlobalComponent(registered);listeners.clear();roots.clear();descriptors.clear();descriptorBindings.clear();client.setPassiveVisible(false);
-    if(host[property]===diagnostic)delete host[property];
-  };
+  function dispose(){
+    if(disposed)return;disposed=true;frame=null;
+    // Steam may reject removal of a stale global component. Release every local
+    // owner before returning the first error to the existing plugin cleanup log.
+    let failed=false,firstError:unknown;
+    const cleanup=(release:()=>void)=>{try{release();}catch(error){if(!failed){failed=true;firstError=error;}}};
+    cleanup(()=>revoke('plugin-unload'));
+    cleanup(()=>{if(closeTimer!==null)host.clearTimeout(closeTimer);closeTimer=null;});
+    cleanup(clearLease);cleanup(offFrame);cleanup(offClient);
+    if(bootstrapInstalled)cleanup(()=>host.removeEventListener('ymcc-decky-bootstrap',bootstrap));
+    if(registrationAttempted)cleanup(()=>routerHook.removeGlobalComponent(registered));
+    listeners.clear();roots.clear();descriptors.clear();descriptorBindings.clear();
+    if(passiveOwned){passiveOwned=false;cleanup(()=>client.setPassiveVisible(false));}
+    cleanup(()=>{if(host[property]===diagnostic)delete host[property];});
+    if(failed)throw firstError;
+  }
+  try{
+    // Registration may fail after Steam commits part of the component. The same
+    // disposer owns partial setup; a failed install cannot orphan the HUD lease.
+    offFrame=client.subscribeExtra(accept);
+    offClient=client.subscribe(state=>{
+      const run=host.__YMCC_DECKY_MIRROR__?.runId??'';
+      if(!state.connected){if(previousConnected){frame=null;lastSeq=-1;retiredSessions.clear();revoke('authenticated-link-lost');}previousConnected=false;return;}
+      if(!previousConnected||run!==previousRun){frame=null;lastSeq=-1;retiredSessions.clear();lastStatus='';previousRun=run;previousConnected=true;report();}
+    }, {connectionOnly:true});
+    bootstrapInstalled=true;host.addEventListener('ymcc-decky-bootstrap',bootstrap);
+    if(capable){registrationAttempted=true;routerHook.addGlobalComponent(registered,Root);}
+    syncBootstrap();
+    Object.defineProperty(host,property,{value:diagnostic,configurable:true,writable:false});
+    return dispose;
+  }catch(error){try{dispose();}catch{}throw error;}
 }

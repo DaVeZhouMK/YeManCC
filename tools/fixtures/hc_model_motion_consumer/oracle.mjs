@@ -59,12 +59,46 @@ export function oracle(workspace, repo) {
   for(const selected of reviewed){const r=legacy.recipes.find(r=>r.deviceClass===selected.deviceClass&&r.gyroMatrixId===selected.identityGyroMatrixId&&r.accelMatrixId===selected.identityAccelMatrixId);if(!r)throw Error('Missing reviewed legacy tuple');r.selectedRecipe=selected;}
   return {...input,schema:'hc-model-motion-consumer-oracle-v3',models,legacy,reviewed,motionCapabilityPolicy:capabilityPolicy(),genericFallbackPolicy:genericFallbackPolicy(workspace),
     upstreamMotionOverride:{commit:'f2e58468d9917189d4be7ccfc242385ce2c3035b',model:'OneXPlayer3',sha256:upgradeSha},
-    expectationBoundary:'Pinned HC a250 aliases plus independently pinned f2e58468 OneXPlayer3 resource; inherited JSON, matrices and resource SHA256; application selector spelling is explicit contract. No candidate C++ supplies expected values.'};
+    win5MotionOverride:{commit:reviewed.find(row=>row.name==='GPDWin5').upstreamCommit,model:'GPDWin5',callbackSemantics:'output-to-input',inputs:reviewed.find(row=>row.name==='GPDWin5').inputs},
+    expectationBoundary:'Pinned HC a250 aliases plus independently pinned f2e58468 OneXPlayer3 resource and fdf0bf66 Win5 device/historical callbacks; application selector spelling is explicit contract. Legacy declaration expectations remain unchanged. No candidate C++ supplies expected values.'};
 }
+const LEGACY_CATALOG='tools/fixtures/hc_legacy_motion_catalog/catalog.json';
+const LEGACY_SOURCE_ROOT='deps/handheldcompanion-runtime/source/';
+
+function legacyBundle(metadata,recipe){
+  const bundle=metadata.bundles[recipe.sourceSha256];if(!bundle)throw Error('Missing C# source bundle');
+  const paths=bundle.sources.map(s=>s.path);
+  if(JSON.stringify(paths)!==JSON.stringify([...new Set(paths)].sort()))throw Error('Noncanonical bundle source list');
+  return {bundle,paths};
+}
+
+// Registration declares this input graph without parsing C# or deriving expectations.
+export function legacyOracleSourcePaths(repo){
+  const file=path.join(repo,LEGACY_CATALOG),limit=4*1024*1024;
+  if(fs.statSync(file).size>limit)throw Error('MOTION_LEGACY_CATALOG_SIZE');
+  const bytes=fs.readFileSync(file);
+  if(bytes.length>limit)throw Error('MOTION_LEGACY_CATALOG_SIZE');
+  const metadata=JSON.parse(bytes);
+  if(!Array.isArray(metadata.recipes)||!metadata.recipes.length)throw Error('MOTION_LEGACY_CATALOG_RECIPES');
+  const sources=new Map();
+  for(const recipe of metadata.recipes){
+    const {paths}=legacyBundle(metadata,recipe);
+    if(!paths.length)throw Error('MOTION_LEGACY_CATALOG_EMPTY_BUNDLE');
+    for(const relative of paths){
+      if(typeof relative!=='string'||!relative.startsWith(LEGACY_SOURCE_ROOT)||relative.includes('..')||!relative.endsWith('.cs')||
+        !relative.split('/').every(name=>/^[A-Za-z0-9_.-]+$/.test(name)&&!name.endsWith('.')))throw Error('Unreviewed bundle source path');
+      const key=relative.toLowerCase();
+      if(sources.has(key)&&sources.get(key)!==relative)throw Error('MOTION_LEGACY_CATALOG_PATH_COLLISION');
+      sources.set(key,relative);
+    }
+  }
+  return [...sources.values()];
+}
+
 // Legacy expectations may consume provenance metadata, but re-derive all axes
 // and bundle hashes from pinned C# bytes, independently of the generated header.
 export function legacyOracle(workspace, repo) {
-  const provenancePath=path.join(repo,'tools/fixtures/hc_legacy_motion_catalog/catalog.json');
+  const provenancePath=path.join(repo,LEGACY_CATALOG);
   const bytes=fs.readFileSync(provenancePath), metadata=JSON.parse(bytes);
   const baselinePath=path.join(repo,'deps/handheldcompanion-runtime/HC-BASELINE.json');
   const indexPath=path.join(repo,'deps/handheldcompanion-runtime/source-files.sha256');
@@ -72,13 +106,17 @@ export function legacyOracle(workspace, repo) {
   const indexSha256='9105b05655c280f99ffffdb214c165955ced5ef3463719d681e7abecf7e904d1';
   if(sha(fs.readFileSync(baselinePath))!==baselineSha256||sha(fs.readFileSync(indexPath))!==indexSha256)throw Error('Pinned legacy HC baseline/index changed');
   const index=new Map(fs.readFileSync(indexPath,'utf8').split(/\r?\n/).filter(Boolean).map(line=>{const m=/^([0-9a-f]{64})\s+(.+)$/i.exec(line);if(!m)throw Error('Bad legacy source index');return [m[2].replaceAll('\\','/'),m[1].toLowerCase()];}));
-  const sourceRoot='deps/handheldcompanion-runtime/source/';
-  const sourceChecks=new Map();
+  const sourceRoot=LEGACY_SOURCE_ROOT;
+  const sources=new Map();
   function source(relative) {
     if(!relative.startsWith(sourceRoot)||relative.includes('..'))throw Error('Unreviewed bundle source path');
+    const saved=sources.get(relative);if(saved)return saved;
     const contents=fs.readFileSync(path.join(repo,relative)),digest=sha(contents);
     if(index.get(relative.slice(sourceRoot.length))!==digest)throw Error(`Legacy pinned C# mismatch ${relative}`);
-    sourceChecks.set(relative,{path:relative,sha256:digest});return contents.toString('utf8');
+    const text=contents.toString('utf8');
+    // The source index pins raw bytes; the legacy bundle hashes UTF-8 text.
+    const row={path:relative,sha256:digest,text,textSha256:sha(Buffer.from(text))};
+    sources.set(relative,row);return row;
   }
   const uncomment=t=>t.replace(/@"(?:""|[^"])*"|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,m=>m.startsWith('/')?m.replace(/[^\r\n]/g,' '):m);
   const braceEnd=(text,open)=>closeBrace(text.replace(/@"(?:""|[^"])*"|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g,m=>m.replace(/[^\r\n]/g,' ')),open);
@@ -96,7 +134,7 @@ export function legacyOracle(workspace, repo) {
     return result;
   }
   function classState(item) {
-    const code=uncomment(source(item.path)), match=new RegExp(`\\bclass\\s+${item.class}\\b(?:\\s*:\\s*([\\w.]+))?`).exec(code);
+    const code=uncomment(source(item.path).text), match=new RegExp(`\\bclass\\s+${item.class}\\b(?:\\s*:\\s*([\\w.]+))?`).exec(code);
     if(!match)throw Error(`Missing pinned class ${item.class}`);
     const open=code.indexOf('{',match.index), body=code.slice(open+1,braceEnd(code,open));
     const ctor=new RegExp(`\\b(?:public|protected)\\s+${item.class}\\s*\\([^)]*\\)[^{;]*\\{`).exec(body);
@@ -122,10 +160,8 @@ export function legacyOracle(workspace, repo) {
   const recipes=metadata.recipes.map(r=>{
     if(excluded.includes(r.deviceClass))throw Error('Legacy table includes excluded class');
     if(r.controllerPreferred!==controllerClasses.has(r.deviceClass))throw Error('Controller policy metadata disagreement');
-    const bundle=metadata.bundles[r.sourceSha256];if(!bundle)throw Error('Missing C# source bundle');
-    const paths=bundle.sources.map(s=>s.path);
-    if(JSON.stringify(paths)!==JSON.stringify([...new Set(paths)].sort()))throw Error('Noncanonical bundle source list');
-    const manifest=paths.map(p=>`${sha(Buffer.from(source(p)))}  ${p}\n`).join('');
+    const {bundle,paths}=legacyBundle(metadata,r);
+    const manifest=paths.map(p=>`${source(p).textSha256}  ${p}\n`).join('');
     if(manifest!==bundle.manifest||sha(Buffer.from(manifest))!==r.sourceSha256)throw Error(`Independent source bundle SHA mismatch ${r.deviceClass}`);
     const required=['Devices/IDevice.cs','Managers/SensorsManager.cs','Sensors/IMUGyrometer.cs','Sensors/IMUAccelerometer.cs'].map(p=>sourceRoot+p);
     for(const p of required)if(!paths.includes(p))throw Error('Missing bundle semantic support source');
@@ -134,7 +170,7 @@ export function legacyOracle(workspace, repo) {
     for(const alias of r.aliases) {
       const state={gyro:null,accel:null};let previous=null;
       for(const item of alias.inheritance) {
-        if(!paths.includes(item.path)||item.sha256!==sha(Buffer.from(source(item.path))))throw Error('Inheritance source missing from bundle');
+        if(!paths.includes(item.path)||item.sha256!==source(item.path).textSha256)throw Error('Inheritance source missing from bundle');
         const parsed=classState(item);
         if(previous&&parsed.parent!==previous)throw Error(`C# inheritance order differs: ${item.class} parent ${parsed.parent}, previous ${previous}`);
         for(const assignment of parsed.assignments)state[assignment.kind]={axis:assignment.axis,swap:assignment.swap};
@@ -159,7 +195,12 @@ export function legacyOracle(workspace, repo) {
     return {...row,systemVersion:row.version||'',expectedRecipe:matching[0]?.selectorId||null};
   });
   for(const r of recipes)if(!cases.some(c=>c.expectedRecipe===r.selectorId))throw Error('Recipe has no raw identity test case');
-  return {schema:'independent-legacy-csharp-consumer-oracle-v1',provenance:{path:provenancePath,sha256:sha(bytes)},baseline:{path:baselinePath,sha256:baselineSha256},sourceIndex:{path:indexPath,sha256:indexSha256},identityInputs:{path:inputsPath,sha256:sha(inputsBytes)},sourceChecks:[...sourceChecks.values()],recipes,cases,controllerClasses:[...controllerClasses],excluded,
+  // Do not return a verified oracle if any C# source changed during derivation.
+  const sourceChecks=[...sources.values()].map(({path:relative,sha256})=>{
+    if(sha(fs.readFileSync(path.join(repo,relative)))!==sha256)throw Error(`Legacy pinned C# mismatch ${relative}`);
+    return {path:relative,sha256};
+  });
+  return {schema:'independent-legacy-csharp-consumer-oracle-v1',provenance:{path:provenancePath,sha256:sha(bytes)},baseline:{path:baselinePath,sha256:baselineSha256},sourceIndex:{path:indexPath,sha256:indexSha256},identityInputs:{path:inputsPath,sha256:sha(inputsBytes)},sourceChecks,recipes,cases,controllerClasses:[...controllerClasses],excluded,
     boundary:'C# inheritance, allocation reset, axis/permutation and bundle SHA are independently rebuilt from pinned source. Metadata supplies tuple/identity labels; no generated header supplies expected axes, hashes or admission. Declared C# recipes do not prove HC callback runtime/physical axes.'};
 }
 

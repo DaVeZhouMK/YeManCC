@@ -45,11 +45,11 @@ try{
   }
   await select(1);
   await page.locator('.mirror-stage .keyboard-asset').waitFor({timeout:3000});
-  await page.evaluate(()=>{const asset=document.querySelector('.mirror-stage .keyboard-asset');window.__retainedKeyboard=asset.firstElementChild;window.__retainedGlyphs=[...asset.querySelectorAll('path')];window.__retainedBlink=asset.querySelector('[data-key-code="ControlLeft"]').getAnimations()[0]});
+  await page.evaluate(()=>{const asset=document.querySelector('.mirror-stage .keyboard-asset');window.__retainedKeyboard=asset.firstElementChild;window.__retainedGlyphs=[...asset.querySelectorAll('path')];window.__retainedBlink=asset.closest('.keyboard-board').querySelector('.keyboard-blink-layer').getAnimations()[0]});
   await customRows.nth(2).focus();
-  const shifted=await page.evaluate(()=>{const asset=document.querySelector('.mirror-stage .keyboard-asset');return{sameSvg:window.__retainedKeyboard===asset.firstElementChild,samePaths:window.__retainedGlyphs.every(path=>path.isConnected),sameBlink:window.__retainedBlink===asset.querySelector('[data-key-code="ControlLeft"]').getAnimations()[0],newKey:asset.querySelector('[data-key-code="KeyJ"]').dataset.selected,oldKey:asset.querySelector('[data-key-code="KeyK"]').dataset.selected}});
+  const shifted=await page.evaluate(()=>{const asset=document.querySelector('.mirror-stage .keyboard-asset');return{sameSvg:window.__retainedKeyboard===asset.firstElementChild,samePaths:window.__retainedGlyphs.every(path=>path.isConnected),sameBlink:window.__retainedBlink===asset.closest('.keyboard-board').querySelector('.keyboard-blink-layer').getAnimations()[0],newKey:asset.querySelector('[data-key-code="KeyJ"]').dataset.selected,oldKey:asset.querySelector('[data-key-code="KeyK"]').dataset.selected}});
   check(shifted.sameSvg&&shifted.samePaths,height+' keyboard focus changes preserve every original SVG path');
-  check(shifted.sameBlink,height+' unchanged selected modifier retains its running blink');
+  check(shifted.sameBlink&&await page.locator('.mirror-stage .keyboard-blink-layer').evaluate(n=>n.getAnimations().length===1),height+' unchanged selected modifier retains its running blink');
   check(shifted.newKey==='true'&&shifted.oldKey==='false',height+' changed selected keys update immediately');
   await page.keyboard.down('KeyJ');check(await page.locator('.mirror-stage path[data-key-code="KeyJ"]').getAttribute('data-live')==='true',height+' real keyboard keydown still receives solid feedback');
   await page.keyboard.up('KeyJ');await page.waitForFunction(()=>document.querySelector('.mirror-stage path[data-key-code="KeyJ"]')?.getAttribute('data-live')==='false');

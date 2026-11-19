@@ -9,11 +9,11 @@ _extract=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(_extrac
 sha=lambda b:hashlib.sha256(b).hexdigest()
 PATTERNS={
  'resolver':rb'^static ComPtr<ICoreWebView2> ipc_view_for_child\(int childId\) \{',
- 'post':rb'^static void ipc_post_json\(int childId, const json& message(?:, const std::string& command = \{\})?\)(?: noexcept)? \{',
+ 'post':rb'^static void ipc_post_json\(int childId, const json& message(?:, const std::string& command = \{\})?(?:,\s+std::optional<std::wstring>\* preparedEventWire = nullptr)?\)(?: noexcept)? \{',
  'generic':rb'^static void ipc_emit\(const std::string& ev, const json& data = \{\}\) \{',
  'gyro':rb'^static void ipc_emit_owned_gyro_telemetry\(std::string ev, json data\) \{',
  'utf16':rb'^static std::wstring U2W\(const std::string& s\) \{',
- 'helper':rb'^static void ipc_broadcast_controller_snapshot\(const json& message\) \{',
+ 'helper':rb'^static void ipc_broadcast_controller_snapshot\(const json& message(?:, const std::string\* validatedUtf8 = nullptr)?\) \{',
 }
 HELPER=r'''
 // The wire belongs to this immutable controller snapshot only. Resolve each
@@ -62,7 +62,19 @@ PLAN={'candidateVariant':'V2-inplace-optional-success-only','setBeforeMeasuremen
  'multitargetControllerRequirements':{'elapsedPairedMedianReductionAtLeast':0.05,'elapsedFasterPairsAtLeast':9,'threadCyclePairedMedianReductionAtLeast':0.05,'allocationsStrictlyDecrease':True},
  'singleTargetAndOtherEventControls':{'maximumMedianRegressionFraction':0.05,'orMaximumAbsoluteRegressionNs':100,'allocationRequestsAndBytesMustNotGrow':True},
  'noRetimingAfterFailure':True,'scope':'Complete source-extracted event emitters and actual JSON/UTF16 conversion. WebView delivery, diagnostic clock/sinks and current power source are inert boundaries. Input capture, Host and devices are not executed.'}
-def extract(raw,name):return _extract.extract(raw,OWNED_CONTROLLER_PATTERN if name=='owned-controller' else PATTERNS[name])
+OPTIONAL_PATTERNS={
+ 'event-broadcast':rb'^static void ipc_broadcast_json_event\(const json& message\) \{',
+ 'event-payload':rb'^static void ipc_emit_payload\(const std::string& ev, Payload&& data\) \{',
+ 'event-owned':rb'^static void ipc_emit\(const std::string& ev, json&& data\) \{',
+ 'controller-generated':rb'^static void ipc_broadcast_controller_snapshot_generated\(',
+}
+def extract(raw,name):return _extract.extract(raw,OWNED_CONTROLLER_PATTERN if name=='owned-controller' else (PATTERNS|OPTIONAL_PATTERNS)[name])
+
+def optional_parts(raw,parts):
+ result=dict(parts)
+ for name,pattern in OPTIONAL_PATTERNS.items():
+  if _extract.re.search(pattern,raw,_extract.re.M):result[name]=extract(raw,name)['bytes']
+ return result
 def normalize(b):return b.replace(b'\r\n',b'\n').replace(b'\r',b'')
 def change_loop(body,new):
  text=normalize(body).decode('utf-8')
@@ -70,23 +82,29 @@ def change_loop(body,new):
  assert text.count(old)==1,'broadcast-loop binding changed'
  return text.replace(old,new,1).encode('utf-8')
 def candidate_fragments(raw):
- result={k:extract(raw,k)['bytes'] for k in PATTERNS if k!='helper'}
+ result=optional_parts(raw,{k:extract(raw,k)['bytes'] for k in PATTERNS if k!='helper'})
  result['generic']=change_loop(result['generic'],'    if (ev == "gamepad.state") {\n        ipc_broadcast_controller_snapshot(m);\n    } else {\n        ipc_post_json(0, m);\n        for (const auto& [id, cw] : g_children) {\n            if (cw && cw->view) ipc_post_json(id, m);\n        }\n    }')
  result['gyro']=change_loop(result['gyro'],'    ipc_broadcast_controller_snapshot(m);')
  result['helper']=HELPER.encode('utf-8')
  return result
 def header(parts,name,stale=False,observed=True,brokenRetry=False):
  chunks=[]
- for k in ['utf16','resolver','post','helper','generic','gyro','owned-controller']:
+ for k in ['utf16','resolver','post','event-broadcast','controller-generated','helper','event-payload','generic','event-owned','gyro','owned-controller']:
   if k not in parts:continue
   body=normalize(parts[k]).decode('utf-8')
+  if k=='event-broadcast':body=body.rstrip('\n')
+  if k=='controller-generated':body='template<class MakeUtf8>\n'+body
+  if k=='event-payload':body='template<class Payload>\n'+body
   if observed and k=='resolver':body=body.replace('{','{\n    if (observing) resolutions.push_back(childId);',1)
   if observed:
    body=body.replace('message.dump()','delivery_dump(message)').replace('MultiByteToWideChar(', 'observedConvert(')
-   if k=='helper':body=body.replace('if (!wireReady) {','if (!wireReady) {\n            if (observing) ++conversions;',1)
+   # An already validated diagnostic wire is counted when the first live
+   # receiver consumes it. Validation without receivers is not a delivery.
+   if k=='controller-generated':body=body.replace('if (!wireReady) {','if (!wireReady) {\n            if (observing && validatedUtf8) ++deliveryDumps;',1)
+   if k in ('helper','controller-generated'):body=body.replace('if (!wireReady) {','if (!wireReady) {\n            if (observing) ++conversions;',1)
   if observed and k=='utf16':body=body.replace('{','{\n    if (observing) ++conversions;',1)
-  if k=='helper' and stale:body=body.replace('    std::optional<std::wstring> wire;','    static std::optional<std::wstring> wire;').replace('    bool wireReady = false;','    static bool wireReady = false;')
-  if k=='helper' and brokenRetry:body=body.replace('wireReady = n > 0 && written == n;','wireReady = true; (void)written;')
+  if k in ('helper','controller-generated') and stale:body=body.replace('    std::optional<std::wstring> wire;','    static std::optional<std::wstring> wire;').replace('    bool wireReady = false;','    static bool wireReady = false;')
+  if k in ('helper','controller-generated') and brokenRetry:body=body.replace('wireReady = n > 0 && written == n;','wireReady = true; (void)written;')
   chunks.append(body)
  return ('namespace '+name+' {\n#include "fixture_state.inc"\n'+'\n'.join(chunks)+'\n}\n').encode('utf-8')
 def run(args,cwd,out):
@@ -94,9 +112,14 @@ def run(args,cwd,out):
  out.write_bytes(p.stdout)
  if p.returncode:raise RuntimeError(str(out)+' exit '+str(p.returncode))
 def main():
- ap=argparse.ArgumentParser();ap.add_argument('--out',type=Path,required=True);ap.add_argument('--baseline',type=Path);ap.add_argument('--correctness-only',action='store_true');ap.add_argument('--negative-stale-cache',action='store_true');ap.add_argument('--negative-conversion-cache',action='store_true');ap.add_argument('--own-controller-envelope',action='store_true');args=ap.parse_args()
+ ap=argparse.ArgumentParser();ap.add_argument('--out',type=Path,required=True);ap.add_argument('--baseline',type=Path);ap.add_argument('--correctness-only',action='store_true');ap.add_argument('--negative-stale-cache',action='store_true');ap.add_argument('--negative-conversion-cache',action='store_true');ap.add_argument('--own-controller-envelope',action='store_true');ap.add_argument('--state-publication',action='store_true');ap.add_argument('--state-source',type=Path);ap.add_argument('--prepare-only',action='store_true');args=ap.parse_args()
+ if args.state_publication:
+  if args.negative_stale_cache or args.negative_conversion_cache or args.own_controller_envelope:ap.error('--state-publication cannot combine emitter variants')
+  from controller_snapshot_state_publication import run as run_state_publication
+  return run_state_publication(args,REPO)
+ if args.state_source or args.prepare_only:ap.error('--state-source/--prepare-only require --state-publication')
  path=REPO/'native/main.cpp';current=path.read_bytes();baseline=args.baseline.read_bytes() if args.baseline else current
- original={k:extract(baseline,k)['bytes'] for k in PATTERNS if args.own_controller_envelope or k!='helper'}
+ original=optional_parts(baseline,{k:extract(baseline,k)['bytes'] for k in PATTERNS if args.own_controller_envelope or k!='helper'})
  if args.own_controller_envelope:
   desired=dict(original);desired['owned-controller']=OWNED_CONTROLLER.encode('utf-8')
  else:desired=candidate_fragments(baseline)
@@ -124,6 +147,7 @@ def main():
  for profile in ['Release','Checked']:
   exe=out/(profile+'.exe');flags='/O2 /DNDEBUG /MT' if profile=='Release' else '/Od /D_DEBUG /MTd /Zi'
   if args.own_controller_envelope:flags+=' /DYMCC_CONTROLLER_OWNED_ENVELOPE'
+  if 'event-broadcast' in desired:flags+=' /DYMCC_GENERIC_EVENT_WIRE_REUSE'
   cmd='@echo off\ncall "'+str(vc)+'" >nul\nif errorlevel 1 exit /b %errorlevel%\ncl /nologo /std:c++20 /EHsc /W4 /WX /utf-8 /DWIN32_LEAN_AND_MEAN '+flags+' /I"'+str(REPO/'deps/json')+'" "'+str(out/'fixture.cpp')+'" /Fe:"'+str(exe)+'" /Fo:"'+str(out/(profile+'.obj'))+'"\n'
   bat=out/('build-'+profile+'.cmd');bat.write_text(cmd,encoding='utf-8')
   p=subprocess.run(['cmd.exe','/d','/c',str(bat)],cwd=out,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=240);(out/('compile-'+profile+'.log')).write_bytes(p.stdout)

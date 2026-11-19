@@ -13,6 +13,9 @@ function Get-NetTCPConnection {param($State,$LocalPort) @()}
 $backend=Join-Path $Out 'CssLoader-Standalone-Headless.exe';[IO.File]::WriteAllText($backend,'test placeholder; never executed')
 try{
  . (Join-Path $ComponentRoot 'steam-appearance.ps1') -Action Library -BackendPath $backend
+ # This is an offline profile fixture: consume the shared identity boundary
+ # explicitly instead of falling through to a live native channel.
+ function Get-AppearanceSteamSession {$null}
  # Library intentionally returns before defining the command dispatcher. Load
  # that exact function from the production AST, without replacing any logic.
  $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $ComponentRoot 'steam-appearance.ps1'),[ref]$tokens,[ref]$errors)
@@ -26,6 +29,13 @@ function New-AppearanceMutex([string]$Purpose) {
  New-Object Threading.Mutex($false,($script:AppearanceFixtureMutexPrefix+$Purpose))
 }
 function Get-BackendProcesses {if($script:Live){[pscustomobject]@{Id=42;Path=$script:BackendExe}}}
+ # The shared-inventory OS boundary replaced private Get-Process enumeration.
+ # This isolated profile has no Steam or competing backend candidates; its one
+ # in-memory backend remains supplied by Get-BackendProcesses above.
+ function Update-AppearanceProcessInventory {
+  $script:AppearanceProcessReceipt=[pscustomobject]@{rows=@();steamPid=[uint32]0;steamBirth='0'}
+  $script:AppearanceProcessReceipt
+ }
  function Test-BackendOwner {$script:Live}
  function Assert-SingleAppearanceBackend($Processes){if(@($Processes).Count -ne 1){throw "fixture instance identity"}}
  function Test-CssDesktopEditing {$script:Editing}
@@ -49,8 +59,13 @@ function Get-BackendProcesses {if($script:Live){[pscustomobject]@{Id=42;Path=$sc
    default {throw ('Unexpected fixture backend operation: '+$Method)}
   }
  }
- $currentPack=Join-Path $project 'PowerControl\steam-appearance'
+ $currentPack=Join-Path $ComponentRoot 'steam-appearance'
  $legacyPack=Join-Path $Out 'legacy-pack';Copy-Item -LiteralPath $currentPack -Destination $legacyPack -Recurse
+ $artHeroPath='themes\Art Hero\shared.css'
+ $currentArtHero=[IO.File]::ReadAllText((Join-Path $currentPack $artHeroPath))
+ $inactiveRule='(?s)\.gamepadhomerecentgames_RecentGamesBackgroundImage_3Mp8R\.gamepadhomerecentgames_OffScreen_Yk-I2\s*\{\s*opacity:\s*0!important;\s*\}'
+ if([regex]::Matches($currentArtHero,$inactiveRule).Count -ne 1){throw 'Current Art Hero inactive-background rule missing or ambiguous'}
+ [IO.File]::WriteAllText((Join-Path $legacyPack $artHeroPath),([regex]::Replace($currentArtHero,$inactiveRule,'')),(New-Object Text.UTF8Encoding($false)))
  $legacyCss="/* isolated previous package */`n.BasicUI .appdetails_Header_2gZXh{--ymcc-details-hero-height:min(70vh, calc(100vh - 12rem));}`n"
  [IO.File]::WriteAllText((Join-Path $legacyPack 'themes\YMCC Game Details\shared.css'),$legacyCss,(New-Object Text.UTF8Encoding($false)))
  $themePath=Join-Path $legacyPack 'themes\YMCC Game Details\theme.json';$theme=Get-Content -LiteralPath $themePath -Raw -Encoding UTF8|ConvertFrom-Json;$theme.version='v1.0.0';[IO.File]::WriteAllText($themePath,($theme|ConvertTo-Json -Depth 12),(New-Object Text.UTF8Encoding($false)))
@@ -86,8 +101,10 @@ function Get-BackendProcesses {if($script:Live){[pscustomobject]@{Id=42;Path=$sc
  New-Scenario 'replay'
  $before=Get-AppearanceStatus;$configs=@{};foreach($f in Get-ChildItem -LiteralPath $script:ThemeRoot -Filter config_USER.json -Recurse){$configs[$f.FullName]=(Get-ConfigHash $f.FullName)}
  Assert (!$before.packPrepared -and $before.packRepairRequired -and (Get-ConfigHash (Join-Path $script:ThemeRoot 'YMCC Game Details\shared.css')) -eq $legacy) 'Reproduce current package with a still-old owned CSSLoader user theme'
+ Assert (![regex]::IsMatch([IO.File]::ReadAllText((Join-Path $script:ThemeRoot 'Art Hero\shared.css')),$inactiveRule)) 'Reproduce stale Art Hero without the inactive-image rule in the owned theme directory'
  $result=Invoke-AppearanceControl 'Ensure'
  Assert ((Get-ConfigHash (Join-Path $script:ThemeRoot 'YMCC Game Details\shared.css')) -eq $expected) 'Ensure synchronizes current bundled CSS before existing backend reload'
+ Assert ((Get-ConfigHash (Join-Path $script:ThemeRoot 'Art Hero\shared.css')) -eq (Get-ConfigHash (Join-Path $currentPack $artHeroPath))) 'The same owned resource update installs the exact static-background selection repair'
  Assert ($result.ok -and $script:Reloads -eq 1 -and $script:Loads[0] -eq $expected) 'Backend rereads the new resource exactly once, without another process'
  Assert ((Get-ConfigHash (Join-Path $script:ThemeRoot 'Darken Unfocused Games\global.css')) -eq (Get-ConfigHash (Join-Path $currentPack 'themes\Darken Unfocused Games\global.css'))) 'Focus-highlight upgrade replaces the old whole-tile filter with current cover-only CSS'
  $focusConfig=Get-Content -LiteralPath (Join-Path $script:ThemeRoot 'Darken Unfocused Games\config_USER.json') -Raw|ConvertFrom-Json
@@ -131,6 +148,15 @@ function Get-BackendProcesses {if($script:Live){[pscustomobject]@{Id=42;Path=$sc
   Assert (!$invalid.packAvailable -and $invalid.packError -and (Same $baseline (Hashes $script:ThemeRoot)) -and $script:Reloads -eq 0) 'Invalid new package is reported without replacing current themes or claiming an upgrade'
   New-Scenario 'same-package';$script:Live=$false;Invoke-PresetPrepare $false (Get-AppearanceStatus).revision|Out-Null;Complete-PresetReload;$script:Live=$true;$script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}})
   $target=Join-Path $script:ThemeRoot 'YMCC Game Details\shared.css';$focus=Join-Path $script:ThemeRoot 'Darken Unfocused Games\global.css';$meta=Join-Path $script:ThemeRoot 'Darken Unfocused Games\theme.json'
+  $before=(Get-Item -LiteralPath $target);$mtime=$before.LastWriteTimeUtc;$created=$before.CreationTimeUtc;$attrs=$before.Attributes;$length=$before.Length
+  $originalBytes=[IO.File]::ReadAllBytes($target);$editedBytes=[byte[]]$originalBytes.Clone();$editedBytes[$editedBytes.Length-1]=$editedBytes[$editedBytes.Length-1] -bxor 1
+  try {
+   [IO.File]::WriteAllBytes($target,$editedBytes);[IO.File]::SetLastWriteTimeUtc($target,$mtime)
+   $after=Get-Item -LiteralPath $target
+   Assert ($after.Length -eq $length -and $after.LastWriteTimeUtc -eq $mtime -and $after.CreationTimeUtc -eq $created -and $after.Attributes -eq $attrs) 'Store fixture changes bytes without changing the resource stamp'
+   $sameStamp=Invoke-AppearanceControl 'Status'
+   Assert ($sameStamp.snapshot.packRepairRequired -and !$sameStamp.snapshot.packPrepared -and (Get-ConfigHash $target) -ne $expected -and $script:Reloads -eq 0) 'Status detects same-stamp managed resource replacement without writing or reloading'
+  }finally{[IO.File]::WriteAllBytes($target,$originalBytes);[IO.File]::SetLastWriteTimeUtc($target,$mtime)}
   [IO.File]::WriteAllText($target,'/* shop replaced managed details CSS */');[IO.File]::WriteAllText($focus,'.BasicUI .appportrait_LibraryItemBox_WYgDg{filter:brightness(.5)}')
   $shopMeta=Get-Content -LiteralPath $meta -Raw -Encoding UTF8|ConvertFrom-Json;$shopMeta.version='v9999.0-store';Write-ConfigAtomic $meta ($shopMeta|ConvertTo-Json -Depth 16)
   $configsBefore=@{};foreach($f in Get-ChildItem -LiteralPath $script:ThemeRoot -Filter config_USER.json -Recurse){$configsBefore[$f.FullName]=(Get-ConfigHash $f.FullName)}

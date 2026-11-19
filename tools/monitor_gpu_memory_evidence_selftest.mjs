@@ -1,5 +1,6 @@
 // Offline native parser and actual high-frequency recorder; no hardware reads.
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';
+import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
 const root=process.cwd(),task=path.resolve(process.env.YMCC_GPU_MEMORY_EVIDENCE_OUT||'../../../Build/Tasks/YMCC-Steam-HUD-Probe/amd-vram-three-machine-20261016'),out=task+'/evidence';fs.mkdirSync(out,{recursive:true});
 // Regenerate the current native parser/publisher fixture; a retained historical
 // generated file must not silently test a different production revision.
@@ -28,8 +29,8 @@ static bool domainLogEnabled(const char*){return detailOn;}
 static std::string nativeLifecycleTimestamp(){return "2026-10-16T10:00:00.000";}
 struct EvidenceState {
  ymcc::monitordetail::Queue queue;
- EvidenceState():queue({[]{return detailOn;},[](auto f){jobs.push_back(std::move(f));return true;},[](auto line){saved.emplace_back(line);return true;},[]{},[]{}}){}
- json stats()const{return queue.stats();}
+ EvidenceState():queue({[]{return detailOn;},[](auto f){jobs.push_back(std::move(f));return true;},[](auto line){saved.emplace_back(line);return true;},[]{return true;},[]{}}){}
+ json stats(bool includeLimits=true)const{return queue.stats(includeLimits);}
 };
 static EvidenceState& monitorDetailState(){static EvidenceState s;return s;}
 #define GetTickCount64() detailTick
@@ -138,6 +139,7 @@ int main(int argc,char**argv){assert(argc==2);json checks=json::array(),examples
  check("same-second retries do not copy or serialize diagnostic evidence",cacheReads==1&&jobs.size()==1);
  auto job=std::move(jobs.front());jobs.clear();job();const auto row=json::parse(saved.back());
  check("actual recorder routes memory proof to the high-frequency record",row["event"]=="monitor-data-snapshot"&&row["lane"]=="high-frequency"&&row["gpuMemoryEvidence"]==e);
+ check("record uses compact counter schema; availability can still read limits",row["schemaVersion"]==2&&row["diagnosticCounters"].contains("accepted")&&!row["diagnosticCounters"].contains("queueMaxBytes")&&monitorDetailState().stats()["queueMaxBytes"]==256*1024);
  check("diagnostic evidence never enters the HUD/cache payload",row["snapshot"]["top"]==detailCache["top"]&&!json::parse(row["snapshot"]["top"].get<std::string>()).contains("d3dDedicatedUsedMb"));
  check("evidence and full record remain well inside existing byte caps",e.dump().size()<2048&&saved.back().size()+1<=32768);
  check("logging never calls another capacity reader",row["gpuMemoryEvidence"]["capacityQueried"]==false&&row["gpuMemoryEvidence"]["source"]=="existing-hwinfo-row-pass");
@@ -150,5 +152,5 @@ int main(int argc,char**argv){assert(argc==2);json checks=json::array(),examples
  json result={{"ok",failures==0},{"checks",checks},{"examples",examples},{"recordBytes",saved.back().size()+1},{"evidenceBytes",e.dump().size()},{"hardwareReads",false},{"newThreads",false},{"newPollingTimers",false}};std::ofstream(argv[1])<<result.dump(2);std::cout<<"GPU memory diagnostic: "<<checks.size()<<" checks, "<<failures<<" failed\n";return failures?2:0;
 }
 `;
-fs.writeFileSync(out+'/evidence.cpp',prefix+harness+'\n'+directCapture+'\n'+hook+'\n'+tests);fs.writeFileSync(out+'/build.cmd',`@echo off\r\ncall "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat" >nul\r\ncl /nologo /std:c++20 /utf-8 /EHsc /W4 "${out}/evidence.cpp" /Fo"${out}/evidence.obj" /Fe"${out}/evidence.exe"\r\nif errorlevel 1 exit /b 1\r\n"${out}/evidence.exe" "${task}/EVIDENCE-RESULT.json"\r\nexit /b %errorlevel%\r\n`);
+fs.writeFileSync(out+'/evidence.cpp',prefix+harness+'\n'+directCapture+'\n'+hook+'\n'+tests);fs.writeFileSync(out+'/build.cmd',calibrationToolchainPreamble('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat')+`cl /nologo /std:c++20 /utf-8 /EHsc /W4 "${out}/evidence.cpp" /Fo"${out}/evidence.obj" /Fe"${out}/evidence.exe"\r\nif errorlevel 1 exit /b 1\r\n"${out}/evidence.exe" "${task}/EVIDENCE-RESULT.json"\r\nexit /b %errorlevel%\r\n`);
 const run=spawnSync('cmd.exe',['/d','/c',out+'/build.cmd'],{encoding:'utf8',windowsHide:true,timeout:45000,maxBuffer:3e6});fs.writeFileSync(out+'/BUILD.log',(run.stdout||'')+(run.stderr||''));console.log(((run.stdout||'')+(run.stderr||'')).slice(-4500));if(run.status!==0)process.exitCode=2;

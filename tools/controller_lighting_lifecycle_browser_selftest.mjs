@@ -6,15 +6,17 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 const repo=process.cwd(),args=process.argv.slice(2),outputArg=args.shift(),requestedColorCaseIds=[];
 assert(typeof outputArg==='string'&&outputArg.trim()&&!outputArg.startsWith('--'),'A fresh evidence directory is required');
-let componentSource;
+let componentSource,ownershipOnly=false;
 for(let i=0;i<args.length;i++){
  const option=args[i];
+ if(option==='--ownership-only'){assert(!ownershipOnly,'Repeated ownership selection');ownershipOnly=true;continue;}
  assert(option==='--component-source'||option==='--color-case','Unsupported argument: '+option);
  const value=args[++i];
  assert(typeof value==='string'&&value.trim()&&!value.startsWith('--'),'Missing or empty value: '+option);
  if(option==='--component-source'){assert(componentSource===undefined,'Duplicate --component-source');componentSource=value;}
  else{assert(!requestedColorCaseIds.includes(value),'Duplicate --color-case: '+value);requestedColorCaseIds.push(value);}
 }
+assert(!ownershipOnly||requestedColorCaseIds.length===0,'Ownership and color selections are mutually exclusive');
 // Expand the original admitted catalog row/effect/height cases before any output or browser execution.
 const catalogPath=path.join(repo,'capabilities/hc-device-catalog.json'),catalogBefore=fs.readFileSync(catalogPath);
 const lightingCatalog=JSON.parse(catalogBefore.toString('utf8').replace(/^\uFEFF/,''));
@@ -29,6 +31,9 @@ assert(!out.startsWith(repo+path.sep)&&!fs.existsSync(out),'Use a fresh evidence
 fs.mkdirSync(out,{recursive:true});
 const component=componentSource===undefined?path.join(repo,'src/components/ControllerFeedbackCapabilitiesCard.vue'):path.resolve(componentSource);
 const sourceBefore=fs.readFileSync(component),hash=b=>crypto.createHash('sha256').update(b).digest('hex');
+const sourceClosure=['src/components/ControllerFeedbackCapabilitiesCard.vue','src/components/Dropdown.vue','src/components/Slider.vue','src/components/Toggle.vue','src/components/InlineIcon.vue','src/bridge/api.ts','src/gamepad/sliderRepeat.ts','src/gamepad/engine.ts','src/gamepad/focus.ts','src/gamepad/spatial.ts','src/gamepad/performanceNavigation.ts','src/styles/tokens.css','capabilities/hc-device-catalog.json','tools/controller_lighting_operations_browser_selftest.mjs','tools/controller_lighting_lifecycle_browser_selftest.mjs'];
+const sourceHashes=Object.fromEntries(sourceClosure.map(p=>[p,hash(fs.readFileSync(path.join(repo,p)))]));
+
 let script=fs.readFileSync(path.join(repo,'tools/controller_lighting_operations_browser_selftest.mjs'),'utf8');
 const replace=(before,after)=>{assert(script.includes(before),'Baseline fixture changed: '+before);script=script.replace(before,after)};
 replace("const {build}=req('esbuild')","const {build,stop}=req('esbuild')");
@@ -48,7 +53,7 @@ const ipcMemory=String.raw`export async function invoke(cmd,args={},options={}){
   if(window.__deferCaps)return await new Promise(resolve=>window.__pendingCaps.push(()=>resolve(result)));
   return result;
  }
- if(cmd==='gamepad.setLed'){window.f.applies.push(structuredClone(args));return {ok:true}}
+ if(cmd==='gamepad.setLed'){window.f.applies.push(structuredClone(args));(window.__ownershipLedger??=[]).push({op:'apply',args:structuredClone(args)});return args.ownership==='oem'?(window.__ownershipReply??{ok:true,ownershipRequestCompleted:true,physicalEffectVerified:false}):{ok:true}}
  if(cmd==='gamepad.vibrate'){(window.__vibrations??=[]).push(args.strength);return {ok:true}}
  if(cmd==='clipboard.writeText')return {};
  throw Error('Unexpected actual API command: '+cmd);
@@ -57,6 +62,9 @@ replace('const bundle=await build(',
  `mocks['./ipc']=mocks['@/bridge/ipc']=${JSON.stringify(ipcMemory)};\n`+
  `mocks['@/bridge/api']=${JSON.stringify('export {gamepadFeedback} from '+JSON.stringify(apiPath)+';')};\n`+
  'const bundle=await build(');
+
+replace("async function saveSettingsSection(section,value){window.f.saved.push", "async function saveSettingsSection(section,value){if(window.__ownershipSaveFail)throw Error('memory durable-save refusal');if(window.__ownershipDeferSave)await new Promise(resolve=>window.__ownershipSavePending=resolve);(window.__ownershipLedger??=[]).push({op:'save',ownership:value.feedback.lighting.ownership});window.f.saved.push");
+replace('app=createApp({setup()',`if(window.__ownershipSetup){Object.assign(window.f.caps,window.__ownershipSetup.caps);Object.assign(window.f.settings.gamepad.feedback.lighting,window.__ownershipSetup.light)}app=createApp({setup()`);
 
 // Reuse the production navigation slice and its real geometry/focus helpers.
 const navigationInputs=['src/gamepad/engine.ts','src/gamepad/focus.ts','src/gamepad/spatial.ts','src/gamepad/performanceNavigation.ts'];
@@ -135,7 +143,7 @@ const colorTests=String.raw`
  }finally{if(directedColorCases)saveColorControls(true);}
  await page.evaluate(()=>{window.__lightingRow=undefined;window.unmount()});
 `;
-const tests=' const directedColorCases='+JSON.stringify(directedColorCases)+';\n const requestedColorCaseIds='+JSON.stringify(requestedColorCaseIds)+';\n const expectedColorCaseIds='+JSON.stringify(expectedColorCaseIds)+';\n'+colorTests.replace('LIGHTING_ROWS',JSON.stringify(lightingRows.map(({name,deviceClass,brightness,secondColor,declaredEffects,presetDeclared,presetAvailable,presets,fixedSpeed,presetSecondColor})=>({name,deviceClass,brightness,secondColor,declaredEffects,presetDeclared,presetAvailable,presets,fixedSpeed,presetSecondColor}))))+(directedColorCases?'':String.raw`
+const defaultTests=' const directedColorCases='+JSON.stringify(directedColorCases)+';\n const requestedColorCaseIds='+JSON.stringify(requestedColorCaseIds)+';\n const expectedColorCaseIds='+JSON.stringify(expectedColorCaseIds)+';\n'+colorTests.replace('LIGHTING_ROWS',JSON.stringify(lightingRows.map(({name,deviceClass,brightness,secondColor,declaredEffects,presetDeclared,presetAvailable,presets,fixedSpeed,presetSecondColor})=>({name,deviceClass,brightness,secondColor,declaredEffects,presetDeclared,presetAvailable,presets,fixedSpeed,presetSecondColor}))))+(directedColorCases?'':String.raw`
  const lifecycle=[];
  const record=(id,height,actual,expected)=>lifecycle.push({id:id+'-'+height,viewport:{width:1280,height},actual,expected,status:JSON.stringify(actual)===JSON.stringify(expected)?'PASS':'FAIL',hardwareIo:false});
  async function resetCase(options={}){
@@ -220,7 +228,44 @@ const tests=' const directedColorCases='+JSON.stringify(directedColorCases)+';\n
  fs.writeFileSync(path.join(out,'lifecycle-cases.json'),JSON.stringify({status:lifecycle.every(c=>c.status==='PASS')?'PASS':'FAIL',caseCount:lifecycle.length,failedCount:lifecycle.filter(c=>c.status==='FAIL').length,cases:lifecycle,hardwareIo:false,consumer:'actual Vue component lifecycle -> settings/debounce -> gamepadFeedback.setLed memory boundary'},null,2));
  assert.equal(lifecycle.filter(c=>c.status==='FAIL').length,0,'leaving lighting controls must revoke queued and pending initialization writes');
 `);
-if(directedColorCases){
+
+const ownershipRows=lightingCatalog.domains.lighting.oemOwnership.filter(row=>['hc.device.AYANEOAIR','hc.device.AYANEOAIR1S','hc.device.AYANEOAIRPlusAMD','hc.device.AYANEOSlide'].includes(row.deviceId));
+assert.equal(ownershipRows.length,4,'Exact catalog ownership representatives');
+const ownershipTests=String.raw`
+ const requestedColorCaseIds=[],expectedColorCaseIds=[],actualColorCaseIds=[];
+ const ownershipRows=OWNERSHIP_ROWS,ownershipCases=[];
+ const mountOwnership=async(setup)=>{await page.evaluate(setup=>{window.unmount();window.__ownershipSetup=setup;window.__lightingRow=undefined;window.__useKeepAlive=true;window.__ownershipSaveFail=false;window.__ownershipDeferSave=false;window.__ownershipReply=undefined;window.__ownershipLedger=[];window.mount('mini')},setup);await page.waitForFunction(()=>!document.querySelector('.availability-chip')?.textContent?.includes('加载中'));await page.waitForFunction(()=>document.querySelectorAll('[role="listbox"]').length===0);};
+ const choose=async(label)=>{await page.locator('.ownership-field button').first().click();await page.getByRole('option',{name:label,exact:true}).click();};
+ const navOwnership=async()=>{const result=await page.evaluate(()=>{const nav=window.__lightingNavigation,nodes=nav.testFocusables();const choice=document.querySelector('.ownership-field button');const edges=nodes.map(()=>[]);for(let i=0;i<nodes.length;i++)for(const [dx,dy]of [[-1,0],[1,0],[0,-1],[0,1]]){nav.testFocus(nodes[i]);nav.testMoveFocus(dx,dy);edges[i].push(nodes.indexOf(document.activeElement))}const reach=start=>{const seen=new Set([start]),todo=[start];while(todo.length)for(const next of edges[todo.shift()])if(next>=0&&!seen.has(next)){seen.add(next);todo.push(next)}return seen};const at=nodes.indexOf(choice);return{present:at>=0,reachable:at>=0&&nodes.every((_,i)=>reach(i).has(at)),returnable:at>=0&&reach(at).size===nodes.length,hiddenExcluded:nodes.every(n=>!n.disabled&&!n.closest('[inert]')&&n.getClientRects().length>0),overflow:document.documentElement.scrollWidth>1280}});assert(result.present&&result.reachable&&result.returnable&&result.hiddenExcluded&&!result.overflow,JSON.stringify(result));return result;};
+ for(const height of [720,800]){
+  await page.setViewportSize({width:1280,height});
+  for(const row of ownershipRows){
+   const id=row.deviceId+'-'+height;
+   await mountOwnership({caps:{machineFamily:'ayanero',ledAvailable:true,oemRestoreAvailable:true,sharedChargeIndicatorDeclared:row.sharedChargeIndicatorDeclared,ledEffects:['solid'],brightnessAvailable:true},light:{enabled:true,ownership:'ymcc',mode:'solid',color:'#2ea6ff',color2:'#9d7cff',speed:55,brightness:65}});
+   await page.waitForFunction(()=>window.f.applies.length===1);await navOwnership();
+   await choose('原厂显示');await page.getByRole('status').filter({hasText:'归还请求已完成'}).waitFor();
+   const switched=await page.evaluate(()=>({applies:window.f.applies,ledger:window.__ownershipLedger,saved:window.f.saved.at(-1).value.feedback.lighting}));
+   assert.deepEqual(switched.applies.at(-1),{ownership:'oem'});assert.equal(switched.saved.ownership,'oem');assert.equal(switched.saved.color,'#2ea6ff');assert.equal(switched.ledger.at(-2).op,'save');assert.equal(switched.ledger.at(-1).op,'apply');
+   assert.equal(await page.locator('.effect-field,.color-field,.light-slider-grid,.light-switch').count(),0);await navOwnership();
+   assert.equal(await page.locator('.light-bubble').getByText('本机手册声明摇杆灯兼作充电显示。',{exact:false}).count(),row.sharedChargeIndicatorDeclared?1:0);
+   await page.locator('.ownership-field button').first().dispatchEvent('gp:dropdown-open',{bubbles:true,cancelable:true});await page.getByRole('listbox').waitFor();
+   assert(await page.evaluate(()=>!window.dispatchEvent(new Event('ipc:gamepad-back',{cancelable:true}))));await page.getByRole('listbox').waitFor({state:'detached'});assert(await page.locator('.ownership-field button').first().evaluate(n=>document.activeElement===n));
+   assert.equal(await page.evaluate(()=>window.f.applies.length),2);await page.screenshot({path:path.join(out,id+'-oem.png'),fullPage:true});
+   await choose('YMCC 灯效');await page.waitForFunction(()=>window.f.applies.length===3);const custom=await page.evaluate(()=>window.f.applies.at(-1));assert.equal(custom.color,'#2ea6ff');assert.equal(custom.color2,'#9d7cff');assert.equal(custom.brightness,65);await navOwnership();
+   await page.evaluate(()=>window.__ownershipSaveFail=true);await choose('原厂显示');await page.getByRole('status').filter({hasText:'灯光来源保存失败'}).waitFor();assert.equal(await page.evaluate(()=>window.f.applies.length),3);assert.match(await page.locator('.ownership-field button').first().textContent(),/YMCC/);
+   await page.evaluate(()=>{window.__ownershipSaveFail=false;window.__ownershipReply={ok:false,reason:'light-setter-oem-ownership-receipt-mismatch'}});await choose('原厂显示');await page.getByRole('status').filter({hasText:'原厂灯光归还未完成'}).waitFor();assert.equal(await page.evaluate(()=>window.f.applies.length),4);
+   await mountOwnership({caps:{machineFamily:'ayanero',oemRestoreAvailable:true,ledAvailable:true,sharedChargeIndicatorDeclared:row.sharedChargeIndicatorDeclared},light:{ownership:'oem',enabled:true}});await page.locator('.ownership-field').waitFor();await page.waitForTimeout(300);assert.equal(await page.evaluate(()=>window.f.applies.length),0,'Mount cannot reissue OEM release');await page.evaluate(()=>window.hideCard());await page.waitForTimeout(20);await page.evaluate(()=>window.showCard());await page.locator('.ownership-field').waitFor();await page.waitForTimeout(300);assert.equal(await page.evaluate(()=>window.f.applies.length),0,'KeepAlive cannot reissue OEM release');
+   ownershipCases.push(id);cases.push('ownership:'+id);
+  }
+  await mountOwnership({caps:{machineFamily:'ayanero',ledAvailable:true,oemRestoreAvailable:false},light:{ownership:'oem',enabled:true}});await page.getByRole('status').filter({hasText:'暂无经确认的原厂灯光归还通路'}).waitFor();assert.equal(await page.evaluate(()=>window.f.applies.length),0);await page.locator('.ownership-field button').first().click();assert.equal(await page.getByRole('option',{name:'原厂显示',exact:true}).getAttribute('aria-disabled'),'true');await page.getByRole('option',{name:'YMCC 灯效',exact:true}).click();await page.waitForFunction(()=>window.f.applies.length===1);ownershipCases.push('unsupported-'+height);cases.push('ownership:unsupported-'+height);
+  await mountOwnership({caps:{machineFamily:'asus-rog-ally',ledAvailable:true,oemRestoreAvailable:false},light:{ownership:'oem',enabled:true}});await page.waitForFunction(()=>window.f.applies.length===1);assert.equal(await page.locator('.ownership-field').count(),0);assert.equal(await page.locator('.color-field').count(),1);assert.equal(await page.evaluate(()=>window.f.applies[0].ownership),undefined);ownershipCases.push('other-family-'+height);cases.push('ownership:other-family-'+height);
+ }
+ assert.deepEqual(ownershipCases,[720,800].flatMap(height=>[...ownershipRows.map(r=>r.deviceId+'-'+height),'unsupported-'+height,'other-family-'+height]));
+ await page.evaluate(()=>{window.__ownershipSetup=undefined;window.unmount()});
+` .replace('OWNERSHIP_ROWS',JSON.stringify(ownershipRows));
+const tests=ownershipOnly?ownershipTests:defaultTests;
+
+if(directedColorCases||ownershipOnly){
  replace(";window.mount('onex');",';');
  const start=script.indexOf(" await page.locator('.preset-field').waitFor();"),end=script.indexOf(' assert.deepEqual(errors,[]);',start);
  assert(start>=0&&end>start,'Baseline operation scenario boundary changed');
@@ -235,7 +280,7 @@ const probe=path.join(out,'browser-probe.mjs');fs.writeFileSync(probe,script,{fl
 const child=spawnSync(process.execPath,[probe,out],{cwd:repo,encoding:'utf8',timeout:90000,windowsHide:true,maxBuffer:2<<20});
 fs.writeFileSync(path.join(out,'stdout.log'),child.stdout??'',{flag:'wx'});fs.writeFileSync(path.join(out,'stderr.log'),child.stderr??'',{flag:'wx'});
 const colorReceiptPath=path.join(out,'catalog-color-controls.json'),colorCaseSelection=fs.existsSync(colorReceiptPath)?JSON.parse(fs.readFileSync(colorReceiptPath,'utf8')).selection:null;
-const stable=hash(fs.readFileSync(component))===hash(sourceBefore)&&hash(fs.readFileSync(apiPath))===hash(apiBefore)&&hash(fs.readFileSync(catalogPath))===hash(catalogBefore)&&navigationInputs.every(p=>hash(fs.readFileSync(path.join(repo,p)))===navigationBefore[p]);
-fs.writeFileSync(path.join(out,'summary.json'),JSON.stringify({allPassed:child.status===0&&stable,exit:child.status,signal:child.signal,error:child.error?.message,source:component,sourceSha256:hash(sourceBefore),apiSource:apiPath,apiSourceSha256:hash(apiBefore),sourceStable:stable,colorCaseSelection,fixtureBaselineSha256:hash(fs.readFileSync(path.join(repo,'tools/controller_lighting_operations_browser_selftest.mjs'))),hardwareIo:false,installedApplicationStarted:false,scope:'Real Vue/controls and production API wrappers at 1280x720 and 1280x800; only IPC/settings are in memory; no native/physical device acceptance'},null,2),{flag:'wx'});
+const stable=sourceClosure.every(p=>hash(fs.readFileSync(path.join(repo,p)))===sourceHashes[p])&&hash(fs.readFileSync(component))===hash(sourceBefore)&&hash(fs.readFileSync(apiPath))===hash(apiBefore)&&hash(fs.readFileSync(catalogPath))===hash(catalogBefore)&&navigationInputs.every(p=>hash(fs.readFileSync(path.join(repo,p)))===navigationBefore[p]);
+fs.writeFileSync(path.join(out,'summary.json'),JSON.stringify({allPassed:child.status===0&&stable,ownershipOnly,fullUiAccepted:false,sourceHashes,exit:child.status,signal:child.signal,error:child.error?.message,source:component,sourceSha256:hash(sourceBefore),apiSource:apiPath,apiSourceSha256:hash(apiBefore),sourceStable:stable,colorCaseSelection,fixtureBaselineSha256:hash(fs.readFileSync(path.join(repo,'tools/controller_lighting_operations_browser_selftest.mjs'))),hardwareIo:false,installedApplicationStarted:false,scope:'Real Vue/controls and production API wrappers at 1280x720 and 1280x800; only IPC/settings are in memory; no native/physical device acceptance'},null,2),{flag:'wx'});
 console.log('LIGHTING_LIFECYCLE',child.status===0&&stable?'PASS':'FAIL','evidence='+out);
 if(child.status!==0||!stable)process.exitCode=1;

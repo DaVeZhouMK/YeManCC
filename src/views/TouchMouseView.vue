@@ -6,11 +6,12 @@ import IntegratedPage from '@/components/IntegratedPage.vue';
 import AppIcon from '@/components/AppIcon.vue';
 import ControllerShortcutsCard from '@/components/ControllerShortcutsCard.vue';
 import ScreenTouchpadsSettings from '@/components/ScreenTouchpadsSettings.vue';
+import CustomTouchSettings from '@/components/CustomTouchSettings.vue';
 import {useInputShortcutRuntime} from '@/bridge/inputShortcutRuntimeState';
 import {CONTROLLER_PERSONA_OPTIONS} from '@/bridge/controllerPersona';
 import {focusGamepadElement} from '@/gamepad/focus';
 const runtime=useInputShortcutRuntime();
-type Section='mouse'|'touch';
+type Section='mouse'|'touch'|'custom';
 const section=ref<Section>('mouse'),root=ref<HTMLElement|null>(null);
 const persona=computed(()=>runtime.value?.virtualEnabled?runtime.value.persona:'disabled');
 const steamDeckActive=computed(()=>runtime.value?.virtualEnabled===true&&runtime.value.persona==='steamdeck');
@@ -34,8 +35,10 @@ onBeforeUnmount(()=>window.removeEventListener('ipc:gamepad-back',back));
       <nav class="touch-mouse-tabs" aria-label="触控鼠标分区">
         <button type="button" data-touch-mouse-section="mouse" :aria-pressed="section==='mouse'" @click="select('mouse')"><AppIcon name="mouse-solid"/>鼠标</button>
         <button type="button" data-touch-mouse-section="touch" :aria-pressed="section==='touch'" @click="select('touch')"><AppIcon name="touch-steam"/>触控</button>
+        <button type="button" data-touch-mouse-section="custom" :aria-pressed="section==='custom'" @click="select('custom')"><AppIcon name="custom-touch"/>自定义触控</button>
       </nav>
       <ControllerShortcutsCard v-if="section==='mouse'" mouse-settings-only :persona="persona" :steam-deck-active="steamDeckActive" :disabled="!runtime" />
+      <CustomTouchSettings v-else-if="section==='custom'"/>
       <section v-else class="card touch-mouse-touch-card" aria-label="屏幕触控板设置"><ScreenTouchpadsSettings :key="persona" :persona="persona" :steam-deck-enabled="steamDeckActive" :ps5-enabled="ps5Active" :disabled="!runtime" /></section>
     </div>
   </IntegratedPage>
@@ -47,7 +50,7 @@ onBeforeUnmount(()=>window.removeEventListener('ipc:gamepad-back',back));
 .touch-mouse-header h1 .app-icon{font-size:20px;color:#eef0f2}
 .touch-mouse-persona{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:4px 8px;border:1px solid var(--touch-mouse-line);border-radius:7px;background:var(--console-surface-alt);font-size:13px;color:var(--text);white-space:nowrap}
 .touch-mouse-persona .app-icon{font-size:15px;color:var(--accent)}
-.touch-mouse-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-width:0}
+.touch-mouse-tabs{display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:6px;min-width:0}
 .touch-mouse-tabs button{display:flex;align-items:center;justify-content:center;gap:6px;height:39px;min-width:0;padding:6px 5px;border:1px solid var(--touch-mouse-line);border-radius:9px;background:var(--console-surface-alt);color:var(--text-dim);font:inherit;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap}
 .touch-mouse-tabs .app-icon{font-size:17px}
 .touch-mouse-tabs button[aria-pressed=true]{color:var(--accent);background:var(--accent-surface);border-color:var(--accent);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}

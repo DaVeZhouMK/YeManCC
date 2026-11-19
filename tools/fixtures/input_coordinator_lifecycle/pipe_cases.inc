@@ -1,5 +1,12 @@
 // Included after full production TU and existing fixture observations.
 // Real owned child/process/pipe ends; original SDK/PnP boundaries stay fake.
+// Immutable observations of actual CreateProcess results, not fake death/ownership.
+struct FullPipePrivateChild {
+ std::uint64_t caseSerial=0;
+ ymcc::targetReturn::ProcessIdentity parent,host;
+ std::wstring receipt;
+};
+static std::vector<FullPipePrivateChild> fullPipePrivateChildren;
 static std::vector<HANDLE> fullPipeChildObservers;
 static std::vector<std::wstring> fullPipeReceipts;
 static bool fixturePsAutoReturnTopology(){
@@ -21,11 +28,122 @@ static std::wstring fullPipeQuote(const std::wstring& value){if(value.find_first
 static BOOL fixtureCreateManagedProcess(STARTUPINFOW& si,PROCESS_INFORMATION& pi){
  if(fixtureManagedDll.empty())throw std::runtime_error("explicit-managed-fixture-required");
  const auto receipt=fspath::path(g_yemanccDataDir)/(L"full-pipe-child-"+std::to_wstring(++fullPipeSpawnCount)+L".json");
- const std::wstring dotnet=L"C:\\Program Files\\dotnet\\dotnet.exe";
+ wchar_t selectedDotnet[32768]{};const auto selectedLength=GetEnvironmentVariableW(L"YMCC_FIXTURE_DOTNET",selectedDotnet,32768);
+ if(selectedLength>=32768)throw std::runtime_error("fixture-dotnet-path-too-long");
+ const std::wstring dotnet=selectedLength?selectedDotnet:L"C:\\Program Files\\dotnet\\dotnet.exe";
  std::wstring command=fullPipeQuote(dotnet)+L" "+fullPipeQuote(fixtureManagedDll)+L" --pipe "+fullPipeQuote(g_inputHostPipeName)+L" --parent-pid "+std::to_wstring(GetCurrentProcessId())+L" --receipt "+fullPipeQuote(receipt.wstring())+L" --nonce "+fullPipeQuote(U2W(g_inputHostStartupNonce))+L" --fault "+U2W(fullPipeFault);
  if(!CreateProcessW(dotnet.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi))return FALSE;
  HANDLE observation=nullptr;if(!DuplicateHandle(GetCurrentProcess(),pi.hProcess,GetCurrentProcess(),&observation,0,FALSE,DUPLICATE_SAME_ACCESS))throw std::runtime_error("private-child-observer-duplicate");
- fullPipeChildObservers.push_back(observation);fullPipeReceipts.push_back(receipt.wstring());return TRUE;
+ fullPipeChildObservers.push_back(observation);fullPipeReceipts.push_back(receipt.wstring());
+ const auto privateParent=ymcc::targetReturn::process::capture(GetCurrentProcess());
+ const auto privateHost=ymcc::targetReturn::process::capture(pi.hProcess);
+ if(!privateParent||!privateHost||privateHost->pid==GetCurrentProcessId()||
+    privateHost->pid!=pi.dwProcessId||GetProcessId(observation)!=privateHost->pid)
+  throw std::logic_error("full-pipe-created-child-identity-unproven");
+ fullPipePrivateChildren.push_back({fixtureTargetReturnCaseSerial,*privateParent,*privateHost,receipt.wstring()});
+ // This OS leaf observes the actual newly created process before Start can
+ // lose PREPARE's reply and enter its real return path. Only the current
+ // serialized recovery successor replaces the already-settled old observer;
+ // its PID, birth and handle all come from the successful CreateProcess call.
+ // No Session duty, native owner, exit status or target-absence proof is set.
+ if(fixtureRuntimeRecoveryOsEnabled && ymcc::inputHost::runtimeRecovery::state.launching){
+  const auto owner=inputHostTargetReturnCaptureOwner(pi.hProcess);
+  if(!owner)throw std::logic_error("successor-process-owner-not-observed");
+  fixtureRuntimeRecoveryOldHost=observation;fixtureRuntimeRecoveryOldOwner=owner;
+  fixtureRuntimeRecoveryOsObservations.push_back({{"leaf","actual-successor-created"},
+   {"pid",owner->pid},{"birth",owner->creationTime},{"nativeParentDeclaredDead",false},
+   {"runtimeRequest",ymcc::inputHost::runtimeRecovery::state.recoveryRequestId}});
+ }
+ return TRUE;
+}
+// Only this case's actual child is eligible. No parent, peer PID or invented key.
+static const FullPipePrivateChild* fullPipePrivateChild(const ymcc::targetReturn::ProcessIdentity& owner){
+ if(!fixtureFullPipe||owner.pid==GetCurrentProcessId())return nullptr;
+ const auto parent=ymcc::targetReturn::process::capture(GetCurrentProcess());
+ if(!parent)return nullptr;
+ for(const auto& entry:fullPipePrivateChildren){
+  if(entry.caseSerial!=fixtureTargetReturnCaseSerial||
+     !ymcc::targetReturn::detail::sameProcess(entry.parent,*parent)||
+     !ymcc::targetReturn::detail::sameProcess(entry.host,owner))continue;
+  if(normalizeWindowsPathForCompare(fspath::path(entry.receipt).parent_path().wstring())!=
+     normalizeWindowsPathForCompare(g_yemanccDataDir))return nullptr;
+  return &entry;
+ }
+ return nullptr;
+}
+static ymcc::targetReturn::process::Probe fixtureFullPipeOwnedWriter(const ymcc::targetReturn::ProcessIdentity& owner){
+ if(!fullPipePrivateChild(owner)){
+  ++forbiddenIo;throw std::logic_error("ordinary-full-pipe-writer-not-private-created-child");
+ }
+ // Original exact PID/birth handle probe. No system-process census/fake Dead.
+ const auto result=ymcc::targetReturn::process::probeRecordedOwnerHandle(owner);
+ cases.back()["ordinaryReturnOs"].push_back({{"leaf","exact-factory-child-process-probe"},
+  {"pid",owner.pid},{"birth",owner.creationTime},
+  {"state",ymcc::targetReturn::process::stateName(result.state)},
+  {"reason",ymcc::targetReturn::process::reasonName(result.reason)},
+  {"win32Error",result.win32Error},{"wholeSystemCensus",false},{"fakeDead",false}});
+ return result;
+}
+static ymcc::targetReturn::pnpAbsence::Result fixtureFullPipeTargetAbsence(const std::vector<std::string>& knownIds){
+ namespace proof=ymcc::targetReturn::pnpAbsence;
+ if(!fixtureFullPipe||!g_inputHostMx.ownedByCurrentThread()){
+  ++forbiddenIo;throw std::logic_error("ordinary-full-pipe-census-without-original-owner");
+ }
+ // A closed FIXTURE scene: one actual factory child, one accepted durable SD
+ // origin, and the EXISTING controlled MSI present-ID inventory. No host SDK
+ // success/failure or process death is converted into endpoint absence here.
+ bool closedScene=false,complete=false;std::set<std::string> present;
+ const auto& ledger=ymcc::inputHost::targetReturnRuntime::state;
+ const auto* record=ledger.session&&ledger.session->ready()?ledger.session->record():nullptr;
+ const auto childCount=std::count_if(fullPipePrivateChildren.begin(),fullPipePrivateChildren.end(),
+  [](const auto& item){return item.caseSerial==fixtureTargetReturnCaseSerial;});
+ if(childCount==1&&record&&record->obligations.size()==1&&ledger.targets.size()==1&&
+    g_msiSteamDeckReleaseDebt.required()&&!g_msiSteamDeckReleaseDebt.ownedTargets().empty()){
+  const auto& entry=ledger.targets.front();const auto& origin=entry.origin;const auto& duty=record->obligations.front();
+  closedScene=origin.runId==g_inputHostRunId&&origin.epoch==g_inputHostEpoch&&origin.persona=="steamdeck"&&
+   origin.targetId==kInputHostTargetId&&origin.physicalRoot.empty()&&fullPipePrivateChild(origin.host)&&
+   ymcc::targetReturn::sameOrigin(duty.origin,origin)&&duty.paths.empty()&&!duty.acceptedPsPin;
+ }
+ if(closedScene&&g_msiSdOwnedPnpSnapshotForTest){
+  const auto inventory=g_msiSdOwnedPnpSnapshotForTest();complete=inventory.first;present=inventory.second;
+ }
+ struct Reader {
+  struct Node{std::wstring id,hardware;};std::vector<Node> nodes;
+  bool complete=false;DWORD last=ERROR_SUCCESS;unsigned enums=0,properties=0,closes=0;
+  HDEVINFO getClassDevs(const GUID*,PCWSTR,HWND,DWORD flags){
+   if(flags!=(DIGCF_PRESENT|DIGCF_ALLCLASSES))throw std::logic_error("ordinary-full-pipe-census-flags");
+   return reinterpret_cast<HDEVINFO>(std::uintptr_t{0x46504338});
+  }
+  BOOL enumerate(HDEVINFO,DWORD index,PSP_DEVINFO_DATA info){
+   ++enums;if(index>=nodes.size()){last=complete?ERROR_NO_MORE_ITEMS:ERROR_NOT_READY;return FALSE;}
+   info->DevInst=index+1;return TRUE;
+  }
+  BOOL destroy(HDEVINFO){++closes;return TRUE;}
+  CONFIGRET deviceId(DEVINST node,PWCHAR out,ULONG chars,ULONG){
+   const auto& id=nodes.at(node-1).id;if(chars<=id.size())return CR_BUFFER_SMALL;
+   std::copy(id.begin(),id.end(),out);out[id.size()]=0;return CR_SUCCESS;
+  }
+  CONFIGRET hardwareIds(DEVINST node,const DEVPROPKEY*,DEVPROPTYPE* type,PBYTE out,PULONG bytes,ULONG){
+   ++properties;*type=DEVPROP_TYPE_STRING_LIST;auto value=nodes.at(node-1).hardware;
+   value.push_back(0);value.push_back(0);const auto size=static_cast<ULONG>(value.size()*sizeof(wchar_t));
+   if(*bytes<size){*bytes=size;return CR_BUFFER_SMALL;}
+   std::memcpy(out,value.data(),size);*bytes=size;return CR_SUCCESS;
+  }
+  DWORD error(){return last;}
+ } reader;
+ reader.complete=closedScene&&complete;
+ reader.nodes.push_back({L"ROOT\\YMCC_FULL_PIPE_FIXTURE\\UNRELATED",L"ROOT\\YMCC_FULL_PIPE_UNRELATED"});
+ for(const auto& id:present){const auto wide=U2W(id);const auto split=wide.find_last_of(L'\\');
+  reader.nodes.push_back({wide,split==std::wstring::npos?wide:wide.substr(0,split)});}
+ // Exact existing AllSupported reducer decides Unknown/Present/Absent.
+ const auto result=proof::verify(knownIds,reader);
+ cases.back()["ordinaryReturnOs"].push_back({{"leaf","closed-scene-existing-fake-PnP-inventory"},
+  {"closedScene",closedScene},{"inventoryComplete",complete},{"presentIds",present},
+  {"state",proof::stateName(result.state)},{"reason",proof::reasonName(result.reason)},
+  {"nodes",result.scannedNodes},{"enumerations",reader.enums},{"properties",reader.properties},
+  {"closes",reader.closes},{"systemDeviceEnumeration",false},{"sdkOutcomeUsedAsAbsence",false}});
+ if(reader.closes!=1)throw std::logic_error("ordinary-full-pipe-census-owned-set-not-closed");
+ return result;
 }
 static json fullPipeChildOutcome(HANDLE exactChild=nullptr,const std::wstring& exactReceipt={}){
  if(fullPipeChildObservers.empty()||fullPipeReceipts.empty())throw std::logic_error("no-owned-managed-child-to-observe");
@@ -53,7 +171,43 @@ static void fullPipeQuarantineProbe(){
 static unsigned fullPipeRestoreCount(){return static_cast<unsigned>(std::count(g_startEntrySeam.trace.begin(),g_startEntrySeam.trace.end(),"hidhide-restore:quarantine-endpoint-absent"));}
 // Execute the current production submit consumer; the sample is a controlled
 // physical-read endpoint, while serialization, receipt and Host transport are real.
-static InputCaptureGamepadSnapshot fullPipeReadNow(int family){static std::uint64_t attempt=0;InputCaptureGamepadSnapshot v;v.live=true;v.inputSource=family?"xinput":"msi-dinput";v.connectedMask=family?1:0;v.readAttemptSequence=++attempt;v.readStartedTick=v.readCompletedTick=GetTickCount64();v.readPowerGeneration=currentPowerGeneration();v.readTopologyGeneration=g_xinputTopologyEpoch.load();v.readIdentityGeneration=g_xinputSlotIdentityEpoch.load();v.readMsiSourceRevision=g_msiMainSourceRevision.load();v.readMsiModeGeneration=g_msiFeedbackModeGeneration.load();v.readContextStable=true;return v;}
+static InputCaptureGamepadSnapshot fullPipeReadNow(int family){
+ static std::uint64_t attempt=0;
+ ymcc::sleeppower::SharedPowerV1 before,after;
+ const bool capturedBefore=ymcc::inputHost::sharedPower::capture(&readSharedSystemPower,sgShouldKeepInputDuringStandby(),before);
+ InputCaptureGamepadSnapshot v;v.readStartedTick=GetTickCount64();
+ v.live=true;v.inputSource=family?"xinput":"msi-dinput";v.connectedMask=family?1:0;
+ v.readAttemptSequence=++attempt;v.readPowerGeneration=capturedBefore?before.generation:0;
+ v.readTopologyGeneration=g_xinputTopologyEpoch.load();v.readIdentityGeneration=g_xinputSlotIdentityEpoch.load();
+ v.readMsiSourceRevision=g_msiMainSourceRevision.load();v.readMsiModeGeneration=g_msiFeedbackModeGeneration.load();
+ v.readCompletedTick=GetTickCount64();
+ const bool capturedAfter=ymcc::inputHost::sharedPower::capture(&readSharedSystemPower,sgShouldKeepInputDuringStandby(),after);
+ v.sharedPower=capturedBefore?before:ymcc::sleeppower::SharedPowerV1{};
+ v.readContextStable=capturedBefore&&capturedAfter&&ymcc::sleeppower::samePowerObservation(before,after)&&
+  ymcc::inputHost::sharedPower::current(&readSharedSystemPower,before,sgShouldKeepInputDuringStandby())&&
+  v.readPowerGeneration==currentPowerGeneration()&&v.readTopologyGeneration==g_xinputTopologyEpoch.load()&&
+  v.readIdentityGeneration==g_xinputSlotIdentityEpoch.load()&&v.readMsiSourceRevision==g_msiMainSourceRevision.load()&&
+  v.readMsiModeGeneration==g_msiFeedbackModeGeneration.load();
+ return v;
+}
+// A controlled NEW read goes through the original public Reader and source
+// projection/continuity consumers before publishing the actual canonical mailbox.
+static InputCaptureGamepadSnapshot fullPipePublishCanonicalRead(int family){
+ auto sample=fullPipeReadNow(family);
+ if(!sample.readContextStable ||
+    !ymcc::inputHost::sharedPower::current(&readSharedSystemPower,sample.sharedPower,sgShouldKeepInputDuringStandby()))
+  throw std::logic_error("full-pipe-canonical-read-public-context-not-current");
+ std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);
+ const auto prior=inputHostRecoveryHealthSource(&g_inputCaptureGamepadSnapshot,true);
+ const auto observed=inputHostRecoveryHealthSource(&sample,true);
+ sample.readContinuityGeneration=ymcc::input::recoveryHealth::nextContinuity(prior,observed,GetTickCount64());
+ const auto projected=inputHostRecoveryHealthSource(&sample,true);
+ if(!projected.live||!projected.stable||!projected.incarnation||!projected.continuity||
+    !ymcc::input::recoveryHealth::fresh(projected,GetTickCount64(),currentPowerGeneration(),g_xinputTopologyEpoch.load()))
+  throw std::logic_error("full-pipe-canonical-read-source-not-current");
+ g_inputCaptureGamepadSnapshot=sample;
+ return sample;
+}
 static json fullPipeSubmitSource(InputCaptureGamepadSnapshot& v,bool admitted,bool neutral,bool boundSource=true){CommonFrameSourceScope scope(boundSource?&v:nullptr);return inputHostSubmitPad(admitted,v.pad,0,0,0,true,true,MotionContribution{},"right",0,0,v.pad,false,0,0,0,0,0,1,1,0,0,0,neutral,0);}
 // Repeated downstream requests must be idempotent even if an upstream caller
 // bypasses its UI busy state. This executes actual Start, transport ownership
@@ -117,13 +271,112 @@ static void fullPipeWaitForPlayerLock(const json& current,const json& next){
  if(!cases.back().contains("playerLockWaits"))cases.back()["playerLockWaits"]=json::array();
  cases.back()["playerLockWaits"].push_back({{"before",before},{"afterVerification",verified},{"after",fullPipeProtectionState()}});
 }
+static std::pair<unsigned,unsigned> fullPipeOffFinalCounts(std::uint64_t request);
 static void fullPipeCheckStopCandidate(std::uint64_t request,const char* outcome){
  const auto v=g_virtualStartProtection.view(startProtectionClock);const auto remaining=v.elapsedMs<fullPipeUserMaxMs?fullPipeUserMaxMs-v.elapsedMs:std::uint64_t{0};
+
+ using namespace ymcc::inputHost::switchVerificationRuntime;
+ const bool sourceWait=std::strcmp(outcome,"success")==0&&rogXboxSignalScope()&&
+  v.phase=="pending"&&rogOffSuccessReceipt.requestId==request;
+ if(sourceWait){
+  json cleanup;
+  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);cleanup=inputHostCleanupEvidenceLocked();}
+  check(v.requestId==request&&v.persona=="disabled"&&v.locked&&v.remainingMs==remaining&&
+   !v.verificationPending&&v.verificationRemainingMs==0&&v.candidateOutcome.empty()&&
+   cleanup.is_object()&&cleanup.contains("blockers")&&cleanup["blockers"].empty(),
+   "ROG local Stop retains one actual receipt without fabricating Tc or spending inspection before current source");
+  check(std::strcmp(rogOffSuccessReceipt.origin,"stop-terminal-result")==0&&
+   fullPipeOffFinalCounts(request)==std::make_pair(0u,0u),
+   "ROG pending execution keeps original Stop provenance and publishes no early final");
+ }else{
  check(v.requestId==request&&v.persona=="disabled"&&v.phase=="verifying"&&v.candidateOutcome==outcome&&v.verificationPending&&v.locked&&v.remainingMs==remaining&&v.verificationRemainingMs==fullPipeUserSettleMs,"actual stop reports only a candidate with its first ten-second verification inside the original thirty-second cap");
+ }
+
  if(!cases.back().contains("stopProtectionReceipts"))cases.back()["stopProtectionReceipts"]=json::array();
  cases.back()["stopProtectionReceipts"].push_back(fullPipeProtectionState());
 }
+static void fullPipeRogObserveReturnedSource(std::uint64_t request,bool stopOneMsBeforeFinal=false);
 #include "off_lifecycle_cases.inc"
+
+// Explicit returned-ROG positive observation, used only by cases that expect
+// source recovery. The negative missing-source cases never call this helper.
+// Run the existing physical-read leaf and original source/verifier consumers;
+// no debt, candidate, final, request, or source-lineage token is forced.
+static void fullPipeRogObserveReturnedSource(std::uint64_t request,bool stopOneMsBeforeFinal){
+ using namespace ymcc::inputHost::switchVerificationRuntime;
+ const auto before=g_virtualStartProtection.view(startProtectionClock);
+ if(!rogXboxSignalScope()||before.persona!="disabled"||before.requestId!=request)return;
+ const auto deadline=startProtectionClock+before.remainingMs;
+ check((before.phase=="pending"&&rogOffSuccessReceipt.requestId==request)||
+  (before.phase=="verifying"&&before.verificationPending),
+  "returned ROG positive observation starts from the exact pending receipt or existing Stop candidate");
+ check(!g_inputHostProcess&&!g_inputHostReleaseQuarantined&&!g_hidHideVisibilityJournal.active,
+  "returned ROG samples require actual old Host and visibility ownership already released");
+ // Normal Stop intentionally retires target-source admission. A new physical
+ // read is an OS-leaf observation, not permission to rearm a virtual writer.
+ const bool sourceWasLocked=g_xinputPhysicalSourceLocked;
+ const auto admittedBefore=g_xinputAdmittedMask,physicalBefore=g_xinputPhysicalSourceMask;
+ check(!g_realStickTest.virtualTargetEnabled&&inputHostConfiguredPersona()=="disabled",
+  "returned ROG physical-read observation keeps the actual player OFF intent");
+ json reads=json::array();
+ for(unsigned n=0;n<=4;++n){
+  if(n){startProtectionClock+=250;fixturePowerClockOffset+=250;}
+  auto sample=fullPipeReadNow(1);
+  {std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);
+   const auto prior=inputHostRecoveryHealthSource(&g_inputCaptureGamepadSnapshot,true);
+   sample.readContinuityGeneration=ymcc::input::recoveryHealth::nextContinuity(
+    prior,inputHostRecoveryHealthSource(&sample,true),GetTickCount64());
+   g_inputCaptureGamepadSnapshot=sample;
+  }
+  fullPipeVerificationStep();
+  reads.push_back({{"sequence",sample.readAttemptSequence},{"started",sample.readStartedTick},
+   {"completed",sample.readCompletedTick},{"power",sample.readPowerGeneration},
+   {"continuity",sample.readContinuityGeneration},{"protection",fullPipeProtectionState()}});
+  if(!n&&before.phase=="pending"){
+   check(g_virtualStartProtection.view(startProtectionClock).phase=="pending"&&
+    !g_virtualStartProtection.view(startProtectionClock).verificationPending,
+    "one fresh returned ROG read cannot fabricate the required advancing one-second source span");
+   fullPipeVerificationStep();
+   check(g_virtualStartProtection.view(startProtectionClock).phase=="pending",
+    "replaying one retained physical read cannot complete ROG execution-source proof");
+  }
+ }
+
+ const auto atSpan=g_virtualStartProtection.view(startProtectionClock);
+ check(atSpan.requestId==request&&atSpan.locked&&atSpan.phase=="verifying"&&atSpan.verificationPending&&
+  (before.phase!="pending"||(atSpan.candidateOutcome=="success"&&atSpan.verificationRemainingMs==fullPipeUserSettleMs))&&
+  startProtectionClock+atSpan.remainingMs==deadline&&fullPipeOffFinalCounts(request)==std::make_pair(0u,0u),
+  "advancing current ROG source proves execution inside the original cap without an early final");
+ // Maintain fresh controlled observations through the ORIGINAL inspection;
+ // jumping ten seconds with a stale retained read is not a healthy source.
+ for(unsigned n=0;n<40&&g_virtualStartProtection.view(startProtectionClock).locked;++n){
+  const auto remaining=g_virtualStartProtection.view(startProtectionClock).verificationRemainingMs;
+  const auto step=stopOneMsBeforeFinal&&remaining>1&&remaining<=250?remaining-1:250;
+  startProtectionClock+=step;fixturePowerClockOffset+=step;
+  auto sample=fullPipeReadNow(1);
+  {std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);
+   const auto prior=inputHostRecoveryHealthSource(&g_inputCaptureGamepadSnapshot,true);
+   sample.readContinuityGeneration=ymcc::input::recoveryHealth::nextContinuity(
+    prior,inputHostRecoveryHealthSource(&sample,true),GetTickCount64());g_inputCaptureGamepadSnapshot=sample;
+  }
+  fullPipeVerificationStep();
+  reads.push_back({{"sequence",sample.readAttemptSequence},{"completed",sample.readCompletedTick},
+   {"power",sample.readPowerGeneration},{"continuity",sample.readContinuityGeneration},{"protection",fullPipeProtectionState()}});
+  const auto observed=g_virtualStartProtection.view(startProtectionClock);
+  if(stopOneMsBeforeFinal&&observed.requestId==request&&observed.phase=="verifying"&&observed.locked&&observed.verificationRemainingMs==1){
+   cases.back()["returnedRogSourceReads"]=reads;return;
+  }
+ }
+ const auto final=g_virtualStartProtection.view(startProtectionClock);
+ check(final.requestId==request&&final.phase=="success"&&!final.locked&&
+  fullPipeOffFinalCounts(request)==std::make_pair(1u,0u),
+  "healthy advancing returned ROG reads pass the original inspection and produce exactly one OFF success");
+ check(g_xinputPhysicalSourceLocked==sourceWasLocked&&g_xinputAdmittedMask==admittedBefore&&
+  g_xinputPhysicalSourceMask==physicalBefore&&!g_realStickTest.virtualTargetEnabled&&!g_inputHostProcess,
+  "returned ROG read and verifier cannot forge target-source admission or resurrect OFF");
+ cases.back()["returnedRogSourceReads"]=reads;
+}
+
 
 static void fullPipeCurrentFrameCases(int family){
  const auto request=g_virtualStartProtection.view(startProtectionClock).requestId;json observations=json::array();
@@ -145,24 +398,62 @@ static void fullPipeCurrentFrameCases(int family){
 // Only wake hide/discovery diagnostic ends are controlled here. Actual wake
 // request/consume/queued-worker policy stays in the compiled production TU.
 struct FullPipeWakeIoScope{bool prior=fixtureWakeScenario;FullPipeWakeIoScope(){fixtureWakeScenario=true;}~FullPipeWakeIoScope(){fixtureWakeScenario=prior;}};
-static json fullPipeWakeKeptCase(unsigned long long generation,bool hideResult){
- const auto spawns=fullPipeSpawnCount,hideBefore=fixtureWakeHideCalls,excludedBefore=fixtureWakeVisibilityExclusions;const auto epoch=g_inputHostEpoch;const auto run=g_inputHostRunId;const auto process=GetProcessId(g_inputHostProcess);fixtureWakeHideResult=hideResult;
+static json fullPipeWakeKeptCase(unsigned long long generation,bool hideResult,int family){
+ namespace runtime=ymcc::inputHost::wakeExecutionRuntime;
+ const auto spawns=fullPipeSpawnCount,hideBefore=fixtureWakeHideCalls,excludedBefore=fixtureWakeVisibilityExclusions;
+ const auto epoch=g_inputHostEpoch;const auto run=g_inputHostRunId;const auto process=GetProcessId(g_inputHostProcess);
+ const auto recreateBefore=fullPipeRecreateCommands();const auto priorKept=g_wakeKeptTargetGeneration.load();fixtureWakeHideResult=hideResult;
  {FullPipeWakeIoScope io;const auto stale=inputHostWakeWorkReason(epoch+1,generation);check(inputHostQueueLifecycleWork(stale.c_str()),"stale epoch wake item enters actual owned lifecycle queue for rejection");fullPipeDrainQueuedLifecycle();}
  check(fixtureWakeHideCalls==hideBefore&&g_inputHostEpoch==epoch&&fullPipeSpawnCount==spawns,"stale queued Host epoch wake cannot hide or create another target");
- const bool msiNoSlotHandshake=msiClawKnownBoardAuthority()&&g_xinputConnectedMask==0&&g_xinputAdmittedMask==0&&inputHostWakePhysicalHandshakeReady();if(msiClawKnownBoardAuthority())check(msiNoSlotHandshake,"MSI DInput wake handshake succeeds with zero XInput slots as observed in real logs");
- inputHostRequestWakeRescan(generation);inputHostConsumeWakeRescan();check(g_inputHostLifecycleWorkQueue.size()==1&&!g_wakeRescanRequested.load(),"actual current wake producer and consumer enqueue exactly one hot-replace item");
- const auto eventBegin=fixtureEvents.size();{FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+ const bool msiNoSlotHandshake=msiClawKnownBoardAuthority()&&g_xinputConnectedMask==0&&g_xinputAdmittedMask==0&&inputHostWakePhysicalHandshakeReady();
+ if(msiClawKnownBoardAuthority())check(msiNoSlotHandshake,"MSI DInput wake handshake succeeds with zero XInput slots as observed in real logs");
+ inputHostRequestWakeRescan(generation);inputHostConsumeWakeRescan();
+ check(g_inputHostLifecycleWorkQueue.size()==1&&!g_wakeRescanRequested.load(),"actual current wake producer and consumer enqueue exactly one hot-replace item");
+ const auto original=runtime::episode;const auto eventBegin=fixtureEvents.size();
+ (void)fullPipePublishCanonicalRead(family);
+ {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+ json failed=nullptr;for(size_t i=eventBegin;i<fixtureEvents.size();++i){const auto& e=fixtureEvents[i];if(e.value("event","")=="input-host-wake-hot-replace"&&e["detail"].value("action","")=="kept-target")failed=e["detail"];}
+ if(!hideResult){
+  const bool retained=!runtime::episode.completed&&g_wakeHoldPhysicalUnhide.load()&&g_wakeRescanRequested.load()&&g_wakeKeptTargetGeneration.load()==priorKept;
+  check(retained,"failed wake hide keeps original execution pending and cannot mark kept generation or clear physical hold");
+  check(runtime::episode.serial==original.serial&&runtime::episode.requestId==original.requestId&&runtime::episode.armedAt==original.armedAt&&runtime::episode.playerDeadline==original.playerDeadline&&runtime::episode.maxAgeMs==original.maxAgeMs,
+   "failed wake hide cannot replace original episode or extend either deadline");
+  check(failed.is_null(),"failed wake hide cannot emit a successful kept-target receipt");
+  if(!retained){fixtureWakeHideResult=true;return {{"generation",generation},{"controlledHideResult",false},{"oldCompletionDetected",true},{"keptReceipt",failed}};}
+  const auto retry=g_wakeHotReplaceRetryAfterTick.load();check(retry>GetTickCount64(),"failed wake hide schedules bounded original-stage retry");
+  inputHostConsumeWakeRescan();check(g_inputHostLifecycleWorkQueue.empty(),"wake retry backoff cannot immediately requeue or spin");
+  const auto delta=retry-GetTickCount64()+1;fixturePowerClockOffset+=delta;startProtectionClock+=delta;fixtureWakeHideResult=true;
+  inputHostConsumeWakeRescan();check(g_inputHostLifecycleWorkQueue.size()==1,"due retained wake enters original queue once");
+  (void)fullPipePublishCanonicalRead(family);
+  {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+ }
  json kept=nullptr;for(size_t i=eventBegin;i<fixtureEvents.size();++i){const auto& e=fixtureEvents[i];if(e.value("event","")=="input-host-wake-hot-replace"&&e["detail"].value("action","")=="kept-target")kept=e["detail"];}
- check(g_inputHostProcess&&GetProcessId(g_inputHostProcess)==process&&g_inputHostEpoch==epoch&&g_inputHostRunId==run&&fullPipeSpawnCount==spawns&&!g_wakeHoldPhysicalUnhide.load()&&!g_wakeRescanRequested.load()&&g_wakeKeptTargetGeneration.load()==generation,"actual handheld wake branch retains original Host and clears its own wake hold without rebuilding");
- check(fixtureWakeHideCalls==hideBefore+1&&fixtureWakeVisibilityExclusions==excludedBefore+1,"wake executes one explicit hide-refresh end and marks diagnostic readback excluded");
- check(kept.is_object()&&kept.value("hidRefreshed",!hideResult)==hideResult,"actual kept-target receipt preserves controlled hide success or failure instead of fabricating visibility proof");
- fixtureWakeHideResult=true;return {{"generation",generation},{"msiNoSlotHandshake",msiNoSlotHandshake},{"controlledHideResult",hideResult},{"keptReceipt",kept},{"hideCalls",fixtureWakeHideCalls-hideBefore},{"diagnosticReadbackExcluded",true},{"targetAfterWake",state()},{"keptGeneration",g_wakeKeptTargetGeneration.load()}};
+ check(g_inputHostProcess&&GetProcessId(g_inputHostProcess)==process&&g_inputHostEpoch==epoch&&g_inputHostRunId==run&&fullPipeSpawnCount==spawns&&fullPipeRecreateCommands()==recreateBefore&&!g_wakeHoldPhysicalUnhide.load()&&!g_wakeRescanRequested.load()&&g_wakeKeptTargetGeneration.load()==generation,
+  "successful wake hide retains original Host and clears only its original wake hold without rebuilding");
+ const unsigned expectedCalls=hideResult?1:2;
+ check(fixtureWakeHideCalls==hideBefore+expectedCalls&&fixtureWakeVisibilityExclusions==excludedBefore+expectedCalls,"wake hide executes only selected explicit refreshes and excludes diagnostic readback");
+ check(kept.is_object()&&kept.value("hidRefreshed",false),"kept-target receipt requires an actual successful hide result");
+ fixtureWakeHideResult=true;return {{"generation",generation},{"msiNoSlotHandshake",msiNoSlotHandshake},{"controlledHideResult",hideResult},{"failedReceipt",failed},{"keptReceipt",kept},{"hideCalls",fixtureWakeHideCalls-hideBefore},{"diagnosticReadbackExcluded",true},{"targetAfterWake",state()},{"keptGeneration",g_wakeKeptTargetGeneration.load()}};
 }
 // Controlled power facts enter the actual request producers and BUS consumer.
 // No OS sleep/callback or sensor STA is executed; capture-ready stays false.
+// Controlled Ready input enters the actual common consumer. It does not
+// call Request again, clear revoked, replace first, or replenish its deadline.
+static void fullPipeDeliverSharedPowerReady(){
+ ymcc::sleeppower::SharedPowerV1 ready;
+ if(!captureSharedPowerLifecycle(ready)||!sharedPowerLifecycleCurrent(ready)||ready.generation!=currentPowerGeneration())
+  throw std::logic_error("full-pipe-shared-power-ready-not-current");
+ ymcc::inputHost::msiPowerWork::readyDelivery(ready);
+}
+static void fullPipeAssertSharedRearmClaim(unsigned long long generation){
+ namespace runtime=ymcc::inputHost::msiPowerWork;
+ check(runtime::first.power==generation&&runtime::consumed&&!g_inputHostPowerRearmRequested.load()&&
+  !g_inputHostPowerAdmissionRevoked.load(),
+  "actual shared queued rearm reaches final claim before writer admission is restored");
+}
 static void fullPipePowerCycles(int family){
  if(g_inputCaptureReady)throw std::logic_error("sensor-STA-not-admitted-in-offline-power-fixture");
- fullPipeDrainQueuedLifecycle();const auto process=GetProcessId(g_inputHostProcess);const auto epoch=g_inputHostEpoch;const auto spawns=fullPipeSpawnCount;const auto run=g_inputHostRunId;const auto request=g_virtualStartProtection.view(startProtectionClock);json cycles=json::array();
+ fullPipeDrainQueuedLifecycle();const auto process=GetProcessId(g_inputHostProcess);const auto epoch=g_inputHostEpoch;const auto spawns=fullPipeSpawnCount;const auto run=g_inputHostRunId;const auto request=g_virtualStartProtection.view(startProtectionClock);const auto requestClock=startProtectionClock;json cycles=json::array();
  for(int cycle=0;cycle<2;++cycle){
   auto oldRead=fullPipeReadNow(family);const auto previous=currentPowerGeneration(),generation=previous+1;g_powerGeneration=generation;
   inputHostRequestPowerRelease(previous,"offline-stale-release");inputHostConsumePowerRequests();const bool staleReleaseIgnored=!g_inputHostPowerAdmissionRevoked.load()&&g_inputHostLifecycleWorkQueue.empty();check(staleReleaseIgnored,"stale generation release cannot revoke current output or enqueue work");
@@ -170,15 +461,24 @@ static void fullPipePowerCycles(int family){
   const auto suspendSequence=g_inputHostSequence;fullPipeDrainQueuedLifecycle();check(g_inputHostPowerAdmissionRevoked.load()&&g_wakeHoldPhysicalUnhide.load()&&g_inputHostProcess&&GetProcessId(g_inputHostProcess)==process&&g_inputHostPrepared&&g_inputHostEpoch==epoch&&fullPipeSpawnCount==spawns&&g_inputHostSequence==suspendSequence,"actual suspend work retains the current target and sends no pipe command");
   const auto suspended=fullPipeSubmitSource(oldRead,true,false);check(suspended.value("hostSubmission","")=="not-admitted-or-failed"&&g_inputHostSequence==suspendSequence,"real submit consumer cannot write while actual power consumer has revoked admission");
   inputHostRequestPowerRearm(previous,"offline-stale-resume");inputHostConsumePowerRequests();const bool staleRearmIgnored=g_inputHostPowerAdmissionRevoked.load()&&g_inputHostLifecycleWorkQueue.empty();check(staleRearmIgnored,"stale generation resume cannot reopen writer or enqueue rearm");
-  g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;inputHostRequestPowerRearm(generation,"offline-controlled-resume");inputHostConsumePowerRequests();check(!g_inputHostPowerAdmissionRevoked.load()&&g_inputHostLifecycleWorkQueue.size()==1,"matching committed Ready generation restores admission and queues one rearm");fullPipeDrainQueuedLifecycle();
+  g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;inputHostRequestPowerRearm(generation,"offline-controlled-resume");fullPipeDeliverSharedPowerReady();inputHostConsumePowerRequests();check(g_inputHostPowerAdmissionRevoked.load()&&g_inputHostLifecycleWorkQueue.size()==1,"matching committed Ready generation queues one rearm while revocation remains until final claim");fullPipeDrainQueuedLifecycle();fullPipeAssertSharedRearmClaim(generation);
   check(g_inputHostProcess&&GetProcessId(g_inputHostProcess)==process&&g_inputHostEpoch==epoch&&g_inputHostRunId==run&&fullPipeSpawnCount==spawns,"actual power rearm reuses retained Host instead of creating a second target");
-  const auto wake=fullPipeWakeKeptCase(generation,cycle==0);
+  const auto wake=fullPipeWakeKeptCase(generation,cycle==0,family);
   const auto retired=fullPipeSubmitSource(oldRead,true,false);check(retired.value("hostSubmission","")=="frame-accepted"&&retired.value("focusIsolationSemanticNeutral",false)&&retired.value("sourceContextReason","")=="canonical-read-context-retired","pre-suspend physical read cannot become live input after committed resume");auto fresh=fullPipeReadNow(family);const auto resumed=fullPipeSubmitSource(fresh,true,false);check(resumed.value("hostSubmission","")=="frame-accepted"&&!resumed.value("focusIsolationSemanticNeutral",true),"fresh current-generation input resumes through actual existing Host pipe");
-  const auto after=g_virtualStartProtection.view(startProtectionClock);check(after.requestId==request.requestId&&after.phase==request.phase&&after.remainingMs==request.remainingMs&&after.verificationRemainingMs==request.verificationRemainingMs&&after.candidateOutcome==request.candidateOutcome,"operational suspend and resume do not renew or replace user startup protection");cycles.push_back({{"generation",generation},{"wake",wake},{"staleReleaseIgnored",staleReleaseIgnored},{"staleRearmIgnored",staleRearmIgnored},{"suspendSequence",suspendSequence},{"suspended",suspended},{"retiredRead",retired},{"resumed",resumed},{"afterRearm",state()},{"retainedProcessId",process},{"protocolPowerGeneration",g_inputHostBoundPowerGeneration}});
+  const auto after=g_virtualStartProtection.view(startProtectionClock);const auto elapsed=startProtectionClock-requestClock;const auto remaining=[&](auto value){return value>elapsed?value-elapsed:decltype(value){0};};check(after.requestId==request.requestId&&after.phase==request.phase&&after.remainingMs==remaining(request.remainingMs)&&after.verificationRemainingMs==remaining(request.verificationRemainingMs)&&after.candidateOutcome==request.candidateOutcome,"operational suspend and resume do not renew or replace user startup protection");cycles.push_back({{"generation",generation},{"wake",wake},{"staleReleaseIgnored",staleReleaseIgnored},{"staleRearmIgnored",staleRearmIgnored},{"suspendSequence",suspendSequence},{"suspended",suspended},{"retiredRead",retired},{"resumed",resumed},{"afterRearm",state()},{"retainedProcessId",process},{"protocolPowerGeneration",g_inputHostBoundPowerGeneration}});
  }
  // Queue the final Ready rearm while ON, then let the caller commit a real OFF
  // and stop before dispatch. The queued rearm must not resurrect that intent.
- const auto generation=currentPowerGeneration()+1;g_powerGeneration=generation;g_powerLifecycle=PowerLifecycle::Suspended;g_inputReady=false;inputHostRequestPowerRelease(generation,"offline-before-user-off");inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;inputHostRequestPowerRearm(generation,"offline-ready-before-user-off");inputHostConsumePowerRequests();check(!g_inputHostPowerAdmissionRevoked.load()&&g_inputHostLifecycleWorkQueue.size()==1,"real Ready rearm is queued while original intent is still ON before user cancellation");fullPipeDrainQueuedLifecycle();inputHostRequestWakeRescan(generation);inputHostConsumeWakeRescan();inputHostRequestPowerRearm(generation,"offline-duplicate-ready-before-user-off");inputHostConsumePowerRequests();check(g_inputHostLifecycleWorkQueue.size()==2,"actual wake item and duplicate Ready rearm are both queued before user OFF");cases.back()["wakeQueuedBeforeOff"]=true;cases.back()["hideCallsBeforeOffDispatch"]=fixtureWakeHideCalls;cases.back()["powerCycles"]=cycles;cases.back()["powerRearmQueuedBeforeOff"]=true;
+ const auto generation=currentPowerGeneration()+1;g_powerGeneration=generation;g_powerLifecycle=PowerLifecycle::Suspended;g_inputReady=false;inputHostRequestPowerRelease(generation,"offline-before-user-off");inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;inputHostRequestPowerRearm(generation,"offline-ready-before-user-off");fullPipeDeliverSharedPowerReady();inputHostConsumePowerRequests();check(g_inputHostPowerAdmissionRevoked.load()&&g_inputHostLifecycleWorkQueue.size()==1,"real Ready rearm is queued while original intent is still ON and admission awaits claim");fullPipeDrainQueuedLifecycle();fullPipeAssertSharedRearmClaim(generation);
+ const auto originalMsiSignal=ymcc::inputHost::msiPowerWork::first.wire;
+ inputHostRequestWakeRescan(generation);inputHostConsumeWakeRescan();
+ inputHostRequestPowerRearm(generation,"offline-duplicate-ready-before-user-off");inputHostConsumePowerRequests();
+ check(g_inputHostLifecycleWorkQueue.size()==1&&
+  fixtureLifecycleWorkReason(g_inputHostLifecycleWorkQueue.front()).rfind("wake-hot-replace:",0)==0&&
+  ymcc::inputHost::msiPowerWork::first.power==generation&&
+  ymcc::inputHost::msiPowerWork::first.wire==originalMsiSignal&&
+  ymcc::inputHost::msiPowerWork::consumed&&!g_inputHostPowerRearmRequested.load(),
+  "all-family duplicate Ready retains the first consumed signal and queues only the separate wake item before OFF");cases.back()["wakeQueuedBeforeOff"]=true;cases.back()["hideCallsBeforeOffDispatch"]=fixtureWakeHideCalls;cases.back()["powerCycles"]=cycles;cases.back()["powerRearmQueuedBeforeOff"]=true;
 }
 static void fullPipeFinishOffRearm(unsigned spawns){{FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}check(cases.back().contains("hideCallsBeforeOffDispatch")&&cases.back()["hideCallsBeforeOffDispatch"].is_number_unsigned()&&fixtureWakeHideCalls==cases.back()["hideCallsBeforeOffDispatch"].get<unsigned>(),"queued wake item dispatched after real OFF does not reach hide-refresh boundary");check(!g_realStickTest.virtualTargetEnabled&&!g_inputHostProcess&&!g_inputHostPrepared&&fullPipeSpawnCount==spawns,"queued power rearm dispatched after actual OFF and Stop cannot resurrect target");cases.back()["afterLateRearmOff"]=state();}
 static unsigned fullPipeRecreateCommands(){unsigned count=0;for(const auto& e:fixtureEvents)if(e.value("event","")=="input-host-command-result"&&e["detail"].value("command","")=="RECREATE_TARGET")++count;return count;}
@@ -188,7 +488,7 @@ static void fullPipePsWakeStep(){g_psWakeRearmRetryAfterTick=0;inputHostConsumeP
 // Actual four-slot discovery and classification under the existing SDK leaf
 // fixture. No physical-source lock, admitted mask or completed-scan flag is set
 // by this test: the original loop and original source consumer establish them.
-static json fullPipeReadPhysicalSourceForElite(){
+static json fullPipeReadPhysicalSourceForElite(bool coldStart=true,bool allowCurrentSource=false){
  for(auto& count:fixtureXinputLivePolls)count=0;
  const auto scan=[](){
   const ULONGLONG probeNow=GetTickCount64();const int probeSrc=kGpReadBus;const bool probeCostOn=false;
@@ -196,12 +496,26 @@ static json fullPipeReadPhysicalSourceForElite(){
   #include "xinput_discovery.inc"
  };
  scan();
- check(!inputHostAdmitSelectedPhysicalSource()&&g_xinputSlotFullScanOnce.load(),"first raw discovery cannot admit Elite source before actual consumer requests a complete boundary scan");
+ const std::array<unsigned,4> readsBeforeGuard={fixtureXinputLivePolls[0],fixtureXinputLivePolls[1],fixtureXinputLivePolls[2],fixtureXinputLivePolls[3]};
+ const bool initiallyAdmitted=inputHostAdmitSelectedPhysicalSource();
+ if(allowCurrentSource&&initiallyAdmitted){
+  check(!coldStart&&readsBeforeGuard[0]>0&&g_xinputPhysicalSourceLocked&&g_xinputPhysicalSourceMask==1&&
+   xinputPhysicalConnectedMask()==1&&g_xinputAdmittedMask==1&&g_xinputPreTargetBoundaryScanned&&
+   g_xinputBoundaryScanEpoch.load()==g_xinputTopologyEpoch.load(),
+   "warm serial source retains only actual current-boundary admission after a fresh controlled physical read");
+  return {{"actualDiscoveryLoop",true},{"actualPhysicalAdmissionConsumer",true},{"alreadyCurrentAfterFreshRead",true},
+   {"physicalMask",xinputPhysicalConnectedMask()},{"selectedSourceMask",g_xinputPhysicalSourceMask},
+   {"publishedSourceMask",g_xinputAdmittedMask},{"coldStart",false},{"readsBeforeGuard",readsBeforeGuard},
+   {"completedBoundary",g_xinputPreTargetBoundaryScanned.load()},{"boundaryEpoch",g_xinputBoundaryScanEpoch.load()},
+   {"topologyEpoch",g_xinputTopologyEpoch.load()},{"deviceIo",false}};
+ }
+ check(!initiallyAdmitted&&g_xinputSlotFullScanOnce.load(),"first raw discovery cannot admit Elite source before actual consumer requests a complete boundary scan");
  scan();
- check(fixtureXinputLivePolls[0]==2&&fixtureXinputLivePolls[1]==2&&fixtureXinputLivePolls[2]==2&&fixtureXinputLivePolls[3]==2,"actual raw discovery and requested boundary scan each read all four controlled XInput slots once");
+ if(coldStart){check(fixtureXinputLivePolls[0]==2&&fixtureXinputLivePolls[1]==2&&fixtureXinputLivePolls[2]==2&&fixtureXinputLivePolls[3]==2,"actual raw discovery and requested boundary scan each read all four controlled XInput slots once");}
+ else check(fixtureXinputLivePolls[0]==readsBeforeGuard[0]+1&&fixtureXinputLivePolls[1]==readsBeforeGuard[1]+1&&fixtureXinputLivePolls[2]==readsBeforeGuard[2]+1&&fixtureXinputLivePolls[3]==readsBeforeGuard[3]+1,"warm source readmission executes exactly one fresh full four-slot guard after ordinary known-slot sampling");
  const bool admitted=inputHostAdmitSelectedPhysicalSource();
  check(admitted&&g_xinputPhysicalSourceLocked&&g_xinputPhysicalSourceMask==1&&xinputPhysicalConnectedMask()==1&&g_xinputAdmittedMask==1,"actual physical-source classifier and selected-source consumer admit controlled slot before Elite creation");
- return {{"actualDiscoveryLoop",true},{"actualPhysicalAdmissionConsumer",true},{"physicalMask",xinputPhysicalConnectedMask()},{"selectedSourceMask",g_xinputPhysicalSourceMask},{"publishedSourceMask",g_xinputAdmittedMask},{"completedBoundary",g_xinputPreTargetBoundaryScanned.load()},{"boundaryEpoch",g_xinputBoundaryScanEpoch.load()},{"topologyEpoch",g_xinputTopologyEpoch.load()},{"slotReads",{fixtureXinputLivePolls[0],fixtureXinputLivePolls[1],fixtureXinputLivePolls[2],fixtureXinputLivePolls[3]}},{"deviceIo",false}};
+ return {{"actualDiscoveryLoop",true},{"actualPhysicalAdmissionConsumer",true},{"physicalMask",xinputPhysicalConnectedMask()},{"selectedSourceMask",g_xinputPhysicalSourceMask},{"publishedSourceMask",g_xinputAdmittedMask},{"coldStart",coldStart},{"readsBeforeGuard",readsBeforeGuard},{"completedBoundary",g_xinputPreTargetBoundaryScanned.load()},{"boundaryEpoch",g_xinputBoundaryScanEpoch.load()},{"topologyEpoch",g_xinputTopologyEpoch.load()},{"slotReads",{fixtureXinputLivePolls[0],fixtureXinputLivePolls[1],fixtureXinputLivePolls[2],fixtureXinputLivePolls[3]}},{"deviceIo",false}};
 }
 static void fullPipePsCancelDuringProbe(const std::string& kind){
  fullPipeDrainQueuedLifecycle();const auto before=fullPipeRecreateCommands();const auto spawns=fullPipeSpawnCount;const auto opens=fixturePsOpenCalls;const auto requestBefore=g_virtualStartProtection.view(startProtectionClock).requestId;const auto publicationRevisionBefore=g_inputHostVirtualIntentRevision.load();bool callback=false,directRecreate=false;json committed,frameAfterCancellation,unboundFrameAfterOff;unsigned long long frameCommandsAdded=0,unboundCommandsAdded=0;bool newerRequestPreserved=false,newerRequestCompleted=false;
@@ -838,7 +1152,7 @@ static void fullPipePsProtectedCycleCase(const std::string& variant="central",co
    check(inputHostWakeArmTick()==originalArm,"duplicate wake notification retains the original effective operation deadline");
   }
   inputHostConsumeWakeRescan();std::string work;
-  {std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);for(const auto& reason:g_inputHostLifecycleWorkQueue)if(reason.rfind("wake-hot-replace:",0)==0)work=reason;}
+  {std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);for(const auto& item:g_inputHostLifecycleWorkQueue){const auto reason=fixtureLifecycleWorkReason(item);if(reason.rfind("wake-hot-replace:",0)==0)work=reason;}}
   check(!work.empty(),"real wake request and consumer queue the current owned work before the tested context change");
   auto nextGeneration=generation;
   if(variant=="wake-old-generation"){
@@ -866,7 +1180,9 @@ static void fullPipePsProtectedCycleCase(const std::string& variant="central",co
   if(variant=="wake-old-generation"||enteredBeforeChange)check(g_wakeRescanGeneration.load()==nextGeneration&&g_wakeRescanRequested.load(),"old wake completion cannot clear the newer power generation's pending arm");
   g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;g_inputHostPowerAdmissionRevoked=false;fixtureWakeHideResult=true;
   if(variant=="wake-old-generation"||variant=="wake-power-not-ready"||enteredBeforeChange){
-   g_wakeHotReplaceRetryAfterTick=0;const auto retryHides=fixtureWakeHideCalls;inputHostConsumeWakeRescan();{FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+   g_wakeHotReplaceRetryAfterTick=0;const auto retryHides=fixtureWakeHideCalls;inputHostConsumeWakeRescan();
+   (void)fullPipePublishCanonicalRead(controlledFamily);
+   {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
    check(fixtureWakeHideCalls==retryHides+1&&g_wakeKeptTargetGeneration.load()==nextGeneration&&!g_wakeRescanRequested.load(),"the retained current Ready wake executes exactly once after stale or paused work is rejected");
   }
   json freshAck;for(int n=0;n<kInputHostFreshNeutralFramesRequired+1;++n){auto fresh=publish();freshAck=fullPipeSubmitSource(fresh,true,false);}
@@ -892,7 +1208,7 @@ static void fullPipePsProtectedCycleCase(const std::string& variant="central",co
   check(fixtureWireFaultConsumed&&rejected.value("hostSubmission","")!="frame-accepted"&&!g_inputHostTransportFault,"actual reply parser rejects the controlled receipt without inventing a pipe transport error");
   const auto prefix="tuple-mismatch-reopen:"+std::to_string(epoch)+":"+std::to_string(generation)+":"+std::to_string(candidate.requestId)+":";
   bool tupleQueued=false,boundQueued=false;
-  {std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);for(const auto& token:g_inputHostLifecycleWorkQueue)if(token.rfind("tuple-mismatch-reopen:",0)==0){tupleQueued=true;boundQueued=boundQueued||(token.rfind(prefix,0)==0&&std::count(token.begin(),token.end(),':')==6);}}
+  {std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);for(const auto& work:g_inputHostLifecycleWorkQueue){const auto token=fixtureLifecycleWorkReason(work);if(token.rfind("tuple-mismatch-reopen:",0)==0){tupleQueued=true;boundQueued=boundQueued||(token.rfind(prefix,0)==0&&std::count(token.begin(),token.end(),':')==6);}}}
   check(tupleQueued==trusted,"only a receipt with current owned identity and verified assets may queue automatic tuple recovery");
   check(boundQueued==trusted,"actual tuple-mismatch producer captures the original complete request Host power and report token");
   fullPipeDrainQueuedLifecycle();const auto inspected=g_virtualStartProtection.view(startProtectionClock);
@@ -922,10 +1238,10 @@ static void fullPipePsProtectedCycleCase(const std::string& variant="central",co
   }
   fullPipeWaitForPlayerLock(on,off);check(writeTarget(on,off).value("ok",false),"receipt recovery case exits through real admitted OFF");inputCaptureRefreshRealStickSettings(true);
   const auto closing=g_virtualStartProtection.view(startProtectionClock);inputHostStop("virtual-target-disabled");
-  const auto stopped=g_virtualStartProtection.view(startProtectionClock);check(stopped.requestId==closing.requestId&&stopped.phase=="verifying"&&stopped.locked,"actual OFF cleanup supplies one provisional candidate while return proof is observed");
+  fullPipeCheckStopCandidate(closing.requestId,"success");
   if(!oldObserved){cases.back()["retiredManagedReceipt"]=fullPipeChildOutcome(oldObserver,oldReceiptPath);oldObserved=true;}
   if(!fullPipeChildObservers.empty())cases.back()["managedReceipt"]=fullPipeChildOutcome();else cases.back()["managedReceipt"]=cases.back()["retiredManagedReceipt"];
-  fullPipeQuarantineProbe();fullPipeDrainQueuedLifecycle();fullPipeWaitForPlayerLock(off,targetDocument("dualsense-edge",2));
+  fullPipeQuarantineProbe();fullPipeDrainQueuedLifecycle();fullPipeRogObserveReturnedSource(closing.requestId);fullPipeWaitForPlayerLock(off,targetDocument("dualsense-edge",2));
   check(!g_inputHostProcess&&!g_inputHostReleaseQuarantined&&!g_hidHideVisibilityJournal.active&&fullPipeChildObservers.empty()&&g_virtualStartProtection.view(startProtectionClock).phase=="success","receipt fault/retry finishes actual OFF proof with no live child or physical visibility debt");
   cases.back()["actualOriginalReply"]=fixtureWireOriginal;cases.back()["injectedWireReply"]=fixtureWireInjected;cases.back()["rejectedAck"]=rejected;cases.back()["nativeEvents"]=fixtureEvents;fixtureFullPipe=false;return;
  }
@@ -943,7 +1259,7 @@ static void fullPipePsProtectedCycleCase(const std::string& variant="central",co
    check(g_virtualStartProtection.view(startProtectionClock).phase=="success"&&finals()==std::make_pair(1u,0u),"natural owned endpoint return releases the original request with one final success");
   }else{
    inputHostConsumePsWakeRearm();std::string oldToken;
-   {std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);for(const auto& token:g_inputHostLifecycleWorkQueue)if(token.rfind("ps-wake-rearm:",0)==0)oldToken=token;}
+   {std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);for(const auto& work:g_inputHostLifecycleWorkQueue){const auto token=fixtureLifecycleWorkReason(work);if(token.rfind("ps-wake-rearm:",0)==0)oldToken=token;}}
    check(!oldToken.empty(),"actual PS consumer queues the original protected worker token before expiry");
    if(variant!="unprotected-task-new-ticket"){startProtectionClock+=candidate.remainingMs;fullPipeVerificationStep();
    check(g_virtualStartProtection.view(startProtectionClock).phase=="expired"&&finals()==std::make_pair(0u,1u),"original PS request expires once at its own thirty-second cap");}
@@ -1025,7 +1341,42 @@ static void fullPipePsProtectedCycleCase(const std::string& variant="central",co
  check(finals()==std::make_pair(1u,0u),"protected PS cleanup cannot add an opposite or duplicate final for the ON request");
  cases.back()["afterStop"]=state();cases.back()["nativeEvents"]=fixtureEvents;fixtureFullPipe=false;
 }
-static void fullPipeCases(){
+static void fullPipeBeginReadonlyPsOwner(){
+ seed();fixtureFullPipe=true;fullPipeFault="none";fixturePsProbeActive=false;fixturePsSameInstanceNames=false;
+ g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
+ g_machineIdentity.family=YmccFamily::AsusRogAllyX;g_machineIdentity.manufacturer="ASUSTEK COMPUTER INC.";g_machineIdentity.product="ROG Ally X";
+ g_msiDinput.enabled=false;g_msiDinputSourceValid=false;g_msiMainSourceRevision=1;g_msiFeedbackModeGeneration=1;g_xinputAdmittedMask=1;
+ g_msiSteamDeckReleaseDebt.clear();g_msiSdOwnedPnpSnapshotForTest={};g_inputShortcutRuntime.clear();g_externalPriorityVirtualSuspended=false;g_inputCaptureStop=false;reg_fs();
+ const auto on=targetDocument("dualsense-edge",0);
+ check(sgWriteFileAtomic(YM_SETTINGS_FILE,on.dump()),"PS readonly setup writes its own private ON document");inputCaptureRefreshRealStickSettings(true);
+ const auto oldSpawns=fullPipeSpawnCount;
+ const bool started=inputHostStart();
+ check(started&&g_inputHostProcess&&fullPipeSpawnCount==oldSpawns+1,"PS readonly setup executes one actual private Host HELLO and PREPARE");
+ if(!started||!g_inputHostProcess)throw std::logic_error("PS-readonly-real-Host-precondition-failed");
+ ULONG client=0;
+ check(GetNamedPipeClientProcessId(g_inputHostServerPipe,&client)&&client==GetProcessId(g_inputHostProcess),"PS readonly setup binds the actual private managed pipe client");
+ fixturePsLastAuthority=g_psEndpointOwnership.snapshot();fixturePsLastSdkSerial=fullPipeRecreateCommands()+1;
+ check(fixturePsLastAuthority.valid&&fixturePsLastAuthority.capable&&fixturePsLastAuthority.revision&&fixturePsLastAuthority.generation&&!fixturePsLastAuthority.rootInstanceId.empty()&&!fixturePsLastAuthority.hidInstanceIds.empty(),"PS readonly setup obtains complete actual accepted PS ownership");
+ if(!fixturePsLastAuthority.valid)throw std::logic_error("PS-readonly-real-PS-ownership-missing");
+ const auto& p=fixturePsLastAuthority;
+ cases.back()["readonlySetup"]={{"source","actual-private-Host-HELLO-PREPARE-State.snapshot"},{"pid",GetProcessId(g_inputHostProcess)},{"hostEpoch",g_inputHostEpoch},{"runId",g_inputHostRunId},{"capable",p.capable},{"valid",p.valid},{"generation",p.generation},{"revision",p.revision},{"rootInstanceId",p.rootInstanceId},{"hidInstanceIds",p.hidInstanceIds},{"reason",p.reason},{"sdkSerial",fixturePsLastSdkSerial}};
+}
+static void fullPipeEndReadonlyPsOwner(){
+ fixturePsProbeActive=false;
+ if(g_inputHostProcess){
+  const auto on=json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE));const auto off=targetDocument("disabled",on["input"]["revision"].get<int>()+1);
+  fullPipeWaitForPlayerLock(on,off);
+  check(writeTarget(on,off).value("ok",false),"PS readonly teardown uses actual player OFF admission");inputCaptureRefreshRealStickSettings(true);
+  inputHostStop("virtual-target-disabled");
+ }
+ const auto child=fullPipeChildOutcome();cases.back()["readonlySetupChild"]=child;
+ check(child.value("nativeObservedProcessExit",false)&&child.value("nativeObservedExitCode",999)==0&&child.value("finalCleanupOk",false)&&!child.value("hasController",true)&&!child.value("hasContext",true),"PS readonly teardown returns actual child controller and context");
+ fullPipeDrainQueuedLifecycle();
+ check(!g_inputHostProcess&&fullPipeChildObservers.empty()&&!g_inputHostReleaseQuarantined&&!g_hidHideVisibilityJournal.active,"PS readonly teardown leaves no child or target visibility owner");
+ fixtureFullPipe=false;
+}
+
+static void fullPipeCases(bool deferUnprovenMsiOff=false){
  if(!fspath::is_regular_file(fixtureManagedDll))throw std::runtime_error("managed-fixture-not-file");
  const struct{const char* fault;int family;const char* persona="steamdeck";} scenarios[]={{"none",0},{"controller-dispose-once",0},{"context-dispose-once",0},{"none",1},{"none",2},{"recreate-owned-ids-rotate",0},{"recreate-owned-ids-foreign",0},{"recreate-owned-ids-unbound-ack",0},{"none",1,"dualsense-edge"},{"off-during-ps-probe",1,"dualsense-edge"},{"exit-during-ps-probe",1,"dualsense-edge"},{"power-during-ps-probe",1,"dualsense-edge"},{"generation-during-ps-probe",1,"dualsense-edge"},{"persona-during-ps-probe",1,"dualsense-edge"},{"reentry-during-ps-probe",1,"dualsense-edge"},{"refresh-during-ps-probe",1,"dualsense-edge"},{"target-during-ps-probe",1,"dualsense-edge"},{"ps-late-ownership-read",1,"dualsense-edge"}};
  for(const auto scenario:scenarios){const std::string fault=scenario.fault;const int family=scenario.family;const std::string persona=scenario.persona;const bool edge=persona=="dualsense-edge";const bool cancelProbe=fault.find("-during-ps-probe")!=std::string::npos;const bool rotate=fault=="recreate-owned-ids-rotate",foreign=fault=="recreate-owned-ids-foreign",unbound=fault=="recreate-owned-ids-unbound-ack";
@@ -1033,6 +1384,11 @@ static void fullPipeCases(){
   if(family){g_machineIdentity.family=family==1?YmccFamily::AsusRogAllyX:YmccFamily::Gpd;g_machineIdentity.manufacturer=family==1?"ASUSTEK COMPUTER INC.":"GPD";g_machineIdentity.product=family==1?"ROG Ally X":"G1617";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;}
   g_msiMainSourceRevision=1;g_msiFeedbackModeGeneration=1;g_xinputAdmittedMask=family?1:0;
   cases.push_back({{"name",std::string(family==1?"ROG/":family==2?"GPD/":"")+"full-coordinator-real-managed-pipe/"+fault+(edge?"/dualsense-edge":"")},{"requestedPersona",persona},{"controlledFamily",family==1?"ROG":family==2?"GPD":"MSI"}});const auto oldSpawns=fullPipeSpawnCount;
+  // Independent process-equivalent Ready facts; the public Reader stays actual.
+  g_hardwareWriteGate=true;
+  ymcc::sleeppower::SharedPowerV1 initialPower;
+  if(g_sleepPowerDispatch.pendingSuspend()||!captureSharedPowerLifecycle(initialPower)||!sharedPowerLifecycleCurrent(initialPower))
+   throw std::logic_error("original-full-pipe-case-public-ready-not-proven");
   // Independent-case initialization, never used as recovery completion evidence.
   g_msiSteamDeckReleaseDebt.clear();g_msiSdOwnedPnpSnapshotForTest={};g_inputShortcutRuntime.clear();g_externalPriorityVirtualSuspended=false;g_inputCaptureStop=false;reg_fs();
   const auto on=targetDocument(persona,0);auto off=targetDocument("disabled",1);check(sgWriteFileAtomic(YM_SETTINGS_FILE,on.dump()),"private ON document exists for real settings consumer");inputCaptureRefreshRealStickSettings(true);
@@ -1129,5 +1485,645 @@ static void fullPipeCases(){
  fullPipePrepareAckLostCase("ROG",true);
  fullPipePrepareAckLostCase("ROG",false,false,true);
  fullPipePsReturnEvidenceCases();
- fullPipeOffLifecycleCases();
+ if(deferUnprovenMsiOff){fullPipeOffLifecycleCase("ROG-returned-with-StartBlocked");fullPipeOffLifecycleCase("expired-OFF-after-expired-new-ON");}
+ else fullPipeOffLifecycleCases();
+}
+
+// Exact optional boundary of the original full Coordinator consumer. The input
+// documents and immutable requests come from the actual four-mode TS startup.
+// No receipt or successful Host outcome is provided by these physical-read ports.
+static void fullPipeInputApplicationCases(){
+ fixturePersistOffCheckpoints=true;std::set_terminate(fixtureOffTerminate);_set_invalid_parameter_handler(fixtureOffInvalidParameter);
+ wchar_t requestPath[32768]{};const auto length=GetEnvironmentVariableW(L"YMCC_FIXTURE_INPUT_REQUESTS",requestPath,32768);
+ if(!length||length>=32768)throw std::runtime_error("explicit-input-application-requests-required");
+ json requestFile;{std::ifstream stream{fspath::path(requestPath)};stream>>requestFile;}
+ const int requestSchema=requestFile.value("schemaVersion",0);const bool matrix=requestSchema==2;
+ if(!requestFile.is_object()||((requestSchema!=1||requestFile.at("rows").size()!=4)&&(!matrix||requestFile.at("rows").size()!=16)))throw std::runtime_error("input-application-request-scope");
+ if(matrix){
+  wchar_t selected[16]{};const auto count=GetEnvironmentVariableW(L"YMCC_FIXTURE_INPUT_INDEX",selected,16);
+  if(!count||count>=16)throw std::runtime_error("explicit-input-matrix-index-required");
+  std::size_t consumed=0;const auto index=std::stoul(std::wstring(selected),&consumed);
+  if(consumed!=count||index>=16)throw std::runtime_error("input-matrix-index-invalid");
+  const auto row=requestFile.at("rows").at(index);
+  if(row.at("boot").get<std::string>()!=bootModeStartupIdentity())throw std::runtime_error("input-matrix-boot-observation-mismatch");
+  requestFile["rows"]=json::array({row});
+ }
+ const bool activeGyro=requestFile.contains("motionLibrary");
+ for(const auto& row:requestFile.at("rows"))if(row.at("request").value("gyro",false)!=activeGyro)throw std::runtime_error("input-application-motion-scope");
+ seed();fixtureFullPipe=true;fullPipeFault="none";g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;
+ g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;g_machineIdentity.family=YmccFamily::AsusRogAllyX;
+ g_machineIdentity.manufacturer="ASUSTEK COMPUTER INC.";g_machineIdentity.product="ROG Ally X";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;
+ g_xinputAdmittedMask=1;g_msiMainSourceRevision=1;g_msiFeedbackModeGeneration=1;g_inputShortcutRuntime.clear();
+ g_externalPriorityVirtualSuspended=false;g_inputCaptureStop=false;reg_fs();
+ UINT64 motionBinding=0;
+ if(activeGyro){
+  wchar_t libraryPath[32768]{};const auto count=GetEnvironmentVariableW(L"YMCC_FIXTURE_MOTION_DLL",libraryPath,32768);
+  if(!count||count>=32768)throw std::runtime_error("reviewed-numeric-motion-library-required");
+  const auto destination=fspath::path(POWER_CONTROL_DIR)/L"handheldcompanion-runtime"/L"YMCC-DEVICECORE-20261018-v1"/L"GamepadMotion.dll";
+  fspath::create_directories(destination.parent_path());fspath::copy_file(fspath::path(libraryPath),destination);
+  inputCaptureLoadGamepadMotion();
+  if(!g_gm||!g_gmDll||!g_gmProcess||!g_gmGetCal||!g_controllerGmDelete)throw std::runtime_error("reviewed-numeric-motion-library-not-ready");
+  // Controlled SMBIOS facts enter the production resolver; no manually signed
+  // family-only motion capability or fabricated processing lease is supplied.
+  g_machineIdentity=MachineIdentity{"ASUSTEK COMPUTER INC.","RC72LA","ROG Ally X RC72LA"};g_machineIdentity.attempted=true;
+  ymccResolveFamily(g_machineIdentity);g_hcMotionSelector=HcMotionSelectorReceipt{};inputCaptureResolveHcMotionSelector();
+  if(!g_machineIdentity.resolved||g_machineIdentity.deviceClass!="HandheldCompanion.Devices.ROGAllyX"||!inputCaptureMotionSelectorBound())throw std::runtime_error("actual-motion-model-selector-not-bound");
+  g_inputCaptureSink=std::make_shared<InputCaptureSensorSink>();motionBinding=++g_inputCaptureSensorGeneration;g_inputCaptureSink->SetBindingGeneration(motionBinding);
+  std::lock_guard<std::mutex> lock(g_sensorMetaMx);g_sensorMeta={};
+  g_sensorMeta.gyroDeviceId="ACPI#YMCCFIXTURE#1#{gyro}";g_sensorMeta.accelDeviceId="ACPI#YMCCFIXTURE#1#{accel}";
+  g_sensorMeta.gyroFamily=g_sensorMeta.accelFamily="winrt";g_sensorMeta.gyroPresent=g_sensorMeta.accelPresent=true;
+  if(inputCaptureSensorProviderKey(g_sensorMeta.gyroDeviceId)!=inputCaptureSensorProviderKey(g_sensorMeta.accelDeviceId))throw std::runtime_error("owned-motion-provider-pair-mismatch");
+ }
+ const auto rawMotion=[&](){
+  FILETIME time{};GetSystemTimeAsFileTime(&time);ULARGE_INTEGER timestamp{};timestamp.LowPart=time.dwLowDateTime;timestamp.HighPart=time.dwHighDateTime;
+  const auto tick=GetTickCount64();
+  g_inputCaptureSink->OnRawGyro(12,18,30,timestamp.QuadPart,tick,motionBinding);
+  g_inputCaptureSink->OnRawAccel(0.05,0.1,0.99,timestamp.QuadPart,tick,motionBinding);
+ };
+ const auto originalSpawns=fullPipeSpawnCount;std::uint64_t previousIntent=0;json lastDocument;
+ for(const auto& row:requestFile.at("rows")){
+  const auto initialFailures=failures.size();const auto document=row.at("settings"),expected=row.at("request");
+  const auto mode=row.at("mode").get<std::string>(),label=matrix?row.at("from").get<std::string>()+"-to-"+mode:mode;
+  cases.push_back({{"name","input-application/"+label},{"mode",mode},{"request",expected},{"settings",document}});
+  if(matrix){cases.back()["from"]=row.at("from");cases.back()["boot"]=row.at("boot");}
+  check(document["input"].value("startupObservedBoot","")==bootModeStartupIdentity(),"real startup document belongs to the private native boot");
+  check(sgWriteFileAtomic(YM_SETTINGS_FILE,document.dump()),"actual four-mode document reaches private native atomic store");
+  check(ymcc::settingsBaseline::supported(document),"actual native schema accepts the generated startup document");
+  check(ymSettingsSection("input")==document.at("input"),"private locked native reader sees the exact startup input");
+  fixtureOffCheckpoint("input-application-before-refresh");
+  inputCaptureRefreshRealStickSettings(true);lastDocument=document;
+  fixtureOffCheckpoint("input-application-after-refresh");
+  const auto intent=g_inputHostVirtualIntentRevision.load();
+  auto sample=fullPipeReadNow(1);
+  const auto publishSource=[&](){std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);const auto prior=inputHostRecoveryHealthSource(&g_inputCaptureGamepadSnapshot,true);sample.readContinuityGeneration=ymcc::input::recoveryHealth::nextContinuity(prior,inputHostRecoveryHealthSource(&sample,true),GetTickCount64());g_inputCaptureGamepadSnapshot=sample;};
+  const auto snapshot=[&](){const ymcc::VirtualOutputSourceWindow window{sample.readAttemptSequence,sample.readStartedTick,sample.readCompletedTick,sample.readPowerGeneration,sample.readTopologyGeneration,sample.readContextStable};return json{{"virtualOutput",virtualOutputRuntimeSnapshot(sample.live,window)}};};
+  publishSource();
+  if(fullPipeSpawnCount==originalSpawns){
+   fixtureXinputSourceLive=true;
+   cases.back()["sourceDiscovery"]=fullPipeReadPhysicalSourceForElite();
+   check(inputHostStart(),"current input configuration starts actual managed private Host");
+  }
+  check(fullPipeSpawnCount==originalSpawns+1,matrix?"independent startup target owns one actual managed Host":"four mode changes reuse the same live managed Host");
+  auto pending=snapshot();cases.back()["beforeFrame"]=pending;
+  check(pending["virtualOutput"]["inputApplication"].value("inputState","")=="waiting","new durable mode config cannot inherit an older Host frame");
+  check(pending["virtualOutput"]["inputApplication"].value("inputConfigHash","")==expected.at("hash").get<std::string>(),"actual native durable fingerprint equals original TS requested fingerprint");
+  if(previousIntent){
+   sample=fullPipeReadNow(1);publishSource();CommonFrameSourceScope source(&sample);
+   const auto stale=inputHostSubmitPad(true,sample.pad,0,0,0,true,true,MotionContribution{},"right",0,0,sample.pad,false,0,0,0,0,0,1,0,0,0,false,0,previousIntent);
+   cases.back()["staleIntentFrame"]=stale;const auto afterOld=snapshot();cases.back()["afterStaleIntent"]=afterOld;
+   check(afterOld["virtualOutput"]["inputApplication"].value("inputState","")=="waiting","old pre-mapping intent crossing a real pipe cannot confirm new durable mode");
+  }
+  for(int n=0;n<kInputHostFreshNeutralFramesRequired+1;++n){
+   sample=fullPipeReadNow(1);publishSource();CommonFrameSourceScope source(&sample);
+   fixtureOffCheckpoint("input-application-before-capture");
+   if(activeGyro)rawMotion();
+   g_inputCaptureReady=true;inputCaptureOnGamepad(true,sample.pad,0,1,sample.inputSource);g_inputCaptureReady=false;
+   inputHostRecoveryMaintenanceTick();
+   fixtureOffCheckpoint("input-application-after-capture");
+  }
+  auto current=snapshot();cases.back()["currentFrame"]=current;
+  const auto proof=current["virtualOutput"]["inputApplication"];
+  check(proof.value("inputState","")=="active","actual capture callback mapping and real managed ACK confirm current durable input");
+  check(proof.value("inputRevision",-1LL)==expected.at("revision").get<std::int64_t>()&&proof.value("inputConfigHash","")==expected.at("hash").get<std::string>(),"published native proof carries the exact real startup revision and hash");
+  if(activeGyro){
+   const auto processed=inputCaptureWindowsProcessingReceiptSnapshot();cases.back()["processedMotion"]=processed;
+   const auto processedScope=g_windowsProcessingOwner.identity.source;
+   check(processed.value("currentSamplingAndProcessingLease",false),"actual raw sensor sink reaches production motion processing");
+   check(proof.value("gyroState","")=="active","actual processed sensor contribution and real managed ACK confirm current gyro");
+   cases.back()["rawMotionSource"]={{"deviceClass",g_machineIdentity.deviceClass},{"selector",g_hcMotionSelector.selectorId},{"binding",motionBinding},{"gyroSequence",g_inputCaptureSink->gyroSequence},{"accelSequence",g_inputCaptureSink->accelSequence}};
+   // A real raw-binding retirement must revoke output. Do not clear or fill
+   // sensorCurrent/mapped flags, processing receipts, or publication outcomes.
+   g_inputCaptureSink->SetBindingGeneration(++motionBinding);
+   check(!ymcc::windows_motion::currentForOutput(processedScope),"retired raw sensor scope cannot be submitted to output");
+   sample=fullPipeReadNow(1);publishSource();
+   {CommonFrameSourceScope source(&sample);g_inputCaptureReady=true;inputCaptureOnGamepad(true,sample.pad,0,1,sample.inputSource);g_inputCaptureReady=false;inputHostRecoveryMaintenanceTick();}
+   const auto retired=snapshot();cases.back()["retiredMotionFrame"]=retired;
+   const auto retiredProcessing=inputCaptureWindowsProcessingReceiptSnapshot();cases.back()["retiredMotionProcessing"]=retiredProcessing;
+   // The durable receipt records that this configuration was applied once;
+   // live sampling/processing health is a separate production observation.
+   check(!g_gmProcessedThisTick&&!retiredProcessing.value("currentSamplingAndProcessingLease",false),"retired raw sensor pair cannot continue actual motion processing");
+   for(int n=0;n<kInputHostFreshNeutralFramesRequired+1;++n){
+    sample=fullPipeReadNow(1);publishSource();rawMotion();CommonFrameSourceScope source(&sample);
+    g_inputCaptureReady=true;inputCaptureOnGamepad(true,sample.pad,0,1,sample.inputSource);g_inputCaptureReady=false;inputHostRecoveryMaintenanceTick();
+   }
+   const auto resumed=snapshot();cases.back()["currentFrame"]=resumed;cases.back()["resumedMotion"]=inputCaptureWindowsProcessingReceiptSnapshot();
+   check(resumed["virtualOutput"]["inputApplication"].value("gyroState","")=="active","fresh same-binding raw pair restores actual gyro processing and Host publication");
+  }else check(proof.value("gyroState","")=="disabled","no sensor frame is fabricated for the disabled gyro request");
+  check(proof.value("runId","")==g_inputHostRunId&&proof.value("hostInstanceId","")==g_inputHostHostInstanceId,"durable proof belongs to actual same managed process and instance");
+  cases.back()["passed"]=failures.size()==initialFailures;previousIntent=intent;
+  if(activeGyro&&failures.size()!=initialFailures)break;
+ }
+ g_inputCaptureReady=false;auto off=targetDocument("disabled",lastDocument["input"]["revision"].get<int>()+1);
+ off["input"]["startupObservedBoot"]=bootModeStartupIdentity();
+ check(sgWriteFileAtomic(YM_SETTINGS_FILE,off.dump()),"private final OFF document commits");inputCaptureRefreshRealStickSettings(true);
+ inputHostStop("virtual-target-disabled");fullPipeDrainQueuedLifecycle();
+ cases.back()["managedReceipt"]=fullPipeChildOutcome();
+ check(fullPipeChildObservers.empty()&&!g_inputHostProcess&&!g_inputHostPrepared&&!g_inputHostNeutralized,"full capture-chain consumer closes actual Host and all owned observation handles");
+ if(activeGyro){
+  // These numeric-library/sink resources belong to this optional fixture,
+  // which did not start an OS sensor STA or the application's full producer.
+  inputCaptureWindowsProcessingRetire();g_inputCaptureSink.reset();
+  g_controllerGmDelete(g_gm);g_gm=nullptr;const bool unloaded=FreeLibrary(g_gmDll)!=FALSE;g_gmDll=nullptr;
+  g_gmProcess=nullptr;g_gmGetCal=nullptr;g_gmGetGravity=nullptr;g_gmGetProcessedAcceleration=nullptr;g_gmGetOrientation=nullptr;
+  g_gmGetOffset=nullptr;g_gmGetConf=nullptr;g_gmIsSteady=nullptr;g_gmPlayer=nullptr;g_gmWorld=nullptr;
+  g_gmSetMode=nullptr;g_gmStartCal=nullptr;g_gmPauseCal=nullptr;g_gmResetCal=nullptr;g_gmSetOffset=nullptr;g_gmResetMotionApi=nullptr;g_controllerGmCreate=nullptr;g_controllerGmDelete=nullptr;
+  check(unloaded&&!g_gm&&!g_gmDll&&!g_inputCaptureSink,"optional numeric motion library and raw sink release their actual owned resources");
+ }
+ fixtureFullPipe=false;
+}
+
+
+// Exact selector on the existing real-pipe consumer. Controlled power/HidHide
+// leaves only; the original wake producer, consumer and queued worker execute.
+static constexpr const char* wakeKeptVisibilityVariants[]={"success","false-then-true","persistent-false","off","new-request","new-power","expired"};
+static constexpr const char* wakeKeptVisibilityFamilies[]={"MSI","ROG","GPD"};
+static void fullPipeWakeKeptSelectedCases(){
+ namespace runtime=ymcc::inputHost::wakeExecutionRuntime;
+ for(int family=0;family<3;++family)for(const std::string variant:wakeKeptVisibilityVariants){
+  seed();fixtureFullPipe=true;fullPipeFault="none";g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
+  if(family){g_machineIdentity.family=family==1?YmccFamily::AsusRogAllyX:YmccFamily::Gpd;g_machineIdentity.manufacturer=family==1?"ASUSTEK COMPUTER INC.":"GPD";g_machineIdentity.product=family==1?"ROG Ally X":"G1617";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;}
+  g_msiMainSourceRevision=1;g_msiFeedbackModeGeneration=1;g_xinputAdmittedMask=family?1:0;
+  g_msiSteamDeckReleaseDebt.clear();g_msiSdOwnedPnpSnapshotForTest={};g_inputShortcutRuntime.clear();g_externalPriorityVirtualSuspended=false;g_inputCaptureStop=false;reg_fs();
+  cases.push_back({{"name",std::string(wakeKeptVisibilityFamilies[family])+"/wake-kept-visibility/"+variant},{"variant",variant},{"controlledFamily",wakeKeptVisibilityFamilies[family]}});
+  const auto on=targetDocument("steamdeck",0);check(sgWriteFileAtomic(YM_SETTINGS_FILE,on.dump()),"private original ON document exists");inputCaptureRefreshRealStickSettings(true);
+  const bool started=inputHostStart();check(started,"selected wake case starts one actual managed Host");
+  if(!started)throw std::runtime_error("selected-wake-host-start-failed");fullPipeCurrentFrameCases(family);
+  const auto off=targetDocument("disabled",1);fullPipeWaitForPlayerLock(on,off);
+  const auto generation=currentPowerGeneration()+1;g_powerGeneration=generation;
+  g_powerLifecycle=PowerLifecycle::Suspended;g_inputReady=false;inputHostRequestPowerRelease(generation,"offline-controlled-suspend");inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();
+  g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;inputHostRequestPowerRearm(generation,"offline-controlled-resume");fullPipeDeliverSharedPowerReady();inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();
+  if(variant=="success"||variant=="false-then-true"){cases.back()["wake"]=fullPipeWakeKeptCase(generation,variant=="success",family);if(variant=="false-then-true")fullPipePowerCycles(family);}
+  else {
+   const auto host=GetProcessId(g_inputHostProcess);const auto epoch=g_inputHostEpoch;const auto run=g_inputHostRunId;const auto spawns=fullPipeSpawnCount,recreates=fullPipeRecreateCommands(),hides=fixtureWakeHideCalls;const auto priorKept=g_wakeKeptTargetGeneration.load();
+   fixtureWakeHideResult=false;inputHostRequestWakeRescan(generation);inputHostConsumeWakeRescan();const auto original=runtime::episode;
+   {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+   const bool retained=!runtime::episode.completed&&g_wakeHoldPhysicalUnhide.load()&&g_wakeRescanRequested.load()&&g_wakeKeptTargetGeneration.load()==priorKept;
+   check(retained,"failed wake hide keeps original execution pending and cannot mark kept generation or clear physical hold");
+   if(retained){
+    if(variant=="persistent-false"){
+     for(unsigned n=0;n<2;++n){const auto due=g_wakeHotReplaceRetryAfterTick.load();const auto now=GetTickCount64();const auto advance=due>now?due-now+1:1;fixturePowerClockOffset+=advance;startProtectionClock+=advance;
+      inputHostConsumeWakeRescan();{FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}}
+     check(runtime::episode.completed&&!g_wakeRescanRequested.load()&&g_wakeHoldPhysicalUnhide.load()&&g_wakeKeptTargetGeneration.load()==priorKept&&fixtureWakeHideCalls==hides+3,
+      "three failed wake hides retire original bounded stage without fabricating kept visibility");
+     inputHostRequestWakeRescan(generation);inputHostConsumeWakeRescan();check(g_inputHostLifecycleWorkQueue.empty(),"duplicate retired power notification cannot reopen bounded hide attempts");
+    }else{
+     if(variant=="off"){check(writeTarget(on,off).value("ok",false),"real settings admission accepts explicit OFF");inputCaptureRefreshRealStickSettings(true);}
+     else if(variant=="new-request"){const auto next=targetDocument("elite",1);check(writeTarget(on,next).value("ok",false),"real settings admission accepts newer player request");inputCaptureRefreshRealStickSettings(true);}
+     else if(variant=="new-power")g_powerGeneration=generation+1;
+     else {fixturePowerClockOffset+=original.maxAgeMs+1;startProtectionClock+=original.maxAgeMs+1;}
+     inputHostConsumeWakeRescan();
+     check(runtime::episode.completed&&!g_wakeRescanRequested.load()&&g_wakeKeptTargetGeneration.load()==priorKept&&fixtureWakeHideCalls==hides+1,
+      "OFF newer request newer power or original expiry retires old wake without another hide");
+    }
+    check(runtime::episode.serial==original.serial&&runtime::episode.armedAt==original.armedAt&&runtime::episode.playerDeadline==original.playerDeadline,
+     "retained wake retries and cancellation preserve original serial arm and player deadline");
+   }
+   check(g_inputHostProcess&&GetProcessId(g_inputHostProcess)==host&&g_inputHostEpoch==epoch&&g_inputHostRunId==run&&fullPipeSpawnCount==spawns&&fullPipeRecreateCommands()==recreates,
+    "failed hide and wake retirement cannot Stop or recreate original Host");
+   cases.back()["nativeWakeEvents"]=fixtureEvents;fixtureWakeHideResult=true;
+  }
+  // Cleanup is an actual explicit OFF. Any controlled old wake hold is retired
+  // by the product OFF path, never by editing the held or completed flags here.
+  auto current=json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE));const auto closing=targetDocument("disabled",current["input"]["revision"].get<int>()+1);
+  if(inputHostTargetKey(current["input"])!="disabled"){fullPipeWaitForPlayerLock(current,closing);check(writeTarget(current,closing).value("ok",false),"selected wake cleanup accepts actual OFF");inputCaptureRefreshRealStickSettings(true);}
+  inputHostStop("virtual-target-disabled");const auto child=fullPipeChildOutcome();cases.back()["managedReceipt"]=child;
+  check(child.value("nativeObservedProcessExit",false)&&child.value("nativeObservedExitCode",999)==0&&child.value("finalCleanupOk",false)&&!child.value("hasController",true)&&!child.value("hasContext",true),"selected wake managed child disposes target and context and exits naturally");
+  check(fullPipeChildObservers.empty()&&!g_inputHostProcess,"selected wake has no owned child observer or Host handle after Stop");if(variant=="false-then-true")fullPipeFinishOffRearm(fullPipeSpawnCount);
+  fixtureFullPipe=false;
+ }
+}
+
+// Explicit extension of the original kept-wake consumer. Samples below are
+// controlled canonical-read inputs; actual source projection/freshness, public
+// power capture/current, queued wake, pipe ownership and completion execute.
+// It does not claim that the physical sampler or settings IPC ran at the query
+// observer: that narrow interleave changes only their controlled input leaves.
+static constexpr const char* wakeKeptSourceFamilies[]={"ROG"};
+static constexpr const char* wakeKeptSourceVariants[]={"current","pending-then-current","stale-source","unstable-source","pending-notification","publication-only","off-after-source-query","new-request-after-source-query","expired-after-source-query"};
+struct WakeKeptSourceFamilyControl { const char* family;const char* variant;int index;bool directedOnly=false; };
+static constexpr WakeKeptSourceFamilyControl wakeKeptSourceFamilyControls[]={
+ {"GPD","current",2},{"GPD","pending-then-current",2},
+ {"MSI","current",0},{"MSI","pending-then-current",0},{"PC","source-free",3},
+ {"GPD","expired-then-current",2,true}
+};
+static bool fixtureWakeSourceSelectionKnown(const std::string& only){
+ if(only.empty())return true;
+ for(const auto* variant:wakeKeptSourceVariants)if(only==std::string("ROG:")+variant)return true;
+ for(const auto& row:wakeKeptSourceFamilyControls)if(only==std::string(row.family)+":"+row.variant)return true;
+ return false;
+}
+static void fullPipeWakeKeptSourceSelectedCases(const std::string& only={}){
+ namespace runtime=ymcc::inputHost::wakeExecutionRuntime;
+ if(!fixtureWakeSourceSelectionKnown(only))throw std::invalid_argument("unknown-wake-source-selection");
+ std::vector<WakeKeptSourceFamilyControl> selected;
+ for(const auto* variant:wakeKeptSourceVariants)selected.push_back({"ROG",variant,1});
+ for(const auto& control:wakeKeptSourceFamilyControls)selected.push_back(control);
+ for(const auto& parameter:selected){const int family=parameter.index;const bool sourceFree=family==3;const std::string variant=parameter.variant;
+  if(only.empty()?parameter.directedOnly:only!=std::string(parameter.family)+":"+variant)continue;
+  const bool lateRecovery=variant=="expired-then-current";
+  const auto lateStage=[&](const char* stage){if(lateRecovery)std::cerr<<"GPD_WAKE_LATE_STAGE "<<stage<<'\n';};
+  const auto failureBefore=failures.size();
+  seed();fixtureFullPipe=true;fullPipeFault="none";g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;
+  fixtureModernStandbyCapabilities=sourceFree;
+  g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
+  if(family){g_machineIdentity.family=sourceFree?YmccFamily::Unknown:family==1?YmccFamily::AsusRogAllyX:YmccFamily::Gpd;g_machineIdentity.manufacturer=sourceFree?"FIXTURE-PC":family==1?"ASUSTEK COMPUTER INC.":"GPD";g_machineIdentity.product=sourceFree?"source-free-SD":family==1?"ROG Ally X":"G1617";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;}
+  g_msiMainSourceRevision=1;g_msiFeedbackModeGeneration=1;g_xinputAdmittedMask=(!sourceFree&&family)?1:0;
+  g_msiSteamDeckReleaseDebt.clear();g_msiSdOwnedPnpSnapshotForTest={};g_inputShortcutRuntime.clear();g_externalPriorityVirtualSuspended=false;g_inputCaptureStop=false;reg_fs();
+  cases.push_back({{"name",std::string(parameter.family)+"/wake-kept-source/"+variant},{"variant",variant},{"controlledCanonicalReadInput",true},{"sourceQuerySettingsIpcExecuted",false}});
+  const auto on=targetDocument("steamdeck",0);check(sgWriteFileAtomic(YM_SETTINGS_FILE,on.dump()),"source-wake private original ON exists");inputCaptureRefreshRealStickSettings(true);
+  lateStage("start");
+  if(!inputHostStart())throw std::runtime_error("source-wake-host-start-failed");
+  fullPipeDrainQueuedLifecycle();if(!sourceFree)fullPipeCurrentFrameCases(family);
+  else check(!g_inputHostFreshNeutralAdmitted&&!g_xinputPhysicalSourceLocked&&!g_hidHideVisibilityJournal.active&&!g_msiDinputRouteDinputArmed.load(),
+   "source-free Host never establishes physical-source admission or a physical return duty");
+  // Continue controlled canonical samples and actual accepted pipe frames
+  // through the ORIGINAL ten-second verification. No phase/outcome is set by
+  // the fixture, and no missing sample is silently treated as health.
+  cases.back()["beforeWakeHealth"]=json::array();
+  for(unsigned step=0;!lateRecovery&&!sourceFree&&step<12&&g_virtualStartProtection.view(startProtectionClock).locked;++step){
+   auto sample=fullPipeReadNow(family);
+   {std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);
+    const auto prior=inputHostRecoveryHealthSource(&g_inputCaptureGamepadSnapshot,true);
+    sample.readContinuityGeneration=ymcc::input::recoveryHealth::nextContinuity(prior,inputHostRecoveryHealthSource(&sample,true),GetTickCount64());
+    g_inputCaptureGamepadSnapshot=sample;}
+   const auto receipt=fullPipeSubmitSource(sample,true,false);fullPipeVerificationStep();
+   const auto observed=g_virtualStartProtection.view(startProtectionClock);const char* missing=nullptr;bool current=false;
+   {std::lock_guard<InputHostMutex> lock(g_inputHostMx);current=ymcc::inputHost::switchVerificationRuntime::currentOutputProvenLocked(observed,&missing);}
+   cases.back()["beforeWakeHealth"].push_back({{"step",step},{"requestId",observed.requestId},{"phase",observed.phase},{"locked",observed.locked},
+    {"continuity",sample.readContinuityGeneration},{"sourceSequence",sample.readAttemptSequence},{"actualFrameAccepted",receipt.value("hostSubmission","")=="frame-accepted"},
+    {"currentOutputProven",current},{"missing",missing?missing:""},{"clock",startProtectionClock}});
+   if(observed.locked){startProtectionClock+=1000;fixturePowerClockOffset+=1000;}
+  }
+  const auto off=targetDocument("disabled",1);
+  if(!lateRecovery)fullPipeWaitForPlayerLock(on,off);
+  const auto previousPlayer=g_virtualStartProtection.view(startProtectionClock);
+  if(lateRecovery)check(previousPlayer.requestId&&previousPlayer.phase=="verifying"&&previousPlayer.locked&&previousPlayer.remainingMs>16&&previousPlayer.candidateOutcome=="success",
+   "cross-power expiry starts with an actual first-frame candidate and the original deadline");
+  else check(!previousPlayer.locked&&(sourceFree||previousPlayer.phase=="success"),"ordinary kept wake begins after the original player success has unlocked");
+  const auto pid=GetProcessId(g_inputHostProcess);const auto epoch=g_inputHostEpoch;const auto run=g_inputHostRunId;
+  const auto spawns=fullPipeSpawnCount,recreates=fullPipeRecreateCommands();
+  const auto generation=currentPowerGeneration()+1;g_powerGeneration=generation;g_powerLifecycle=PowerLifecycle::Suspended;g_inputReady=false;
+  if(lateRecovery)g_sharedPowerSuspendSerial.fetch_add(1,std::memory_order_acq_rel);
+  lateStage("suspend-rearm");
+  inputHostRequestPowerRelease(generation,"offline-source-wake-suspend");inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();
+  g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;inputHostRequestPowerRearm(generation,"offline-source-wake-resume");fullPipeDeliverSharedPowerReady();inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();
+  const auto publishSample=[&](bool live,bool stable,bool stale){
+   auto sample=fullPipeReadNow(family);sample.live=live;sample.readContextStable=stable;
+   if(stale){sample.readStartedTick=sample.readCompletedTick=GetTickCount64()-ymcc::kVirtualOutputSourceWindowMaxAgeMs-1;}
+   std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);
+   const auto previous=inputHostRecoveryHealthSource(&g_inputCaptureGamepadSnapshot,true);
+   sample.readContinuityGeneration=ymcc::input::recoveryHealth::nextContinuity(previous,inputHostRecoveryHealthSource(&sample,true),GetTickCount64());
+   g_inputCaptureGamepadSnapshot=sample;return sample;
+  };
+  const auto playerDeadline=startProtectionClock+previousPlayer.remainingMs;
+  lateStage("player-terminal");
+  if(lateRecovery){
+   const auto advance=previousPlayer.remainingMs>16?previousPlayer.remainingMs-16:0;
+   startProtectionClock+=advance;fixturePowerClockOffset+=advance;
+   // Consume the rearm reset through the actual worker, not a fixture write.
+   inputHostRecoveryMaintenanceTick();
+   const auto nearDeadline=g_virtualStartProtection.view(startProtectionClock);
+   const char* missing=nullptr;bool outputProven=false;
+   {std::lock_guard<InputHostMutex> lock(g_inputHostMx);outputProven=ymcc::inputHost::switchVerificationRuntime::currentOutputProvenLocked(nearDeadline,&missing);}
+   check(!outputProven&&missing&&std::string_view(missing)=="power-binding-unproven"&&nearDeadline.remainingMs==16&&nearDeadline.requestId==previousPlayer.requestId,
+    "old bound power is not evidence of output just before the original deadline");
+   const auto inspection=std::find_if(fixtureEvents.crbegin(),fixtureEvents.crend(),[&](const json& event){
+    if(event.value("event","")!="input-host-switch-verification")return false;
+    const auto& detail=event["detail"];
+    return detail.value("stage","")=="inspection"&&detail.value("requestId",0ULL)==previousPlayer.requestId;
+   });
+   check(inspection!=fixtureEvents.crend()&&(*inspection)["detail"].value("evidence","")=="power-binding-unproven"&&
+    (*inspection)["detail"].value("remainingMs",0ULL)==16&&(*inspection)["detail"].value("lastInspectionPowerGeneration",0ULL)==generation,
+    "actual verification records missing current power proof in the same near-deadline inspection");
+   const auto inspected=g_virtualStartProtection.view(startProtectionClock);
+   check(inspected.locked&&inspected.requestId==previousPlayer.requestId&&startProtectionClock+inspected.remainingMs==playerDeadline,
+    "near-deadline inspection cannot complete or extend the original cross-power request");
+   startProtectionClock+=16;fixturePowerClockOffset+=16;fullPipeVerificationStep();
+   const auto expired=g_virtualStartProtection.view(startProtectionClock);
+   check(startProtectionClock==playerDeadline&&expired.phase=="expired"&&!expired.locked&&!expired.remainingMs&&expired.requestId==previousPlayer.requestId,
+    "original request expires at its existing deadline before fresh input arrives");
+   cases.back()["crossPowerExpiry"]={{"requestId",expired.requestId},{"deadline",playerDeadline},{"remainingBeforeExpiry",nearDeadline.remainingMs},
+    {"reason",missing?missing:""},{"oldBoundPower",g_inputHostBoundPowerGeneration},{"currentPower",generation},{"phase",expired.phase}};
+   json accepted;
+   for(int n=0;n<kInputHostFreshNeutralFramesRequired+1;++n){auto sample=publishSample(true,true,false);accepted=fullPipeSubmitSource(sample,true,false);}
+   check(accepted.value("hostSubmission","")=="frame-accepted"&&!accepted.value("focusIsolationSemanticNeutral",true),
+    "late current-power input receives a real same-Host managed frame acknowledgement after expiry");
+   cases.back()["lateFrame"]=accepted;
+  }else publishSample(!sourceFree&&variant!="pending-then-current",variant!="unstable-source",variant=="stale-source");
+  if(sourceFree)check(!g_inputHostFreshNeutralAdmitted&&!g_xinputPhysicalSourceLocked&&!g_hidHideVisibilityJournal.active&&!g_msiDinputRouteDinputArmed.load(),
+   "source-free wake keeps the original absence of physical responsibility without clearing any admitted fact");
+  bool queryObserved=false;ymcc::sleeppower::Dispatch::Receipt notification;
+  if(variant=="pending-notification"||variant=="publication-only"||variant.find("after-source-query")!=std::string::npos){
+   fixtureWakeAfterSourceQuery=[&]{
+    queryObserved=true;
+    if(variant=="pending-notification")notification=g_sleepPowerDispatch.window(PBT_APMSUSPEND,GetTickCount64());
+    else if(variant=="publication-only")g_sharedPowerPublicationRevision.fetch_add(1,std::memory_order_acq_rel);
+    else if(variant=="off-after-source-query")g_realStickTest.virtualTargetEnabled=false;
+    else if(variant=="new-request-after-source-query"){
+     const auto admitted=g_virtualStartProtection.admit("elite",startProtectionClock);check(admitted.accepted,"original unlocked player manager admits a new request at source-query boundary");
+    }else {fixturePowerClockOffset+=runtime::episode.maxAgeMs+1;startProtectionClock+=runtime::episode.maxAgeMs+1;}
+   };
+  }
+  // Keep the original SDK-free Start/OFF transport models. Project Win5's
+  // board identity only for the kept-SD wake consumer under test.
+  const auto priorProduct=g_machineIdentity.product,priorDeviceClass=g_machineIdentity.deviceClass;
+  if(lateRecovery){g_machineIdentity.product="G1618-05";g_machineIdentity.deviceClass="HandheldCompanion.Devices.GPDWin5";}
+  fixtureWakeHideResult=true;const auto priorKept=g_wakeKeptTargetGeneration.load();
+  lateStage("queue-kept-wake");
+  inputHostRequestWakeRescan(generation);
+  if(sourceFree){
+   const bool keeps=sgShouldKeepInputDuringStandby();
+   check(keeps,"source-free PC kept-wake control uses actual Modern Standby capabilities");
+   inputHostConsumeWakeRescan();
+   if(!keeps){check(g_inputHostLifecycleWorkQueue.empty(),"classic source-free PC respects the original no-handshake wait before dispatch");
+    fixturePowerClockOffset+=kWakeHandshakeWaitMs+1;startProtectionClock+=kWakeHandshakeWaitMs+1;}
+  }
+  inputHostConsumeWakeRescan();
+  if(lateRecovery){
+   lateStage("retire-old-suspend");
+   const auto first=runtime::episode;
+   const auto h=fixtureWakeHideCalls;
+   check(first.suspendBound&&first.suspendSerial>0,"Win5 retained SD recovery binds the actual public suspend watermark");
+   // Model the public watermark after a second suspend/resume in one generation.
+   g_sharedPowerSuspendSerial.fetch_add(1,std::memory_order_acq_rel);
+   {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+   check(runtime::episode.completed&&fixtureWakeHideCalls==h&&g_wakeKeptTargetGeneration.load()==priorKept,
+     "work queued for the earlier suspend cannot hide or settle the successor");
+   inputHostRequestWakeRescan(generation);publishSample(true,true,false);inputHostConsumeWakeRescan();
+   check(runtime::episode.serial!=first.serial&&runtime::episode.suspendSerial==first.suspendSerial+1&&
+     runtime::episode.generation==first.generation,"the same-generation successor must use its own suspend watermark");
+  }
+  const auto original=runtime::episode;
+  if(lateRecovery){
+   // Complete a duplicate through the public dispatcher while the old result
+   // is in flight. Both ends are Ready and carry the same generation/suspend.
+   cases.back()["latePublicPower"] = json::array();
+   for(const bool oldHideResult:{true,false}){
+    lateStage(oldHideResult?"revoked-success":"revoked-failure");
+    fixtureWakeHideResult=oldHideResult;bool delivered=false;
+    const auto beforeHides=fixtureWakeHideCalls;
+    const auto beforeSequence=g_sleepPowerDispatch.observedSequence();
+    fixtureWakeBeforeHideReturn=[&]{
+     const auto tick=GetTickCount64();
+     const auto duplicate=g_sleepPowerDispatch.window(PBT_APMRESUMEAUTOMATIC,tick);
+     delivered=static_cast<bool>(duplicate);
+     g_sleepPowerDispatch.complete(duplicate,tick);
+    };
+    {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+    fixtureWakeBeforeHideReturn={};
+    ymcc::sleeppower::SharedPowerV1 nowPower;
+    const bool stillReady=captureSharedPowerLifecycle(nowPower)&&nowPower.generation==generation&&
+      nowPower.suspendSerial==original.suspendSerial&&nowPower.observedNotificationSequence>beforeSequence;
+    check(delivered&&stillReady&&fixtureWakeHideCalls==beforeHides+1,
+      "late duplicate is consumed during the original hide in the same public Ready cycle");
+    const auto after=runtime::episode;
+    check(!after.completed&&g_wakeRescanRequested.load()&&g_wakeHoldPhysicalUnhide.load()&&
+      g_wakeKeptTargetGeneration.load()==priorKept,"a late public notification revokes the old hide result, even after Ready returns");
+    check(after.serial==original.serial&&after.requestId==original.requestId&&after.armedAt==original.armedAt&&
+      after.maxAgeMs==original.maxAgeMs&&after.playerDeadline==original.playerDeadline&&
+      after.keptHideFailures==original.keptHideFailures&&after.recreateAttempts==0&&after.startAttempts==0,
+      "stale success or failure neither renews the same wake nor consumes recovery attempts");
+    cases.back()["latePublicPower"].push_back({{"oldHideResult",oldHideResult},{"notificationDelivered",delivered},
+      {"stillReady",stillReady},{"observedSequence",nowPower.observedNotificationSequence},{"wakeSerial",after.serial},
+      {"suspendSerial",after.suspendSerial},{"completed",after.completed},{"hideFailures",after.keptHideFailures}});
+    const auto due=g_wakeHotReplaceRetryAfterTick.load(),now=GetTickCount64();const auto advance=due>now?due-now+1:1;
+    fixturePowerClockOffset+=advance;startProtectionClock+=advance;publishSample(true,true,false);
+    inputHostConsumeWakeRescan();
+   }
+   fixtureWakeHideResult=true;
+   fixtureWakeBeforeHideReturn=[] {g_sharedPowerPublicationRevision.fetch_add(1,std::memory_order_acq_rel);};
+  }
+  lateStage("current-power-completion");
+  {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+  fixtureWakeBeforeHideReturn={};
+  fixtureWakeAfterSourceQuery={};
+  const bool positive=sourceFree||lateRecovery||variant=="current"||variant=="publication-only";
+  const bool completed=runtime::episode.completed&&g_wakeKeptTargetGeneration.load()==generation&&!g_wakeHoldPhysicalUnhide.load();
+  check(positive?completed:(!completed&&g_wakeKeptTargetGeneration.load()==priorKept&&g_wakeHoldPhysicalUnhide.load()),
+   "only current fresh source and current owner/power may publish kept wake completion");
+  if(variant=="pending-notification"||variant=="publication-only"||variant.find("after-source-query")!=std::string::npos)
+   check(queryObserved,"query interleave must occur inside the actual source projection observer");
+  if(variant=="pending-then-current"||variant=="stale-source"||variant=="unstable-source"){
+   check(!runtime::episode.completed&&runtime::episode.keptHideFailures==original.keptHideFailures,
+    "missing or stale source retains the original wake without spending hide failure quota");
+   check(runtime::episode.serial==original.serial&&runtime::episode.armedAt==original.armedAt&&runtime::episode.maxAgeMs==original.maxAgeMs&&runtime::episode.playerDeadline==original.playerDeadline,
+    "source waiting cannot renew the original wake or player deadlines");
+   if(variant=="pending-then-current"&&!runtime::episode.completed){
+    const auto due=g_wakeHotReplaceRetryAfterTick.load(),now=GetTickCount64();const auto delta=due>now?due-now+1:1;
+    fixturePowerClockOffset+=delta;startProtectionClock+=delta;publishSample(true,true,false);
+    inputHostConsumeWakeRescan();{FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+    check(runtime::episode.completed&&g_wakeKeptTargetGeneration.load()==generation&&!g_wakeHoldPhysicalUnhide.load(),"fresh current source resumes the same retained wake without a new Host");
+   }
+  }
+  if(notification)g_sleepPowerDispatch.complete(notification,GetTickCount64());
+  check(g_inputHostProcess&&GetProcessId(g_inputHostProcess)==pid&&g_inputHostEpoch==epoch&&g_inputHostRunId==run&&fullPipeSpawnCount==spawns&&fullPipeRecreateCommands()==recreates,
+   "source proof and cancellation cannot recreate or replace the original Host");
+  if(lateRecovery){
+   fullPipeVerificationStep();const auto terminal=g_virtualStartProtection.view(startProtectionClock);
+   json final=nullptr,wake=nullptr;unsigned finals=0,lateCompletions=0;std::size_t finalAt=0,wakeAt=0;
+   for(std::size_t i=0;i<fixtureEvents.size();++i){const auto& event=fixtureEvents[i];const auto type=event.value("event","");
+    if(type!="input-host-switch-verification"&&type!="input-host-wake-execution")continue;
+    const auto& detail=event["detail"];
+    if(detail.value("requestId",0ULL)!=previousPlayer.requestId)continue;
+    if(type=="input-host-switch-verification"&&detail.value("stage","")=="final"){++finals;final=detail;finalAt=i;}
+    if(type=="input-host-wake-execution"&&detail.value("stage","")=="complete"){++lateCompletions;wake=detail;wakeAt=i;}
+   }
+   check(finals==1&&!final.is_null()&&final.value("outcome","")=="failure"&&final.value("finalReason","")=="original-admission-deadline-expired"&&
+    terminal.requestId==previousPlayer.requestId&&terminal.phase=="expired"&&!terminal.locked&&!terminal.remainingMs,
+    "late wake cannot replace the single original timeout with another terminal or a renewed request");
+   check(lateCompletions==1&&finalAt<wakeAt&&!wake.is_null()&&wake.value("reason","")=="same-host-current-power-proven"&&
+    wake.value("role","")=="normal-power-execution"&&!wake.value("protectedPlayer",true)&&wake.value("powerGeneration",0ULL)==generation&&wake.value("hostEpoch",0ULL)==epoch&&
+    wake.value("originalPlayerDeadline",1ULL)==0&&!wake.value("fallbackCharged",true)&&wake.value("startAttempts",1U)==0&&wake.value("recreateAttempts",1U)==0&&
+    !original.playerDeadline&&terminal.fallbackAttempts==0&&g_inputHostRecoveryEpisodeAttempts.load()==0,
+    "only normal same-Host current-power execution completes after the original terminal, without a player deadline or fallback");
+   cases.back()["lateRecovery"]={{"originalFinal",final},{"wakeCompletion",wake},{"finalEventIndex",finalAt},{"completionEventIndex",wakeAt},
+    {"hostPid",pid},{"hostEpoch",epoch},{"hostRunId",run},{"addedSpawns",fullPipeSpawnCount-spawns},{"addedRecreates",fullPipeRecreateCommands()-recreates},
+    {"finalPhase",terminal.phase},{"fallbackAttempts",terminal.fallbackAttempts}};
+  }
+  cases.back()["queryObserved"]=queryObserved;cases.back()["originalPlayerPhase"]=previousPlayer.phase;
+  cases.back()["ordinaryUnlockedWake"]=!original.protectedPlayer;cases.back()["wakeOriginalArm"]=original.armedAt;
+  cases.back()["wakeOriginalMaxAgeMs"]=original.maxAgeMs;cases.back()["actualSourceEvents"]=fixtureEvents;
+  if(lateRecovery){g_machineIdentity.product=priorProduct;g_machineIdentity.deviceClass=priorDeviceClass;}
+  lateStage("cleanup");
+  // Query-boundary inputs never perform a reentrant settings/Stop operation.
+  // Cleanup uses the existing actual OFF consumer after all query locks return.
+  g_realStickTest.virtualTargetEnabled=true;
+  auto current=json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE));const auto closing=targetDocument("disabled",current["input"]["revision"].get<int>()+1);
+  fullPipeWaitForPlayerLock(current,closing);check(writeTarget(current,closing).value("ok",false),"source-wake cleanup commits actual private OFF");inputCaptureRefreshRealStickSettings(true);
+  inputHostStop("virtual-target-disabled");fullPipeDrainQueuedLifecycle();cases.back()["managedReceipt"]=fullPipeChildOutcome();
+  check(fullPipeChildObservers.empty()&&!g_inputHostProcess,"source-wake returns all owned managed observers and Host handle");
+  cases.back()["passed"]=failures.size()==failureBefore;fixtureFullPipe=false;
+ }
+}
+
+// Optional original full-pipe consumer: no Host existed during the expired ON.
+static constexpr const char* gpdExpiredFirstOnFullCycleTerminals[]={"off","exit"};
+#ifdef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
+#include "gpd_native_writer_return.inc"
+#endif
+static void fullPipeGpdExpiredFirstOnSelectedCases(bool nativeWriterReturn=false){
+#ifndef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
+ if(nativeWriterReturn)throw std::runtime_error("gpd-native-writer-return-not-compiled");
+#endif
+ namespace wake=ymcc::inputHost::wakeExecutionRuntime;
+ for(const std::string terminal:gpdExpiredFirstOnFullCycleTerminals){
+  const auto beforeFailures=failures.size();seed();fixtureFullPipe=true;fullPipeFault="none";
+  g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;
+  g_sleepRecoveryOutputWanted=true;g_machineIdentity.family=YmccFamily::Gpd;
+  g_machineIdentity.manufacturer="GPD";g_machineIdentity.product="G1618-05";
+  g_msiDinput.enabled=false;g_msiDinputSourceValid=false;g_msiMainSourceRevision=1;
+  g_msiFeedbackModeGeneration=1;g_inputShortcutRuntime.clear();
+  g_externalPriorityVirtualSuspended=false;g_inputCaptureStop=false;reg_fs();
+  {std::lock_guard<std::mutex> observation(fixtureGpdFullCycleObservationMx);fixtureGpdFullCycleSourceReads=json::array();}
+  fixtureGpdFullCycleObserving.store(true,std::memory_order_release);
+  cases.push_back({{"name","GPD/first-on-expired-full-cycle/"+terminal},{"terminal",terminal},
+    {"realManagedPipe",true},{"completeCycleProven",false},{"selectedParameter","gpd-expired-first-on-full-cycle"},
+    {"controlledModel","G1618-05"},{"physicalSdkAndStandardReadmission","existing controlled fixture leaves"}});
+  const auto spawns=fullPipeSpawnCount;const auto receipts=fullPipeReceipts.size();
+  const auto queueDepth=[](){std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);return g_inputHostLifecycleWorkQueue.size();};
+  const auto advance=[](std::uint64_t ms){startProtectionClock+=ms;fixturePowerClockOffset+=ms;};
+  const auto base=targetDocument("disabled",0);auto on=targetDocument("elite",1),off=targetDocument("disabled",2);
+  check(!g_inputHostProcess&&!g_inputHostEpoch&&!g_inputHostHello&&!g_inputHostPrepared&&fullPipeChildObservers.empty()&&
+    !fixtureGpdPostHideApplied&&!g_hidHideVisibilityJournal.active&&queueDepth()==0,
+    "GPD full cycle begins without any current Host, inherited post-hide proof or unreturned child");
+  check(sgWriteFileAtomic(YM_SETTINGS_FILE,base.dump()),"GPD full cycle seeds only its private disabled input document");
+  auto original=g_virtualStartProtection.view(startProtectionClock);
+  auto generation=currentPowerGeneration();auto armed=wake::episode;bool initialSourceObserved=false;
+#ifdef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
+  std::unique_ptr<FullPipeGpdNativeWriterReturn> nativeWriter;
+  if(nativeWriterReturn){
+   nativeWriter=std::make_unique<FullPipeGpdNativeWriterReturn>();
+   original=nativeWriter->prepareAndStart(terminal,base,on,off,initialSourceObserved);
+  }else
+#endif
+  {
+  check(writeTarget(base,on).value("ok",false),"GPD original first ON is admitted by the actual settings writer");
+  inputCaptureRefreshRealStickSettings(true);
+  original=g_virtualStartProtection.view(startProtectionClock);
+  const auto playerDeadline=startProtectionClock+original.remainingMs;
+  check(original.requestId&&original.phase=="pending"&&original.remainingMs==fullPipeUserMaxMs&&
+    inputHostConfiguredPersona()=="elite"&&g_realStickTest.virtualTargetEnabled,
+    "GPD original first ON owns one real unchanged thirty-second player ticket");
+  advance(original.remainingMs+1);
+  const auto expired=g_virtualStartProtection.view(startProtectionClock);
+  check(expired.requestId==original.requestId&&expired.phase=="expired"&&!expired.locked&&!expired.remainingMs&&
+    !g_inputHostProcess&&!g_inputHostEpoch&&!g_inputHostHello&&!g_inputHostPrepared&&
+    fullPipeSpawnCount==spawns&&fullPipeReceipts.size()==receipts&&fullPipeChildObservers.empty(),
+    "GPD original first ON actually expires before any Host process, HELLO or target creation");
+  cases.back()["firstOnBeforeWake"]={{"requestId",expired.requestId},{"phase",expired.phase},
+    {"remainingMs",expired.remainingMs},{"originalDeadline",playerDeadline},{"hostEpoch",g_inputHostEpoch},
+    {"hostSpawnsThisCase",fullPipeSpawnCount-spawns},{"managedReceiptsThisCase",fullPipeReceipts.size()-receipts}};
+  generation=currentPowerGeneration()+1;g_powerGeneration=generation;
+  inputHostRequestWakeRescan(generation);armed=wake::episode;
+  check(armed.serial&&armed.generation==generation&&armed.requestId==original.requestId&&
+    !armed.protectedPlayer&&!armed.playerDeadline&&armed.maxAgeMs==20000,
+    "GPD expired first ON arms only the normal twenty-second wake episode without a new player period");
+  fixtureXinputSourceLive=true;
+  fixtureGpdTransferSourceAtEnsure=[&](){
+    initialSourceObserved=true;cases.back()["initialSourceDiscovery"]=fullPipeReadPhysicalSourceForElite(true);
+  };
+  advance(kWakeHandshakeWaitMs+1);inputHostConsumeWakeRescan();
+  check(g_inputHostLifecycleWorkRequested.load(),"GPD ordinary wake consumer reaches the actual serialized lifecycle queue");
+  {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+  }
+  const bool started=g_inputHostProcess&&g_inputHostHello&&g_inputHostPrepared&&g_inputHostNeutralized;
+  check(started&&initialSourceObserved&&fullPipeSpawnCount==spawns+1&&fullPipeChildObservers.size()==1,
+    "GPD expired first ON starts exactly one real managed Host through ordinary wake and actual Start");
+  if(!started){cases.back()["afterStart"]=state();cases.back()["nativeEvents"]=fixtureEvents;
+    cases.back()["trace"]=g_startEntrySeam.trace;fixtureGpdFullCycleObserving=false;fixtureFullPipe=false;
+    throw std::runtime_error("gpd-expired-first-on-full-managed-start-failed");}
+  const auto process=g_inputHostProcess;const auto pid=GetProcessId(process);const auto epoch=g_inputHostEpoch;
+  const auto run=g_inputHostRunId,host=g_inputHostHostInstanceId;
+  const auto observer=fullPipeChildObservers.back();const auto receipt=fullPipeReceipts.back();
+  ULONG client=0;const bool exactPipe=pid!=GetCurrentProcessId()&&GetNamedPipeClientProcessId(g_inputHostServerPipe,&client)&&client==pid;
+  check(exactPipe&&g_inputHostBoundPowerGeneration==generation&&g_inputHostBoundPersona=="elite",
+    "GPD HELLO PREPARE and neutral use the actual pipe connected to this owned new Host and current power");
+  json sourceReads;{std::lock_guard<std::mutex> observation(fixtureGpdFullCycleObservationMx);sourceReads=fixtureGpdFullCycleSourceReads;}
+  bool freshPostHide=!sourceReads.empty();std::uint64_t priorSequence=0;
+  for(const auto& read:sourceReads){const auto sequence=read.value("sequence",0ULL);
+    freshPostHide=freshPostHide&&sequence>priorSequence&&read.value("live",false)&&read.value("stable",false)&&
+      read.value("power",0ULL)==generation&&read.value("hello",false)&&!read.value("prepared",true);
+    priorSequence=sequence;}
+  // Refresh intentionally advances topology/identity. The actual Await reads
+  // again; require its final two coherent observations, not the pre-refresh era.
+  freshPostHide=freshPostHide&&sourceReads.size()>=2;
+  for(std::size_t n=sourceReads.size()>1?sourceReads.size()-2:0;n<sourceReads.size();++n){
+    freshPostHide=freshPostHide&&sourceReads[n].value("topology",0ULL)==g_xinputTopologyEpoch.load()&&
+      sourceReads[n].value("identity",0ULL)==g_xinputSlotIdentityEpoch.load();}
+  check(fixtureGpdPostHideApplied&&freshPostHide,
+    "GPD actual post-hide consumer reads fresh current-generation source after HELLO and before target PREPARE");
+  unsigned attempts=0;for(const auto& event:fixtureEvents)if(event.value("event","")=="input-host-wake-execution"&&event["detail"].value("stage","")=="start-attempt")++attempts;
+  const auto afterStart=g_virtualStartProtection.view(startProtectionClock);
+#ifdef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
+  if(nativeWriterReturn){
+   const auto recovery=ymcc::inputHost::runtimeRecovery::state.recoveryRequestId;
+   check(recovery&&recovery!=original.requestId&&afterStart.requestId==recovery&&
+    g_inputHostRecoveryEpisodeAttempts.load()==1,
+    "GPD combined actual Host owns the distinct bounded recovery ticket, not an expired wake ticket");
+  }else
+#endif
+  {
+  check(attempts==1&&GetTickCount64()-armed.armedAt<armed.maxAgeMs&&afterStart.requestId==original.requestId&&
+    afterStart.phase=="expired"&&!afterStart.remainingMs&&!afterStart.fallbackAttempts&&!g_inputHostRecoveryEpisodeAttempts.load(),
+    "GPD full managed wake keeps the expired player unchanged and uses one Start within original wake time without fallback");
+  cases.back()["wake"]={{"serial",armed.serial},{"requestId",armed.requestId},{"generation",armed.generation},
+    {"armedAt",armed.armedAt},{"maxAgeMs",armed.maxAgeMs},{"protectedPlayer",armed.protectedPlayer},
+    {"playerDeadline",armed.playerDeadline},{"startAttemptEvents",attempts},{"postHideSourceReads",sourceReads}};
+  }
+  const auto publish=[](){auto sample=fullPipeReadNow(2);std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);
+    const auto prior=inputHostRecoveryHealthSource(&g_inputCaptureGamepadSnapshot,true);
+    sample.readContinuityGeneration=ymcc::input::recoveryHealth::nextContinuity(prior,inputHostRecoveryHealthSource(&sample,true),GetTickCount64());
+    g_inputCaptureGamepadSnapshot=sample;return sample;};
+  json accepted;for(int n=0;n<kInputHostFreshNeutralFramesRequired+1;++n){auto sample=publish();
+    if(n==kInputHostFreshNeutralFramesRequired)sample.pad.wButtons=XINPUT_GAMEPAD_A;
+    accepted=fullPipeSubmitSource(sample,true,false);}
+  check(accepted.value("hostSubmission","")=="frame-accepted"&&!accepted.value("focusIsolationSemanticNeutral",true)&&
+    g_inputHostActive&&g_inputHostFreshNeutralAdmitted,
+    "GPD wake retains the original fresh-neutral gate and accepts current non-neutral input through its real managed Host");
+  const bool sameHost=g_inputHostProcess==process&&GetProcessId(g_inputHostProcess)==pid&&g_inputHostEpoch==epoch&&
+    g_inputHostRunId==run&&g_inputHostHostInstanceId==host&&fullPipeSpawnCount==spawns+1;
+  check(sameHost,"GPD startup and accepted input remain on the same sole owned Host before OFF or exit");
+  cases.back()["currentAck"]=accepted;cases.back()["hostStart"]={{"pid",pid},{"epoch",epoch},{"runId",run},
+    {"hostInstanceId",host},{"pipeClientPid",client},{"sameNativeHost",sameHost},{"prepared",g_inputHostPrepared},{"neutralized",g_inputHostNeutralized}};
+  cases.back()["completeCycleProven"]=started&&exactPipe&&freshPostHide&&sameHost&&accepted.value("hostSubmission","")=="frame-accepted";
+  std::uint64_t closingRequest=0;
+  if(terminal=="off"){
+#ifdef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
+    if(nativeWriterReturn)fullPipeWaitForPlayerLock(on,off);
+#endif
+    check(writeTarget(on,off).value("ok",false),"GPD actual user OFF is admitted after its original first ON expired");
+    inputCaptureRefreshRealStickSettings(true);closingRequest=g_virtualStartProtection.view(startProtectionClock).requestId;
+    check(closingRequest!=original.requestId&&!g_realStickTest.virtualTargetEnabled&&g_inputHostLifecycleWorkRequested.load(),
+      "GPD OFF creates only its own closing ticket and actual cleanup queue");
+    fullPipeDrainQueuedLifecycle();fullPipeCheckStopCandidate(closingRequest,"success");
+  }else{
+    inputHostRaiseExitFence("fixture-gpd-expired-first-on-exit");g_exitRequested=true;g_inputCaptureStop=true;
+    check(inputHostExitFenceRaised()&&inputHostConfiguredPersona()=="elite"&&g_realStickTest.virtualTargetEnabled,
+      "GPD exit raises the actual terminal fence while preserving the saved ON document");
+    inputHostStop("shutdown");
+  }
+  const auto child=fullPipeChildOutcome(observer,receipt);cases.back()["managedReceipt"]=child;
+  const auto finalTuple=child.value("stateAfterFinalCleanup",json::object()).value("tuple",json::object());
+  check(child.value("nativeObservedProcessExit",false)&&child.value("nativeObservedExitCode",999)==0&&
+    child.value("nativeObserverCloseSucceeded",false)&&child.value("finalCleanupOk",false)&&
+    !child.value("hasController",true)&&!child.value("hasContext",true)&&
+    finalTuple.value("RunId",std::string{})==run&&finalTuple.value("Epoch",0ULL)==epoch,
+    "GPD same new Host exits naturally with matching final tuple and disposed controller context and observation handle");
+  if(terminal=="off"){const auto nextOn=targetDocument("elite",off["input"]["revision"].get<int>()+1);fullPipeWaitForPlayerLock(off,nextOn);fullPipeCheckUniqueOffFinal(closingRequest,true);}
+  const auto lateSpawns=fullPipeSpawnCount,lateHides=fixtureWakeHideCalls,lateRecreates=fullPipeRecreateCommands();
+  inputHostRequestWakeRescan(generation);inputHostConsumeWakeRescan();inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
+  const bool lateStarted=inputHostStart();
+  const bool resurrected=lateStarted||g_inputHostProcess||fullPipeSpawnCount!=lateSpawns||fixtureWakeHideCalls!=lateHides||fullPipeRecreateCommands()!=lateRecreates;
+  check(!resurrected,"GPD late wake recovery and direct Start cannot resurrect the closed or exiting function");
+  const bool released=!g_inputHostProcess&&!g_inputHostPrepared&&!g_inputHostNeutralized&&!g_inputHostReleaseQuarantined&&
+    !g_inputHostStartBlocked&&!g_hidHideVisibilityJournal.active&&fullPipeChildObservers.empty()&&
+    !g_inputHostLifecycleWorkRequested.load()&&!g_inputHostLifecycleWorkInFlight.load()&&queueDepth()==0;
+  check(released&&forbiddenIo==0,"GPD full cycle returns all native ownership and queued work without real physical SDK IO");
+  cases.back()["lateWork"]={{"resurrected",resurrected},{"ownedStateReleased",released},{"spawnCountBefore",lateSpawns},{"spawnCountAfter",fullPipeSpawnCount}};
+  cases.back()["afterStop"]=state();cases.back()["nativeEvents"]=fixtureEvents;cases.back()["trace"]=g_startEntrySeam.trace;
+#ifdef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
+  if(nativeWriter)nativeWriter->finish();
+#endif
+  cases.back()["passed"]=failures.size()==beforeFailures;fixtureGpdFullCycleObserving=false;fixtureFullPipe=false;
+ }
 }

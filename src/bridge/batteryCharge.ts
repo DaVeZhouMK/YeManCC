@@ -1,11 +1,14 @@
 import { invoke } from './ipc';
 import { reportFrontendError } from '@/robust/frontendDiagnostics';
 import type { DropdownOption } from '@/components/Dropdown.vue';
+import { captureBootPreferenceWrite, type BootPreferenceWrite } from './bootModeGlobalPreferences';
 export interface BatteryChargeState {
   schema: 1; ok: boolean; supported: boolean; batteryPresent: boolean;
   model: string; family: string; kind: string; choices: number[];
   currentLimit: number | null; requestedLimit: number | null; managed: boolean;
   verification: string; fence: string; reason: string;
+  /** Unified boot preference save; independent of the device operation's ok. */
+  preferenceSaved?: boolean; preferenceReason?: string;
 }
 const percent = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 100;
 export function parseBatteryChargeState(value: unknown): BatteryChargeState {
@@ -16,7 +19,9 @@ export function parseBatteryChargeState(value: unknown): BatteryChargeState {
       !Array.isArray(v.choices) || v.choices.length > 21 || v.choices.some(n => !percent(n)) ||
       new Set(v.choices).size !== v.choices.length ||
       (v.currentLimit !== null && !percent(v.currentLimit)) || (v.requestedLimit !== null && !percent(v.requestedLimit)) ||
-      (v.supported && (v.choices.length === 0 || !/^[A-Fa-f0-9]{64}$/.test(String(v.fence))))) throw new Error('充电状态未能确认，请重新读取');
+      (v.supported && (v.choices.length === 0 || !/^[A-Fa-f0-9]{64}$/.test(String(v.fence)))) ||
+      (v.preferenceSaved !== undefined && typeof v.preferenceSaved !== 'boolean') ||
+      (v.preferenceReason !== undefined && typeof v.preferenceReason !== 'string')) throw new Error('充电状态未能确认，请重新读取');
   if (v.kind === 'firmware-fixed' && v.choices.some(n => n !== 80 && n !== 100)) throw new Error('养护模式档位异常');
   return v as unknown as BatteryChargeState;
 }
@@ -43,8 +48,13 @@ const request = async (operation: string, args: Record<string, unknown> = {}) =>
     throw error;
   }
 };
+const preferenceArgs = (options: BootPreferenceWrite) => {
+  const submitted = captureBootPreferenceWrite(options);
+  return { ...(submitted.origin ? { origin: submitted.origin } : {}),
+    ...(submitted.bootContext === undefined ? {} : { bootContext: submitted.bootContext }) };
+};
 export const batteryCharge = {
   get: () => request('get'), refresh: () => request('refresh'),
-  set: (fence: string, target: number) => request('set', { fence, target }),
-  release: () => request('release'),
+  set: (fence: string, target: number, options: BootPreferenceWrite = {}) => request('set', { fence, target, ...preferenceArgs(options) }),
+  release: (options: BootPreferenceWrite = {}) => request('release', preferenceArgs(options)),
 };

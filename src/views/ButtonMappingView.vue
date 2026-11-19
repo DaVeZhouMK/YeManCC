@@ -585,7 +585,7 @@ function closeShortcutEditor(): void {
           >{{ o.label }}</button>
         </div>
 <p v-if="startProtectionLocked || targetProtectionNotice" class="field-hint" role="status" aria-live="polite">{{ targetProtectionNotice || '手柄切换处理中，请稍候。' }}</p>
-<div class="controller-preview-row"><div ref="controllerPreviewHost" class="controller-preview-host" aria-label="现有手柄实时预览"/><ControllerChannelStatus :status="virtualOutputStatus" :gyro-supported="personaCapability.gyro" :gyro-enabled="shortcutRuntime?.gyroEnabled ?? gyroEnabled" :back-buttons="personaCapability.backButtons" :physical-gyro-supported="physicalGyroSupported" :physical-back-buttons="physicalBackButtons" :physical-back-buttons-captured="physicalBackButtonsCaptured" :usage="oemUsage" :virtual-enabled="displayTargetEnabled" :persona="displayPersona" :observed-keys="observedOemKeys"/></div>
+<div class="controller-preview-row"><div ref="controllerPreviewHost" class="controller-preview-host" aria-label="现有手柄实时预览"/><ControllerChannelStatus :status="virtualOutputStatus" :gyro-supported="personaCapability.gyro" :gyro-enabled="shortcutRuntime?.gyroEnabled ?? gyroEnabled" :back-buttons="personaCapability.backButtons" :physical-gyro-supported="physicalGyroSupported" :physical-back-buttons="physicalBackButtons" :physical-back-buttons-captured="physicalBackButtonsCaptured" :usage="oemUsage" :virtual-enabled="displayTargetEnabled" :persona="displayPersona" :observed-keys="observedOemKeys" @inspect-keys="readPhysicalChannelCapabilities"/></div>
       </div>
       <p v-if="virtualTargetPolicy?.steamDeckSelfOutputBlocked" role="status" class="field-hint">{{ STEAM_DECK_SELF_OUTPUT_MESSAGE }}</p>
       <!-- 背键映射（2026-09-24 operator 裁决：去掉开关、改为**常开**。

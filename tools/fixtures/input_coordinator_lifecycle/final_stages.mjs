@@ -5,7 +5,7 @@ import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 const sha = text => createHash('sha256').update(text).digest('hex');
 const ENTRY = 'int wmain(int argc,wchar_t**argv){try{';
-const START = 'fspath::create_directories(g_yemanccDataDir);fixtureTargetReturnIndependentCase();';
+const START = 'fspath::create_directories(g_yemanccDataDir);';
 const REPORT = ' const auto report=json{{"status",ok?"PASS":"FAIL"},{"checks",checks},{"assertionTrace",assertionTrace},{"orderedReturn",fixtureCurrentOrderedReturn},';
 const WRITE = ' std::ofstream(fspath::path(g_yemanccDataDir)/L"fixture-result.json")<<report.dump(2);';
 const RETURN = 'return ok&&forbiddenIo==0?0:1;';
@@ -47,7 +47,7 @@ export function observeFinalStages(original){
  const helper=HELPER.replace(/\r?\n/g,newline);
  const changes=[
   [ENTRY,helper+ENTRY],
-  [START,'fspath::create_directories(g_yemanccDataDir);fixtureFinalStage("body-start");fixtureTargetReturnIndependentCase();'],
+   [START,START+'fixtureFinalStage("body-start");'],
   [REPORT,' fixtureFinalStage("body-return");'+newline+REPORT],
   [WRITE,' fixtureFinalStage("report-built");'+newline+' fixtureFinalStage("report-write-start");'+newline+' std::ofstream(fspath::path(g_yemanccDataDir)/L"fixture-result.json")<<fixtureFinalSerialize([&](){return report.dump(2);});fixtureFinalStage("report-write-end");'],
   [RETURN,'fixtureFinalStage("main-return");'+RETURN]

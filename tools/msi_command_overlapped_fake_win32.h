@@ -146,3 +146,39 @@ inline bool ymStartSeamActive(){return false;}
 inline std::string W2U(const wchar_t* p){std::string s;while(*p)s.push_back(char(*p++));return s;}
 struct FakeLogValue {template<class T> FakeLogValue(const T&){} };
 inline void appendNativeLifecycleLog(const char*,std::initializer_list<std::pair<std::string,FakeLogValue>>){++fake::logs;}
+
+constexpr DWORD ERROR_WRITE_FAULT=29;
+// Legacy fake-IO suites provide one permanently healthy read-only public port.
+// Sleep/revocation and real HANDLE return are tested by the Native power suite;
+// this seam only preserves these older suites' original scripted IO boundaries.
+#ifndef YMCC_LEGACY_MSI_INERT_PUBLIC_POWER
+#define YMCC_LEGACY_MSI_INERT_PUBLIC_POWER
+#include <memory>
+namespace ymcc::sleeppower {inline bool powerAdmitted(bool value)noexcept{return value;}}
+namespace ymcc::inputHost::sharedPower {
+enum class Use{Input,Lifecycle};
+class Scope final {
+public:
+    template<class Reader,class Mirrors>static std::shared_ptr<Scope> create(Reader,Mirrors&,bool,Use){return std::make_shared<Scope>();}
+    bool current()const noexcept{return true;}
+    bool power()const noexcept{return true;}
+    HANDLE event()const noexcept{return reinterpret_cast<HANDLE>(std::uintptr_t(0x5f20));}
+};
+}
+[[maybe_unused]] static int readSharedSystemPower(){return 0;}
+[[maybe_unused]] static int g_sharedPowerRevocations=0;
+[[maybe_unused]] static std::shared_ptr<ymcc::inputHost::sharedPower::Scope> t_inputHostRequestPower;
+[[maybe_unused]] static bool t_inputHostRequestHardwareRequired=false;
+struct InputHostRequestPowerScope {
+    std::shared_ptr<ymcc::inputHost::sharedPower::Scope> previous;
+    bool previousHardware;
+    explicit InputHostRequestPowerScope(std::shared_ptr<ymcc::inputHost::sharedPower::Scope> scope,bool hardware=false)
+        :previous(std::move(t_inputHostRequestPower)),previousHardware(t_inputHostRequestHardwareRequired){
+        t_inputHostRequestPower=std::move(scope);t_inputHostRequestHardwareRequired=hardware;}
+    ~InputHostRequestPowerScope(){t_inputHostRequestPower=std::move(previous);t_inputHostRequestHardwareRequired=previousHardware;}
+};
+[[maybe_unused]] static DWORD WaitForMultipleObjects(DWORD count,const HANDLE* handles,BOOL all,DWORD budget){
+    if(count!=2||all||!handles||handles[1]!=reinterpret_cast<HANDLE>(std::uintptr_t(0x5f20)))throw std::logic_error("invalid-legacy-public-wait-set");
+    return WaitForSingleObject(handles[0],budget);
+}
+#endif

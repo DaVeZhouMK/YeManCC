@@ -3,13 +3,15 @@
   "caseId": "sleep.session-marker-file-consumer",
   "fixture": {
     "path": "tools/ymcc_sim/global/sleep-session-marker-file-consumer/fixture.cpp.in",
-    "sha256": "aa08932532d968faa2a0229c61878d54a8b0fee797c212b6f5af84797bd1310b",
+    "sha256": "e62aaa8509309d6c8d4a04db1abc4f35e027d085ae955db39b1be866bfc1e7ac",
     "positiveGroups": 17,
     "nativeStages": 19
   },
   "productSources": [
     "native/main.cpp",
-    "deps/json/json.hpp"
+    "deps/json/json.hpp",
+    "native/log_snapshot_state.h",
+    "native/sleep_recovery_record_name.h"
   ],
   "sharedLeaves": [
     "tools/ymcc_sim/global/host-process.ps1",
@@ -36,7 +38,7 @@
   "reviewedSharedLeafIdentities": [
     {
       "path": "tools/ymcc_sim/global/host-process.ps1",
-      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+      "sha256": "0779bc14096e2e8cdcc7046cf3072bfdd36fb4ed8d1c01f969b8babb2759efdb"
     },
     {
       "path": "tools/ymcc_sim/global/marker-ownership-consumer/adapter.mjs",
@@ -48,7 +50,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
-      "sha256": "570ee6b49050c091cd8712517bea57e1bcff82bcd87b92c7b05522b28993dfcf"
+      "sha256": "f348f7aa4cc5d48ae494ed3b992564cc280a09ba6b8a569e51531ff7da8ae6c8"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
@@ -60,11 +62,11 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
-      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+      "sha256": "de5026dfc3c6207a92b979f1f43d3b7c8cdcc0764f8a77c81c56ed69cca5173b"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
-      "sha256": "c773aeedde73fc4c2cc81cd2cfd91ab1314d1afcfa20e1e38510acab27000c9a"
+      "sha256": "e97696b1b38b94dad9b72c76b19506f7f045501e678599ae38a9649dc270282f"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
@@ -72,31 +74,31 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
-      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+      "sha256": "4a01815cd4bf7aaca1b9624d998c5121d273077a9bee75aae1101f4c5bdf440f"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
-      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+      "sha256": "30ea844250b2735c55d26ea582bf9d4318181d181dc2d260908dff8e2bdb417d"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
-      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+      "sha256": "920faaf9193486e91a82a71c22f27c11e6696f7257b4e250f6fec0836ec51728"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
-      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+      "sha256": "15d5bc0ebb5b0e6791a5822abf7eeed131b7724444835a8662189b73bd67c476"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
-      "sha256": "98710c204a6cffd4b277f86429e57d397d5b57ff1f3faa7858f28cdbc2106d6e"
+      "sha256": "dd666ee2db082b2df9f9be93e220e1ec2febe46a827f7fa92e8025009746ca4c"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
-      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+      "sha256": "b82c1b62fa2ed9bfea3ae5e7170d921ea9d3c626c6db759df94a6805113f6192"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
-      "sha256": "948f426d281262e419ea646e0aabb909e429509f358dc00471d30888379a37cd"
+      "sha256": "5c6ed8482558262b81ac7d19625e52cdc0c13a81aa871f37c68b21f893f30f58"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
@@ -104,15 +106,15 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.mjs",
-      "sha256": "d1cd10430a261d32dbd0f90377fcd0348fe4d361eb4ad7f39596055d1006105d"
+      "sha256": "9f65184c97fd697d1e88948c89310f452bf3ecc3426e7ed02621710f54170426"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json",
-      "sha256": "3b5b94a78e34ec77faae67bb8fca8c25bc4e8dc4bbfb48a02fd5643cd6bbb3ae"
+      "sha256": "59fe824f254e4e9ec2114338edbc7b061a81ffe0cda14bcca0f6dec86de69199"
     },
     {
       "path": "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
-      "sha256": "6ee6e861ef65075d48b1d4d757e26544d7d8ca42a04444384003f81bc7f5cc7d"
+      "sha256": "22bd4cc43b8c0b924f581d6307f9ae53684e2c109304acb01f8d97e9d4e42139"
     }
   ],
   "reviewedFunctions": [
@@ -139,17 +141,17 @@
     {
       "name": "sessionMarkerMarkClean",
       "role": "new-target",
-      "sha256": "ef0dc770cde25672d61ddd1d802c68b0c4c862d8d90b665aa605015170c882cd"
+      "sha256": "7c13578e876d4b8f843df245030e2b567e565767ee0e1b2e8e47f977c1ac8ec6"
     },
     {
       "name": "sgHasMarkerFiles",
       "role": "previously-actually-compiled-caller-support",
-      "sha256": "266b1e19b808d765f13613d2dbcdc8a8a64dc6c535ee81be2989abb56cb25d45"
+      "sha256": "d26a395f5588e56ffa9f47dfc64048d5e5f7161094d7c0a5b268bbf23334f3d5"
     },
     {
       "name": "sgCleanupBeforeExit",
       "role": "previously-actually-compiled-caller-support",
-      "sha256": "f0c0434d05904e9a73a82c34c6d8c404f6c9a848caefd0d7272211f672111c0c"
+      "sha256": "114e9a6f890031b2d98b7e555daf8e819dbd335ba124d0bff9dc5648b57d35a1"
     }
   ],
   "variants": [
@@ -167,8 +169,8 @@
       "sourcePatches": [
         {
           "function": "sessionMarkerMarkClean",
-          "before": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    if (!sessionMarkerWrite(true)) {\n        appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"}\n        });\n        return false;\n    }\n    done = true;\n    appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())}\n    });\n    return true;\n}",
-          "after": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    done = true;\n    if (!sessionMarkerWrite(true)) {\n        appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"}\n        });\n        return false;\n    }\n    done = true;\n    appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())}\n    });\n    return true;\n}"
+          "before": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    if (!sessionMarkerWrite(true)) {\n        try {appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"},\n            {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n            {\"sessionMarkerWriteSucceeded\",false},{\"nativeProcessExitProven\",false},\n            {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n        });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::failedMarker);}\n        return false;\n    }\n    done = true;\n    try {appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n        {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n        {\"sessionMarkerWriteSucceeded\",true},{\"nativeProcessExitProven\",false},\n        {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n    });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::cleanMarker);}\n    return true;\n}",
+          "after": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    done = true;\n    if (!sessionMarkerWrite(true)) {\n        try {appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"},\n            {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n            {\"sessionMarkerWriteSucceeded\",false},{\"nativeProcessExitProven\",false},\n            {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n        });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::failedMarker);}\n        return false;\n    }\n    done = true;\n    try {appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n        {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n        {\"sessionMarkerWriteSucceeded\",true},{\"nativeProcessExitProven\",false},\n        {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n    });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::cleanMarker);}\n    return true;\n}"
         }
       ]
     },
@@ -183,8 +185,8 @@
       "sourcePatches": [
         {
           "function": "sessionMarkerMarkClean",
-          "before": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    if (!sessionMarkerWrite(true)) {\n        appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"}\n        });\n        return false;\n    }\n    done = true;\n    appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())}\n    });\n    return true;\n}",
-          "after": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    (void)sessionMarkerWrite(true);\n    done = true;\n    appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())}\n    });\n    return true;\n}"
+          "before": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    if (!sessionMarkerWrite(true)) {\n        try {appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"},\n            {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n            {\"sessionMarkerWriteSucceeded\",false},{\"nativeProcessExitProven\",false},\n            {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n        });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::failedMarker);}\n        return false;\n    }\n    done = true;\n    try {appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n        {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n        {\"sessionMarkerWriteSucceeded\",true},{\"nativeProcessExitProven\",false},\n        {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n    });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::cleanMarker);}\n    return true;\n}",
+          "after": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    (void)sessionMarkerWrite(true);\n    done = true;\n    try {appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n        {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n        {\"sessionMarkerWriteSucceeded\",true},{\"nativeProcessExitProven\",false},\n        {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n    });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::cleanMarker);}\n    return true;\n}"
         }
       ]
     },
@@ -197,8 +199,8 @@
       "sourcePatches": [
         {
           "function": "sgCleanupBeforeExit",
-          "before": "static bool sgCleanupBeforeExit(bool nonBlocking) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked();\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = !pending && sessionMarkerMarkClean();\n    g_sgCleanupDone = sessionClean;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}",
-          "after": "static bool sgCleanupBeforeExit(bool nonBlocking) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked();\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = !pending && sessionMarkerMarkClean();\n    g_sgCleanupDone = true;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}"
+          "before": "static bool sgCleanupBeforeExit(bool nonBlocking, bool finalizeSession) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked(SgDirectoryResumePurpose::ExitCleanup);\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = finalizeSession && !pending && sessionMarkerMarkClean();\n    if (finalizeSession) g_sgCleanupDone = sessionClean;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean},\n        {\"finalizeSession\", finalizeSession}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}",
+          "after": "static bool sgCleanupBeforeExit(bool nonBlocking, bool finalizeSession) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked(SgDirectoryResumePurpose::ExitCleanup);\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = finalizeSession && !pending && sessionMarkerMarkClean();\n    if (finalizeSession) g_sgCleanupDone = true;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean},\n        {\"finalizeSession\", finalizeSession}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}"
         }
       ]
     },
@@ -240,8 +242,8 @@
       "sourcePatches": [
         {
           "function": "sessionMarkerMarkClean",
-          "before": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    if (!sessionMarkerWrite(true)) {\n        appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"}\n        });\n        return false;\n    }\n    done = true;\n    appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())}\n    });\n    return true;\n}",
-          "after": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (false && done) return true;\n    if (!sessionMarkerWrite(true)) {\n        appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"}\n        });\n        return false;\n    }\n    done = true;\n    appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())}\n    });\n    return true;\n}"
+          "before": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    if (!sessionMarkerWrite(true)) {\n        try {appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"},\n            {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n            {\"sessionMarkerWriteSucceeded\",false},{\"nativeProcessExitProven\",false},\n            {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n        });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::failedMarker);}\n        return false;\n    }\n    done = true;\n    try {appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n        {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n        {\"sessionMarkerWriteSucceeded\",true},{\"nativeProcessExitProven\",false},\n        {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n    });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::cleanMarker);}\n    return true;\n}",
+          "after": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (false && done) return true;\n    if (!sessionMarkerWrite(true)) {\n        try {appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"},\n            {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n            {\"sessionMarkerWriteSucceeded\",false},{\"nativeProcessExitProven\",false},\n            {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n        });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::failedMarker);}\n        return false;\n    }\n    done = true;\n    try {appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n        {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n        {\"sessionMarkerWriteSucceeded\",true},{\"nativeProcessExitProven\",false},\n        {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n    });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::cleanMarker);}\n    return true;\n}"
         }
       ]
     },
@@ -275,8 +277,8 @@
       "sourcePatches": [
         {
           "function": "sessionMarkerMarkClean",
-          "before": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    if (!sessionMarkerWrite(true)) {\n        appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"}\n        });\n        return false;\n    }\n    done = true;\n    appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())}\n    });\n    return true;\n}",
-          "after": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    if (!sessionMarkerWrite(true)) {\n        appendNativeLifecycleLog(\"session-clean-exit-write-error\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"}\n        });\n        return false;\n    }\n    done = true;\n    appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())}\n    });\n    return true;\n}"
+          "before": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    if (!sessionMarkerWrite(true)) {\n        try {appendNativeLifecycleLog(\"session-clean-exit-failed\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"},\n            {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n            {\"sessionMarkerWriteSucceeded\",false},{\"nativeProcessExitProven\",false},\n            {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n        });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::failedMarker);}\n        return false;\n    }\n    done = true;\n    try {appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n        {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n        {\"sessionMarkerWriteSucceeded\",true},{\"nativeProcessExitProven\",false},\n        {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n    });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::cleanMarker);}\n    return true;\n}",
+          "after": "static bool sessionMarkerMarkClean() {\n    static bool done = false;\n    if (done) return true;\n    if (!sessionMarkerWrite(true)) {\n        try {appendNativeLifecycleLog(\"session-clean-exit-write-error\", {\n            {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n            {\"reason\", \"session-marker-write-failed\"},\n            {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n            {\"sessionMarkerWriteSucceeded\",false},{\"nativeProcessExitProven\",false},\n            {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n        });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::failedMarker);}\n        return false;\n    }\n    done = true;\n    try {appendNativeLifecycleLog(\"session-clean-exit\", {\n        {\"pid\", static_cast<unsigned long long>(GetCurrentProcessId())},\n        {\"schemaVersion\",1},{\"scope\",\"session-marker-file-write-result;not-host-process-or-device-retirement\"},\n        {\"sessionMarkerWriteSucceeded\",true},{\"nativeProcessExitProven\",false},\n        {\"inputHostRetirementProven\",false},{\"deviceReturnProven\",false}\n    });}catch(...){ymcc::logging::sessionMarkerDiagnosticExceptionEvidence().record(ymcc::logging::SessionMarkerDiagnosticExceptionEvidence::cleanMarker);}\n    return true;\n}"
         }
       ]
     },
@@ -289,8 +291,8 @@
       "sourcePatches": [
         {
           "function": "sgCleanupBeforeExit",
-          "before": "static bool sgCleanupBeforeExit(bool nonBlocking) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked();\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = !pending && sessionMarkerMarkClean();\n    g_sgCleanupDone = sessionClean;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}",
-          "after": "static bool sgCleanupBeforeExit(bool nonBlocking) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked();\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = !pending && sessionMarkerMarkClean();\n    g_sgCleanupDone = sessionClean;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return !pending;\n}"
+          "before": "static bool sgCleanupBeforeExit(bool nonBlocking, bool finalizeSession) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked(SgDirectoryResumePurpose::ExitCleanup);\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = finalizeSession && !pending && sessionMarkerMarkClean();\n    if (finalizeSession) g_sgCleanupDone = sessionClean;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean},\n        {\"finalizeSession\", finalizeSession}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}",
+          "after": "static bool sgCleanupBeforeExit(bool nonBlocking, bool finalizeSession) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked(SgDirectoryResumePurpose::ExitCleanup);\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = finalizeSession && !pending && sessionMarkerMarkClean();\n    if (finalizeSession) g_sgCleanupDone = sessionClean;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean},\n        {\"finalizeSession\", finalizeSession}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return !pending;\n}"
         }
       ]
     }
@@ -382,13 +384,27 @@
   ],
   "compilerSourceReview": {
     "manifest": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json",
-    "sha256": "3b5b94a78e34ec77faae67bb8fca8c25bc4e8dc4bbfb48a02fd5643cd6bbb3ae",
+    "sha256": "59fe824f254e4e9ec2114338edbc7b061a81ffe0cda14bcca0f6dec86de69199",
     "oldCompilerLeafSha256": "55ea54805704339adf3ff6bdb31f946b6d027d77913e97534c2fce47786bc77b",
-    "currentCompilerLeafSha256": "98710c204a6cffd4b277f86429e57d397d5b57ff1f3faa7858f28cdbc2106d6e",
+    "currentCompilerLeafSha256": "dd666ee2db082b2df9f9be93e220e1ec2febe46a827f7fa92e8025009746ca4c",
     "inheritedFunctionsUnchangedAfterCanonicalLf": true,
     "actualWorkerEsmCoverageRequired": true,
     "calibrationToolchainPreambleInvocationAllowed": false,
     "budgetsAndFaultsUnchanged": true,
     "sourceApproval": false
-  }
+  },
+  "reviewedCleanupDeclaration": {
+    "text": "static bool sgCleanupBeforeExit(bool nonBlocking = false, bool finalizeSession = true);",
+    "sha256": "86e1b567e17e407744da02e8b8bef997be5e6a6feb3c63222167daba954ccce8"
+  },
+  "reviewedSessionHandlers": [
+    {
+      "name": "WM_QUERYENDSESSION",
+      "canonicalLfSha256": "298e3b86b96ff5de3b60f4f15d45d18983cc074c56b0d6bcc3faba6075112533"
+    },
+    {
+      "name": "WM_ENDSESSION",
+      "canonicalLfSha256": "5b2bfc86a86bd5b0e60d3cc4195afc1534c54ca919d1ff8d307d610a177e36be"
+    }
+  ]
 }

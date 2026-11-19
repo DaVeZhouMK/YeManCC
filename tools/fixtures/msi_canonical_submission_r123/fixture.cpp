@@ -15,14 +15,33 @@
 #include "legion_motion_source.h"
 #include "windows_motion_submission.h"
 #include "msi_virtual_report_diagnostic.h"
+#include "input_host_shared_power.h"
+#include <memory>
+#include <stdexcept>
 static struct{bool enabled=true,virtualTargetEnabled=true;}g_realStickTest;
 static std::atomic<bool> g_inputHostRequestedPersonaMatchesBound{true};
 using json=nlohmann::json;
 static ULONGLONG clockTick=1000;static ULONGLONG fixtureTick(){return clockTick;}
 #define GetTickCount64 fixtureTick
-static std::atomic<ULONGLONG> power{1},g_msiFeedbackModeGeneration{1},g_msiMainSourceRevision{1},g_inputHostVirtualIntentRevision{1};
+static std::atomic<ULONGLONG> fixturePowerGeneration{1},g_msiFeedbackModeGeneration{1},g_msiMainSourceRevision{1},g_inputHostVirtualIntentRevision{1};
 static std::atomic<unsigned> g_xinputTopologyEpoch{1},g_xinputSlotIdentityEpoch{1},g_inputHostVirtualIntentWriters{0};
-static ULONGLONG currentPowerGeneration(){return power;}
+static ULONGLONG currentPowerGeneration(){return fixturePowerGeneration;}
+static bool writerAllowed=true;
+namespace sp=ymcc::sleeppower;namespace ip=ymcc::inputHost::sharedPower;
+static std::uint64_t fixturePublication=1,fixtureNotification=1,fixtureSuspendSerial=1;
+static std::uint32_t fixturePowerPhase=0;static bool fixtureNotificationPending=false;
+static sp::RevocationMirrors g_sharedPowerRevocations;
+static ip::Cache g_inputHostInputPowerCache;
+static thread_local std::shared_ptr<ip::Scope> t_inputHostRequestPower;
+@@HARDWARE_TLS@@
+static bool sgShouldKeepInputDuringStandby(){return true;}
+static int __cdecl readSharedSystemPower(sp::SharedPowerV1* output,std::uint32_t bytes){
+ if(!output||bytes!=sizeof(*output))return 0;sp::SharedPowerV1 value;value.generation=currentPowerGeneration();
+ value.publicationRevision=fixturePublication;value.observedNotificationSequence=fixtureNotification;
+ value.suspendSerial=fixtureSuspendSerial;value.phase=fixturePowerPhase;
+ value.flags=sp::kKnown|(writerAllowed&&value.phase==0?sp::kHardwareAllowed:0u)|
+  (fixtureNotificationPending?sp::kNotificationPending:0u);*output=value;return 1;
+}
 struct Capability{unsigned pidDInput=0x1902;};static Capability kMsiClawCapability;
 static bool knownMsi=true;static bool msiClawKnownBoardAuthority(){return knownMsi;}
 static std::atomic<bool> g_msiDinputRouteDinputArmed{true},g_msiDinputRouteConfirmed{true},g_msiDinputSourceValid{true};
@@ -39,6 +58,7 @@ static std::atomic<uint64_t> g_msiCanonicalReportSequence{0};
 #endif
 static void appendNativeLifecycleLog(const char*,const json&){}
 @@PUBLISH@@
+static void oemVirtualInvalidateMsiController(){} // The shortcut mailbox is outside this fixture.
 @@INVALIDATE@@
 @@SNAPSHOT@@
 static void msiDinputClearOwnedState(const char*){g_msiDinputSourceValid=false;g_msiDinputRouteConfirmed=false;msiDinputInvalidateCanonicalFrame();}
@@ -51,22 +71,44 @@ static MsiSampleGate g_msiSampleGate;
 @@ELIGIBLE@@
 @@CAPTURE_TYPE@@
 // Feedback routing is outside this source-publication proof; no output backend runs.
-static void inputCaptureStampFeedbackSourceLocked(InputCaptureGamepadSnapshot& sample){sample.feedbackSource={};}
+static void inputCaptureStampFeedbackSourceLocked(InputCaptureGamepadSnapshot& sample,ymcc::capabilities::controller::InputBinding){sample.feedbackSource={};}
 @@APPLY@@
 static InputCaptureGamepadSnapshot g_inputCaptureGamepadSnapshot;
-static DWORD g_xinputPrimarySlot=0;
+static DWORD g_xinputPrimarySlot=0;static bool g_xinputSpecialButton=false;
 // Successful, range-validated canonical payload is supplied at an inert OS boundary.
 // Start/commit statements are extracted from the actual pump, never reimplemented here.
+template<class... Args>static void msiDinputRecordTriggerEvidence(const Args&...){}
 static void successfulPumpRead(const XINPUT_GAMEPAD& canonical,ULONGLONG duration=0,const std::function<void()>& duringRead={}){
  const ULONGLONG now=GetTickCount64();(void)now;
 @@PRODUCER_BEGIN@@
+ const int js=0,frame=0;const long pollHr=0,stateHr=0;
  clockTick+=duration;if(duringRead)duringRead();
 @@PRODUCER_COMPLETION@@
 @@PRODUCER_GENERATION@@
 @@PRODUCER_PUBLISH@@
 @@PRODUCER_FEEDBACK@@
 }
+// No helper is attached at this selected MSI OS boundary. Its actual POD and
+// canonicalizers compile; false does not authorize a replacement physical source.
+namespace ymcc::physicalreader{
+@@PHYSICAL_READER_SAMPLE@@
+}
+static bool physicalSourceReaderSample(ymcc::physicalreader::Sample&){return false;}
+@@CENTER_DEADZONE@@
+@@CANONICAL_AXIS@@
+@@CANONICAL_PAD@@
+@@BIND_STANDARD_INPUT@@
+struct CommonControllerHidRead {
+ std::uint64_t sequence=0,observedTick=0;
+ bool independentTriggers=false,completeBasic=false;
+ std::uint32_t combinedTriggerRaw=0;
+ bool isolationSharedRead=false;
+};
+static bool commonControllerHidRead(XINPUT_GAMEPAD&,CommonControllerHidRead&,bool,bool){return false;}
+static struct { ymcc::VirtualOutputSourceWindow window; DWORD physicalMask; unsigned identity; } g_inputHostFallbackXinputRead;
 static void readState(){
+ const bool publishUi=false;
+ const DWORD physicalMask=0;
 @@READ_BEGIN@@
 @@READ_LOCALS@@
  unsigned admittedMask=0;bool externalPriority=false;
@@ -76,24 +118,31 @@ static void readState(){
 }
 static std::atomic<bool> g_inputReady{true},g_inputHostPowerAdmissionRevoked{false},g_inputHostFaultHoldsStart{false};
 static ULONGLONG g_inputHostEpoch=7;static bool g_inputHostProcess=true,g_inputHostPrepared=true,g_inputHostNeutralized=true,g_inputHostTransportFault=false;
-static bool writerAllowed=true;static bool sgVirtualWriterAllowedNow(){return writerAllowed;}static bool inputHostExitFenceRaised(){return false;}static bool msiControllerNeutralCleanupAllowed(bool v){return v&&knownMsi;}
+@@POWER_WRITER@@static bool inputHostExitFenceRaised(){return false;}static bool msiControllerNeutralCleanupAllowed(bool v){return v&&knownMsi;}
 @@FRAME_TYPE@@
+static thread_local bool t_inputHostOneXStartWrite=false;
+static bool inputHostOneXStartMayIssue(){throw std::logic_error("OneX outside canonical fixture");}
+static thread_local const void* t_inputHostDeferredPhysicalHideWrite=nullptr;
+static thread_local bool t_inputHostDeferredPhysicalHideRefreshIssueActive=false;
+static bool inputHostDeferredPhysicalHideReserveRefreshIssue(){throw std::logic_error("visibility refresh outside canonical fixture");}
+static bool inputHostDeferredPhysicalHideWriteCurrent(){throw std::logic_error("visibility outside canonical fixture");}
 @@SOURCE_ADMITTED@@
 @@SAMPLE@@
 @@CURRENT@@
 // Motion is outside this sidecar. All frame motion pointers remain null; reject any accidental Legion use.
 static bool legionMotionSubmissionCurrent(const ymcc::legion_motion::Sample&,ULONGLONG) noexcept {return false;}
 @@WINDOWS_CURRENT@@
+@@SHARED_CURRENT@@
 @@MAY_ISSUE@@
 static std::vector<std::string> cases,failures;static unsigned assertions=0;static json observations=json::array();
 static void require(bool b,const char* message){++assertions;if(!b)failures.push_back(cases.back()+": "+message);}
-static bool mayIssue(){InputFrameSubmission f{};f.ticket={g_inputHostEpoch,power.load(),g_inputHostVirtualIntentRevision.load(),false};f.sample=inputHostFrameSubmissionSample(&g_inputCaptureGamepadSnapshot);f.physicalSourceAdmitted=true;const bool allowed=inputHostFrameSubmissionMayIssue(&f);observations.push_back({{"case",cases.back()},{"allowed",allowed},{"reason",ymcc::input::frameSubmission::name(f.reason)},{"buttons",g_inputCaptureGamepadSnapshot.pad.wButtons},{"samplePower",g_inputCaptureGamepadSnapshot.readPowerGeneration},{"currentPower",power.load()},{"readStart",g_inputCaptureGamepadSnapshot.readStartedTick},{"readEnd",g_inputCaptureGamepadSnapshot.readCompletedTick},{"now",clockTick}});return allowed;}
-static void reset(){power=1;g_xinputTopologyEpoch=g_xinputSlotIdentityEpoch=1;g_msiFeedbackModeGeneration=g_msiMainSourceRevision=1;clockTick=1000;g_msiDinput.enabled=g_msiDinput.mainInterfaceMatched=true;g_msiDinput.productId=0x1902;g_msiDinputRouteDinputArmed=g_msiDinputRouteConfirmed=g_msiDinputSourceValid=true;g_inputReady=true;g_inputHostPowerAdmissionRevoked=g_inputHostFaultHoldsStart=false;g_inputHostProcess=g_inputHostPrepared=g_inputHostNeutralized=true;g_inputHostTransportFault=false;writerAllowed=true;msiDinputInvalidateCanonicalFrame();g_inputCaptureGamepadSnapshot={};g_msiSampleGate.gen=1;g_msiSampleGate.closing=false;g_msiSampleGate.activeReads=g_msiSampleGate.quarantinedReads=0;}
+static bool mayIssue(){InputFrameSubmission f{};f.ticket={g_inputHostEpoch,fixturePowerGeneration.load(),g_inputHostVirtualIntentRevision.load(),false};f.sample=inputHostFrameSubmissionSample(&g_inputCaptureGamepadSnapshot);f.physicalSourceAdmitted=true;f.sourcePower=g_inputCaptureGamepadSnapshot.sharedPower;f.powerScope=g_inputHostInputPowerCache.acquire(&readSharedSystemPower,g_sharedPowerRevocations,sgShouldKeepInputDuringStandby());const bool allowed=inputHostFrameSubmissionMayIssue(&f);observations.push_back({{"case",cases.back()},{"allowed",allowed},{"reason",ymcc::input::frameSubmission::name(f.reason)},{"buttons",g_inputCaptureGamepadSnapshot.pad.wButtons},{"samplePower",g_inputCaptureGamepadSnapshot.readPowerGeneration},{"currentPower",fixturePowerGeneration.load()},{"readStart",g_inputCaptureGamepadSnapshot.readStartedTick},{"readEnd",g_inputCaptureGamepadSnapshot.readCompletedTick},{"now",clockTick}});return allowed;}
+static void reset(){t_inputHostRequestHardwareRequired=false;g_inputHostInputPowerCache.reset();t_inputHostRequestPower.reset();g_sharedPowerRevocations.revoke();fixturePublication=fixtureNotification=fixtureSuspendSerial=1;fixturePowerPhase=0;fixtureNotificationPending=false;g_realStickTest.enabled=g_realStickTest.virtualTargetEnabled=true;g_inputHostRequestedPersonaMatchesBound=true;fixturePowerGeneration=1;g_xinputTopologyEpoch=g_xinputSlotIdentityEpoch=1;g_msiFeedbackModeGeneration=g_msiMainSourceRevision=1;clockTick=1000;g_msiDinput.enabled=g_msiDinput.mainInterfaceMatched=true;g_msiDinput.productId=0x1902;g_msiDinputRouteDinputArmed=g_msiDinputRouteConfirmed=g_msiDinputSourceValid=true;g_inputReady=true;g_inputHostPowerAdmissionRevoked=g_inputHostFaultHoldsStart=false;g_inputHostProcess=g_inputHostPrepared=g_inputHostNeutralized=true;g_inputHostTransportFault=false;writerAllowed=true;msiDinputInvalidateCanonicalFrame();g_inputCaptureGamepadSnapshot={};g_msiSampleGate.gen=1;g_msiSampleGate.closing=false;g_msiSampleGate.activeReads=g_msiSampleGate.quarantinedReads=0;}
 template<class F>static void run(const char* name,F fn){reset();cases.push_back(name);fn();}
 static XINPUT_GAMEPAD pressed(){XINPUT_GAMEPAD p{};p.wButtons=XINPUT_GAMEPAD_A;return p;}
 int main(){
  run("stationary-current-source-still-valid",[]{successfulPumpRead({});readState();require(g_inputCaptureGamepadSnapshot.live,"zero source remains live");require(mayIssue(),"zero source is admissible");});
- run("bus-power-boundary-does-not-relabel-old-canonical",[]{successfulPumpRead(pressed());clockTick=23000;++power;readState();successfulPumpRead({});require(g_inputCaptureGamepadSnapshot.pad.wButtons==XINPUT_GAMEPAD_A,"BUS initially selected previous canonical payload");require(!mayIssue(),"old physical read cannot become current just because wrapper and later pump ran in new power");++clockTick;readState();require(mayIssue(),"next copied new-generation physical read resumes without recreate");require(g_inputCaptureGamepadSnapshot.pad.wButtons==0,"old button does not replay");});
+ run("bus-power-boundary-does-not-relabel-old-canonical",[]{successfulPumpRead(pressed());clockTick=23000;++fixturePowerGeneration;readState();successfulPumpRead({});require(g_inputCaptureGamepadSnapshot.pad.wButtons==XINPUT_GAMEPAD_A,"BUS initially selected previous canonical payload");require(!mayIssue(),"old physical read cannot become current just because wrapper and later pump ran in new power");++clockTick;readState();require(mayIssue(),"next copied new-generation physical read resumes without recreate");require(g_inputCaptureGamepadSnapshot.pad.wButtons==0,"old button does not replay");});
  run("canonical-age-is-not-reset-by-wrapper",[]{successfulPumpRead(pressed());clockTick=2501;readState();require(!mayIssue(),"1501ms old producer cannot get new freshness from copy");});
  run("canonical-1500ms-inclusive-control",[]{successfulPumpRead({});clockTick=2500;readState();require(mayIssue(),"existing inclusive producer age bound is preserved");});
  run("bus-topology-boundary-does-not-relabel-old-canonical",[]{successfulPumpRead(pressed());++g_xinputTopologyEpoch;readState();successfulPumpRead({});require(!mayIssue(),"old topology payload cannot inherit wrapper topology");readState();require(mayIssue(),"current source next copy resumes");});
@@ -104,7 +153,8 @@ int main(){
  run("unchanged-payload-new-read-refreshes-validity",[]{successfulPumpRead({});clockTick=2501;successfulPumpRead({});readState();require(mayIssue(),"same all-zero payload with actual new read is current");});
  run("retired-canonical-validity-still-blocks",[]{successfulPumpRead(pressed());msiDinputInvalidateCanonicalFrame();readState();require(!g_inputCaptureGamepadSnapshot.live,"invalidated source is not selected");require(!mayIssue(),"invalidated payload cannot publish");});
  run("closing-permit-does-not-allow-cached-read",[]{successfulPumpRead(pressed());g_msiSampleGate.closing=true;readState();require(!g_inputCaptureGamepadSnapshot.live,"closing source does not obtain a read permit");require(!mayIssue(),"closed source stays unavailable");});
- run("power-changes-during-real-read-still-revoked",[]{successfulPumpRead(pressed(),1,[]{++power;});readState();require(!g_inputCaptureGamepadSnapshot.live,"actual producer generation guard clears source");require(!mayIssue(),"unstable OS read cannot publish");});
+ run("power-changes-during-real-read-still-revoked",[]{successfulPumpRead(pressed(),1,[]{++fixturePowerGeneration;});readState();require(!g_inputCaptureGamepadSnapshot.live,"actual producer generation guard clears source");require(!mayIssue(),"unstable OS read cannot publish");});
  run("target-ready-does-not-override-input-not-ready",[]{successfulPumpRead(pressed());readState();g_inputReady=false;require(!mayIssue(),"sleep admission blocks even a current source");});
+ g_inputHostInputPowerCache.reset();t_inputHostRequestPower.reset();
  std::cout<<json({{"cases",cases},{"assertions",assertions},{"failures",failures},{"observations",observations},{"noDeviceIo",true},{"wholePumpExecuted",false},{"wholeBusExecuted",false},{"hostExecuted",false}}).dump(2)<<std::endl;return failures.empty()?0:1;
 }

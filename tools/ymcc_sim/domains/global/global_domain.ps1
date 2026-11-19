@@ -28,9 +28,17 @@ param(
  [string]$Python='',
  [string]$Receipts='',
  [switch]$AuditRegistered,
- [switch]$RequireAll
+ [switch]$RequireAll,
+ [switch]$CommonHidRuntimeOnly,
+ [string]$CommonHidRuntimeCase='',
+ [string]$MainFile='',
+ [string]$HeaderRoot=''
 )
 $ErrorActionPreference='Stop'
+if($PSBoundParameters.ContainsKey('CommonHidRuntimeOnly') -and -not $CommonHidRuntimeOnly){throw 'COMMON_HID_RUNTIME_ONLY_MUST_BE_ENABLED'}
+foreach($commonHidInput in @('CommonHidRuntimeCase','MainFile','HeaderRoot')){
+ if($PSBoundParameters.ContainsKey($commonHidInput) -and [string]::IsNullOrWhiteSpace([string]$PSBoundParameters[$commonHidInput])){throw ('COMMON_HID_INPUT_MUST_NOT_BE_EMPTY_'+$commonHidInput)}
+}
 if($PSBoundParameters.ContainsKey('Capabilities')){
  if(@($Capabilities).Count -eq 0 -or @($Capabilities).Count -gt 64){throw 'CAPABILITY_INVALID_ARGUMENT'}
  if($Mode -notin @('inventory','plan','run')){throw 'CAPABILITY_UNSUPPORTED_MODE'}
@@ -39,6 +47,10 @@ $simRoot=Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $entry=Join-Path $simRoot 'global\cli.mjs'
 $node=Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
 $arguments=@($entry,'--mode',$Mode,'--profile',$Profile)
+if($CommonHidRuntimeOnly){$arguments+='--common-hid-runtime-only'}
+foreach($commonHidPair in @(@('--common-hid-runtime-case',$CommonHidRuntimeCase),@('--MainFile',$MainFile),@('--HeaderRoot',$HeaderRoot))){
+ if(-not [string]::IsNullOrWhiteSpace([string]$commonHidPair[1])){$arguments+=@([string]$commonHidPair[0],[string]$commonHidPair[1])}
+}
 foreach($capabilityValue in $Capabilities){$arguments+=@('--capability',$capabilityValue)}
 foreach($pair in @(
  @('--domain',$Domains),@('--test',$Tests),@('--out-dir',$EvidenceDir),

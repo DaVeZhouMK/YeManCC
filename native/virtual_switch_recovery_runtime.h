@@ -103,11 +103,16 @@ static bool cleanLocked() noexcept {
 // A verification fault may still own its target/journal. Only this exact current
 // tuple may be stopped; ordinary transport retains its SteamDeck scope. Local
 // visibility/tuple producers supply separate exact ownership, never UI guesses.
-static bool recoverableOwnedStateLocked(Tick power,bool tupleFault=false, bool localFault=false) noexcept {
+static bool recoverableOwnedStateLocked(Tick power,bool tupleFault=false,bool localFault=false,Tick ticket=0) noexcept {
+    const auto& proof=g_inputHostKeptTupleWakeProof;
+    const bool keptTuple=tupleFault && ticket && proof.ticket==ticket && proof.generation==power &&
+        proof.epoch==g_inputHostEpoch && proof.boundGeneration && proof.boundGeneration==g_inputHostBoundPowerGeneration &&
+        (!inputHostWin5KeptSteamDeckWake(g_inputHostBoundPersona) ||
+         proof.suspendSerial==g_sharedPowerSuspendSerial.load(std::memory_order_acquire));
     return cleanLocked() || (power && currentPowerGeneration() == power &&
         g_inputHostProcess && g_inputHostHello && !g_inputHostRunId.empty() && g_inputHostEpoch &&
         ((tupleFault || localFault) ? g_inputHostBoundPersona == inputHostConfiguredPersona() : g_inputHostBoundPersona == "steamdeck") &&
-        g_inputHostBoundPowerGeneration == power && (tupleFault || localFault || g_inputHostTransportFault) &&
+        (g_inputHostBoundPowerGeneration == power || keptTuple) && (tupleFault || localFault || g_inputHostTransportFault) &&
         !g_inputHostReleaseQuarantined && !g_inputHostStartBlocked);
 }
 // now is system uptime (GetTickCount64), never the injectable guard clock.
@@ -230,7 +235,7 @@ static void inputHostSwitchRecoveryOfferLocked(std::uint64_t ticket,
             currentPowerGeneration() != power || inputHostConfiguredPersona() != view.persona ||
             !g_realStickTest.enabled || !g_realStickTest.virtualTargetEnabled ||
             inputHostExitFenceRaised() || g_exitRequested.load(std::memory_order_acquire) ||
-            g_inputCaptureStop.load(std::memory_order_acquire) || !runtime::recoverableOwnedStateLocked(power,tupleFault,local) ||
+            g_inputCaptureStop.load(std::memory_order_acquire) || !runtime::recoverableOwnedStateLocked(power,tupleFault,local,ticket) ||
             remaining > (std::numeric_limits<std::uint64_t>::max)() - now) return;
     // Preserve the original 30s remainder; the 10s inspection is not a retry hard cap.
     // A newer ticket may replace state; an older queued ticket can never borrow it.
@@ -288,7 +293,7 @@ static void inputHostSwitchRecoveryMaintenanceLocked() {
         if(!runtime::localFaultReadyLocked(request))return;
         if (request.spent || (!request.tupleFault && request.localFault==InputHostSwitchLocalFault::None && !runtime::retryable(request.error)) ||
                 runtime::budgetBlockedLocked(GetTickCount64()) ||
-                !runtime::recoverableOwnedStateLocked(request.power,request.tupleFault,request.localFault!=InputHostSwitchLocalFault::None)) {
+                !runtime::recoverableOwnedStateLocked(request.power,request.tupleFault,request.localFault!=InputHostSwitchLocalFault::None,request.requestId)) {
             runtime::retireLocked("blocked","budget-or-cleanup-not-admitted");
             return;
         }
@@ -361,7 +366,7 @@ static void inputHostPerformSwitchRecovery(std::uint64_t ticket) {
                 if (runtime::stopHeldLocked(recoveryNow)) return;
                 if(!runtime::localFaultReadyLocked(request))return;
                 if ((!request.tupleFault && request.localFault==InputHostSwitchLocalFault::None && !runtime::retryable(request.error)) || runtime::budgetBlockedLocked(recoveryNow) ||
-                        !runtime::recoverableOwnedStateLocked(request.power,request.tupleFault,request.localFault!=InputHostSwitchLocalFault::None)) {
+                        !runtime::recoverableOwnedStateLocked(request.power,request.tupleFault,request.localFault!=InputHostSwitchLocalFault::None,request.requestId)) {
                     runtime::retireLocked("blocked","budget-or-cleanup-not-admitted");
                     return;
                 }
@@ -493,7 +498,7 @@ static bool inputHostConsumeSwitchFaultCleanup(std::uint64_t faultEpoch) {
             return true;
         }
         if (runtime::stopHeldLocked(GetTickCount64()) || runtime::budgetBlockedLocked(GetTickCount64()) ||
-                !runtime::recoverableOwnedStateLocked(request.power)) {
+                !runtime::recoverableOwnedStateLocked(request.power,request.tupleFault,request.localFault!=InputHostSwitchLocalFault::None,request.requestId)) {
             runtime::retireLocked("blocked","fault-cleanup-priority");
             return false;
         }

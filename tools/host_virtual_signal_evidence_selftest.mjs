@@ -6,12 +6,13 @@ import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const args=process.argv.slice(2),opts={};
-for(let i=0;i<args.length;i+=2){if(!['--evidence','--baseline','--sd-baseline','--reset-baseline','--profile-baseline'].includes(args[i])||!args[i+1])throw Error('Use --evidence DIR --baseline Program.before.cs --sd-baseline ScreenTouchpadReport.before-sd.cs');opts[args[i]]=path.resolve(args[i+1]);}
+for(let i=0;i<args.length;i+=2){if(!['--evidence','--baseline','--sd-baseline','--reset-baseline','--profile-baseline','--case'].includes(args[i])||!args[i+1])throw Error('Use --evidence DIR --baseline Program.before.cs --sd-baseline ScreenTouchpadReport.before-sd.cs');opts[args[i]]=args[i]==='--case'?args[i+1]:path.resolve(args[i+1]);}
+if(opts['--case'] && opts['--case']!=='deferred-writer')throw Error('Unknown case selection');
 const out=opts['--evidence']; if(!out||!opts['--baseline']||!opts['--sd-baseline'])throw Error('Evidence directory and before-sources required');
 if(fs.existsSync(out)&&fs.readdirSync(out).length)throw Error('Use fresh evidence directory; prior failures/results are immutable');
 fs.mkdirSync(out,{recursive:true});
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
-const names=['Program.cs','HostVirtualSignalEvidence.cs','HostSdkFirstWitness.cs','MsiVirtualReportChain1410.cs','ScreenTouchpadReport.cs','MsiHostStageEvidence.cs','SteamDeckStateFields.cs','SteamDeckPadSubmissionEvidence.cs','SteamDeckPadReportObservation.cs','SdkDataOnlyProfiles.cs'];
+const names=['Program.cs','HostVirtualSignalEvidence.cs','HostSdkFirstWitness.cs','MsiVirtualReportChain1410.cs','ScreenTouchpadReport.cs','MsiHostStageEvidence.cs','SteamDeckStateFields.cs','SteamDeckPadSubmissionEvidence.cs','SteamDeckPadReportObservation.cs','SdkDataOnlyProfiles.cs',"MsiCostWindowDiagnostics.cs","MsiCostWindowDispatcher.cs","HostCpuCostWindow.cs","HostCostLog.cs","HostCostArchive.cs"];
 const snapshots=Object.fromEntries(names.map(n=>[n,fs.readFileSync(path.join(repo,'InputHost',n))]));
 const before=fs.readFileSync(opts['--baseline'],'utf8'), sdBefore=fs.readFileSync(opts['--sd-baseline'],'utf8');
 const source=snapshots['Program.cs'].toString('utf8'), pads=snapshots['ScreenTouchpadReport.cs'].toString('utf8');
@@ -21,8 +22,8 @@ fs.writeFileSync(path.join(out,'snapshot','Program.before.cs'),before);
 fs.writeFileSync(path.join(out,'snapshot','ScreenTouchpadReport.before-sd.cs'),sdBefore);
 function mask(text){return text.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g,m=>m.replace(/[^\n\r]/g,' '));}
 const members=[];
-function extract(text,name,kind='method'){
- const re=new RegExp('^    +(?:private|internal) (?:static |sealed |readonly )*[^\\r\\n]*\\b'+name+(kind==='record'?'\\(':kind==='field'?'\\s*(?:=|;)':'\\('),'gm');
+function extract(text,name,kind='method',file=path.join(repo,'InputHost','Program.cs')){
+ const re=new RegExp('^    +(?:private|internal) (?:static |sealed |readonly )*[^=\\r\\n]*\\b'+name+(kind==='record'?'\\(':kind==='field'?'\\s*(?:=|;)':'\\('),'gm');
  const hits=[...text.matchAll(re)];if(hits.length!==1)throw Error('Expected unique member '+name+' got '+hits.length);
  const start=hits[0].index, clean=mask(text.slice(start));let end;
  if(kind==='field'){end=clean.indexOf(';')+1;}
@@ -30,9 +31,11 @@ function extract(text,name,kind='method'){
  while(/\s/.test(clean[k]))k++;
  if(clean.slice(k,k+2)==='=>'){end=clean.indexOf(';',k)+1;}
  else{if(clean[k]!=='{')throw Error('No body '+name);let depth=0;for(;k<clean.length;k++){if(clean[k]==='{')depth++;if(clean[k]==='}'&&--depth===0){end=k+1;break;}}}}
- if(!end)throw Error('Unclosed '+name);const code=text.slice(start,start+end);members.push({name,sha256:sha(code),line:text.slice(0,start).split('\n').length});return code;
+ if(!end)throw Error('Unclosed '+name);const code=text.slice(start,start+end);members.push({name,file,sha256:sha(code),line:text.slice(0,start).split('\n').length});return code;
 }
-const common=['TryGetVirtualOutputProfile','BuildEliteState','BuildDualSenseDataOnlyReport','QuantizeMotionAxis','WriteSonyImuLe16','AxisToByte','TriggerToByte','MapHatOctant','MapFaceButtons','MapDigitalButtons','MapDsEdgePaddles','UnitStickAxis','BuildSteamDeckStateFields'].map(n=>extract(source,n));
+const common=['TryGetVirtualOutputProfile','BuildEliteState','BuildEliteStateCore','BindEliteStateIdleThreadField','BuildDualSenseDataOnlyReport','QuantizeMotionAxis','WriteSonyImuLe16','AxisToByte','TriggerToByte','MapHatOctant','MapFaceButtons','MapDigitalButtons','MapDsEdgePaddles','UnitStickAxis','BuildSteamDeckStateFields'].map(n=>extract(source,n));
+common.push(extract(source,'EliteStateIdleThreadField','field'));
+common.push(extract(source,'LockedCoreMvid','field'));
 common.push(...['WriteDualSenseScreenPads','WriteDualSenseContact','WriteSonyContact','TakeScreenPadReportOwnership','BuildSteamDeckScreenPadReport','SubmitSteamDeckWithScreenPads'].map(n=>extract(pads,n)));
 common.push(...['ScreenPadReportBuffer','_screenPadPacketCounter','_screenPadOwnsReport','ScreenPadSubmissionEvidence','ScreenPadLastEncoded','DeckButtonBits'].map(n=>extract(pads,n,'field')));
 // A/B uses the original SD boundary verbatim except for its symbol name. Encoders/ownership are shared unchanged.
@@ -41,13 +44,26 @@ common.push(extract(sdBefore,'SubmitSteamDeckWithScreenPads').replace('SubmitSte
 common.push(extract(source,'ApplySonyAxisDeclarationSwap'));
 const record=extract(source,'CommandEnvelope','record');
 const currentNames=['ResetVirtualSignalEvidenceSafely','BeginVirtualSignalEvidenceSafely','CompleteVirtualSignalEvidenceSafely','PrepareReportChainInvocation1410','CloseReportChain1410Safely','SubmitSonyReportChain1410','SubmitEliteReportChain1410','TrySubmitFrame','TrySubmitNeutral'];
-const current=currentNames.map(n=>extract(source,n)).join('\n');
+// Every variant consumes its own ownership method when that source contains it.
+// Older baselines keep their original wrapper behavior; no handoff body is synthesized.
+function sessionMethods(text,names,file,requireOwnership=false){
+ const hasOwnership=/^[ \t]*private void EnsureSonyRawReportOwnership\(/m.test(mask(text));
+ if(requireOwnership&&!hasOwnership)throw Error('Current Sony ownership method missing');
+ const hasBorrow=/^[ \t]*private HMGamepadState BuildEliteStateForSubmit\(/m.test(mask(text));
+ return [...(hasBorrow?[extract(text,'_eliteSubmitAxes','field',file),extract(text,'BuildEliteStateForSubmit','method',file)]:[]),...[...(hasOwnership?['EnsureSonyRawReportOwnership']:[]),...names].map(n=>extract(text,n,'method',file))].join('\n');
+}
+const current=sessionMethods(source,currentNames,path.join(repo,'InputHost','Program.cs'),true);
 const resetBefore=opts['--reset-baseline']?fs.readFileSync(opts['--reset-baseline'],'utf8'):source;
 const profileBefore=opts['--profile-baseline']?fs.readFileSync(opts['--profile-baseline'],'utf8'):source;
-const profileBaseline=currentNames.map(n=>extract(profileBefore,n)).join('\n').replaceAll('SubmitSteamDeckWithScreenPads(', 'SubmitSteamDeckWithScreenPadsProfileBefore(');
+const profileBaseline=sessionMethods(profileBefore,currentNames,opts['--profile-baseline']??path.join(repo,'InputHost','Program.cs')).replaceAll('SubmitSteamDeckWithScreenPads(', 'SubmitSteamDeckWithScreenPadsProfileBefore(');
 common.push(extract(pads,'SubmitSteamDeckWithScreenPads').replace('SubmitSteamDeckWithScreenPads(', 'SubmitSteamDeckWithScreenPadsProfileBefore(').replace('HostSession? signalSession', 'HostSessionProfileBefore? signalSession'));
-const resetBaseline=['ResetVirtualSignalEvidenceSafely','BeginVirtualSignalEvidenceSafely','CompleteVirtualSignalEvidenceSafely','PrepareReportChainInvocation1410','CloseReportChain1410Safely','SubmitSonyReportChain1410','SubmitEliteReportChain1410'].map(n=>extract(resetBefore,n)).join('\n');
-const baseline=['PrepareReportChainInvocation1410','SubmitSonyReportChain1410','SubmitEliteReportChain1410','TrySubmitFrame','TrySubmitNeutral'].map(n=>extract(before,n)).join('\n').replaceAll('SubmitSteamDeckWithScreenPads(', 'SubmitSteamDeckWithScreenPadsBefore(');
+const resetBaseline=sessionMethods(resetBefore,['ResetVirtualSignalEvidenceSafely','BeginVirtualSignalEvidenceSafely','CompleteVirtualSignalEvidenceSafely','PrepareReportChainInvocation1410','CloseReportChain1410Safely','SubmitSonyReportChain1410','SubmitEliteReportChain1410'],opts['--reset-baseline']??path.join(repo,'InputHost','Program.cs'));
+const baseline=sessionMethods(before,['PrepareReportChainInvocation1410','SubmitSonyReportChain1410','SubmitEliteReportChain1410','TrySubmitFrame','TrySubmitNeutral'],opts['--baseline']).replaceAll('SubmitSteamDeckWithScreenPads(', 'SubmitSteamDeckWithScreenPadsBefore(');
+// Check owner invalidation in the actual lifecycle members; fixture Rebuild is only a controller replacement seam.
+const releaseSource=extract(source,'ReleaseLocalLocked').replaceAll('\r\n','\n');
+const prepareSource=extract(source,'TryPrepare').replaceAll('\r\n','\n');
+if(!/_controller = null;\s*ResetVirtualSignalEvidenceSafely\(\);\s*_sonyRawReportOwner = null;/.test(releaseSource)||
+ !/_sonyRawReportOwner = null;\s*_screenPadOwnsReport = false;/.test(prepareSource))throw Error('Sony owner lifecycle invalidation missing');
 // Also assert the actual dynamic flag/lifecycle wiring, not a test-only reconstruction.
 for(const needle of ['if (!_costFlagEnabled) ResetVirtualSignalEvidenceSafely();','ResetVirtualSignalEvidenceSafely();\n                _tuple = envelope;','_controller = null;\n                ResetVirtualSignalEvidenceSafely();'])if(!source.replaceAll('\r\n','\n').includes(needle))throw Error('Missing lifecycle wire '+needle);
 if(source.split('if (!_costFlagEnabled) ResetVirtualSignalEvidenceSafely();').length!==3)throw Error('Both cost flag update routes must invalidate');
@@ -64,13 +80,13 @@ const generated=template.replace('/*ACTUAL_COMMON*/',record+'\n'+common.join('\n
 fs.writeFileSync(path.join(out,'Fixture.cs'),generated);
 const esc=s=>s.replaceAll('&','&amp;').replaceAll('"','&quot;');
 const dll=path.join(repo,'deps','hidmaestro','HIDMaestro.Core.dll');
-fs.writeFileSync(path.join(out,'Fixture.csproj'),`<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><PlatformTarget>x64</PlatformTarget><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><NuGetAudit>false</NuGetAudit><UseSharedCompilation>false</UseSharedCompilation></PropertyGroup><ItemGroup><Compile Include="Fixture.cs"/>${['HostVirtualSignalEvidence.cs','HostSdkFirstWitness.cs','MsiVirtualReportChain1410.cs','MsiHostStageEvidence.cs','SteamDeckStateFields.cs','SteamDeckPadSubmissionEvidence.cs','SteamDeckPadReportObservation.cs','SdkDataOnlyProfiles.cs'].map(n=>`<Compile Include="snapshot/${n}"/>`).join('')}<Reference Include="HIDMaestro.Core"><HintPath>${esc(dll)}</HintPath></Reference></ItemGroup></Project>`);
+fs.writeFileSync(path.join(out,'Fixture.csproj'),`<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><PlatformTarget>x64</PlatformTarget><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><NuGetAudit>false</NuGetAudit><UseSharedCompilation>false</UseSharedCompilation></PropertyGroup><ItemGroup><Compile Include="Fixture.cs"/>${['HostVirtualSignalEvidence.cs','HostSdkFirstWitness.cs','MsiVirtualReportChain1410.cs','MsiHostStageEvidence.cs','SteamDeckStateFields.cs','SteamDeckPadSubmissionEvidence.cs','SteamDeckPadReportObservation.cs','SdkDataOnlyProfiles.cs',"MsiCostWindowDiagnostics.cs","MsiCostWindowDispatcher.cs","HostCpuCostWindow.cs","HostCostLog.cs","HostCostArchive.cs"].map(n=>`<Compile Include="snapshot/${n}"/>`).join('')}<Reference Include="HIDMaestro.Core"><HintPath>${esc(dll)}</HintPath></Reference></ItemGroup></Project>`);
 fs.writeFileSync(path.join(out,'NuGet.Config'),'<configuration><packageSources><clear/></packageSources></configuration>');
-const manifest={members,sourceFiles:Object.fromEntries(Object.entries(snapshots).map(([n,b])=>[n,sha(b)])),profileBaselineSha256:sha(profileBefore),resetBaselineSha256:sha(resetBefore),baselineSha256:sha(before),sdBaselineSha256:sha(sdBefore),templateSha256:sha(template),runnerSha256:sha(fs.readFileSync(fileURLToPath(import.meta.url))),sdkDataAssemblySha256:sha(fs.readFileSync(dll)),scope:'Exact current and before Sony/Elite wrappers plus SD partial raw boundary, builders, ownership and live/neutral paths; actual helper/pad evidence and real SDK state types. Only HMController submit terminal and idle-clock stop are fake; real SDK HMProfile and GetProfile operate on inert uninitialized context with full data-only catalog; no SDK controller/context constructor runs. Baseline SD declaration/calls renamed solely to compile A/B together; SD ownership/encoder are asserted byte-identical.'};
+const manifest={members,sourceFiles:Object.fromEntries(Object.entries(snapshots).map(([n,b])=>[n,sha(b)])),profileBaselineSha256:sha(profileBefore),resetBaselineSha256:sha(resetBefore),baselineSha256:sha(before),sdBaselineSha256:sha(sdBefore),templateSha256:sha(template),runnerSha256:sha(fs.readFileSync(fileURLToPath(import.meta.url))),sdkDataAssemblySha256:sha(fs.readFileSync(dll)),selectedCase:opts['--case']??'full-original-plus-deferred',scope:'Exact current and before Sony/Elite wrappers plus SD partial raw boundary, builders, ownership and live/neutral paths; actual helper/pad evidence and real SDK state types. Only HMController submit terminal and idle-clock stop are fake; real SDK HMProfile and GetProfile operate on inert uninitialized context with full data-only catalog; no SDK controller/context constructor runs. Baseline SD declaration/calls renamed solely to compile A/B together; SD ownership/encoder are asserted byte-identical.'};
 fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
 function run(label,args){const p=spawnSync('dotnet',args,{cwd:out,encoding:'utf8',windowsHide:true,timeout:120000,maxBuffer:8*1024*1024});fs.writeFileSync(path.join(out,label+'.log'),(p.stdout??'')+(p.stderr??''));if(p.status!==0){console.error((p.stdout??'')+(p.stderr??''));throw Error(label+' failed '+p.status);}}
 run('build',['build','Fixture.csproj','-c','Release','--nologo']);
-run('selftest',[path.join(out,'bin','Release','net10.0-windows','Fixture.dll'),out]);
+run('selftest',[path.join(out,'bin','Release','net10.0-windows','Fixture.dll'),out,...(opts['--case']?[opts['--case']]:[])]);
 for(const[n,b]of Object.entries(snapshots))if(sha(fs.readFileSync(path.join(repo,'InputHost',n)))!==sha(b))throw Error('Source changed during test: '+n);
 if(opts['--reset-baseline'])run('reset-performance',[path.join(out,'bin','Release','net10.0-windows','Fixture.dll'),out,'measure-reset']);
 const result=JSON.parse(fs.readFileSync(path.join(out,'result.json'),'utf8'));

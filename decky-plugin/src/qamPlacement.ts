@@ -14,12 +14,14 @@ export function installConsoleTab(dfl: any, host: any, content: any, icon: any):
   const panelContent=(tab:any)=>tab?.panel?.props?.children?.props?.children;
   const seen=new WeakSet<any[]>(), receipts:WeakRef<any[]>[]=[];
   let stopped=false,patch:any,before:any;
+  const isCurrent=()=>!stopped&&host.__TABS_HOOK_INSTANCE===hook&&owns()&&
+    before?.hasUnpatched===false&&patch?.hasUnpatched===false;
   let defaultSelection:{active:boolean;dispose():void}|undefined;
   const remove=(tabs:any[])=>{if(Object.isFrozen(tabs))return;for(let i=tabs.length-1;i>=0;i--)if(isConsole(tabs[i])&&panelContent(tabs[i])===content)tabs.splice(i,1);};
   try {
     hook.add(registration);
     before=dfl.beforePatch(hook,'render',(args:any[])=>{
-      const tabs=args[0];if(stopped||!owns()||!Array.isArray(tabs)||Object.isFrozen(tabs))return;
+      const tabs=args[0];if(!isCurrent()||!Array.isArray(tabs)||Object.isFrozen(tabs))return;
       const consoles=tabs.filter(isConsole);
       if(consoles.length===1&&panelContent(consoles[0])===content)return;
       if(!consoles.length&&!tabs.some(t=>String(t?.key)==='999'&&t?.decky===true))return;
@@ -33,23 +35,30 @@ export function installConsoleTab(dfl: any, host: any, content: any, icon: any):
       tabs.splice(Math.min(position,tabs.length),0,current);
     });
     patch=dfl.afterPatch(hook,'render',(args:any[],result:any)=>{
-      const tabs=args[0];if(stopped||!owns()||!Array.isArray(tabs)||Object.isFrozen(tabs))return result;
+      const tabs=args[0];if(!isCurrent()||!Array.isArray(tabs)||Object.isFrozen(tabs))return result;
       const consoles=tabs.filter(t=>isConsole(t)&&panelContent(t)===content);
       if(consoles.length<1||tabs.filter(t=>String(t?.key)==='0').length!==1)return result;
       try {
         if(!seen.has(tabs)){for(let i=receipts.length-1;i>=0;i--)if(!receipts[i].deref())receipts.splice(i,1);
-          if(receipts.length===32){dispose();remove(tabs);return result;}
+          if(receipts.length===32){
+            // Retire only the oldest array receipt, never the live console.
+            // Forget its seen marker so a later render can register it again.
+            const oldest=receipts[0].deref();
+            if(oldest){remove(oldest);seen.delete(oldest);}
+            receipts.shift();
+          }
           seen.add(tabs);receipts.push(new WeakRef(tabs));}
         const current=consoles[consoles.length-1];remove(tabs);tabs.unshift(current);
       }catch{/* Unknown Steam layout must not break native QAM. */}
       return result;
     });
-    defaultSelection=installConsoleDefault(dfl,host,id,owns);
-  }catch{try{defaultSelection?.dispose();patch?.unpatch();before?.unpatch();if(owns())hook.removeById(id);}catch{}return {active:false,dispose(){}};}
-  function dispose(){if(stopped)return;stopped=true;defaultSelection?.dispose();try{patch?.unpatch();before?.unpatch();}catch{}
+    defaultSelection=installConsoleDefault(dfl,host,id,isCurrent);
+  }catch{try{defaultSelection?.dispose();}catch{}unpatchRender();try{if(owns())hook.removeById(id);}catch{}return {active:false,dispose(){}};}
+  function unpatchRender(){for(const item of [patch,before])try{if(item&&!item.hasUnpatched)item.unpatch();}catch{}}
+  function dispose(){if(stopped)return;stopped=true;defaultSelection?.dispose();unpatchRender();
     // A late previous onDismount must not unregister a newer module with our id.
     try{if(owns())hook.removeById(id);}catch{}
     for(const receipt of receipts){const tabs=receipt.deref();if(tabs)try{remove(tabs);}catch{}}receipts.length=0;
   }
-  return {get active(){return !stopped&&owns();},dispose};
+  return {get active(){return isCurrent();},dispose};
 }

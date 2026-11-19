@@ -4,7 +4,6 @@
 #include "msi_visibility_wake_diagnostics.h"
 static_assert(ymcc::msi::visibility::wake::buildEnabled);
 static ymcc::msi::visibility::wake::Policy g_msiVisibilityWakePolicy;
-static std::atomic<bool> g_exitRequested{false};
 namespace gameMsiMemory {
 static bool exitFence=false, knownBoard=false, virtualLog=false;
 }
@@ -12,10 +11,6 @@ static bool exitFence=false, knownBoard=false, virtualLog=false;
 static bool inputHostExitFenceRaised(){return gameMsiMemory::exitFence;}
 static bool msiClawKnownBoardAuthority(){return gameMsiMemory::knownBoard;}
 static bool domainLogEnabled(const char* domain){return gameMsiMemory::virtualLog&&domain&&std::strcmp(domain,"virtual")==0;}
-// Decky transport is outside this PID fixture. This counted memory port has no I/O.
-static unsigned gameDeckyResumePortCalls=0;
-static unsigned long long gameDeckyResumePortGeneration=0;
-static bool deckySidebarResumeAfterIntent(unsigned long long generation){++gameDeckyResumePortCalls;gameDeckyResumePortGeneration=generation;return false;}
 @@PRODUCT_ELIGIBILITY@@
 @@PRODUCT_NOTE_RESUME@@
 namespace gameMsiMemory {

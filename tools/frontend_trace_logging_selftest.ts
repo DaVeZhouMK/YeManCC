@@ -1,6 +1,6 @@
 // Real diagnostic sender with inert IPC; no engine, UI actions or hardware.
 import './mock-shell';
-import { reportFrontendTrace, reportFrontendError, readFrontendErrorLog, frontendDiagnosticDeliveryFailures } from '../src/robust/frontendDiagnostics';
+import { reportFrontendTrace, reportFrontendError, readFrontendErrorLog, frontendDiagnosticDeliveryFailures, frontendDiagnosticDeliveryEvidence } from '../src/robust/frontendDiagnostics';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 const root=resolve(process.argv[2]);mkdirSync(root,{recursive:true});
@@ -9,7 +9,23 @@ let response='ok';(globalThis as any).__mockIpcResponder=(cmd:string,args:any)=>
 (globalThis as any).window.location={hash:'#/fixture'};
 function check(name:string,value:unknown){checks.push({name,pass:!!value});}
 async function settle(){await new Promise(r=>setImmediate(r));}
+const fixtureCase=process.argv[3]??'all';
+if(!['all','capacity-error-only'].includes(fixtureCase))throw Error('Unknown frontend logging fixture case');
 async function main(){
+ if(fixtureCase==='capacity-error-only'){
+   const webview=(globalThis as any).window.chrome.webview,post=webview.postMessage;
+   const held:any[]=[];webview.postMessage=(message:any)=>held.push(message);
+   for(let i=0;i<32;i++)reportFrontendTrace('gamepad-admission',{stage:'directed-capacity'});
+   const before=readFrontendErrorLog().length;
+   reportFrontendError('fixture-capacity-error',new Error('fixture-original-local-error'));
+   check('native-capacity-error-stays-isolated-when-original-store-is-unavailable',readFrontendErrorLog().length===before&&held.length===32&&frontendDiagnosticDeliveryEvidence().channels[0].capacityRejectedRequests===1);
+   for(const message of held)post.call(webview,message);await settle();webview.postMessage=post;
+   check('directed-capacity-case-returns-original-response-reservations',frontendDiagnosticDeliveryEvidence().senderAdmission.inFlightRequests===0);
+   const report={fixtureCase,checks,failures:checks.filter(c=>!c.pass).length,realProductOrHardwareExecuted:false};
+   writeFileSync(join(root,'report.json'),JSON.stringify(report,null,2)+'\n');
+   console.log(JSON.stringify(report));process.exitCode=report.failures?1:0;return;
+ }
+
  const before=readFrontendErrorLog().length;
  reportFrontendTrace('gamepad-admission',{stage:'owner-start',action:'',epoch:1,qSeq:2,t:3});await settle();
  check('trace-uses-only-named-diagnostic-IPC-with-original-state',calls.length===1&&calls[0].cmd==='diagnostics.frontendTrace'&&JSON.parse(calls[0].args.message).qSeq===2&&calls[0].args.route==='#/fixture');
@@ -20,6 +36,67 @@ async function main(){
  failures=frontendDiagnosticDeliveryFailures();response='throw';reportFrontendTrace('gamepad-admission',{stage:'owner-stop'});await settle();check('IPC-failure-counted-no-recursive-report',frontendDiagnosticDeliveryFailures()===failures+1&&calls.length===4);
  failures=frontendDiagnosticDeliveryFailures();const circular:any={stage:'bad-fixture'};circular.self=circular;reportFrontendTrace('gamepad-admission',circular);await settle();check('serialization-failure-never-throws-or-changes-control',frontendDiagnosticDeliveryFailures()===failures+1&&calls.length===4);
  failures=frontendDiagnosticDeliveryFailures();reportFrontendError('vue-runtime',new Error('fixture-original-error'));await settle();check('real-error-delivery-failure-also-counted',frontendDiagnosticDeliveryFailures()===failures+1&&calls[4].cmd==='diagnostics.frontendError');
+ const evidence=frontendDiagnosticDeliveryEvidence();
+ const count=(channel:string,outcome:string)=>frontendDiagnosticDeliveryEvidence().channels.find(v=>v.channel===channel)?.counts[outcome];
+ check('fixed-channel-failure-classification-preserves-total',evidence.failureCount===4&&count('gamepad-admission','native-not-ok')===1&&count('gamepad-admission','invoke-rejected')===1&&count('gamepad-admission','sender-exception')===1&&count('frontend-error','invoke-rejected')===1);
+ evidence.channels[1].counts['native-not-ok']=999;
+ check('snapshot-is-a-copy-not-mutable-counter-state',count('gamepad-admission','native-not-ok')===1);
+ const webview=(globalThis as any).window.chrome.webview;const post=webview.postMessage;
+ webview.postMessage=()=>{};reportFrontendTrace('controller-preview',{stage:'fixture-timeout'});
+ await new Promise(r=>setTimeout(r,1050));webview.postMessage=post;
+ check('actual-local-response-timer-has-distinct-outcome',count('controller-preview','response-timeout')===1&&count('controller-preview','invoke-rejected')===0);
+ response='throw';(globalThis as any).__mockIpcResponder=(cmd:string,args:any)=>{calls.push({cmd,args});throw Error('IPC command timed out: diagnostics.frontendTrace');};
+ reportFrontendTrace('controller-preview',{stage:'remote-timeout-text'});await settle();
+ check('remote-timeout-text-is-not-local-timeout-proof',count('controller-preview','response-timeout')===1&&count('controller-preview','invoke-rejected')===1);
+ const sends=calls.length;const beforeStorm=frontendDiagnosticDeliveryFailures();
+ for(let i=0;i<50000;i++)reportFrontendTrace('controller-calibration',circular);
+ const afterStorm=frontendDiagnosticDeliveryEvidence();
+ check('fifty-thousand-local-failures-use-fixed-counters-no-IPC-or-retry',calls.length===sends&&afterStorm.failureCount===beforeStorm+50000&&count('controller-calibration','sender-exception')===50000&&afterStorm.channels.length===6);
+ check('snapshot-is-bounded-and-contains-no-original-errors-or-payload',JSON.stringify(afterStorm).length<2048&&!JSON.stringify(afterStorm).includes('fixture-'));
+ check('failure-does-not-imply-native-write-or-input-drop',afterStorm.nativeWriteOutcome==='UNKNOWN'&&afterStorm.snapshotAtomicWithNative===false);
+ const existingResponder=(globalThis as any).__mockIpcResponder;
+ (globalThis as any).__mockIpcResponder=(cmd:string,args:any)=>{calls.push({cmd,args});return {ok:true};};
+ const unreadable={toString(){throw Error('fixture-unreadable-error');}};
+ let threw=false;failures=frontendDiagnosticDeliveryFailures();const beforeUnreadable=calls.length;
+ try{reportFrontendError('fixture-unreadable',unreadable);}catch{threw=true;}await settle();
+ check('unreadable-error-is-counted-and-fixed-fallback-reaches-native-without-throw',!threw&&frontendDiagnosticDeliveryFailures()===failures+1&&calls.length===beforeUnreadable+1&&calls.at(-1)?.args.message==='frontend-error-text-unavailable');
+ const badStack=new Error('fixture-bad-stack');Object.defineProperty(badStack,'stack',{get(){throw Error('fixture-stack-access');}});
+ failures=frontendDiagnosticDeliveryFailures();threw=false;
+ try{reportFrontendError('fixture-stack',badStack);}catch{threw=true;}await settle();
+ check('throwing-error-stack-cannot-escape-diagnostic-sender',!threw&&frontendDiagnosticDeliveryFailures()===failures+1&&calls.at(-1)?.args.message==='frontend-error-text-unavailable');
+ const oldLocation=(globalThis as any).window.location;
+ Object.defineProperty((globalThis as any).window,'location',{configurable:true,get(){throw Error('fixture-route-access');}});
+ failures=frontendDiagnosticDeliveryFailures();threw=false;const beforeRoute=calls.length;
+ try{reportFrontendError('fixture-route',new Error('fixture-original'));}catch{threw=true;}
+ Object.defineProperty((globalThis as any).window,'location',{configurable:true,writable:true,value:oldLocation});await settle();
+ check('record-construction-failure-is-counted-without-recursion-or-IPC',!threw&&frontendDiagnosticDeliveryFailures()===failures+1&&calls.length===beforeRoute);
+ failures=frontendDiagnosticDeliveryFailures();const afterRoute=calls.length;
+ reportFrontendError('fixture-after-fault',new Error('fixture-original-after-fault'));await settle();
+ check('record-failure-releases-reporting-guard-for-next-original-error',frontendDiagnosticDeliveryFailures()===failures&&calls.length===afterRoute+1&&calls.at(-1)?.args.message==='fixture-original-after-fault');
+ const hostileExtra=Object.defineProperty({},'generation',{enumerable:true,get(){throw Error('fixture-extra-getter');}});
+ failures=frontendDiagnosticDeliveryFailures();threw=false;const beforeExtra=calls.length;
+ try{reportFrontendError('fixture-extra',new Error('fixture-extra-original'),hostileExtra);}catch{threw=true;}await settle();
+ check('extra-field-access-failure-isolated-in-existing-error-channel',!threw&&frontendDiagnosticDeliveryFailures()===failures+1&&calls.length===beforeExtra);
+ const capacityCalls:any[]=[];let stringifyCalls=0;
+ webview.postMessage=(message:any)=>{capacityCalls.push(message);};
+ const tracedPayload={toJSON(){++stringifyCalls;return {stage:'fixture-admission-capacity'};}};
+ const failuresBeforeCapacity=frontendDiagnosticDeliveryFailures();
+ for(let i=0;i<50032;i++)reportFrontendTrace('gamepad-admission',tracedPayload);
+ const full=frontendDiagnosticDeliveryEvidence();
+ check('capacity-thirty-two-reservations-before-trace-serialization-no-unbounded-IPC',capacityCalls.length===32&&stringifyCalls===32&&full.senderAdmission.maxInFlightRequests===32&&full.senderAdmission.inFlightRequests===32&&full.senderAdmission.highWaterRequests===32);
+ check('fifty-thousand-capacity-rejections-are-separate-counts-with-no-request-recovery',full.senderAdmission.capacityRejectedRequests===50000&&full.channels.find(c=>c.channel==='gamepad-admission')?.capacityRejectedRequests===50000&&frontendDiagnosticDeliveryFailures()===failuresBeforeCapacity+50000);
+ const errorsBeforeCapacity=readFrontendErrorLog().length;
+ reportFrontendError('fixture-capacity-error',new Error('fixture-original-local-error'));
+ check('native-capacity-error-stays-isolated-when-original-store-is-unavailable',readFrontendErrorLog().length===errorsBeforeCapacity&&capacityCalls.length===32&&frontendDiagnosticDeliveryEvidence().channels[0].capacityRejectedRequests===1);
+ for(const message of capacityCalls.slice())post.call(webview,message);await settle();
+ webview.postMessage=post;
+ const drained=frontendDiagnosticDeliveryEvidence();
+ check('original-replies-return-all-slots-without-replaying-rejected-traces',drained.senderAdmission.inFlightRequests===0&&drained.senderAdmission.admittedRequests===drained.senderAdmission.settledRequests&&stringifyCalls===32);
+ reportFrontendTrace('gamepad-admission',tracedPayload);await settle();
+ check('next-real-diagnostic-is-admitted-after-return-without-retry',stringifyCalls===33&&frontendDiagnosticDeliveryEvidence().senderAdmission.inFlightRequests===0);
+ const snapshotCopy=frontendDiagnosticDeliveryEvidence();snapshotCopy.senderAdmission.inFlightRequests=999;snapshotCopy.channels[0].capacityRejectedRequests=999;
+ check('admission-and-capacity-snapshots-are-independent-fixed-size-copies',frontendDiagnosticDeliveryEvidence().senderAdmission.inFlightRequests===0&&frontendDiagnosticDeliveryEvidence().channels[0].capacityRejectedRequests===1&&JSON.stringify(frontendDiagnosticDeliveryEvidence()).length<4096);
+ (globalThis as any).__mockIpcResponder=existingResponder;
  const report={checks,failures:checks.filter(c=>!c.pass).length,realProductOrHardwareExecuted:false,scope:'REAL_DIAGNOSTIC_SENDERS_INERT_IPC_NO_ENGINE_OR_USER_STORAGE'};writeFileSync(join(root,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));process.exitCode=report.failures?1:0;
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

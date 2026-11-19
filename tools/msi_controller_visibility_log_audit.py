@@ -419,10 +419,9 @@ def session_native_scope(session, native, archives):
     anchor = [t for t in boots if begin <= t <= min(end, begin + 30000)]
     later_boots = [t for t in boots if t > (min(anchor) if anchor else begin + 30000)]
     lifetime_end = min(later_boots) - 1 if later_boots else end
-    exits = [native_ms(x, archives) for x in lifetime_rows
-             if x["record"].get("event") == "session-clean-exit" and begin <= native_ms(x, archives) <= lifetime_end]
-    if exits:
-        lifetime_end = min(lifetime_end, min(exits))
+    # Session clean means the marker file was written, not process or Host exit.
+    session_markers = [x for x in lifetime_rows
+                       if x["record"].get("event") == "session-clean-exit" and begin <= native_ms(x, archives) <= lifetime_end]
     stop = min(end, lifetime_end)
     scoped = [x for x in lifetime_rows if x["record"].get("event") in CONFIG_EVENTS and begin <= native_ms(x, archives) <= stop]
     config = config_summary(scoped, archives, session["observerExecutable"])
@@ -433,7 +432,8 @@ def session_native_scope(session, native, archives):
             "parentCreationUtc": utc_text(begin), "nativeBootAnchorObserved": bool(anchor),
             "nativeBootUtc": utc_text(min(anchor)) if anchor else None,
             "scopeBeginUtc": utc_text(begin), "scopeEndUtc": utc_text(stop),
-            "nextSamePidBootBounded": bool(later_boots), "scopeIsContinuousConfigProof": False, "config": config}
+            "nextSamePidBootBounded": bool(later_boots), "scopeIsContinuousConfigProof": False,
+            "sessionMarkerObservationCount":len(session_markers),"sessionMarkersBoundLifetime":False,"config": config}
 
 
 

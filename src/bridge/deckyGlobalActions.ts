@@ -53,14 +53,14 @@ cas:(revision:number,patch:Record<string,unknown>,isCurrent?:()=>boolean)=>Promi
     const patch:Record<string,unknown>=args.field==='gyroEnabled'
       ? {outputTarget:{gyroEnabled:args.value==='on'},gyroMotion:{enabled:args.value==='on',...(args.value==='on'?gyroMotionForEnable(motion):{})}}
       : {outputTarget:{gyroEnabled:true},gyroMotion:{...gyroMotionParamsForPreset(args.value as any,motion.presets),enabled:true,preset:args.value,activePreset:args.value,outputMode:'virtual-stick'}};
-    await gate();checkTarget();const result=await deps.cas(current.input.revision,patch,()=>{try{checkpoint();checkTarget();return true;}catch{return false;}});if(!result.ok)throw Error('GAME_MIRROR_SOURCE_CHANGED');
+    await gate();checkTarget();const result=await deps.cas(current.input.revision,{...patch,gameOverride:null},()=>{try{checkpoint();checkTarget();return true;}catch{return false;}});if(!result.ok)throw Error('GAME_MIRROR_SOURCE_CHANGED');
     return await committed();
    }
    const target=current.input.outputTarget||{},motion=current.input.gyroMotion||{},persona=args.value;
    const patch:Record<string,any>={outputTarget:{persona,buttonMappingEnabled:persona!=='disabled'}};
    if(persona==='disabled'){patch.outputTarget.gyroEnabled=false;patch.gyroMotion={enabled:false};}
    else if(motion.virtualPadLink!==false&&!(target.buttonMappingEnabled===true&&target.persona!=='disabled')){patch.outputTarget.gyroEnabled=true;patch.gyroMotion=gyroMotionForEnable(motion);}
-   if(persona==='steamdeck'){checkTarget();await deps.closeJoyxoff();checkpoint();}await gate();checkTarget();const result=await deps.cas(current.input.revision,patch,()=>{try{checkpoint();checkTarget();return true;}catch{return false;}});if(!result.ok)throw Error('GAME_MIRROR_SOURCE_CHANGED');
+   if(persona==='steamdeck'){checkTarget();await deps.closeJoyxoff();checkpoint();}await gate();checkTarget();const result=await deps.cas(current.input.revision,{...patch,gameOverride:null},()=>{try{checkpoint();checkTarget();return true;}catch{return false;}});if(!result.ok)throw Error('GAME_MIRROR_SOURCE_CHANGED');
    return await committed();
   }finally{release();}
  }};

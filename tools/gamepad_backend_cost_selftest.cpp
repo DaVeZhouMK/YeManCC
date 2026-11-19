@@ -250,6 +250,22 @@ static void testJson() {
     inconsistent.sumUs = 17; // Legal adjacent-emission state: n was drained separately.
     const auto noN = cost::snapshotJson<json>(inconsistent);
     require(noN.at("meanUs").is_null() && noN.at("sumUs") == 17, "n=0 must give null mean even with sum");
+    const auto sameAsFull = [](const cost::Snapshot& s) {
+        const auto full = cost::snapshotJson<json>(s);
+        const auto compact = cost::compactSnapshotJson<json>(s);
+        require(compact.is_object() && compact == full, "partial drain must keep observed fields");
+    };
+    sameAsFull(inconsistent);
+    for (auto field : {&cost::Snapshot::n, &cost::Snapshot::maxUs, &cost::Snapshot::success,
+                       &cost::Snapshot::nonSuccess, &cost::Snapshot::otherCodeCount}) {
+        cost::Snapshot s{};
+        s.*field = 1;
+        s.lastOtherCode = kU32Max;
+        sameAsFull(s);
+    }
+    cost::Snapshot histogramOnly{};
+    histogramOnly.resultCodes.back() = {kU32Max, 1};
+    sameAsFull(histogramOnly);
     cost::Aggregate aggregate;
     const std::array<U32, 8> codes{0, kU32Max, kHresultFail, 0x80070005u, 1, 2, 3, 4};
     for (const auto code : codes) aggregate.record(3, code, code == 0);
@@ -279,7 +295,7 @@ static void testJson() {
     counters.msiGetDeviceState.record(17, kHresultFail, false);
     counters.msiGetDeviceState.record(18, 0, true);
     const auto window = json::parse(cost::windowJson<json>(counters).dump());
-    require(window.size() == 11 && window.at("schema") == "ymcc-gamepad-backend-cost-v1", "window schema");
+    require(window.size() == 11 && window.at("schema") == "ymcc-gamepad-backend-cost-v2", "window schema");
     require(window.at("resultCodeCapacityPerRoute") == 8, "window capacity");
     require(window.at("measurement") == "steady_clock elapsed around calls; not thread CPU or pure hardware I/O", "measurement scope");
     require(window.at("windowSemantics").get<std::string>().find("independent atomic counters may straddle emissions") != std::string::npos,
@@ -313,12 +329,20 @@ static void testJson() {
     require(window.at("msiGetDeviceState").at("n") == 2 && window.at("msiGetDeviceState").at("sumUs") == 35 &&
             window.at("msiGetDeviceState").at("meanUs") == 17, "MSI state elapsed");
     const auto next = cost::windowJson<json>(counters);
+    const auto checkEmptyToken = [](const json& value) {
+        require(value.is_number_unsigned() && value == 0 && value.dump() == "0", "explicit empty route token");
+    };
     for (const auto* source : sources)
         for (const auto* purpose : purposes)
-            for (const auto* api : {"canonical", "ordinal100"}) emptyJson(next.at("xinputWrappers").at(source).at(purpose).at(api));
-    for (const auto* field : {"system32Diagnostic", "msiPoll", "msiGetDeviceState"}) emptyJson(next.at(field));
+            for (const auto* api : {"canonical", "ordinal100"}) checkEmptyToken(next.at("xinputWrappers").at(source).at(purpose).at(api));
+    for (const auto* field : {"system32Diagnostic", "msiPoll", "msiGetDeviceState"}) checkEmptyToken(next.at(field));
+    cost::Snapshot stale{};
+    stale.lastOtherCode = kU32Max;
+    stale.resultCodes.front().code = kHresultFail;
+    emptyJson(cost::snapshotJson<json>(stale));
+    checkEmptyToken(cost::compactSnapshotJson<json>(stale));
     suite("actual vendored-JSON adapter, unsigned HRESULTs, all route/system/MSI fields", before,
-          {{"histogramSample", row}, {"windowSample", window}});
+          {{"histogramSample", row}, {"windowSample", window}, {"emptyWindowSample", next}});
 }
 
 struct Collected {

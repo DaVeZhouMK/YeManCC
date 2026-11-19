@@ -2,7 +2,15 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <bcrypt.h>
+#if defined(YMCC_STEAM_COLD_FILE_FLIGHT)
+#include "fixtures/steam_cold_file_flight/ports.h"
+#define ReadFile cold_file_ports::read
+#endif
 #include "../native/steam_compatibility_win32.h"
+#if defined(YMCC_STEAM_COLD_FILE_FLIGHT)
+#undef ReadFile
+#include <future>
+#endif
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -487,7 +495,391 @@ void coreCases() {
     check("import-validator/own-stack-private-memory-rejected", !compat::executableImportTarget(GetCurrentProcess(), static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(expected))));
     check("import-validator/zero-and-noncanonical-rejected", !compat::executableImportTarget(GetCurrentProcess(), 0) && !compat::executableImportTarget(GetCurrentProcess(), 0xffffffffffffffffULL));
 }
+void printQualificationEvidence(const compat::Evidence& evidence) {
+    std::cout << "{\"matched\":" << (evidence.matched ? "true" : "false")
+        << ",\"reason\":" << quoted(evidence.reason) << ",\"failedRva\":" << evidence.failedRva
+        << ",\"rangesChecked\":" << evidence.rangesChecked << ",\"bytesChecked\":" << evidence.bytesChecked << '}';
+}
+void printQualificationObservation(const char* kind, const compat::Qualification& observed) {
+    std::cout << "{\"kind\":" << quoted(kind) << ",\"qualified\":" << (observed.layout ? "true" : "false")
+        << ",\"reason\":" << quoted(observed.reason) << ",\"sha256\":" << quoted(observed.sha256)
+        << ",\"dynamicallyLocated\":" << (observed.dynamicallyLocated ? "true" : "false")
+        << ",\"failureCoordinate\":\"reference-graph-RVA\",\"record\":";
+    printQualificationEvidence(observed.record); std::cout << ",\"publisher\":";
+    printQualificationEvidence(observed.publisher); std::cout << ",\"ui\":";
+    printQualificationEvidence(observed.ui); std::cout << '}';
+}
+int qualifyOnly(const wchar_t* clientPath, const wchar_t* uiPath) {
+    const auto client = compat::qualifyFile(clientPath, compat::ModuleKind::Client);
+    const auto ui = compat::qualifyFile(uiPath, compat::ModuleKind::Ui);
+    std::cout << "{\"mode\":\"qualify-only\",\"diagnosticOnly\":true,\"fullSelftestExecuted\":false,"
+        << "\"targetProcessAccess\":false,\"targetCalls\":0,\"targetWrites\":0,\"observations\":[";
+    printQualificationObservation("client", client); std::cout << ',';
+    printQualificationObservation("ui", ui); std::cout << "]}\n";
+    return client.layout && ui.layout ? 0 : 3;
+}
+void sourceFileCases() {
+    constexpr char reference[]="C:\\buildworker\\steam_rel_client_hotfix_win64\\build\\src\\public\\tier1\\utlmemory.h";
+    constexpr std::string_view suffix="\\build\\src\\public\\tier1\\utlmemory.h";
+    const std::string oldPath(reinterpret_cast<const char*>(reference));
+    const std::string newPath="C:\\buildworker\\steam_rel_client_win64"+std::string(suffix);
+    struct Outcome { bool accepted=false, point=false, interior=false, endpoint=false, same=false, other=false; std::size_t boundSize=0; };
+    const auto probe=[&](const std::string& value,std::uint32_t flags=0x40000040u,bool terminated=true,
+        bool readable=true,std::string_view tail="\\build\\src\\public\\tier1\\utlmemory.h",bool referenceReadable=true,bool pathFixup=false) {
+        Bytes memory(0x1000,0);
+        for(const std::size_t at:{std::size_t(0x300),std::size_t(0x600)}){
+            if(!terminated)std::fill_n(memory.begin()+static_cast<std::ptrdiff_t>(at),512,static_cast<unsigned char>('x'));
+            require(value.size()<512,"source-file fixture path bound");std::memcpy(memory.data()+at,value.data(),value.size());
+            if(terminated)memory[at+value.size()]=0;
+        }
+        std::array<compat::SectionSpec,1> referenceSections{{{0x100,0xf00,0xf00,referenceReadable?0x40000040u:0x00000040u,{}}}};
+        auto actualSections=referenceSections;actualSections[0].characteristics=flags;
+        const std::array<compat::GraphRange,1> ranges{{{0x180,reinterpret_cast<const unsigned char*>(reference),sizeof(reference),compat::RangeKind::SourceFile,tail}}};
+        const std::array<compat::GraphFixup,1> fields{{{0x185,0x189,0x300,compat::FixupKind::Relative32}}};
+        const std::span<const compat::GraphFixup> fixups=pathFixup?std::span<const compat::GraphFixup>(fields):std::span<const compat::GraphFixup>();
+        compat::Image image{[&](std::uint64_t rva,void* target,std::size_t bytes){if(!readable||rva>=memory.size()||bytes>memory.size()-rva)return false;std::memcpy(target,memory.data()+static_cast<std::size_t>(rva),bytes);return true;},0x180000000,static_cast<std::uint64_t>(memory.size()),actualSections,{},false};
+        const compat::GraphSpec spec{ranges,fixups,referenceSections,0x180000000};
+        compat::graph_detail::Resolver resolver(image,spec);Outcome result;
+        result.accepted=resolver.target(0x180,0x300);
+        if(result.accepted){
+            result.point=compat::translateRva(resolver.result,0x180)==0x300;
+            result.interior=compat::translateRva(resolver.result,0x181).has_value();
+            result.endpoint=compat::translateRva(resolver.result,0x180+sizeof(reference),true).has_value();
+            result.same=resolver.target(0x180,0x300);result.other=resolver.target(0x180,0x600);
+            result.boundSize=resolver.result.ranges.at(0).size;
+        }
+        return result;
+    };
+    check("source-file/old-build-prefix-accepted",probe(oldPath).accepted);
+    check("source-file/changed-build-prefix-accepted",probe(newPath).accepted);
+    check("source-file/moved-root-accepted",probe("D:\\different_root\\toolchain"+std::string(suffix)).accepted);
+    std::string forward=newPath;std::replace(forward.begin(),forward.end(),'\\','/');
+    check("source-file/slash-normalization-accepted",probe(forward).accepted);
+    check("source-file/wrong-source-tail-rejected",!probe(newPath+".other").accepted);
+    check("source-file/relative-path-rejected",!probe("buildworker"+std::string(suffix)).accepted);
+    check("source-file/traversal-rejected",!probe("C:\\buildworker\\..\\other"+std::string(suffix)).accepted);
+    check("source-file/writable-target-rejected",!probe(newPath,0xc0000040u).accepted);
+    check("source-file/executable-target-rejected",!probe(newPath,0x60000020u).accepted);
+    check("source-file/non-readable-reference-rejected",!probe(newPath,0x40000040u,true,true,suffix,false).accepted);
+    check("source-file/unterminated-target-rejected",!probe(newPath,0x40000040u,false).accepted);
+    check("source-file/unreadable-target-rejected",!probe(newPath,0x40000040u,true,false).accepted);
+    check("source-file/empty-tail-rejected",!probe(newPath,0x40000040u,true,true,{}).accepted);
+    const auto bound=probe(newPath);
+    check("source-file/point-only-no-interior-or-endpoint",bound.accepted&&bound.point&&!bound.interior&&!bound.endpoint&&bound.boundSize==1);
+    check("source-file/repeated-target-conflict-rejected",bound.same&&!bound.other);
+    check("source-file/reference-path-tail-mismatch-rejected",!probe(newPath,0x40000040u,true,true,"\\other.h").accepted);
+    check("source-file/fixup-masking-in-path-rejected",!probe(newPath,0x40000040u,true,true,suffix,true,true).accepted);
+}
+int sourceFileOnly(const wchar_t* clientPath,const wchar_t* uiPath,const wchar_t* publicClientPath,const wchar_t* publicUiPath) {
+    sourceFileCases();
+    const auto client=compat::qualifyFile(clientPath,compat::ModuleKind::Client),ui=compat::qualifyFile(uiPath,compat::ModuleKind::Ui);
+    const auto controlClient=compat::qualifyFile(publicClientPath,compat::ModuleKind::Client),controlUi=compat::qualifyFile(publicUiPath,compat::ModuleKind::Ui);
+    const auto failed=std::count_if(cases.begin(),cases.end(),[](const auto& c){return !c.pass;});
+    std::cout << "{\"mode\":\"source-file-only\",\"fullSelftestExecuted\":false,\"targetProcessAccess\":false,\"boundaryPassed\":" << (failed?"false":"true") << ",\"cases\":[";
+    bool first=true;for(const auto& item:cases){if(!first)std::cout << ',';first=false;std::cout << "{\"name\":" << quoted(item.name) << ",\"passed\":" << (item.pass?"true":"false") << '}';}
+    std::cout << "],\"current\":[";printQualificationObservation("client",client);std::cout << ',';printQualificationObservation("ui",ui);
+    std::cout << "],\"originalControl\":[";printQualificationObservation("client",controlClient);std::cout << ',';printQualificationObservation("ui",controlUi);std::cout << "]}\n";
+    return failed||!controlClient.layout||!controlUi.layout?1:client.layout&&ui.layout?0:3;
+}
+struct ImportGraphProductProof {
+    bool graphKept=false, fixedFlag=false, loadedAccepted=false, namedTargetRejected=false,
+        codeMutationRejected=false, pdataMutationRejected=false, unwindMutationRejected=false, sourceMutationRejected=false, sourceInteriorDenied=false;
+    std::uint64_t namedCalls=0, rejectedNamedCalls=0;
+    std::string loadedReason, rejectedReason;
+    std::uint64_t loadedFailedRva=0;
+};
+ImportGraphProductProof importGraphProductProof(const compat::Qualification& disk,const wchar_t* path,compat::ModuleKind kind) {
+    ImportGraphProductProof result;result.graphKept=bool(disk.graph);result.fixedFlag=!disk.dynamicallyLocated;
+    if(!disk.layout||!disk.metadata||!disk.graph)return result;
+    const auto bytes=readFile(fs::path(path));if(digest(bytes)!=disk.sha256)return result;
+    compat::detail::PeFile file(bytes);if(!file.parse())return result;
+    const auto metadata=disk.metadata;constexpr std::uint64_t fakeBase=0x700000000000ULL;
+    std::optional<std::uint64_t> corrupt;
+    const compat::ReadRva loaded=[&](std::uint64_t rva,void* target,std::size_t count){
+        if(!file.read(rva,target,count))return false;
+        const auto end=rva+count;
+        for(const auto& slot:metadata->imports)if(slot.rva<end&&std::uint64_t(slot.rva)+8>rva){
+            const auto value=fakeBase+slot.rva,low=(std::max)(rva,std::uint64_t(slot.rva)),high=(std::min)(end,std::uint64_t(slot.rva)+8);
+            std::memcpy(static_cast<unsigned char*>(target)+(low-rva),reinterpret_cast<const unsigned char*>(&value)+(low-slot.rva),static_cast<std::size_t>(high-low));
+        }
+        if(corrupt&&*corrupt>=rva&&*corrupt-rva<count)static_cast<unsigned char*>(target)[*corrupt-rva]^=1;
+        return true;
+    };
+    const auto accept=[&](const compat::ImportSlot& slot,std::uint64_t value){++result.namedCalls;return value==fakeBase+slot.rva;};
+    const auto deny=[&](const compat::ImportSlot&,std::uint64_t){++result.rejectedNamedCalls;return false;};
+    const auto healthy=compat::qualifyLoaded(disk,kind,loaded,metadata->preferredBase,metadata->imageSize,{},accept);
+    result.loadedAccepted=healthy.matched;result.loadedReason=healthy.reason;result.loadedFailedRva=healthy.failedRva;
+    const auto rejected=compat::qualifyLoaded(disk,kind,loaded,metadata->preferredBase,metadata->imageSize,{},deny);
+    result.namedTargetRejected=!rejected.matched&&std::string(rejected.reason)=="contract-import-target-policy"&&result.rejectedNamedCalls>0;result.rejectedReason=rejected.reason;
+    const auto mutation=[&](compat::RangeKind rangeKind){
+        const auto& ranges=disk.graph->specification.ranges;
+        const auto found=std::find_if(ranges.begin(),ranges.end(),[&](const auto& range){return range.loadedRequired&&range.kind==rangeKind;});
+        if(found==ranges.end())return false;
+        const auto actual=compat::translateRva(*disk.graph,found->refRva);if(!actual)return false;
+        corrupt=*actual+(rangeKind==compat::RangeKind::SourceFile?found->size-5:(std::min)(std::size_t(4),found->size-1));
+        const auto proof=compat::qualifyLoaded(disk,kind,loaded,metadata->preferredBase,metadata->imageSize,{},accept);corrupt.reset();
+        return !proof.matched;
+    };
+    if(kind==compat::ModuleKind::Client){result.codeMutationRejected=mutation(compat::RangeKind::Code);
+        result.pdataMutationRejected=mutation(compat::RangeKind::Pdata);result.unwindMutationRejected=mutation(compat::RangeKind::Unwind);result.sourceMutationRejected=mutation(compat::RangeKind::SourceFile);
+        const auto source=std::find_if(disk.graph->specification.ranges.begin(),disk.graph->specification.ranges.end(),[](const auto& r){return r.loadedRequired&&r.kind==compat::RangeKind::SourceFile;});
+        result.sourceInteriorDenied=source!=disk.graph->specification.ranges.end()&&!compat::translateRva(*disk.graph,source->refRva+1);
+    }
+    return result;
+}
+
+void importGraphCases(const std::array<ImportGraphProductProof,2>& productProof,bool focused=false) {
+    enum class Fault { None, DllCase, WrongDll, WrongSymbol, DuplicateSlot, MissingFacts,
+        TruncatedName, Descriptor, DivergentLookup, Writable, Executable, PartialName,
+        LoadedImage, WrongReference, SectionConflict, FixupOverlap, ImportConflict, Calibrated, CalibratedWrong, ModeledHint, PartialHint };
+    struct Observation { bool matched=false, names=false, slotPartial=false, hintDenied=false,
+        prefixDenied=false, loadedAccepted=false, loadedMutationDenied=false, avoidsAmbiguousScan=false, unrelatedReadonly=false; };
+    const auto probe=[](Fault fault) {
+        constexpr std::uint64_t base=0x180000000ULL,refCode=0x110,actualCode=0x140,
+            refSlot=0x300,refLookup=0x3a0,refName=0x500,refDll=0x560;
+        constexpr char library[]="tier0_s64.dll",symbol[]="Plat_IsInDebugSession";
+        Bytes memory(0x2000,0),referenceCode{
+            0x48,0x83,0xec,0x28,0x90,0x90,0x90,0x90,0xff,0x15,0,0,0,0,0x48,0x83,0xc4,0x28,0xc3};
+        const auto put=[&](std::uint64_t rva,const auto& value){std::memcpy(memory.data()+static_cast<std::size_t>(rva),&value,sizeof(value));};
+        const auto refDisplacement=static_cast<std::int32_t>(refSlot-(refCode+14));
+        std::memcpy(referenceCode.data()+10,&refDisplacement,4);
+        std::memcpy(memory.data()+actualCode,referenceCode.data(),referenceCode.size());
+        const auto actualDisplacement=static_cast<std::int32_t>(0x760-(actualCode+14));put(actualCode+10,actualDisplacement);
+        const std::uint64_t nameValue=0x900;put(0x760,nameValue);put(0x840,nameValue);
+        const std::uint32_t lookupBase=0x800,dllName=0x980,iatBase=0x720;
+        put(0x680,lookupBase);put(0x68c,dllName);put(0x690,iatBase);
+        const std::uint16_t hint=405;put(0x900,hint);
+        std::memcpy(memory.data()+0x902,symbol,sizeof(symbol));
+        std::memcpy(memory.data()+0x980,library,sizeof(library));
+        std::vector<compat::ImportSlot> facts{{0x760,nameValue,library,symbol,0x840,0x680,0x800,0x720,0x980}};
+        std::array<compat::SectionSpec,2> referenceSections{{
+            {0x100,0x100,0x100,0x60000020u,{}},{0x200,0x1d00,0x1d00,0x40000040u,{}}}};
+        auto actualSections=referenceSections;
+        std::array<compat::GraphImport,1> imports{{{refSlot,refLookup,refName,0x240,0x380,0x2e0,refDll,library,symbol}}};
+        const std::array<std::uint32_t,3> descriptor{{0x380,static_cast<std::uint32_t>(refDll),0x2e0}};
+        std::vector<compat::GraphRange> ranges{
+            {refCode,referenceCode.data(),referenceCode.size(),compat::RangeKind::Code,{},true},
+            {refSlot,reinterpret_cast<const unsigned char*>(&refName),8,compat::RangeKind::Data,{},true},
+            {refLookup,reinterpret_cast<const unsigned char*>(&refName),8,compat::RangeKind::Data},
+            {0x240,reinterpret_cast<const unsigned char*>(&descriptor[0]),4,compat::RangeKind::Data},
+            {0x24c,reinterpret_cast<const unsigned char*>(&descriptor[1]),4,compat::RangeKind::Data},
+            {0x250,reinterpret_cast<const unsigned char*>(&descriptor[2]),4,compat::RangeKind::Data},
+            {refName+2,reinterpret_cast<const unsigned char*>(symbol),sizeof(symbol),compat::RangeKind::Data},
+            {refDll,reinterpret_cast<const unsigned char*>(library),sizeof(library),compat::RangeKind::Data}};
+        const std::uint16_t referenceHint=1;
+        if(fault==Fault::ModeledHint||fault==Fault::PartialHint)ranges.push_back({refName,reinterpret_cast<const unsigned char*>(&referenceHint),2,compat::RangeKind::Data});
+        std::vector<compat::GraphFixup> fields{
+            {refCode+10,refCode+14,refSlot,compat::FixupKind::Relative32},
+            {refSlot,0,refName,compat::FixupKind::Rva64},
+            {refLookup,0,refName,compat::FixupKind::Rva64},
+            {0x240,0,0x380,compat::FixupKind::Rva32},
+            {0x24c,0,refDll,compat::FixupKind::Rva32},
+            {0x250,0,0x2e0,compat::FixupKind::Rva32}};
+        if(fault==Fault::DllCase){facts[0].library="TIER0_S64.DLL";std::memcpy(memory.data()+0x980,"TIER0_S64.DLL",sizeof(library));}
+        if(fault==Fault::WrongDll)facts[0].library="other_s64.dll";
+        if(fault==Fault::WrongSymbol)facts[0].symbol="Plat_IsOtherSession";
+        if(fault==Fault::DuplicateSlot)facts.push_back(facts[0]);
+        if(fault==Fault::MissingFacts)facts.clear();
+        if(fault==Fault::TruncatedName)memory[0x902+sizeof(symbol)-1]='x';
+        if(fault==Fault::Descriptor){const std::uint32_t bad=0x990;put(0x68c,bad);}
+        if(fault==Fault::DivergentLookup){const std::uint64_t bad=0x920;put(0x840,bad);}
+        if(fault==Fault::Writable)actualSections[1].characteristics=0xc0000040u;
+        if(fault==Fault::Executable)actualSections[1].characteristics=0x60000020u;
+        if(fault==Fault::WrongReference)imports[0].symbol="Plat_IsOtherSession";
+        if(fault==Fault::FixupOverlap)fields.push_back({refCode+12,refCode+16,refSlot,compat::FixupKind::Relative32});
+        if(fault==Fault::Calibrated||fault==Fault::CalibratedWrong){
+            const std::uint64_t oldName=refName;const std::uint32_t oldLookup=0x380,oldDll=0x560,oldIat=0x2e0;
+            std::memcpy(memory.data()+refCode,referenceCode.data(),referenceCode.size());
+            std::memcpy(memory.data()+actualCode,referenceCode.data(),referenceCode.size());
+            const auto duplicateDisplacement=static_cast<std::int32_t>(refSlot-(actualCode+14));put(actualCode+10,duplicateDisplacement);
+            put(refSlot,oldName);put(refLookup,oldName);put(0x240,oldLookup);put(0x24c,oldDll);put(0x250,oldIat);
+            std::memcpy(memory.data()+refName+2,symbol,sizeof(symbol));std::memcpy(memory.data()+refDll,library,sizeof(library));
+            facts={{static_cast<std::uint32_t>(refSlot),refName,library,symbol,static_cast<std::uint32_t>(refLookup),0x240,0x380,0x2e0,0x560}};
+            if(fault==Fault::CalibratedWrong)facts[0].symbol="Plat_IsOtherSession";
+        }
+        const auto read=[&](std::uint64_t rva,void* target,std::size_t count){
+            if(rva>=memory.size()||count>memory.size()-rva)return false;
+            if(fault==Fault::PartialName&&rva<=0x902&&count>0x902-rva)return false;
+            if(fault==Fault::PartialHint&&rva<=0x900&&count>0x900-rva)return false;
+            std::memcpy(target,memory.data()+static_cast<std::size_t>(rva),count);return true;};
+        compat::Image image{read,base,static_cast<std::uint64_t>(memory.size()),actualSections,{},fault==Fault::LoadedImage,facts};
+        const compat::GraphSpec spec{ranges,fields,referenceSections,base,imports};
+        compat::GraphResolution graph;
+        if(fault==Fault::SectionConflict){auto otherSections=referenceSections;otherSections[1].virtualSize+=8;
+            const compat::GraphSpec other{ranges,fields,otherSections,base,imports};
+            const std::array<compat::GraphSpec,2> specs{{spec,other}};graph=compat::resolveGraphs(image,specs);
+        }else if(fault==Fault::ImportConflict){auto otherImports=imports;otherImports[0].symbol="Plat_IsOtherSession";
+            const compat::GraphSpec other{ranges,fields,referenceSections,base,otherImports};
+            const std::array<compat::GraphSpec,2> specs{{spec,other}};graph=compat::resolveGraphs(image,specs);
+        }else if(fault==Fault::Calibrated||fault==Fault::CalibratedWrong)graph=compat::resolveCalibratedGraph(image,spec);
+        else graph=compat::resolveGraph(image,spec);
+        Observation result;result.matched=graph.evidence.matched;if(!result.matched)return result;
+        const auto normalized=compat::referenceImageRead(graph,read,base,base);
+        std::array<char,sizeof(library)> observed{};std::uint16_t partial=0;
+        result.names=normalized(refDll,observed.data(),observed.size())&&std::memcmp(observed.data(),library,sizeof(library))==0;
+        result.slotPartial=normalized(refSlot+1,&partial,2)&&partial==static_cast<std::uint16_t>((refName>>8)&0xffff);
+        result.hintDenied=!compat::translateRva(graph,refName+1);
+        if(fault==Fault::ModeledHint){std::uint16_t observedHint=0;result.names=result.names&&normalized(refName,&observedHint,2)&&observedHint==referenceHint;}
+        result.prefixDenied=!compat::translateRva(graph,refSlot-8);
+        result.unrelatedReadonly=compat::translateRva(graph,0x1500)==std::optional<std::uint64_t>(0x1500);
+        compat::Image contract=image;contract.read=normalized;contract.sections=referenceSections;
+        result.loadedAccepted=compat::checkLoadedRequired(spec,image,contract,&graph).matched;
+        if(fault==Fault::Calibrated){compat::graph_detail::Resolver scanner(image,spec);
+            const auto candidates=scanner.loadCode()?scanner.scan(0):std::vector<std::uint64_t>();
+            result.avoidsAmbiguousScan=candidates==std::vector<std::uint64_t>{refCode,actualCode}&&!compat::resolveGraph(image,spec).evidence.matched;}
+        const auto boundCode=compat::translateRva(graph,refCode);if(boundCode)memory[static_cast<std::size_t>(*boundCode+4)]^=1;
+        result.loadedMutationDenied=!compat::checkLoadedRequired(spec,image,contract,&graph).matched;
+        return result;
+    };
+    if(focused){
+        const auto good=probe(Fault::None),calibrated=probe(Fault::Calibrated);
+        const std::array<const char*,3> names{{"import-graph/calibrated-coordinates-still-check-import-identity","import-graph/calibrated-known-coordinates-avoid-ambiguous-scan","import-graph/loaded-required-code-mutation-rejected"}};
+        check(names[0],calibrated.matched&&calibrated.loadedAccepted&&!probe(Fault::CalibratedWrong).matched&&productProof[0].graphKept&&productProof[1].graphKept&&productProof[0].fixedFlag&&productProof[1].fixedFlag);
+        check(names[1],calibrated.matched&&calibrated.avoidsAmbiguousScan&&productProof[0].loadedAccepted&&productProof[1].loadedAccepted&&productProof[0].namedTargetRejected&&productProof[1].namedTargetRejected);
+        check(names[2],good.matched&&good.loadedAccepted&&good.loadedMutationDenied&&productProof[0].loadedAccepted&&productProof[0].codeMutationRejected&&productProof[0].pdataMutationRejected&&productProof[0].unwindMutationRejected&&productProof[0].sourceMutationRejected&&productProof[0].sourceInteriorDenied);
+        std::cerr << "focused calibrated=" << calibrated.matched << " loaded=" << calibrated.loadedAccepted << " ambiguity=" << calibrated.avoidsAmbiguousScan << '\n';
+        for(std::size_t i=0;i<productProof.size();++i){const auto& p=productProof[i];
+            std::cerr << "product[" << i << "] graph=" << p.graphKept << " fixed=" << p.fixedFlag << " loaded=" << p.loadedAccepted << " reason=" << p.loadedReason << " failedRva=" << p.loadedFailedRva << " deny=" << p.namedTargetRejected << " denyReason=" << p.rejectedReason << " namedCalls=" << p.namedCalls << " deniedCalls=" << p.rejectedNamedCalls << '\n';}
+        return;
+    }
+    const auto good=probe(Fault::None),caseFold=probe(Fault::DllCase),calibrated=probe(Fault::Calibrated);
+    check("import-graph/calibrated-coordinates-still-check-import-identity",calibrated.matched&&calibrated.loadedAccepted&&!probe(Fault::CalibratedWrong).matched&&productProof[0].graphKept&&productProof[1].graphKept&&productProof[0].fixedFlag&&productProof[1].fixedFlag);
+    check("import-graph/calibrated-known-coordinates-avoid-ambiguous-scan",calibrated.matched&&calibrated.avoidsAmbiguousScan&&productProof[0].loadedAccepted&&productProof[1].loadedAccepted&&productProof[0].namedTargetRejected&&productProof[1].namedTargetRejected);
+    check("import-graph/moved-slot-and-reordered-lookup-accepted",good.matched);
+    check("import-graph/dll-ascii-case-accepted",caseFold.matched&&caseFold.names);
+    check("import-graph/wrong-dll-rejected",!probe(Fault::WrongDll).matched);
+    check("import-graph/wrong-symbol-rejected",!probe(Fault::WrongSymbol).matched);
+    check("import-graph/duplicate-actual-slot-rejected",!probe(Fault::DuplicateSlot).matched);
+    check("import-graph/missing-facts-rejected",!probe(Fault::MissingFacts).matched);
+    check("import-graph/truncated-name-rejected",!probe(Fault::TruncatedName).matched);
+    check("import-graph/descriptor-mismatch-rejected",!probe(Fault::Descriptor).matched);
+    check("import-graph/lookup-iat-divergence-rejected",!probe(Fault::DivergentLookup).matched);
+    check("import-graph/writable-target-rejected",!probe(Fault::Writable).matched);
+    check("import-graph/executable-target-rejected",!probe(Fault::Executable).matched);
+    check("import-graph/partial-name-read-rejected",!probe(Fault::PartialName).matched);
+    check("import-graph/loaded-image-resolver-rejected",!probe(Fault::LoadedImage).matched);
+    check("import-graph/reference-identity-mismatch-rejected",!probe(Fault::WrongReference).matched);
+    const auto modeledHint=probe(Fault::ModeledHint);
+    check("import-graph/unmodeled-hint-byte-not-mapped",good.matched&&good.hintDenied&&modeledHint.matched&&modeledHint.names&&!modeledHint.hintDenied&&!probe(Fault::PartialHint).matched);
+    check("import-graph/unmodeled-table-prefix-not-mapped",good.matched&&good.prefixDenied&&good.unrelatedReadonly);
+    check("import-graph/dll-canonical-read",good.matched&&good.names&&caseFold.names);
+    check("import-graph/partial-fixup-read-normalized",good.matched&&good.slotPartial);
+    check("import-graph/reference-sections-conflict-rejected",!probe(Fault::SectionConflict).matched);
+    check("import-graph/partly-overlapping-fixup-rejected",!probe(Fault::FixupOverlap).matched);
+    check("import-graph/import-declaration-conflict-rejected",!probe(Fault::ImportConflict).matched);
+    check("import-graph/loaded-required-code-accepted",good.matched&&good.loadedAccepted);
+    check("import-graph/loaded-required-code-mutation-rejected",good.matched&&good.loadedAccepted&&good.loadedMutationDenied&&productProof[0].loadedAccepted&&productProof[0].codeMutationRejected&&productProof[0].pdataMutationRejected&&productProof[0].unwindMutationRejected&&productProof[0].sourceMutationRejected&&productProof[0].sourceInteriorDenied);
+    const auto additional=[](compat::RangeKind kind,bool changed){
+        constexpr std::uint64_t base=0x180000000ULL;Bytes memory(0x1000,0);
+        const std::array<unsigned char,12> original{{1,2,3,4,5,6,7,8,9,10,11,12}};
+        std::memcpy(memory.data()+0x300,original.data(),original.size());if(changed)memory[0x305]^=1;
+        const std::array<compat::SectionSpec,1> sections{{{0x100,0xf00,0xf00,0x40000040u,{}}}};
+        const std::array<compat::GraphRange,1> ranges{{{0x300,original.data(),original.size(),kind,{},true}}};
+        const compat::GraphSpec spec{ranges,{},sections,base};
+        const compat::Image image{[&](std::uint64_t rva,void* target,std::size_t bytes){if(rva>=memory.size()||bytes>memory.size()-rva)return false;std::memcpy(target,memory.data()+static_cast<std::size_t>(rva),bytes);return true;},base,static_cast<std::uint64_t>(memory.size()),sections,{},true};
+        return compat::checkLoadedRequired(spec,image,image).matched;
+    };
+    check("import-graph/loaded-required-pdata-bytes-checked",additional(compat::RangeKind::Pdata,false)&&!additional(compat::RangeKind::Pdata,true));
+    check("import-graph/loaded-required-unwind-bytes-checked",additional(compat::RangeKind::Unwind,false)&&!additional(compat::RangeKind::Unwind,true));
+    const auto source=[](bool wrong){
+        constexpr char reference[]="C:\\buildworker\\steam_rel_client_hotfix_win64\\build\\src\\tier1\\utlmemory.cpp";
+        const std::string current=wrong?"D:\\worker\\build\\src\\tier1\\other.cpp":"D:\\worker\\build\\src\\tier1\\utlmemory.cpp";
+        constexpr std::uint64_t base=0x180000000ULL;Bytes memory(0x1000,0);std::memcpy(memory.data()+0x300,current.c_str(),current.size()+1);
+        const std::array<compat::SectionSpec,1> sections{{{0x100,0xf00,0xf00,0x40000040u,{}}}};
+        const std::array<compat::GraphRange,1> ranges{{{0x300,reinterpret_cast<const unsigned char*>(reference),sizeof(reference),compat::RangeKind::SourceFile,"\\build\\src\\tier1\\utlmemory.cpp",true}}};
+        const compat::GraphSpec spec{ranges,{},sections,base};
+        const compat::Image image{[&](std::uint64_t rva,void* target,std::size_t bytes){if(rva>=memory.size()||bytes>memory.size()-rva)return false;std::memcpy(target,memory.data()+static_cast<std::size_t>(rva),bytes);return true;},base,static_cast<std::uint64_t>(memory.size()),sections,{},true};
+        return compat::checkLoadedRequired(spec,image,image).matched;
+    };
+    check("import-graph/loaded-source-file-new-prefix-accepted",source(false));
+    check("import-graph/loaded-source-file-wrong-tail-rejected",!source(true));
+}
+int importGraphOnly(const wchar_t* clientPath,const wchar_t* uiPath,const wchar_t* publicClientPath,const wchar_t* publicUiPath,bool focused=false) {
+    const auto client=compat::qualifyFile(clientPath,compat::ModuleKind::Client),ui=compat::qualifyFile(uiPath,compat::ModuleKind::Ui);
+    const auto controlClient=compat::qualifyFile(publicClientPath,compat::ModuleKind::Client),controlUi=compat::qualifyFile(publicUiPath,compat::ModuleKind::Ui);
+    const std::array<ImportGraphProductProof,2> productProof{{importGraphProductProof(controlClient,publicClientPath,compat::ModuleKind::Client),importGraphProductProof(controlUi,publicUiPath,compat::ModuleKind::Ui)}};
+    importGraphCases(productProof,focused);
+    const auto failed=std::count_if(cases.begin(),cases.end(),[](const auto& c){return !c.pass;});
+    std::cout << "{\"mode\":\"import-graph-only\",\"fullSelftestExecuted\":false,\"targetProcessAccess\":false,\"boundaryPassed\":" << (failed?"false":"true") << ",\"cases\":[";
+    bool first=true;for(const auto& item:cases){if(!first)std::cout << ',';first=false;std::cout << "{\"name\":" << quoted(item.name) << ",\"passed\":" << (item.pass?"true":"false") << '}';}
+    std::cout << "],\"current\":[";printQualificationObservation("client",client);std::cout << ',';printQualificationObservation("ui",ui);
+    std::cout << "],\"originalControl\":[";printQualificationObservation("client",controlClient);std::cout << ',';printQualificationObservation("ui",controlUi);std::cout << "]}\n";
+    return failed||!controlClient.layout||!controlUi.layout?1:client.layout&&ui.layout?0:3;
+}
+
+
+#if defined(YMCC_STEAM_SESSION_CACHE_PEER)
+extern "C" bool steamSessionCachePeer(const wchar_t*,const char*,bool*,unsigned long long*,unsigned long long*);
+int sessionCacheOnly(const wchar_t* destination,const wchar_t* clientPath) {
+    output=fs::absolute(destination);fs::create_directories(output);
+    const auto original=readFile(clientPath);const auto active=output/L"prepared-client.bin",next=output/L"next-client.bin";
+    writeFile(active,original);
+    const auto first=compat::qualifyFile(active.wstring(),compat::ModuleKind::Client);
+    check("session-cache/cold-source-facts",first.layout.has_value()&&!first.cacheHit&&first.fileBytesRead==original.size()&&first.digestBytesHashed==original.size(),first.reason);
+    bool same=false;unsigned long long bytes=~0ULL,hashed=~0ULL;
+    const bool shared=steamSessionCachePeer(active.c_str(),first.sha256.c_str(),&same,&bytes,&hashed);
+    check("session-cache/actual-cross-tu-reuse",shared&&same&&bytes==0&&hashed==0,"session preparation and engine TU must share disk fact cache");
+    if(!shared||!same||bytes||hashed)return 1;
+    const auto again=compat::qualifyFile(active.wstring(),compat::ModuleKind::Client);
+    check("session-cache/same-key-no-content-read",again.cacheHit&&again.fileBytesRead==0&&again.digestBytesHashed==0&&again.identity==first.identity);
+    auto replacement=original;Header h(replacement);
+    const auto stampOffset=h.file+offsetof(IMAGE_FILE_HEADER,TimeDateStamp);
+    put<DWORD>(replacement,stampOffset,at<DWORD>(replacement,stampOffset)^0x01010101);
+    writeFile(next,replacement);
+    require(MoveFileExW(next.c_str(),active.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=FALSE,"owned fixture replacement");
+    const bool oldMatched=steamSessionCachePeer(active.c_str(),first.sha256.c_str(),&same,&bytes,&hashed);
+    check("session-cache/new-file-identity-not-reused",!oldMatched&&!same&&bytes==replacement.size()&&hashed==replacement.size());
+    const auto changed=compat::qualifyFile(active.wstring(),compat::ModuleKind::Client);
+    check("session-cache/replacement-qualified-and-shared",changed.layout.has_value()&&changed.cacheHit&&!(changed.identity==first.identity)&&changed.sha256!=first.sha256);
+    const auto mapped=mappedImage(replacement,*changed.metadata,0x180000000ULL);
+    const auto loaded=compat::qualifyLoaded(changed,compat::ModuleKind::Client,readerFor(mapped),0x180000000ULL,changed.metadata->imageSize);
+    check("session-cache/loaded-still-qualified",loaded.matched,loaded.reason);
+    auto tampered=mapped;
+    const auto& range=compat::field_record::fixedRanges[0];
+    const auto actual=compat::resolvedRva(changed,range.rva);
+    require(actual<tampered.size(),"loaded mutation RVA");tampered[static_cast<std::size_t>(actual)]^=1;
+    const auto rejected=compat::qualifyLoaded(changed,compat::ModuleKind::Client,readerFor(tampered),0x180000000ULL,changed.metadata->imageSize);
+    check("session-cache/cached-disk-does-not-bypass-loaded-guard",!rejected.matched,rejected.reason);
+    const auto failed=std::count_if(cases.begin(),cases.end(),[](const auto& item){return !item.pass;});
+    std::cout<<"{\"mode\":\"session-cache-cross-tu-only\",\"checks\":"<<cases.size()<<",\"failed\":"<<failed<<",\"cases\":[";
+    bool sep=false;for(const auto& item:cases){if(sep)std::cout<<',';sep=true;std::cout<<"{\"name\":"<<quoted(item.name)<<",\"passed\":"<<(item.pass?"true":"false")<<'}';}
+    std::cout<<"],\"realSteamAccess\":false,\"healthReferenceProduced\":false,\"fullDefaultSelftestExecuted\":false}\n";
+    return failed?1:0;
+}
+#endif
+
+#if defined(YMCC_STEAM_COLD_FILE_FLIGHT)
+#include "fixtures/steam_cold_file_flight/cases.inc"
+#endif
+
 int wmain(int argc, wchar_t** argv) {
+#if defined(YMCC_STEAM_COLD_FILE_FLIGHT)
+    if(argc==4&&std::wstring(argv[1])==L"--cold-single-flight-from-replacement-only"){try{return coldSingleFlightOnly(argv[2],argv[3],true);}catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}}
+    if(argc==4&&std::wstring(argv[1])==L"--cold-single-flight-only"){try{return coldSingleFlightOnly(argv[2],argv[3]);}catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}}
+#endif
+#if defined(YMCC_STEAM_SESSION_CACHE_PEER)
+    if(argc==4&&std::wstring(argv[1])==L"--session-cache-cross-tu-only"){try{return sessionCacheOnly(argv[2],argv[3]);}catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}}
+#endif
+    if (argc >= 2 && std::wstring(argv[1]) == L"--import-graph-review-only") {
+        if (argc != 6) { std::cerr << "usage: selftest --import-graph-review-only CLIENT UI PUBLIC_CLIENT PUBLIC_UI\n"; return 2; }
+        try { return importGraphOnly(argv[2],argv[3],argv[4],argv[5],true); }
+        catch(const std::exception& error){std::cerr << error.what() << '\n';return 1;}
+    }
+    if (argc >= 2 && std::wstring(argv[1]) == L"--import-graph-only") {
+        if (argc != 6) { std::cerr << "usage: selftest --import-graph-only CLIENT UI PUBLIC_CLIENT PUBLIC_UI\n"; return 2; }
+        try { return importGraphOnly(argv[2],argv[3],argv[4],argv[5]); }
+        catch (const std::exception& error) { std::cerr << "import graph observation failed: " << error.what() << '\n'; return 1; }
+    }
+    if (argc >= 2 && std::wstring(argv[1]) == L"--source-file-only") {
+        if (argc != 6) { std::cerr << "usage: selftest --source-file-only CLIENT UI PUBLIC_CLIENT PUBLIC_UI\n"; return 2; }
+        try { return sourceFileOnly(argv[2],argv[3],argv[4],argv[5]); }
+        catch (const std::exception& error) { std::cerr << "source file observation failed: " << error.what() << '\n'; return 1; }
+    }
+    if (argc >= 2 && std::wstring(argv[1]) == L"--qualify-only") {
+        if (argc != 4) { std::cerr << "usage: selftest --qualify-only CLIENT UI\n"; return 2; }
+        try { return qualifyOnly(argv[2], argv[3]); }
+        catch (const std::exception& error) { std::cerr << "qualification observation failed: " << error.what() << '\n'; return 1; }
+    }
     if (argc != 6) { std::cerr << "usage: selftest OUT LEGACY_CLIENT PUBLIC_CLIENT LEGACY_UI PUBLIC_UI\n"; return 2; }
     try {
         output = fs::absolute(argv[1]); fs::create_directories(output);

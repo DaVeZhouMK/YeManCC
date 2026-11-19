@@ -5,7 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import {extractFunction} from './ymcc_sim/global/controller-startup-return/extend-fixture.mjs';
-import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
+import {startupToolchainPreamble,verifyStartupToolchain} from './ymcc_sim/global/controller-startup-return/toolchain.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO = path.resolve(HERE, '..');
@@ -13,7 +13,7 @@ const MODULE = 'tools/ymcc_sim/global/controller-startup-return';
 const FUNCTIONS = ['msiCrashProcessCreation', 'msiCrashCurrentOwner', 'msiCrashOldOwnerDead'];
 const INPUTS = ['native/msi_crash_recovery_runtime.h', 'native/msi_crash_recovery_journal.h', 'deps/json/json.hpp',
   'tools/msi_crash_owner_liveness_selftest.cpp', 'tools/msi_crash_owner_liveness_selftest.mjs',
-  MODULE + '/extend-fixture.mjs', 'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
+  MODULE + '/extend-fixture.mjs', MODULE + '/toolchain.mjs', 'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
 const CASES = [
   ['owner/current-pseudo-handle', 6], ['owner/live-child', 5], ['owner/live-child-creation-mismatch', 3],
   ['owner/current-creation-mismatch', 2], ['owner/exited-child-retained-handle', 6], ['owner/invalid-handle-real-api', 2],
@@ -123,13 +123,13 @@ export function runOwnerLiveness({out, repo = DEFAULT_REPO, toolchainFile = path
       return {path: relative, source, snapshot: target, sha256: hash(source)};
     });
     need(hash(path.join(repo, 'tools/msi_crash_owner_liveness_selftest.mjs')) === hash(fileURLToPath(import.meta.url)), 'RUNNER_DIFFERS_FROM_FROZEN_SOURCE');
-    for (const relative of [MODULE + '/extend-fixture.mjs', 'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'])
+    for (const relative of [MODULE + '/extend-fixture.mjs', MODULE + '/toolchain.mjs', 'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'])
       need(hash(path.join(repo, relative)) === hash(path.join(DEFAULT_REPO, relative)), 'IMPORTED_HELPER_DIFFERS_FROM_FROZEN_SOURCE');
     const toolchain = read(toolchainFile), toolchainHash = hash(toolchainFile);
     need(toolchain.files.length > 0 && toolchain.files.length <= 640, 'TOOLCHAIN_MEMBERSHIP');
     const node = toolchain.files.find(row => row.roles.includes('node'));
     need(node && path.resolve(node.path).toLowerCase() === path.resolve(process.execPath).toLowerCase(), 'NODE_NOT_PINNED');
-    for (const row of toolchain.files) need(hash(row.path) === row.sha256, 'TOOLCHAIN_CHANGED:' + row.path);
+    verifyStartupToolchain(toolchain);
     write(path.join(root, 'input-snapshot.json'), {sourceBindings, toolchainFile, toolchainHash, toolchain});
     const source = fs.readFileSync(path.join(snapshot, 'native/msi_crash_recovery_runtime.h'), 'utf8');
     const functions = FUNCTIONS.map(name => extractFunction(source, name));
@@ -151,7 +151,7 @@ export function runOwnerLiveness({out, repo = DEFAULT_REPO, toolchainFile = path
     for (const key of Object.keys(env)) if (/^(?:CL|_CL_|LINK|_LINK_|NODE_OPTIONS|NODE_PATH|YMCC_VCVARS64)$/i.test(key)) delete env[key];
     const temp = path.join(root, 't'); fs.mkdirSync(temp); Object.assign(env, {TEMP: temp, TMP: temp, VSCMD_SKIP_SENDTELEMETRY: '1'});
     const quote = value => { need(!/["%\r\n]/.test(value), 'UNSAFE_COMPILER_PATH'); return '"' + value + '"'; };
-    const preamble = calibrationToolchainPreamble(toolchain.vcvars64);
+    const preamble = startupToolchainPreamble(toolchain);
     const profiles = {}, dependencyFiles = [], compilerRows = [];
     const artifacts = new Map(toolchain.files.map(row => [path.resolve(row.path).toLowerCase(), row.sha256]));
     function bindCompilerInput(file, kind) {
@@ -201,7 +201,7 @@ export function runOwnerLiveness({out, repo = DEFAULT_REPO, toolchainFile = path
     }
     need(libraries > 0, 'LIBRARY_CLOSURE_MISSING');
     for (const row of sourceBindings) need(hash(row.source) === row.sha256 && hash(row.snapshot) === row.sha256, 'SOURCE_CHANGED:' + row.path);
-    for (const row of toolchain.files) need(hash(row.path) === row.sha256, 'TOOL_CHANGED:' + row.path);
+    verifyStartupToolchain(toolchain);
     need(hash(toolchainFile) === toolchainHash, 'TOOLCHAIN_DESCRIPTOR_CHANGED');
     for (const row of Object.values(generated)) need(hash(row.path) === row.sha256, 'GENERATED_SOURCE_CHANGED');
     const compilerInputs = {dependencyFiles: dependencyFiles.length, libraries, rows: compilerRows};

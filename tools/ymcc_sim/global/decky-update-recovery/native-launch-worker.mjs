@@ -42,6 +42,13 @@ function start({repo,callerEvidence,deadlineMs},mode){
  repo=plain(repo);callerEvidence=plain(callerEvidence);
  need(inside(path.resolve(core,'Evidence'),callerEvidence),'CORE_CALLER_EVIDENCE');
  need(key(plain(fileURLToPath(import.meta.url)))===key(plain(path.join(repo,modulePath,'native-launch-worker.mjs'))),'CALLING_MODULE_OUTSIDE_REPO');
+ // Fail reviewed-source/terminal drift synchronously, before any worker or heavy sibling.
+ const reviewRoot=path.join(repo,modulePath,'native-launch-noio'),sourceReview=read(path.join(reviewRoot,'reviewed-source.json')),terminalReview=read(path.join(reviewRoot,'reviewed-terminals.json'));
+ need(sourceReview.kind==='reviewed-native-launch-NoIO-source'&&sourceReview.sourceApprovalGranted===false,'SOURCE_REVIEW_KIND');
+ const reviewedSourceMembers=Object.freeze(["native/steam_native_launch.h","native/steam_native_launch_windows.h","native/steam_launch_path.h","native/steam_launch_observation.h","native/steam_launch_owner_observation.h","tools/steam_launch_noio_facts.h","native/decky_sidebar_launch.h","native/process_efficiency.h","tools/steam_native_launch_selftest.cpp","deps/json/json.hpp","native/process_inventory.h","native/process_handle_inheritance.h","tools/steam_boot_selected_cases.inc","native/steam_offline_mutation_gate.h","tools/steam_launch_actual_manual_cases.inc"]);
+ need(Array.isArray(sourceReview.files)&&sourceReview.files.length===reviewedSourceMembers.length&&new Set(sourceReview.files.map(row=>row.path)).size===reviewedSourceMembers.length&&sourceReview.files.every(row=>reviewedSourceMembers.includes(row.path)),'SOURCE_REVIEW_MEMBERSHIP');
+ for(const row of sourceReview.files){need(typeof row.path==='string'&&!path.isAbsolute(row.path)&&!row.path.split(/[\\/]/).includes('..')&&NATIVE_LAUNCH_NOIO_SOURCE_INPUTS.includes(row.path),'SOURCE_REVIEW_PATH');const file=plain(path.join(repo,row.path));need(inside(repo,file)&&hash(file)===row.sha256,'REVIEWED_SOURCE_CHANGED:'+row.path);}
+ need(terminalReview.kind==='reviewed-memory-native-launch-terminals'&&terminalReview.status==='STATIC_TERMINAL_REVIEW_COMPLETE'&&hash(plain(path.join(reviewRoot,'terminal-adapter.h')))===terminalReview.adapterSha256,'TERMINAL_REVIEW_CHANGED');
  const workParent=directory(path.join(core,'Workspace/Nl'));
  const work=plain(fs.mkdtempSync(path.join(workParent,'w')));
  const out=directory(path.join(callerEvidence,'native-launch-worker'));need(fs.readdirSync(out).length===0,'FRESH_CALLER_OUTPUT');

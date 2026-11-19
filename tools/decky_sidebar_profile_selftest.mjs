@@ -22,12 +22,12 @@ await check('snapshot exposes a global profile entry with an opaque stable revis
  const f=await fixture(),s=await f.read();assert.equal(s.game.fields.profile.value,'global');assert(s.game.fields.profile.sourceRevision);assert.equal(s.game.fields.profile.supported,true);
  assert(!JSON.stringify(s).includes('profileSource'));assert.equal(f.memory.stats().fakeWrites,0);f.stop();
 });
-await check('setting dedicated imports both current power banks, exact frame settings and current gyro/persona',async()=>{
+await check('setting dedicated imports performance and exact FPS without remembering global input',async()=>{
  const f=await fixture();f.state.schedule.controls=performanceControlsModule.normalizeContinuousControls({ac:{tdp:31,tdpCeiling:40,auto:{bias:10}},dc:{tdp:12,tdpCeiling:25,auto:{bias:75}}});
  f.state.globalFrames={ac:{fps:95,ceiling:120,lastFps:95},dc:{fps:0,ceiling:60,lastFps:45}};
  const controls=structuredClone(f.state.schedule.controls),frames=structuredClone(f.state.globalFrames),s=await f.read(),r=await f.request('dedicated',s);
  assert.equal(r.ok,true,JSON.stringify(r));const c=f.memory.view(),entry=c.entries['game.exe'];
- same(entry.controls,controls);assert.equal(entry.enabled,true);assert.equal(entry.padPersona,'steamdeck');assert.equal(entry.gyroOverride,'off');
+ same(entry.controls,controls);assert.equal(entry.enabled,true);assert.equal(entry.padPersona??'follow','follow');assert.equal(entry.gyroOverride??'follow','follow');for(const key of ['gyroPreset','inputOverrides'])assert.equal(entry[key],undefined);
  assert.equal(c.rtss['game.exe'].acFps,95);assert.equal(c.rtss['game.exe'].dcFps,0);assert.equal(c.rtss['game.exe'].dcLastFps,45);
  same(f.state.globalFrames,frames);same(f.state.schedule.controls,controls);assert.equal(f.counts.profileImports,1);assert.equal((await f.read()).game.fields.profile.value,'dedicated');f.stop();
 });
@@ -61,14 +61,14 @@ await check('a change to the inactive DC bank rejects the earlier current-config
 await check('a changed global FPS source rejects the earlier import without saving a partial entry',async()=>{
  const f=await fixture(),s=await f.read();f.state.globalFrames.dc.fps=45;assert.equal((await f.request('dedicated',s)).ok,false);assert.equal(f.counts.profileImports??0,0);f.stop();
 });
-await check('a changed global gyro source rejects the earlier import',async()=>{
- const f=await fixture(),s=await f.read();f.state.gyroDefaults.source='changed-input-source';assert.equal((await f.request('dedicated',s)).ok,false);assert.equal(f.counts.profileImports??0,0);f.stop();
+await check('a changed global gyro source does not gate a performance/FPS profile import',async()=>{
+ const f=await fixture(),s=await f.read();f.state.gyroDefaults.source='changed-input-source';assert.equal((await f.request('dedicated',s)).ok,true);assert.equal(f.counts.profileImports,1);assert.equal(f.memory.view().entries['game.exe'].gyroOverride??'follow','follow');f.stop();
 });
 await check('power recovery or a new power generation rejects profile writes',async()=>{
  for(const update of [{phase:'resuming'},{generation:2},{hardwareWritesAllowed:false}]){const f=await fixture(),s=await f.read();Object.assign(f.state.power,update);assert.equal((await f.request('dedicated',s)).ok,false);assert.equal(f.counts.profileImports??0,0);f.stop();}
 });
-await check('blocked native virtual-output policy is honored when importing the current input preset',async()=>{
- const f=await fixture();f.state.virtualPolicy={steamDeckSelfOutputBlocked:true,reason:'fixture-native-policy'};const r=await f.request('dedicated');assert.equal(r.ok,false);assert.equal(f.counts.profileImports??0,0);f.stop();
+await check('virtual-output restrictions do not gate performance/FPS profile creation',async()=>{
+ const f=await fixture();f.state.virtualPolicy={steamDeckSelfOutputBlocked:true,reason:'fixture-native-policy'};const r=await f.request('dedicated');assert.equal(r.ok,true,JSON.stringify(r));assert.equal(f.counts.profileImports,1);assert.equal(f.memory.view().entries['game.exe'].padPersona??'follow','follow');f.stop();
 });
 await check('malformed profile values or extra arguments cannot enter the store',async()=>{
  for(const args of [{field:'profile',value:'reset'},{field:'profile',value:'dedicated',exe:'other.exe'}]){const f=await fixture();assert.equal((await f.request(undefined,undefined,args)).ok,false);assert.equal(f.counts.profileImports??0,0);f.stop();}
@@ -115,9 +115,10 @@ await check('dormant input records display global values and stay byte-for-byte 
  assert.equal((await f.request('dualsense-edge',s,{field:'padPersona',value:'dualsense-edge'})).ok,true);
  same(f.memory.view(),before);assert.equal(f.counts.inputSaves,1);assert.equal((await f.read()).game.fields.profile.value,'global');f.stop();
 });
-await check('active dedicated input still saves only the original EXE profile',async()=>{
- const f=await fixture(seed()),s=await f.read();assert.equal((await f.request('elite',s,{field:'padPersona',value:'elite'})).ok,true);
- assert.equal(f.memory.view().entries['game.exe'].padPersona,'elite');assert.equal(f.counts.inputSaves,0);assert.equal((await f.read()).game.fields.profile.value,'dedicated');f.stop();
+await check('active dedicated performance leaves input edits global and preserves every EXE field',async()=>{
+ const initial=seed();initial.entries['game.exe'].padPersona='dualsense-edge';initial.entries['game.exe'].gyroOverride='racing';
+ const f=await fixture(initial),before=structuredClone(f.memory.view()),s=await f.read();assert.equal(s.game.fields.padPersona.value,'steamdeck');assert.equal(s.game.fields.gyroOverride,undefined);
+ assert.equal((await f.request('elite',s,{field:'padPersona',value:'elite'})).ok,true);same(f.memory.view(),before);assert.equal(f.state.input.outputTarget.persona,'elite');assert.equal(f.counts.inputSaves,1);assert.equal((await f.read()).game.fields.profile.value,'dedicated');f.stop();
 });
 await check('external deletion without a renderer event refreshes profile value and allows a new explicit import',async()=>{
  const f=await fixture(seed()),before=await f.read();assert.equal(before.game.fields.profile.value,'dedicated');
@@ -132,21 +133,21 @@ await check('deletion during an asynchronous snapshot cannot publish an old dedi
  let s=await f.read();if(!s.game){assert.equal(s.ready,false);assert.match(s.notice,/读取失败/);f.advanceController(250);for(let i=0;i<220;i++)await Promise.resolve();s=await f.read();}
  assert.equal(s.game.fields.profile.value,'global');assert.equal(f.replies.filter(r=>r.message.type==='snapshot').some(r=>r.message.snapshot.game?.fields.profile.value==='dedicated'),false);assert.equal(f.memory.stats().fakeWrites,0);f.stop();
 });
-await check('an unseen external profile import blocks a captured global input edit before input CAS',async()=>{
+await check('an unseen external profile import cannot move a captured input edit out of global CAS',async()=>{
  const f=await fixture(),s=await f.read();f.memory.documents.set(main,JSON.stringify(seed()));
- assert.equal((await f.request('elite',s,{field:'padPersona',value:'elite'})).ok,false);assert.equal(f.counts.inputSaves,0);assert.equal(f.counts.saves,0);f.stop();
+ assert.equal((await f.request('elite',s,{field:'padPersona',value:'elite'})).ok,true);assert.equal(f.counts.inputSaves,1);assert.equal(f.counts.saves,0);f.stop();
 });
-await check('a profile deleted after a dedicated input receipt cannot be recreated by the stale input command',async()=>{
+await check('a profile deleted after an input snapshot remains deleted when global input is saved',async()=>{
  const f=await fixture(seed()),s=await f.read(),raw=f.memory.raw();delete raw.entries['game.exe'];delete raw.rtss['game.exe'];f.memory.documents.set(main,JSON.stringify(raw));
- assert.equal((await f.request('elite',s,{field:'padPersona',value:'elite'})).ok,false);assert.equal(f.counts.saves,0);assert.equal(f.counts.inputSaves,0);assert.equal(f.memory.view().entries['game.exe'],undefined);f.stop();
+ assert.equal((await f.request('elite',s,{field:'padPersona',value:'elite'})).ok,true);assert.equal(f.counts.saves,0);assert.equal(f.counts.inputSaves,1);assert.equal(f.memory.view().entries['game.exe'],undefined);f.stop();
 });
 
 
 await check('an input-only edit cannot silently migrate or create continuous performance banks in an old active profile',async()=>{
  const f=await fixture(seed()),before=structuredClone(f.memory.view().entries['game.exe']);assert.equal(before.controls,undefined);
  const r=await f.request('elite',null,{field:'padPersona',value:'elite'});assert.equal(r.ok,true);const after=f.memory.view().entries['game.exe'];
- assert.equal(after.padPersona,'elite');assert.equal(after.controls,undefined,'controller intent must not create TDP/performance memory');same(after.ac,before.ac);same(after.dc,before.dc);assert.equal(f.counts.inputSaves,0);f.stop();
+ same(after,before);assert.equal(f.state.input.outputTarget.persona,'elite');assert.equal(after.controls,undefined,'controller intent must not create TDP/performance memory');same(after.ac,before.ac);same(after.dc,before.dc);assert.equal(f.counts.inputSaves,1);f.stop();
 });
 
-fs.writeFileSync(path.join(validation,'PROFILE-IMPORT-REMOVE.json'),JSON.stringify({status:'passed',cases:cases.length,results:cases,productionHost:true,productionRelay:true,productionProfileAdapter:true,productionQueuedStore:true,realHardwareWrites:0},null,2)+'\n');
+fs.writeFileSync(path.join(validation,'PROFILE-IMPORT-REMOVE.json'),JSON.stringify({status:'passed',cases:cases.length,results:cases,productionHost:true,productionRelay:true,productionProfileAdapter:true,productionQueuedStore:true,realHardwareWrites:0},null,2)+'\n',{flag:'wx'});
 console.log('Profile import/remove PASS '+cases.length);

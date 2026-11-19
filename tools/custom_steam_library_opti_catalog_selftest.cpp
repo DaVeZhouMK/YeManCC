@@ -40,15 +40,120 @@ struct Memory {
 static oc::Candidate manual() {
     return {"D:\\Games\\Example", "D:\\Games\\Example\\Binaries\\Game.exe", "Example", "D:\\Cache\\cover.png", 0};
 }
+static void planNativeOptiCatalog(const fs::path& fixture) {
+    struct RestoreRoot { fs::path old = g_dataRoot; ~RestoreRoot() { g_dataRoot = std::move(old); } } restore;
+    g_dataRoot=fixture/L"data";
+    const auto utf=[](const fs::path& p){return toUtf8(p.wstring());};
+    fs::create_directories(g_dataRoot);
+    { std::ofstream out(g_dataRoot/L"data-root.json");out<<json{{"schemaVersion",2},{"dataLayoutVersion",2},{"dataRoot",utf(g_dataRoot)}}.dump();check(bool(out),"Root identity seed failed"); }
+    const auto apps=fixture/L"SteamLibrary"/L"steamapps";
+    auto make=[&](int id,const std::wstring& name,const std::string& vdfId,const std::string& vdfDirectory,bool executable=true){
+        const auto dir=apps/L"common"/name, exe=dir/L"Game.exe", manifest=apps/(L"appmanifest_"+std::to_wstring(id)+L".acf");
+        fs::create_directories(dir);
+        if(executable)writeHostBytesAtomic(exe,"inert fixture executable");
+        if(!vdfId.empty())writeHostBytesAtomic(manifest,"\"AppState\" { \"appid\" \""+vdfId+"\" \"installdir\" \""+vdfDirectory+"\" }");
+        return json{{"gameDirectory",utf(dir)},{"directoryName",utf(name)},{"primaryExecutable",executable?json(utf(exe)):json(nullptr)},
+            {"status","already-in-steam"},{"steamNative",true},{"steamOwnership","native-steam"},{"contentType","steam-native"},
+            {"nativeSteamAppId",id},{"nativeSteamManifestPath",utf(manifest)}};
+    };
+    const auto confirmed=make(101,L"Exact","101","Exact");
+    const auto folder=make(102,L"NoExecutable","102","NoExecutable",false);
+    const auto scanned=make(103,L"Scanned","103","Scanned");
+    auto scannedPlan=scanned;scannedPlan["formalName"]="Old plan title";
+    auto alias=confirmed;
+    auto wrongId=make(104,L"WrongId","999","WrongId");
+    auto wrongDir=make(105,L"WrongDir","105","SomethingElse");
+    auto missing=make(106,L"Missing","","Missing");
+    auto unconfirmed=make(107,L"Unconfirmed","107","Unconfirmed");unconfirmed["nativeSteamScanUnconfirmed"]=true;
+    auto wrongFile=make(108,L"WrongFile","108","WrongFile");wrongFile["nativeSteamManifestPath"]=confirmed["nativeSteamManifestPath"];
+    auto staleExe=make(109,L"RetiredExe","109","RetiredExe",false);staleExe["primaryExecutable"]=utf(apps/L"common"/L"RetiredExe"/L"Missing.exe");
+    auto malformed=make(110,L"Malformed","","Malformed");
+    writeHostBytesAtomic(apps/L"appmanifest_110.acf","\"AppState\" { \"appid\" \"110\" \"appid\" \"110\" \"installdir\" \"Malformed\" }");
+    auto tool=make(228980,L"Tool","228980","Tool");
+    const auto missingScan=make(111,L"ScanMissing","111","ScanMissing");
+    auto deferredScan=make(112,L"DeferredScan","112","DeferredScan");
+    const auto deferredPlan=deferredScan;deferredScan["nativeSteamScanUnconfirmed"]=true;
+    auto storeOnly=make(113,L"StoreOnly","113","StoreOnly");
+    storeOnly.erase("nativeSteamAppId");storeOnly["steamStoreAppId"]=113;
+    const auto libraryPath=g_dataRoot/L"state"/L"library-scan.json";
+    auto library=json{{"games",json::array({scanned})},{"missingGames",json::array({missingScan})},
+        {"unscannedGames",json::array({deferredScan})}};
+    writeHostBytesAtomic(libraryPath,library.dump());
+    writeHostBytesAtomic(workspacePlanPath(),json{{"libraryState",utf(libraryPath)},{"summary",json::object()},
+        {"items",json::array({confirmed,alias,folder,scannedPlan,wrongId,wrongDir,missing,unconfirmed,wrongFile,staleExe,malformed,
+            tool,missingScan,deferredPlan,storeOnly})}}.dump());
+    const auto collect=[] {return optiCatalogCandidates([]{return false;},false);};
+    const auto rows=collect();
+    std::set<int> ids;for(const auto& row:rows)ids.insert(row.steamAppId);
+    std::cout<<"plan-native candidates="<<rows.size()<<" ids="<<json(ids).dump()<<std::endl;
+    check(rows.size()==3&&ids==std::set<int>{101,102,103},"Confirmed native plan rows missing or stale records included");
+    check(rows.front().steamAppId==103&&rows.front().name=="Scanned","Cached plan took precedence over current scan");
+    const auto client=fixture/L"FreshOpti";
+    const auto receipt=supplementOptiCatalog(client,rows,[]{return false;});
+    const auto bytes=readText(client/L"games.json");const auto games=json::parse(bytes);
+    check(receipt["added"]==3&&games.size()==3,"First OPT pass did not create native game rows");
+    const auto game=[&](const char* id)->const json&{for(const auto& row:games)if(row["AppId"]==id)return row;throw std::runtime_error("Expected native OPT identity missing");};
+    check(game("101")["Platform"]==0&&game("101")["ExecutablePath"]==confirmed["primaryExecutable"],"Native game lost its platform, app ID or executable");
+    check(game("102")["Platform"]==0&&!game("102").contains("ExecutablePath"),"Folder-only native game invented an executable");
+    check(supplementOptiCatalog(client,collect(),[]{return false;})["status"]=="idle"&&readText(client/L"games.json")==bytes,"Second native supplement changed saved rows");
+    library["nativeSteamInstallationUnavailable"]=true;writeHostBytesAtomic(libraryPath,library.dump());
+    const auto incomplete=collect();
+    check(incomplete.size()==1&&incomplete[0].steamAppId==103,"Unconfirmed native scan borrowed plan-only identities");
+
+    auto legacy=[&](int id,const wchar_t* name,bool exeExists=true) {
+        auto row=make(id,name,std::to_string(id),toUtf8(name),exeExists);
+        if(!exeExists)row["primaryExecutable"]=utf(apps/L"common"/name/L"Game.exe");
+        row["lifecycleStatus"]="primary-executable-missing-or-filtered";
+        return row;
+    };
+    const auto recovered=legacy(114,L"OldMissing");
+    const auto excluded=legacy(115,L"UserRemoved");
+    const auto filtered=legacy(116,L"Filtered");
+    const auto gone=legacy(117,L"Gone",false);
+    const auto mismatch=legacy(118,L"WrongPrimary");
+    auto differentPrimary=mismatch;
+    const auto replacement=apps/L"common"/L"WrongPrimary"/L"Backup.exe";
+    writeHostBytesAtomic(replacement,"inert alternate fixture executable");
+    differentPrimary["primaryExecutable"]=utf(replacement);
+    auto removed=legacy(119,L"Uninstalled");removed["lifecycleStatus"]="game-directory-missing";
+    writeHostBytesAtomic(g_dataRoot/L"config"/L"library-config.json",json{{"schemaVersion",1},
+        {"excludedGameDirectories",json::array({json{{"path",excluded["gameDirectory"]}}})}}.dump());
+    library={{"games",json::array()},{"missingGames",json::array({recovered,excluded,filtered,gone,mismatch,removed})},
+        {"skippedDirectories",json::array({json{{"path",utf(apps.parent_path())},{"reason","platform-library-excluded"}},
+            json{{"path",filtered["gameDirectory"]},{"reason","non-game-directory-excluded"}}})}};
+    writeHostBytesAtomic(libraryPath,library.dump());
+    writeHostBytesAtomic(workspacePlanPath(),json{{"libraryState",utf(libraryPath)},{"summary",json::object()},
+        {"items",json::array({recovered,excluded,filtered,gone,differentPrimary,removed})}}.dump());
+    const auto collectFirst=[&] {
+        const auto active=collect();std::vector<int> ids;
+        for(const auto& row:active)ids.push_back(row.steamAppId);
+        std::cout<<"legacy-native candidates="<<active.size()<<" ids="<<json(ids).dump()<<std::endl;
+        return active;
+    };
+    const auto restored=collectFirst();
+    check(restored.size()==1&&restored.front().steamAppId==114&&restored.front().executablePath==jsonStringOr(recovered,"primaryExecutable"),
+        "Legacy scan false missing blocked the verified native installation");
+    const auto restoredClient=fixture/L"RestoredOpti";
+    const auto receipt2=runOptiCatalogSupplement([]{return false;},[]{return true;},"fixture-first-start",
+        [&]{return restoredClient;},[]{return false;},[]{return true;});
+    const auto restoredBytes=readText(restoredClient/L"games.json");
+    check(receipt2["status"]=="synced"&&receipt2["added"]==1&&json::parse(restoredBytes)[0]["AppId"]=="114",
+        "First actual OPT pass did not write the verified legacy installation");
+    check(readText(libraryPath)==library.dump(),"OPT pass changed the library lifecycle records");
+    writeHostBytesAtomic(g_dataRoot/L"config"/L"library-config.json","invalid config");
+    check(collect().empty(),"Unreadable exclusion policy allowed legacy plan recovery");
+}
 int wmain(int argc, wchar_t** argv) {
     try {
-        check(argc == 2, "Pass an isolated Build fixture directory");
+        const bool planNativeOnly=argc==3&&std::wstring_view(argv[2])==L"--plan-native";
+        check(argc == 2 || planNativeOnly, "Pass an isolated Build fixture directory");
         const auto fixture = fs::absolute(argv[1]).lexically_normal();
         const auto workspace = fs::path(__FILE__).parent_path().parent_path().parent_path().parent_path().parent_path();
         const auto build = fs::absolute(workspace / L"Build").lexically_normal();
         check(normalizedPathKey(fixture).starts_with(normalizedPathKey(build) + L"\\") || normalizedPathKey(fixture).starts_with(normalizedPathKey(workspace / L"Testing" / L"YMCC" / L"Evidence" / L"Build") + L"\\"), "Fixture escaped workspace test Build");
         check(!fs::exists(fixture), "Fixture must be fresh");
         fs::create_directories(fixture);
+        if(planNativeOnly){test("current native plans supplement empty OPT without reviving stale entries",[&]{planNativeOptiCatalog(fixture);});return 0;}
         test("native Steam folder-only entry retains real app ID", [] {
             Memory m; auto p = m.ports(); auto row = manual(); row.executablePath.clear(); row.steamAppId = 123;
             const auto r = oc::supplement({row}, p);
@@ -79,6 +184,27 @@ int wmain(int argc, wchar_t** argv) {
             const auto before = m.bytes; auto p = m.ports(); auto c = manual(); c.steamAppId = 123;
             const auto r = oc::supplement({c}, p);
             check(r.status == "idle" && m.bytes == before && !m.writes && !m.backups && !m.copies, "Unchanged record was written");
+        });
+        test("formal Steam identity conflicts cannot borrow a shared executable or directory", [] {
+            for (const std::string mode : {"exe", "directory", "correct-id", "complete"}) {
+                Memory m; auto c = manual(); c.steamAppId = 123;
+                json other = {{"Platform", 0}, {"AppId", "620"}, {"InstallPath", c.installPath},
+                    {"Name", "Other game"}, {"ExecutablePath", mode == "directory" ? c.installPath + "\\Other.exe" : c.executablePath},
+                    {"UserSettings", {{"keep", true}}}};
+                if (mode == "complete") other["CoverImageUrl"] = "user-cover.png";
+                auto rows = json::array({other});
+                if (mode == "correct-id") rows.push_back({{"Platform", 0}, {"AppId", "123"},
+                    {"Name", "Desired game"}, {"InstallPath", "E:\\OldRoot"}, {"ExecutablePath", "E:\\OldRoot\\Old.exe"}});
+                m.set(rows); const auto before = m.bytes; auto p = m.ports(); const auto r = oc::supplement({c}, p);
+                const auto games = m.games();
+                check(r.status == "synced" && games.size() == 2 && games[0] == other, "Conflicting Steam game was changed or target was omitted");
+                check(games[1]["AppId"] == "123" && games[1]["Platform"] == 0 && games[1]["CoverImageUrl"] == "C:\\Fixture\\Covers\\copy.png", "Target did not receive its own Steam identity/cover");
+                check(m.copies == 1 && m.steps == 1 && m.saved == before, "Conflict handling changed serial pacing or backup");
+                if (mode == "correct-id") check(r.supplemented == 1 && r.added == 0 && games[1]["ExecutablePath"] == "E:\\OldRoot\\Old.exe", "Correct AppID lost to conflicting EXE");
+                else check(r.added == 1 && r.supplemented == 0 && games[1]["ExecutablePath"] == c.executablePath, "Distinct native game was not created");
+                const auto committed = m.bytes; const auto copies = m.copies;
+                check(oc::supplement({c}, p).status == "idle" && m.bytes == committed && m.copies == copies, "Repeated conflicting candidate duplicated or rewrote");
+            }
         });
         test("repeat execution is idempotent and writes nothing", [] {
             Memory m; auto p = m.ports(); oc::supplement({manual(), manual()}, p);
@@ -278,6 +404,9 @@ int wmain(int argc, wchar_t** argv) {
             check(found.size()==2&&std::any_of(found.begin(),found.end(),[&](const auto& row){return row.installPath==utf(joinedRoot)&&row.executablePath==utf(joinedExe);}),"Current alias lost joined ownership");
             writeJsonWithLocalBackup(path,before,false);
         });
+        test("current native plans supplement empty OPT without reviving stale entries",[&]{
+            planNativeOptiCatalog(fixture/L"PlanNative");
+        });
         test("explicit cover deletion prevents manifest fallback in lazy lookup", [&] {
             const auto path=g_dataRoot/L"config"/L"manual-overrides.json";
             const auto before=readJson(path,json::object());auto manual=before;
@@ -347,15 +476,25 @@ int wmain(int argc, wchar_t** argv) {
             auto receipt=supplementOptiCatalog(root,rows,[]{return false;},[]{return false;},[]{return true;},&budget);
             auto stored=json::parse(readText(root/L"games.json"));
             check(receipt["status"]=="synced"&&receipt["workLimited"]==true&&receipt["added"]==1&&stored.size()==1&&stored[0]["AppId"]=="200"&&receipt["nextCandidate"]==oc::candidateKey(rows[1]),"Real deadline failed completed-prefix commit");
+            check(optiCatalogPreparationExitCode(receipt)==21,"Explicit open reported a bounded prefix as fully prepared");
             const auto oldInventory=readJson(g_dataRoot/L"state"/L"library-scan.json",json::object());
             writeJsonWithLocalBackup(g_dataRoot/L"state"/L"library-scan.json",{{"games",inventory}},false);
             receipt["clientRoot"]=toUtf8(normalizedPathKey(root));
             writeJsonWithLocalBackup(g_dataRoot/L"state"/L"last-opti-client-supplement.json",receipt,false);
             const auto skipped=runOptiCatalogSupplement([]{return false;},[]{return true;},"fixture-client-open",[&]{return root;},[]{return true;});
             check(skipped["status"]=="deferred"&&skipped["reason"]=="client-running"&&skipped["workLimited"]==true&&skipped["nextCandidate"]==receipt["nextCandidate"],"Skipped startup erased the continuation cursor");
+            check(optiCatalogPreparationExitCode(skipped)==20,"Resumable cursor masked the live client result");
             const auto next=runOptiCatalogSupplement([]{return false;},[]{return true;},"fixture-next-normal-start",[&]{return root;},[]{return false;});
             stored=json::parse(readText(root/L"games.json"));
             check(next["status"]=="synced"&&next["resumed"]==true&&next["added"]==2&&next["workLimited"]==false&&stored.size()==3&&stored[1]["AppId"]=="201"&&stored[2]["AppId"]=="202","Actual receipt failed cursor continuation or duplicated prefix");
+            check(optiCatalogPreparationExitCode(next)==0,"Completed supplement no longer reported prepared");
+            const auto noWork=fixture/L"UnstartedClient";
+            oc::WorkBudget noTime([]{return false;},oc::itemDelayMs-1);
+            const auto unstarted=supplementOptiCatalog(noWork,rows,[]{return false;},[]{return false;},[]{return true;},&noTime);
+            check(unstarted["status"]=="idle"&&unstarted["workLimited"]==true&&!fs::exists(noWork/L"games.json")&&
+                optiCatalogPreparationExitCode(unstarted)==21,"Explicit open reported a timed-out empty pass as prepared");
+            check(optiCatalogPreparationExitCode(json{{"status","deferred"},{"reason","library-scan-unavailable"}})==22&&
+                optiCatalogPreparationExitCode(json{{"status","idle"}})==0,"Missing or empty inventory result changed");
             writeJsonWithLocalBackup(g_dataRoot/L"state"/L"library-scan.json",oldInventory,false);
         });
         writeJsonWithLocalBackup(fixture / L"summary.json", {{"status", "PASS"}, {"cases", passed},

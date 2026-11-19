@@ -1,6 +1,7 @@
 // YMCC owns discovery and observation. Decky and Y consume this singleton.
 import {losslessRuntime, type LosslessRuntimeReceipt} from './api';
 import {on} from './ipc';
+import {getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted,onSharedPowerLifecycle,requestSharedPowerLifecycleReconcile} from './powerLifecycleState';
 import {subscribePolicyGameStatus} from './gamePolicyTarget';
 import type {LosslessProgramState} from './losslessProgramState';
 export class LosslessStateOwner {
@@ -26,22 +27,23 @@ export class LosslessStateOwner {
   }
 }
 const owner=new LosslessStateOwner(()=>losslessRuntime.detect());
-let consumers=0,gamePresent=false,suspended=false,resident=0;
-let configured='',configuring=Promise.resolve();
+let consumers=0,gamePresent=false,suspended=true,resident=0;
+let configured='',configurationRevision=0,configuring=Promise.resolve();
 let residentStops:Array<()=>void>=[];
 function configure(){
   const active=!suspended&&(gamePresent||consumers>0),detailed=active&&consumers>0;
   const key=String(active)+String(detailed);if(key===configured)return;configured=key;
   // Serialize interest changes; a late older request cannot re-enable a watch.
-  configuring=configuring.catch(()=>{}).then(()=>losslessRuntime.watch(active,detailed)).then(()=>{},()=>{if(configured===key)configured='';});
+  const ticket=++configurationRevision;
+  configuring=configuring.catch(()=>{}).then(()=>{if(ticket!==configurationRevision)return;return losslessRuntime.watch(active,detailed);}).then(()=>{},()=>{if(ticket===configurationRevision)configured='';});
 }
 export function startLosslessRuntimeOwner():()=>void {
   resident++;
-  if(resident===1){suspended=false;
+  if(resident===1){const power=getSharedPowerLifecycle();suspended=!isSharedPowerLifecycleAdmitted(power);
   residentStops=[on('lossless.runtime',value=>owner.accept(value as LosslessRuntimeReceipt)),
     subscribePolicyGameStatus(game=>{gamePresent=!!game;owner.invalidate();configure();}),
-    on('power.suspending',()=>{suspended=true;owner.invalidate();configure();}),
-    on('power.resumed',()=>{suspended=false;owner.invalidate();configure();})];
+    onSharedPowerLifecycle(snapshot=>{suspended=!isSharedPowerLifecycleAdmitted(snapshot);owner.invalidate();configure();})];
+  requestSharedPowerLifecycleReconcile('lossless-runtime-owner');
   configure();}
   let stopped=false;
   return ()=>{if(stopped)return;stopped=true;if(--resident)return;for(const stop of residentStops)stop();residentStops=[];gamePresent=false;suspended=true;owner.invalidate();configure();};

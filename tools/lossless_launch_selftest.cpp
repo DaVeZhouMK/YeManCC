@@ -155,6 +155,9 @@ inline int main(){
 }
 }
 int wmain(){return ymcc::losslessLaunchSessionFixture::main();}
+#elif defined(YMCC_LOSSLESS_RUNTIME_POWER_ONLY)
+#include "lossless_runtime_power_fixture.h"
+int wmain(int argc,wchar_t** argv){return ymcc::losslessRuntimePowerFixture::main(argc,argv);}
 #else
 #if defined(YMCC_LOSSLESS_DISCOVERY_ONLY)
 #include "lossless_discovery_fixture.h"
@@ -362,7 +365,9 @@ static void foregroundChecks(){
 }
 static void scaleChecks(){
     const Identity external{99,456,L"E:\\Portable\\LosslessScaling.exe"};
-    {std::atomic<unsigned> discoveries{0},receipts{0};RuntimeMonitor monitor([&]{++discoveries;return selectRuntime({},false);});
+    {ymcc::sleeppower::RevocationMirrors nativePower;
+     const RuntimePowerAccess access{+[](ymcc::sleeppower::SharedPowerV1* out,std::uint32_t bytes)->int{if(!out||bytes<sizeof(*out))return 0;*out={};out->generation=1;out->flags=3;return 1;},&nativePower};
+     std::atomic<unsigned> discoveries{0},receipts{0};RuntimeMonitor monitor([&]{++discoveries;return selectRuntime({},false);},access);
      monitor.configure(false,false,[&](const RuntimeReceipt&){++receipts;});require(discoveries==0,"idle observer never enumerates");
      monitor.configure(true,false,[&](const RuntimeReceipt&){++receipts;});const auto deadline=GetTickCount64()+1000;
      while(receipts.load()==0&&GetTickCount64()<deadline)Sleep(5);

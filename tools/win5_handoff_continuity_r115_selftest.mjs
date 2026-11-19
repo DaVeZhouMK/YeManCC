@@ -86,6 +86,16 @@ function command(dir,label,exe,args,timeout=60000){
  save(dir,label+'.command.json',{exe,args,cwd:dir,status:r.status,signal:r.signal,error:r.error?String(r.error):null});assert(!r.error,label+': '+r.error);
  return r;
 }
+// Explicit T1 selections are exclusive; an empty selector retains the original group below.
+if(options.case.startsWith('t1-')){
+ try{
+  const {runT1Borrow,t1BorrowCases}=await import('./fixtures/win5_handoff_continuity_r115/t1_borrow_consumer.mjs');
+  assert(t1BorrowCases.includes(options.case),'Unknown T1 case: '+options.case);
+  const result=runT1Borrow({repo,source:options.source,out:options.out,case:options.case});
+  console.log(JSON.stringify({status:result.status,case:result.case,profiles:result.profiles.map(x=>({config:x.config,exit:x.runtime?.exit,cases:x.result?.cases?.length}))}));
+  process.exit(result.status==='PASS'?0:1);
+ }catch(error){console.error(error.stack??String(error));process.exit(2);}
+}
 try{
  fs.mkdirSync(options.out,{recursive:true});
  const run=path.join(options.out,'runs',new Date().toISOString().replace(/[:.]/g,'-')+'-'+process.pid);fs.mkdirSync(run,{recursive:true});

@@ -19,7 +19,7 @@ static BOOL liveFixtureGetPointerInfo(UINT32 id,POINTER_INFO* value){
 #include <fstream>
 #include <iostream>
 using namespace ymcc;using namespace ymcc::desktophud;
-struct SharedReceiver {volatile LONG ready=0,mouseDown=0,mouseUp=0,touchDown=0,touchUp=0;UINT64 hwnd=0;DWORD pid=0;};
+struct SharedReceiver {volatile LONG ready=0,mouseDown=0,mouseUp=0,touchDown=0,touchUp=0;UINT64 hwnd=0;DWORD pid=0;BOOL legacyTouch=FALSE;};
 static SharedReceiver* sharedReceiver=nullptr;
 static HWND receiver=nullptr;static unsigned mouseDown=0,mouseUp=0,touchDown=0,touchUp=0,injected=0;
 static Json lastCursorDelivery=Json::object();
@@ -35,7 +35,11 @@ static LRESULT CALLBACK receive(HWND h,UINT m,WPARAM w,LPARAM l){
   pointers.push_back({{"message",m},{"type",p.pointerType},{"x",p.ptPixelLocation.x},{"y",p.ptPixelLocation.y}});
   if(p.pointerType==PT_TOUCH){if(m==WM_POINTERDOWN){++touchDown;if(sharedReceiver)InterlockedIncrement(&sharedReceiver->touchDown);}else{++touchUp;if(sharedReceiver)InterlockedIncrement(&sharedReceiver->touchUp);}}else if(p.pointerType==PT_MOUSE){if(m==WM_POINTERDOWN){++mouseDown;if(sharedReceiver)InterlockedIncrement(&sharedReceiver->mouseDown);}else{++mouseUp;if(sharedReceiver)InterlockedIncrement(&sharedReceiver->mouseUp);}}}
   return 0;}
- if(m==WM_LBUTTONDOWN){++mouseDown;if(sharedReceiver)InterlockedIncrement(&sharedReceiver->mouseDown);return 0;}if(m==WM_LBUTTONUP){++mouseUp;if(sharedReceiver)InterlockedIncrement(&sharedReceiver->mouseUp);return 0;}
+ if(m==WM_LBUTTONDOWN||m==WM_LBUTTONUP){
+  const bool promoted=(static_cast<ULONG_PTR>(GetMessageExtraInfo())&0xFFFFFF00u)==0xFF515700u;
+  if(sharedReceiver&&sharedReceiver->legacyTouch&&promoted){if(m==WM_LBUTTONDOWN)InterlockedIncrement(&sharedReceiver->touchDown);else InterlockedIncrement(&sharedReceiver->touchUp);}
+  else if(m==WM_LBUTTONDOWN){++mouseDown;if(sharedReceiver)InterlockedIncrement(&sharedReceiver->mouseDown);}else{++mouseUp;if(sharedReceiver)InterlockedIncrement(&sharedReceiver->mouseUp);}return 0;
+ }
  if(m==WM_PAINT){PAINTSTRUCT p;auto dc=BeginPaint(h,&p);RECT r{};GetClientRect(h,&r);FillRect(dc,&r,(HBRUSH)GetStockObject(DKGRAY_BRUSH));SetTextColor(dc,RGB(240,240,240));SetBkMode(dc,TRANSPARENT);DrawTextW(dc,L"YMCC owned input routing test",-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE);EndPaint(h,&p);return 0;}
  if(m==WM_DESTROY){PostQuitMessage(0);return 0;}
  return DefWindowProcW(h,m,w,l);
@@ -79,7 +83,7 @@ static int worker(const std::filesystem::path& out,const std::wstring& runtime,c
  try{GetPhysicalCursorPos(&initialCursor);need(!(GetAsyncKeyState(VK_LBUTTON)&0x8000)&&!(GetAsyncKeyState(VK_RBUTTON)&0x8000),"Mouse button held; refuse test");
  SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);EnableMouseInPointer(TRUE);winrt::init_apartment(winrt::apartment_type::single_threaded);com=true;
  WNDCLASSW c{};c.lpfnWndProc=receive;c.hInstance=GetModuleHandleW(nullptr);c.lpszClassName=L"YMCC_RoutingOwnedReceiver";RegisterClassW(&c);MONITORINFO mi{sizeof mi};GetMonitorInfoW(MonitorFromPoint(initialCursor,MONITOR_DEFAULTTOPRIMARY),&mi);
- const int left=mi.rcWork.right-640,top=mi.rcWork.bottom-400;const auto mapName=L"Local\\YMCC_RoutingReceiver_"+std::to_wstring(GetCurrentProcessId());receiverMapping=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(SharedReceiver),mapName.c_str());need(receiverMapping,"Receiver mapping unavailable");sharedReceiver=(SharedReceiver*)MapViewOfFile(receiverMapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(SharedReceiver));need(sharedReceiver,"Receiver mapping view unavailable");*sharedReceiver=SharedReceiver{};
+ const int left=mi.rcWork.right-640,top=mi.rcWork.bottom-400;const auto mapName=L"Local\\YMCC_RoutingReceiver_"+std::to_wstring(GetCurrentProcessId());receiverMapping=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(SharedReceiver),mapName.c_str());need(receiverMapping,"Receiver mapping unavailable");sharedReceiver=(SharedReceiver*)MapViewOfFile(receiverMapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(SharedReceiver));need(sharedReceiver,"Receiver mapping view unavailable");*sharedReceiver=SharedReceiver{};sharedReceiver->legacyTouch=std::filesystem::exists(out/L"legacy-receiver.request");result["legacyReceiver"]=sharedReceiver->legacyTouch!=FALSE;
  wchar_t self[32768]{};GetModuleFileNameW(nullptr,self,32768);std::wstring childCommand=L"\""+std::wstring(self)+L"\" --receiver \""+mapName+L"\" "+std::to_wstring(left)+L" "+std::to_wstring(top);STARTUPINFOW receiverStartup{sizeof receiverStartup};PROCESS_INFORMATION receiverInfo{};
  need(CreateProcessW(self,childCommand.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&receiverStartup,&receiverInfo),"Receiver process unavailable");receiverProcess=receiverInfo.hProcess;CloseHandle(receiverInfo.hThread);
  const auto receiverEnd=GetTickCount64()+3000;while(!sharedReceiver->ready&&GetTickCount64()<receiverEnd)pump(nullptr,10);receiver=(HWND)(UINT_PTR)sharedReceiver->hwnd;need(receiver&&IsWindow(receiver),"Foreign receiver HWND unavailable");result["receiverPid"]=sharedReceiver->pid;result["monitorPid"]=GetCurrentProcessId();need(sharedReceiver->pid!=GetCurrentProcessId(),"Receiver must be another process");
@@ -101,12 +105,22 @@ static int worker(const std::filesystem::path& out,const std::wstring& runtime,c
    check("actual Vue renderer reports a content-sized panel inside the foreign receiver",s->width>0&&s->width<540&&s->height>0&&s->height<300);
  }else{s->width=150;s->height=90;s->seq=1;s->expires=wallNow()+60000;s->armed=s->layout=true;s->crosshair=true;}
  carrier->refresh(s);pump(carrier.get(),80);check("real full-screen display has no drag source while explicitly locked",IsWindowVisible(s->hwnd)&&!s->inputWindow);
+ result["residentDisplayWindows"]=Json::array();
+ const auto recordWindow=[](HWND h,LPARAM data)->BOOL{auto& windows=*reinterpret_cast<Json*>(data);RECT rect{};GetWindowRect(h,&rect);wchar_t cls[128]{};GetClassNameW(h,cls,128);DWORD pid=0;const auto thread=GetWindowThreadProcessId(h,&pid);windows.push_back({{"class",utf8(cls)},{"pid",pid},{"thread",thread},{"visible",IsWindowVisible(h)!=FALSE},{"enabled",IsWindowEnabled(h)!=FALSE},{"x",rect.left},{"y",rect.top},{"width",rect.right-rect.left},{"height",rect.bottom-rect.top},{"exStyle",(UINT64)GetWindowLongPtrW(h,GWL_EXSTYLE)}});return TRUE;};
+ recordWindow(s->hwnd,reinterpret_cast<LPARAM>(&result["residentDisplayWindows"]));EnumChildWindows(s->hwnd,recordWindow,reinterpret_cast<LPARAM>(&result["residentDisplayWindows"]));
  probe("full-screen real display alone preserves lower mouse and touch clicks",carrier.get());
  s->drag.position.locked=false;++s->drag.position.revision;carrier->refresh(s);pump(carrier.get(),80);check("unlocked monitor creates only a bounded input window",s->inputWindow&&IsWindowVisible(s->inputWindow));
  probe("full-screen real display plus drag source preserves outside clicks",carrier.get());
  const auto edgeDown=sharedReceiver->touchDown,edgeUp=sharedReceiver->touchUp;
  POINT outsideEdge{s->panel.right+4,s->panel.top+(s->panel.bottom-s->panel.top)/2};tap(carrier.get(),outsideEdge,24);
  check("wide touch ellipse with its actual point outside the HUD reaches the lower process",sharedReceiver->touchDown==edgeDown+1&&sharedReceiver->touchUp==edgeUp+1&&!s->drag.contact());
+ if(std::filesystem::exists(out/L"resident-only.request")){
+   result["selectedMode"]="resident-only";
+   bool inertChildren=true;for(const auto& child:result["residentDisplayWindows"])if(child["class"]!="YMCC_DesktopMonitorHUD")
+     inertChildren&=!child["enabled"].get<bool>()&&(child["exStyle"].get<UINT64>()&(WS_EX_TRANSPARENT|WS_EX_NOACTIVATE))==(WS_EX_TRANSPARENT|WS_EX_NOACTIVATE);
+   check("resident real renderer descendants are input inert",inertChildren);
+   for(int i=0;i<3;++i){carrier->refresh(s);pump(carrier.get(),150);probe("resident no-contact refresh preserves legacy desktop delivery",carrier.get());}
+ }else{
  const int originalPanelWidth=s->width;const HWND manipulatedInput=s->inputWindow;
  inputPlacementOriginal=reinterpret_cast<WNDPROC>(SetWindowLongPtrW(manipulatedInput,GWLP_WNDPROC,reinterpret_cast<LONG_PTR>(alteredInputPlacement)));need(inputPlacementOriginal,"Owned input placement observer unavailable");
  enlargeNextInputPlacement=true;s->width=originalPanelWidth+1;carrier->refresh(s);pump(carrier.get(),30);
@@ -217,6 +231,7 @@ static int worker(const std::filesystem::path& out,const std::wstring& runtime,c
  check("remote release-state fault actually skipped an owned UP",omittedUps>droppedBefore);omitOwnedUp=omitReleaseState=false;
  carrier->stopInteraction(s);carrier->refresh(s);pump(carrier.get(),40);probe("after interrupted remote delivery the foreign process remains clickable",carrier.get());
  for(unsigned i=0;i<2;++i){carrier->stopInteraction(s);carrier->refresh(s);pump(carrier.get(),40);probe("repeated drag hide and show preserves outside clicks",carrier.get());}
+ }
  if(std::filesystem::exists(web/L"notice-output.html")){
    Carrier notices;Config noticeConfig=config;noticeConfig.noticeOnly=true;noticeConfig.notify=[&](const std::string& name,const Json& value){if(!result.contains("noticeEvents"))result["noticeEvents"]=Json::array();result["noticeEvents"].push_back({{"name",name},{"value",value}});};notices.initialize(environment.Get(),noticeConfig);
    const std::string nonce="actual-notice-routing-00000001";auto lease=notices.reserveNotice(nonce);notices.create(0,0,nonce,true,lease["leaseId"].get<unsigned long long>());
@@ -256,7 +271,7 @@ static int worker(const std::filesystem::path& out,const std::wstring& runtime,c
  result["ok"]=good;result["error"]=error;result["injectedPackets"]=injected;result["lastCursorDelivery"]=lastCursorDelivery;result["receivedPointerEvents"]=pointers;std::ofstream(out/L"native-result.json")<<result.dump(2);std::cout<<Json{{"ok",good},{"error",error},{"cases",result["cases"].size()}}.dump()<<std::endl;return error.empty()?(good?0:3):4;
 }
 static int receiverMain(const wchar_t* mapName,int left,int top){
- HANDLE mapping=OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,mapName);if(!mapping)return 5;sharedReceiver=(SharedReceiver*)MapViewOfFile(mapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(SharedReceiver));if(!sharedReceiver)return 5;SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);EnableMouseInPointer(TRUE);
+ HANDLE mapping=OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,mapName);if(!mapping)return 5;sharedReceiver=(SharedReceiver*)MapViewOfFile(mapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(SharedReceiver));if(!sharedReceiver)return 5;SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);if(!sharedReceiver->legacyTouch)EnableMouseInPointer(TRUE);
  WNDCLASSW c{};c.lpfnWndProc=receive;c.hInstance=GetModuleHandleW(nullptr);c.lpszClassName=L"YMCC_RoutingOwnedReceiver";RegisterClassW(&c);HWND h=CreateWindowExW(WS_EX_TOPMOST|WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW,c.lpszClassName,L"YMCC independent routing receiver",WS_POPUP,left,top,600,360,nullptr,nullptr,c.hInstance,nullptr);if(!h)return 5;ShowWindow(h,SW_SHOWNOACTIVATE);UpdateWindow(h);sharedReceiver->hwnd=(UINT64)(UINT_PTR)h;sharedReceiver->pid=GetCurrentProcessId();InterlockedExchange(&sharedReceiver->ready,1);MSG m;while(GetMessageW(&m,nullptr,0,0)>0){TranslateMessage(&m);DispatchMessageW(&m);}UnmapViewOfFile(sharedReceiver);CloseHandle(mapping);return 0;
 }
 int wmain(int argc,wchar_t**argv){if(argc!=4&&argc!=5)return 2;if(argc==5&&std::wstring(argv[1])==L"--receiver")return receiverMain(argv[2],_wtoi(argv[3]),_wtoi(argv[4]));if(argc==5&&std::wstring(argv[1])==L"--worker")return worker(argv[2],argv[3],argv[4]);

@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 #include "json.hpp"
+#include "sleep_power_state.h"
 #include "msi_owned_return_recovery.h"
 #include "msi_crash_recovery_journal.h"
 using json = nlohmann::json;
@@ -97,7 +98,8 @@ static bool deviceInterfaceUsbInstance(const wchar_t*, std::wstring&) { throw st
 static std::wstring U2W(const std::string&) { throw std::runtime_error("out-of-scope conversion reached"); }
 static std::string W2U(const std::wstring&) { throw std::runtime_error("out-of-scope conversion reached"); }
 static std::vector<std::string> msiCrashLocations(const std::string&) { throw std::runtime_error("out-of-scope locations reached"); }
-static bool msiOwnedReturnQuiesceReboundDinput(unsigned long long,unsigned long long,unsigned,unsigned long long,unsigned long long) {
+static bool msiOwnedReturnQuiesceReboundDinput(unsigned long long,unsigned long long,unsigned,unsigned long long,unsigned long long,const std::function<bool()>& observationCurrent=std::function<bool()>()) {
+    if(observationCurrent && !observationCurrent())return false;
     throw std::runtime_error("out-of-scope source release reached");
 }
 template<class Guard> static MsiClawCommandOutcome msiClawSwitchModeOnHandle(unsigned,HANDLE,const MsiClawHidDiag&,bool,const Guard&) {
@@ -105,3 +107,27 @@ template<class Guard> static MsiClawCommandOutcome msiClawSwitchModeOnHandle(uns
 }
 static void msiNoteDisruptiveTx(const char*) { throw std::runtime_error("out-of-scope disruptive tx reached"); }
 
+
+// Read-only public transport ports for this legacy inert business fixture.
+// SharedPowerV1 is the real Native48 declaration; this transport is controlled,
+// and cannot prove real notification, cancellation or device-return behavior.
+#ifndef YMCC_LEGACY_MSI_INERT_PUBLIC_POWER
+#define YMCC_LEGACY_MSI_INERT_PUBLIC_POWER
+#include <memory>
+namespace ymcc::sleeppower {inline bool powerAdmitted(bool value)noexcept{return value;}}
+namespace ymcc::inputHost::sharedPower {
+class Scope final {public:bool current()const noexcept{return true;}bool power()const noexcept{return true;}};
+}
+[[maybe_unused]] static std::shared_ptr<ymcc::inputHost::sharedPower::Scope> t_inputHostRequestPower;
+#endif
+#ifndef YMCC_LEGACY_RETURN_OBSERVATION_CAPTURE
+#define YMCC_LEGACY_RETURN_OBSERVATION_CAPTURE
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& output)noexcept{
+    output={};output.generation=currentPowerGeneration();output.flags=ymcc::sleeppower::kKnown;
+    if(hardwareWriteAllowed())output.flags|=ymcc::sleeppower::kHardwareAllowed;
+    return ymcc::sleeppower::powerAdmitted(output);
+}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& value)noexcept{
+    return ymcc::sleeppower::powerAdmitted(value)&&value.generation==currentPowerGeneration()&&hardwareWriteAllowed();
+}
+#endif

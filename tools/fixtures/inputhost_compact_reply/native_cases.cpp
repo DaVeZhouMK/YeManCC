@@ -21,6 +21,7 @@
 #include "game_feedback_receipt.h"
 using json=nlohmann::json;
 static std::string g_inputHostRunId="fixture-run",g_inputHostStartupNonce="fixture-nonce",g_inputHostHostInstanceId="fixture-instance",g_inputHostFrameReplyBinding;
+static bool g_inputHostCompactFrameRequest=false;
 static unsigned long long g_inputHostEpoch=2,g_inputHostConfigRevision=1,fixturePower=3;
 static const char* kInputHostTargetId="fixture-target";
 static const char* kInputHostOwnerIdentity="fixture-owner";
@@ -134,7 +135,7 @@ static void motor(){
 }
 static void lifecycle(){
  auto prepared=full();prepared["command"]="PREPARE_TARGET";prepared["status"]="target-prepared";prepared["frameReplyBinding"]=tokenA;prepared["targetPnpAdmitted"]=true;
- auto publish=[&](const json& j,const char* command="PREPARE_TARGET"){InputHostGameMotorDomKeys keys;auto parsed=json::parse(j.dump(),[&](int d,json::parse_event_t e,json& v){return keys(d,e,v);});auto dom=actualDom(j.dump(),nullptr,command,"target-prepared");if(dom.accepted)actualPublish(parsed,keys);return dom.accepted;};
+ auto publish=[&](const json& j,const char* command="PREPARE_TARGET"){InputHostGameMotorDomKeys keys;keys.compact.observeWire(j.dump());auto parsed=json::parse(j.dump(),[&](int d,json::parse_event_t e,json& v){return keys(d,e,v);});auto dom=actualDom(j.dump(),nullptr,command,"target-prepared");if(dom.accepted)actualPublish(parsed,keys);return dom.accepted;};
  g_inputHostFrameReplyBinding.clear();require(publish(prepared),"valid full prepare rejected");require(g_inputHostFrameReplyBinding==tokenA,"accepted prepare token not published");
  auto request=std::string("{\"command\":\"SUBMIT_FRAME\"}");require(actualAttach("SUBMIT_FRAME",request),"current frame token not attached");require(json::parse(request)["frameReplyBinding"]==tokenA,"wrong attached token");
  for(const auto& key:{"runId","hostInstanceId","targetPnpAdmitted","ok","status"}){actualRevoke("PREPARE_TARGET");auto bad=prepared;bad[key]=nullptr;require(!publish(bad),"unverified prepare accepted");require(g_inputHostFrameReplyBinding.empty(),"unverified prepare published token");probe("invalid-prepare-old-ACK",compact().dump(),0,0,&g_inputHostFrameReplyBinding);}
@@ -183,6 +184,65 @@ static void sdkWitnesses(const std::string& out){
  probe("logging-sdk-stale-binding",c.dump(),0,0,&tokenB);
  bool pending=false;p=probe("logging-sdk-private-pipe",throughPrivatePipe(f.dump(),"logging-sdk-witness",pending),0,1,nullptr);
  require(p.parsed.response["sdkFirstWitnesses"]==actual["sdkFirstWitnesses"]&&p.parsed.response["sdkFirstWitnessCoverage"]==actual["sdkFirstWitnessCoverage"],"pipe SDK payload changed");
+}
+
+static void requestCapability(){
+ ++cases;groups["compact-request-native"]=1;
+ const auto beforeChecks=checks,beforeFailures=failures;
+ auto prepared=full();prepared["command"]="PREPARE_TARGET";prepared["status"]="target-prepared";prepared["targetPnpAdmitted"]=true;prepared["frameReplyBinding"]=tokenA;
+ auto publish=[&](const std::string& wire,const char* command="PREPARE_TARGET"){
+  actualRevoke(command);InputHostGameMotorDomKeys keys;keys.compact.observeWire(wire);
+  auto parsed=json::parse(wire,[&](int d,json::parse_event_t e,json& v){return keys(d,e,v);},false);
+  const auto dom=actualDom(wire,nullptr,command,"target-prepared");
+  if(dom.accepted)actualPublish(parsed,keys);return dom.accepted;
+ };
+ require(publish(prepared.dump())&&g_inputHostFrameReplyBinding==tokenA&&!g_inputHostCompactFrameRequest,"old Host keeps full request and reply token");
+ auto advertised=prepared;advertised["compactFrameRequestVersion"]=1;
+ require(publish(advertised.dump())&&g_inputHostCompactFrameRequest,"verified version one advertisement enabled");
+ require(ymcc::inputHost::compactReply::requestEnabled(g_inputHostFrameReplyBinding,g_inputHostCompactFrameRequest),"current valid binding admitted");
+ for(const auto& version:{json(nullptr),json(false),json("1"),json(0),json(2),json(-1),json(1.0),json::array(),json::object(),json((std::numeric_limits<std::uint64_t>::max)())}){
+  auto bad=prepared;bad["compactFrameRequestVersion"]=version;
+  require(publish(bad.dump())&&!g_inputHostCompactFrameRequest&&g_inputHostFrameReplyBinding==tokenA,"bad version falls back but retains reply binding");
+ }
+ for(const char* tail:{",\"compactFrameRequestVersion\":1",",\"compactFrameRequestVersion\":2",",\"compactFrameRequestVersion\":null"}){
+  require(publish(append(advertised.dump(),tail))&&!g_inputHostCompactFrameRequest&&g_inputHostFrameReplyBinding==tokenA,"duplicate advertisement never enables request");
+ }
+ auto nested=prepared;nested["extension"]={{"compactFrameRequestVersion",1}};require(publish(nested.dump())&&!g_inputHostCompactFrameRequest,"nested advertisement ignored");
+ auto unknown=prepared;unknown["compactFrameRequestVersion"]=2;require(publish(append(unknown.dump(),",\"compactFrameRequestVersion\":1"))&&!g_inputHostCompactFrameRequest,"unknown then one duplicate disabled");
+ for(const auto& token:{std::string(),std::string(63,'a'),std::string(65,'a'),std::string(64,'A'),std::string(64,'g')}){
+  auto bad=advertised;bad["frameReplyBinding"]=token;require(publish(bad.dump())&&g_inputHostFrameReplyBinding.empty()&&!g_inputHostCompactFrameRequest,"advertisement requires current lowercase 64hex token");
+  require(!ymcc::inputHost::compactReply::requestEnabled(token,true),"bad token never selects compact writer");
+ }
+ require(publish(append(advertised.dump(),",\"frameReplyBinding\":\""+tokenA+"\""))&&g_inputHostFrameReplyBinding.empty()&&!g_inputHostCompactFrameRequest,"duplicate token cannot enable request");
+ for(const char* key:{"runId","epoch","powerGeneration","targetId","ownerIdentity","persona","profileIdentity","startupNonce","configRevision","configHash","hostInstanceId","ok","status","targetPnpAdmitted"}){
+  auto bad=advertised;bad[key]=nullptr;require(!publish(bad.dump())&&g_inputHostFrameReplyBinding.empty()&&!g_inputHostCompactFrameRequest,"failed full ACK identity/status/PnP cannot enable request");
+ }
+ auto mixed=advertised;mixed["compactFrameReplyVersion"]=1;require(publish(mixed.dump())&&g_inputHostFrameReplyBinding.empty()&&!g_inputHostCompactFrameRequest,"compact reply marker cannot advertise full prepare");
+ for(const char* command:{"HELLO","PREPARE_TARGET","RECREATE_TARGET","QUIESCE","RELEASE_TARGET","SHUTDOWN"}){
+  require(publish(advertised.dump())&&g_inputHostCompactFrameRequest,"reseed capability");actualRevoke(command);
+  require(g_inputHostFrameReplyBinding.empty()&&!g_inputHostCompactFrameRequest,"all original revocations clear request capability");
+ }
+ auto recreated=advertised;recreated["command"]="RECREATE_TARGET";recreated["frameReplyBinding"]=tokenB;
+ require(publish(recreated.dump(),"RECREATE_TARGET")&&g_inputHostFrameReplyBinding==tokenB&&g_inputHostCompactFrameRequest,"full recreate advertises new current binding");
+ require(publish(prepared.dump())&&!g_inputHostCompactFrameRequest,"following old Host ACK cannot retain prior advertisement");
+ require(publish(advertised.dump())&&g_inputHostCompactFrameRequest,"seed clear test");actualClearBindingOnly();require(g_inputHostFrameReplyBinding.empty()&&!g_inputHostCompactFrameRequest,"original session clear resets both states");
+ const std::string base="{\"command\":\"SUBMIT_FRAME\",\"compactFrameRequestVersion\":1,\"protocolVersion\":1,\"sequence\":17,\"startupNonce\":\"nonce\"}";
+ fixtureDiagnosticEnabled=false;
+ for(bool enabled:{false,true})for(const auto& token:{std::string(),std::string(64,'G'),tokenA}){
+  g_inputHostFrameReplyBinding=token;g_inputHostCompactFrameRequest=enabled;auto wire=base;
+  const bool wanted=enabled&&token==tokenA;require(actualAttach("SUBMIT_FRAME",wire,true)==wanted,"compact attachment eligibility");
+  if(wanted){InputHostGameMotorDomKeys keys;auto parsed=json::parse(wire,[&](int d,json::parse_event_t e,json& v){return keys(d,e,v);});require(!keys.compact.duplicate&&parsed["frameReplyBinding"]==tokenA,"single binding key appended at original owner");}
+  else require(wire==base,"failed compact attachment does not send or change frame");
+ }
+ g_inputHostFrameReplyBinding=tokenA;g_inputHostCompactFrameRequest=true;
+ for(const auto& shape:{std::string(),std::string("{"),std::string(16*1024,'x')+"}"}){auto wire=shape;require(!actualAttach("SUBMIT_FRAME",wire,true)&&wire==shape,"unattachable compact request rejected before transport");}
+ auto wire=base;require(!actualAttach("QUERY",wire,true)&&wire==base,"compact request cannot escape as another command");
+ for(const char* extension:{",\"compactFrameRequestVersion\":2",",\"compactFrameRequestVersion\":1,\"compactFrameRequestVersion\":null"}){
+  const auto reply=actualDom(append(compact().dump(),extension),&tokenA);require(reply.accepted&&reply.expanded,"bad request advertisement does not disable compact reply DOM");
+ }
+ actualClearBindingOnly();
+ raw<<cases<<"\tcompact-request-native\t"<<base.size();for(int i=0;i<16;++i)raw<<"\tNA";raw<<'\n';
+ std::ofstream details("compact-request-checks.json");details<<json{{"checks",checks-beforeChecks},{"failures",failures-beforeFailures},{"scope","actual full ACK publication/revocation/clear and sole request attachment; no product IO"}}.dump(2)<<'\n';
 }
 
 static void focusedFailures(){
@@ -256,6 +316,6 @@ static void requestBudget(const std::string& out,bool negativeOnly=false){
 int main(int argc,char**argv){
  if(argc!=2&&argc!=4)return 2;const std::string selected=argc==4?argv[3]:"all";const bool directed=selected=="compact-regressions",budget=selected=="request-budget"||selected=="request-budget-negative";if(argc==4&&(std::string(argv[2])!="--case-group"||(!directed&&!budget)))return 2;const std::string out=argv[1];raw.open(out+"/cases.tsv",std::ios::binary);errors.open(out+"/failures.jsonl",std::ios::binary);transports.open(out+"/pipe.jsonl",std::ios::binary);if(!raw||!errors||!transports)return 3;
  raw<<"case\tgroup\tbytes\trawScanner\tfast\tdom\texpectedFast\texpectedDom\texpanded\tfirstFrame\tsubmitElapsedUs\tmotorPresent\tmotorValid\tgeneration\trevision\tleft\tright\tcompatibility\tsdkSequence\n";
- bool complete=false;std::string exception;try{if(budget)requestBudget(out,selected=="request-budget-negative");else{core();if(directed)focusedFailures();else parserCorpus();motor();lifecycle();pipes();sdkWitnesses(out);}complete=true;}catch(const std::exception& e){exception=e.what();require(false,exception.c_str());}
+ bool complete=false;std::string exception;try{if(budget)requestBudget(out,selected=="request-budget-negative");else{core();if(directed)focusedFailures();else parserCorpus();motor();lifecycle();requestCapability();pipes();sdkWitnesses(out);}complete=true;}catch(const std::exception& e){exception=e.what();require(false,exception.c_str());}
  raw.flush();errors.flush();transports.flush();json summary={{"selectedCaseGroup",selected},{"status",complete&&failures==0?"PASS":"FAIL"},{"complete",complete},{"cases",cases},{"checks",checks},{"failures",failures},{"fastAccepted",fastAccepted},{"domAccepted",domAccepted},{"fallbackAccepted",fallbackAccepted},{"groups",groups},{"pipeCases",pipeCases},{"pipeFragments",pipeFragments},{"exception",exception},{"performanceMeasured",false},{"realTransportScope",budget?"NOT_EXECUTED; request construction only":"private Win32 message pipes only; 73-byte diagnostic reassembly, not product transport integration"},{"oneSendTimeoutReplay","source-bound attachment only; full product timeout/replay path NOT_EXECUTED"}};std::ofstream(out+"/summary.json")<<summary.dump(2)<<'\n';std::cout<<summary.dump()<<'\n';return complete&&failures==0?0:1;
 }

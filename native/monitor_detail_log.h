@@ -22,6 +22,11 @@ struct Limits {
     std::uint64_t sampleMs=1000, flushMs=5000;
     unsigned flushRows=16;
 };
+inline json queueLimitEvidence(const Limits& limits) {
+    return {{"sampleIntervalMs",limits.sampleMs},{"recordMaxBytes",limits.recordBytes},
+        {"queueMaxBytes",limits.queueBytes},{"queueMaxRows",limits.queueRows},{"fileMaxBytes",limits.fileBytes},
+        {"retainedFileCount",2}};
+}
 inline constexpr std::size_t rawSnapshotBytes=12*1024;
 // A read-only view used by the native monitor worker. The string fields borrow
 // the already published cache while snapshotRecord() materializes exactly one
@@ -80,15 +85,35 @@ class StrictFile {
     unsigned pending_=0;
     bool tailNeedsNewline_=false;
     std::atomic<std::uint64_t> rotations_{0},failures_{0},flushes_{0};
-    void closeImpl(){if(stream_.is_open()){stream_.flush();stream_.close();}stream_.clear();pending_=0;}
-    struct Failure { std::uint64_t tick=0; const char* stage="not-observed"; int code=0; };
-    mutable std::mutex failureMx_;
+    void closeImpl(){
+        if(stream_.is_open()){
+            const bool healthyBefore=stream_.good();stream_.flush();
+            const bool healthyAfterFlush=stream_.good();
+            if(healthyBefore&&!healthyAfterFlush)rememberFailure(std::nullopt,"stream-close-flush");
+            stream_.close();
+            if(healthyAfterFlush&&!stream_)rememberFailure(std::nullopt,"stream-close");
+        }
+        stream_.clear();pending_=0;
+    }
+    struct Failure { std::optional<std::uint64_t> tick; const char* stage="not-observed"; int code=0; };
+    mutable std::mutex evidenceMx_;
     Failure firstFailure_, lastFailure_;
     bool failureKnown_=false;
+    struct TailSeparator {std::uint64_t tick;std::size_t offset;};
+    std::optional<TailSeparator> lastTailSeparator_;
+    std::uint64_t tailSeparators_=0;
+    void rememberFailure(std::optional<std::uint64_t> tick,const char* stage,int code=0) noexcept {
+        try {std::lock_guard<std::mutex> lock(evidenceMx_);lastFailure_={tick,stage,code};
+            if(!failureKnown_){firstFailure_=lastFailure_;failureKnown_=true;}}catch(...){}
+        failures_.fetch_add(1);
+    }
+    void rememberTailSeparator(std::uint64_t tick,std::size_t offset) noexcept {
+        try {std::lock_guard<std::mutex> lock(evidenceMx_);lastTailSeparator_=TailSeparator{tick,offset};
+            ++tailSeparators_;}catch(...){}
+    }
     bool failed(std::uint64_t now,const char* stage,int code=0){
-        {std::lock_guard<std::mutex> lock(failureMx_);lastFailure_={now,stage,code};
-            if(!failureKnown_){firstFailure_=lastFailure_;failureKnown_=true;}}
-        closeImpl();retryAt_=now+1000;failures_.fetch_add(1);return false;
+        rememberFailure(now,stage,code);
+        closeImpl();retryAt_=now+1000;return false;
     }
     bool open(std::size_t nextBytes,std::uint64_t now){
         if(now<retryAt_)return false;
@@ -101,12 +126,18 @@ class StrictFile {
             if(bytes_){std::ifstream in(active_,std::ios::binary);in.seekg(-1,std::ios::end);char last=0;if(!in.get(last))return failed(now,"tail-read");tailNeedsNewline_=last!='\n';}}
         if(nextBytes>limits_.fileBytes-bytes_||(tailNeedsNewline_&&nextBytes==limits_.fileBytes-bytes_)){
             closeImpl();auto backup=active_;backup+=L".1";
-            std::filesystem::remove(backup,ec);if(ec)return failed(now,"backup-remove",ec.value());
+            // Replace only when the active rename succeeds. A sharing refusal
+            // must retain both the previous backup and the active evidence.
             if(exists){std::filesystem::rename(active_,backup,ec);if(ec)return failed(now,"active-rename",ec.value());rotations_.fetch_add(1);}
             bytes_=0;tailNeedsNewline_=false;
         }
         stream_.open(active_,std::ios::binary|std::ios::app);if(!stream_)return failed(now,"stream-write-or-open");
-        if(tailNeedsNewline_){stream_.put('\n');++bytes_;tailNeedsNewline_=false;}
+        if(tailNeedsNewline_){
+            stream_.put('\n');
+            if(!stream_)return failed(now,"tail-separator-write");
+            rememberTailSeparator(now,bytes_);
+            ++bytes_;tailNeedsNewline_=false;
+        }
         return stream_.good();
     }
 public:
@@ -118,14 +149,25 @@ public:
         stream_.write(line.data(),static_cast<std::streamsize>(line.size()));stream_.put('\n');
         if(!stream_)return failed(now,"stream-write-or-open");
         bytes_+=line.size()+1;++pending_;
-        if(pending_>=limits_.flushRows||(now>=lastFlush_&&now-lastFlush_>=limits_.flushMs)){if(!flush())return failed(now,"stream-flush");lastFlush_=now;}
+        if(pending_>=limits_.flushRows||(now>=lastFlush_&&now-lastFlush_>=limits_.flushMs)){if(!flush(false))return failed(now,"stream-flush");lastFlush_=now;}
         return true;
     }
-    bool flush(){if(stream_.is_open()&&pending_){stream_.flush();flushes_.fetch_add(1);pending_=0;}return !stream_.is_open()||stream_.good();}
+    bool flush(bool recordFailure=true){
+        if(stream_.is_open()&&pending_){
+            stream_.flush();flushes_.fetch_add(1);pending_=0;
+            if(!stream_&&recordFailure)rememberFailure(std::nullopt,"stream-flush");
+        }
+        return !stream_.is_open()||stream_.good();
+    }
     void close(){closeImpl();}
+    json tailSeparatorEvidence()const{
+        std::lock_guard<std::mutex> lock(evidenceMx_);
+        return {{"schemaVersion",1},{"accepted",tailSeparators_},
+            {"last",lastTailSeparator_?json{{"tick",lastTailSeparator_->tick},{"offsetBytes",lastTailSeparator_->offset}}:json(nullptr)}};
+    }
     json failureEvidence()const{
-        std::lock_guard<std::mutex> lock(failureMx_);
-        const auto row=[](const Failure& f){return json{{"tick",f.tick},{"stage",f.stage},
+        std::lock_guard<std::mutex> lock(evidenceMx_);
+        const auto row=[](const Failure& f){return json{{"tick",f.tick?json(*f.tick):json(nullptr)},{"tickKnown",f.tick.has_value()},{"stage",f.stage},
             {"errorCodeObserved",f.code!=0},{"errorCode",f.code?json(f.code):json(nullptr)}};};
         return {{"schemaVersion",1},{"observed",failureKnown_},{"clock","native-monotonic-ms"},
             {"sourcePathsIncluded",false},{"first",failureKnown_?row(firstFailure_):json(nullptr)},
@@ -139,7 +181,8 @@ struct QueueDeps {
     std::function<bool()> enabled;
     std::function<bool(std::function<void()>)> submit;
     std::function<bool(std::string_view)> write;
-    std::function<void()> flush,close;
+    std::function<bool()> flush;
+    std::function<void()> close;
 };
 class Queue {
     struct Row {std::string line;std::uint64_t epoch;std::size_t charge;};
@@ -207,13 +250,23 @@ public:
         if(closeWanted_.exchange(false)){try{deps_.close();}catch(...){}}
         if(ownsScheduledJob){{std::lock_guard<std::mutex> lock(queueMx_);scheduled_=false;}kick();}
     }
-    void flushForExport(){drain(false);std::lock_guard<std::mutex> writer(writerMx_);deps_.flush();}
-    json stats()const{return {{"enabled",enabled()},{"sampleIntervalMs",limits_.sampleMs},{"recordMaxBytes",limits_.recordBytes},
-        {"queueMaxBytes",limits_.queueBytes},{"queueMaxRows",limits_.queueRows},{"fileMaxBytes",limits_.fileBytes},
-        {"retainedFileCount",2},{"pendingBytes",pendingBytes_.load()},{"pendingRows",pendingRows_.load()},
+    void flushForExport(){drain(false);withExportSourceBoundary([]{});}
+    // Capture only opens the source and records its size under the writer lock.
+    template<class Capture>
+    bool withExportSourceBoundary(const Capture& capture){
+        std::lock_guard<std::mutex> writer(writerMx_);
+        const bool flushed=deps_.flush();
+        capture();
+        return flushed;
+    }
+    json stats(bool includeLimits=true)const{
+        json result={{"enabled",enabled()},{"pendingBytes",pendingBytes_.load()},{"pendingRows",pendingRows_.load()},
         {"accepted",accepted_.load()},{"written",written_.load()},{"droppedBusy",busyDrops_.load()},
         {"droppedQueueFull",fullDrops_.load()},{"droppedOversize",oversizeDrops_.load()},{"droppedGate",gateDrops_.load()},
-        {"droppedIo",ioDrops_.load()},{"submitFailures",submitFailures_.load()}};}
+        {"droppedIo",ioDrops_.load()},{"submitFailures",submitFailures_.load()}};
+        if(includeLimits)result.update(queueLimitEvidence(limits_));
+        return result;
+    }
 };
 }
 

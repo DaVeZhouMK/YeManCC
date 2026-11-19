@@ -12,7 +12,7 @@
     },
     {
       "path": "tools/sleep_game_pause_selftest.py",
-      "sha256": "b5c0c63d62e7d9b7fdfcd277cd9f03b56ba9927f9547dea9a300dbc7c1955007"
+      "sha256": "f6b7b60ec84ae36c78d38d445cfe54a37bfe07dc6431ce355c3a166f3014b3be"
     }
   ],
   "definitions": [
@@ -34,7 +34,7 @@
       "completeLfSha256": "ccbf08ef757e6aafff56e98bfc17c4e4d5cd2a59cd0302ab07f82ca07e3bcf1f"
     }
   ],
-  "templateSha256": "b0e6ff31792dd40c247afa89dfa2f2a8b1527e2fcbd8f40b80e1756abb93fc78",
+  "templateSha256": "7f1b561dac3ad08ed377da8a479bce7797eb375540ab47b8fecae4959d91cf02",
   "insertion": {
     "anchor": "static bool sgShouldKeepInputDuringStandby() {",
     "include": "#include \"msi-observer-context.h\"\n",
@@ -47,7 +47,7 @@
   },
   "originalScript": {
     "path": "tools/sleep_game_pause_selftest.py",
-    "sha256": "b5c0c63d62e7d9b7fdfcd277cd9f03b56ba9927f9547dea9a300dbc7c1955007"
+    "sha256": "f6b7b60ec84ae36c78d38d445cfe54a37bfe07dc6431ce355c3a166f3014b3be"
   },
   "changesReviewed": {
     "cause": "Complete product resume handler now calls diagnostic receipt helper; original generated memory preamble lacked that context.",
@@ -90,5 +90,46 @@
       "initialPowerGeneration"
     ],
     "hardwareValidated": false
-  }
+  },
+  "priorS4Review": {
+    "sources": [
+      {
+        "path": "native/msi_visibility_wake_runtime.h",
+        "sha256": "153cca798f2e3c66fb99f0eccb3359c8c5b8da11124dda01e793b3fc8e202aa6"
+      },
+      {
+        "path": "native/msi_visibility_wake_diagnostics.h",
+        "sha256": "4e229beb29e327f68ff919a734a092ece528b6424179c54f0d05546f145ab3d8"
+      },
+      {
+        "path": "tools/sleep_game_pause_selftest.py",
+        "sha256": "9103662ef3372077a0f11cfda925b9c57b764e3f42f345e6d72ba9ec862eeee3"
+      }
+    ],
+    "definitions": [
+      {
+        "path": "native/msi_visibility_wake_runtime.h",
+        "signature": "static bool msiVisibilityWakeDiagnosticEligible(bool requireReady) {",
+        "token": "@@PRODUCT_ELIGIBILITY@@",
+        "completeLfSha256": "be53d223f8bcbe854926395fd417ec1e519df66d0472abb75200c1d768b18229"
+      },
+      {
+        "path": "native/msi_visibility_wake_runtime.h",
+        "signature": "static void msiVisibilityObserverNoteResume(unsigned long long generation) noexcept {",
+        "token": "@@PRODUCT_NOTE_RESUME@@",
+        "completeLfSha256": "28e83f77a835e672af74cf5ef060a6facf4fafaf3ea173694dccc4ac35d76996"
+      },
+      {
+        "path": "native/main.cpp",
+        "signature": "static void handlePowerResumeNotification(SgWork work, const char* reason) {",
+        "completeLfSha256": "ccbf08ef757e6aafff56e98bfc17c4e4d5cd2a59cd0302ab07f82ca07e3bcf1f"
+      }
+    ],
+    "templateSha256": "b0e6ff31792dd40c247afa89dfa2f2a8b1527e2fcbd8f40b80e1756abb93fc78",
+    "originalScript": {
+      "path": "tools/sleep_game_pause_selftest.py",
+      "sha256": "9103662ef3372077a0f11cfda925b9c57b764e3f42f345e6d72ba9ec862eeee3"
+    }
+  },
+  "s4ContextReview": "Current original generator supplies exit flag and void Decky transport memory port; remove duplicate template declarations only. Complete product helpers and twelve observer checks retained."
 }

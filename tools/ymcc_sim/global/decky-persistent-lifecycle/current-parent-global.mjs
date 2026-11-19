@@ -11,11 +11,10 @@ import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import {spawnSync,spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
-import {getLegacyDeckyPersistentLifecycleAdapters} from './adapter.mjs';
-import {getDeckyUpdateRecoveryAdapters} from '../decky-update-recovery/adapter.mjs';
+import {readDeckyPersistentDeclarationInputs} from './adapter.mjs';
 import {lifecycleContract} from './contract.mjs';
 import {ownedToolDeclaration,OWNED_INPUTS} from './owned-adapter.mjs';
-import {ORIGINAL_CASES,originalReadyConsumer,originalCommittedReadyConsumer,originalOfflineConsumer,originalManagedBackendConsumer,originalAggregateCases,validateOriginalResult} from './owned-run.mjs';
+import {ORIGINAL_CASES,originalReadyConsumer,originalCommittedReadyConsumer,originalOfflineConsumer,originalManagedBackendConsumer,originalAggregateCases,validateOriginalResult,verifyOriginalFrozenSources} from './owned-run.mjs';
 import {resourceZero,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
 import {validateTypedRuntimeParentReceipt} from './typed-runtime-parent.mjs';
 import {validateTypedHealthCloseParentReceipt} from './typed-health-close-parent.mjs';
@@ -44,7 +43,13 @@ export const REQUIREMENTS=Object.freeze([
  ['recoverAfterTransientFailure','acceptance.transient-failure',[TS_IDS[7],TS_IDS[6],TS_IDS[9],...TS_IDS.slice(10)]],
  ['respectRecoveryLimits','acceptance.recovery-limits',[CURRENT_IDS[5],TS_IDS[8],TS_IDS[9]]]
 ]);
-export const JS_REGRESSIONS=Object.freeze(['decky_loader_official_selftest','decky_sidebar_safety_selftest','decky_sidebar_client_selftest','decky_sidebar_host_selftest','decky_sidebar_hang_recovery_selftest','decky_sidebar_stability_matrix_selftest']);
+const HOST_JS_REGRESSION='decky_sidebar_host_selftest';
+export const JS_REGRESSIONS=Object.freeze(['decky_loader_official_selftest','decky_sidebar_safety_selftest','decky_sidebar_client_selftest',HOST_JS_REGRESSION,'decky_sidebar_hang_recovery_selftest','decky_sidebar_stability_matrix_selftest']);
+export function originalJsRegressionArgs(repo,name,artifact){
+ assert(JS_REGRESSIONS.includes(name),'UNREGISTERED_JS_REGRESSION');
+ const entry=path.join(repo,'tools',name+'.mjs');
+ return name==='decky_sidebar_host_selftest'?[entry]:[entry,artifact];
+}
 export const NATIVE_REGRESSIONS=Object.freeze([
  {name:'runtime',source:'tools/decky_sidebar_runtime_selftest.cpp',runMs:15000,legacy:true},
  {name:'recovery',source:'tools/decky_sidebar_recovery_selftest.cpp',runMs:15000,legacy:false},
@@ -222,9 +227,24 @@ export function verifyParentMetadata(out,report){
 // Explicit launcher selection keeps ordinary hosts on their original sequential route.
 // Its installed runtime and Add-Type reference assemblies are declared as tools once.
 
-export function parentDeclaration(repo){
+function requireDeclarationNode(){
  assert.equal(key(process.execPath),key(path.resolve(simulationNodePath())),'FIXED_NODE_REQUIRED');
- const parent=getLegacyDeckyPersistentLifecycleAdapters(repo)[0],baseline=getDeckyUpdateRecoveryAdapters(repo)[0],tools=ownedToolDeclaration(repo);
+}
+
+export function parentDeclaration(repo){
+ requireDeclarationNode();
+ return buildParentDeclaration(repo,readDeckyPersistentDeclarationInputs(repo));
+}
+
+// Both views refer to the same update-recovery inputs for this invocation only.
+export function currentParentRegistration(repo){
+ const inputs=readDeckyPersistentDeclarationInputs(repo);
+ try{requireDeclarationNode();return {legacy:inputs.legacy,current:buildParentDeclaration(repo,inputs)};}
+ catch(error){return {legacy:inputs.legacy,blockedReason:'DECKY_CURRENT_PARENT_PREREQUISITE_UNAVAILABLE:'+error.message};}
+}
+
+function buildParentDeclaration(repo,{legacy:parent,baseline}){
+ const tools=ownedToolDeclaration(repo);
  assert(!parent.blockedReason,parent.blockedReason);assert(!baseline.blockedReason,baseline.blockedReason);assert(!tools.blockedReason,tools.blockedReason);
  const inputs=new Set([WRAPPER,'tools/ymcc_sim/global/host-process.ps1','tools/ymcc_sim/optimization/release-baseline-reference.mjs','tools/ymcc_sim/optimization/release-resource-reference.mjs','tools/ymcc_sim/global/decky-update-recovery/package-fixture-tools.mjs','decky-plugin/plugin.json','tools/decky_update_release_gate.ps1','tools/decky-loader-upgrade.ps1','decky-plugin/vendor/DECKY-API-LOCK.json','decky-plugin/vendor/decky-api-1.1.3/dist/index.js','decky-plugin/vendor/decky-api-1.1.3/dist/types.js','decky-plugin/vendor/decky-api-1.1.3/LICENSE','decky-plugin/vendor/decky-api-1.1.3/package.json','tools/decky_binding_steam_lease_selftest.cpp','tools/decky_binding_steam_lease_selftest.mjs',...['typed-async-source-inputs.json','typed-owned-async-parent.mjs','typed-owned-async-native.mjs','typed-owned-async-request-regression.mjs','typed-owned-async-request-regression.cpp','typed-owned-async-request-regression.test.mjs','typed-owned-async-contract.json','typed-async-parent.mjs','typed-async-parent.test.mjs','typed-async-request-parent.mjs','typed-legacy-async-request-regression.mjs','typed-legacy-async-request-regression.cpp','typed-legacy-async-request-regression.test.mjs','typed-runtime-parent.mjs','typed-legacy-runtime-regression.mjs','typed-legacy-runtime-regression.cpp','typed-legacy-runtime-regression.test.mjs','typed-health-close-parent.mjs','typed-legacy-health-close-regression.mjs','typed-legacy-health-close-regression.cpp','typed-legacy-health-close-regression.test.mjs'].map(name=>MODULE+'/'+name),...parent.evidenceInputs,...baseline.evidenceInputs,baseline.path,MODULE+'/baseline-environment.mjs','tools/decky_update_recovery_selftest.mjs',...OWNED_INPUTS,MODULE+'/current-parent-native.mjs',MODULE+'/current-parent-native.cpp','tools/decky-loader-contract.mjs','PowerControl/decky/PluginLoader_noconsole.exe','PowerControl/decky/LICENSE.decky-loader','.gitattributes','scripts/bump-version.mjs',...JS_REGRESSIONS.map(n=>'tools/'+n+'.mjs'),...NATIVE_REGRESSIONS.map(n=>n.source)]);
  // The official consumer reads every publication workflow as source data.
@@ -262,14 +282,18 @@ export function validateGraph(file,sourcePins,toolPins){
  const graph=read(file);assert.equal(graph.Version,'1.2');for(const p of [graph.Data.Source,...graph.Data.Includes]){const row=sourcePins.get(key(p))??toolPins.get(key(p));assert(row,'UNDECLARED_COMPILER_INPUT:'+p);assert.equal(hash(p),row.sha256,'COMPILER_INPUT_CHANGED:'+p);}return pin(file);
 }
 function freeze(repo,paths,destination){const rows=[];for(const p of paths){relative(p);const source=path.join(repo,p);assert.equal(key(fs.realpathSync(source)),key(source),'SOURCE_REPARSE');const bytes=fs.readFileSync(source),target=path.join(destination,p);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes);assert.equal(hash(source),sha(bytes),'SOURCE_CHANGED_DURING_FREEZE');rows.push({path:p,sha256:sha(bytes),frozen:pin(target)});}return rows;}
-export function verifyCurrentDisk(value,parentSources,toolPins,childRoot,work){
+export function verifyCurrentDisk(value,parentSources,toolPins,childRoot,work,repo=path.resolve(import.meta.dirname,'../../../..')){
  verifySourceRows(value.sourceInputs,parentSources);exactTools(value.toolArtifacts,toolPins);
  for(const phase of value.executions){verifyFile(phase.program);verifyFile(phase.stdout);verifyFile(phase.stderr);ownedFile(childRoot,phase.stdout.path);ownedFile(childRoot,phase.stderr.path);}
  const original=value.originalProducer,current=value.currentProducer;
  for(const row of [original.raw,original.result,original.sourcePins,original.exe,current.raw,current.exe,current.cef]){verifyFile(row);ownedFile(work,row.path);}
  const typed=read(original.raw.path),typedRun=read(original.result.path),fullOriginal=validateOriginalResult(typed,typedRun);assert.equal(fullOriginal.completeCurrentProducer,true,'CURRENT_COMPLETE_ORIGINAL_PRODUCER_REQUIRED');assert.equal(typed.passed,true);assert.equal(fullOriginal.failed,0);assert.deepEqual(value.originalSummary,fullOriginal);
  for(const c of originalAggregateCases(typed)){const delivered=value.cases.find(r=>r.id===c.id);assert.deepEqual(delivered.measurements,Object.fromEntries(Object.entries(c).filter(([k])=>!['id','passed'].includes(k))));assert.deepEqual(delivered.evidence,original.raw);}
- const frozen=read(original.sourcePins.path);verifySourceRows(frozen.files,parentSources);const frozenMap=new Map();for(const row of frozen.files){const p=ownedFile(work,path.join(frozen.source,row.path));assert.equal(hash(p),row.sha256);frozenMap.set(key(p),{path:p,sha256:row.sha256});}
+ const originals=path.dirname(original.raw.path),frozen=read(original.sourcePins.path);
+ ownedFile(work,path.join(originals,'source'));
+ const sourcePins=new Map(Array.from(parentSources,([file,sha256])=>[file,{sha256}]));
+ const {files:frozenMap,publicationPort}=verifyOriginalFrozenSources({repo,original:originals,frozen,originalRun:typedRun,sourcePins});
+ assert.deepEqual(value.originalPublicationPort,publicationPort,'CURRENT_ORIGINAL_PUBLICATION_PROVENANCE');
  const readyConsumer=originalReadyConsumer(frozen.source);frozenMap.set(key(readyConsumer.path),readyConsumer);
  const generatedCommittedEvidence=[];
  if(fs.readFileSync(path.join(frozen.source,'tools/decky_binding_runtime_selftest.cpp'),'utf8').includes('#include "decky_wake_committed_consumer.inc"')){
@@ -294,7 +318,6 @@ export function verifyCurrentDisk(value,parentSources,toolPins,childRoot,work){
   frozenMap.set(key(managedBackendConsumer.path),managedBackendConsumer);generatedManagedEvidence.push(pin(managedBackendConsumer.path),managedBackendConsumer.metadata);
  }
 
- const originals=path.dirname(original.raw.path);
  const proof=verifyDeferredResourceProof(typed,originals);ownedFile(work,proof.raw.path);
  assert.deepEqual(value.deferredResourceProof,proof,'Deferred source/result binding missing from original child');
  assert.deepEqual(original.deferredRaw,proof.raw,'Deferred raw identity missing from original producer');
@@ -315,7 +338,7 @@ export function verifyCurrentDisk(value,parentSources,toolPins,childRoot,work){
  for(const x of Object.values(value.nativeExtractions)){verifyFile(x.generated);assert.equal(parentSources.get(relative(x.path)),x.sha256,'EXTRACTION_SOURCE_CHANGED');}
  const consumer=read(path.join(childRoot,'consumer-result.json'));assert.equal(consumer.passed,true);assert.deepEqual(consumer.cases.map(c=>c.id),TS_IDS);assert.equal(consumer.productionHostExecuted,true);assert.equal(consumer.productionRelayExecuted,true);assert.equal(consumer.productionClientExecuted,true);
  for(const c of consumer.cases){assert.deepEqual(value.cases.find(r=>r.id===c.id).measurements,c.measurements);assert.equal(c.passed,true);}
- return [original.raw,original.result,original.sourcePins,...(original.deferredRaw?[original.deferredRaw]:[]),...generatedManagedEvidence,...generatedCommittedEvidence,current.raw,pin(path.join(childRoot,'consumer-result.json'))];
+ return [original.raw,original.result,original.sourcePins,pin(publicationPort.path),...(original.deferredRaw?[original.deferredRaw]:[]),...generatedManagedEvidence,...generatedCommittedEvidence,current.raw,pin(path.join(childRoot,'consumer-result.json'))];
 }
 function history(core){
  const base=path.join(core,'Evidence/DeckyParentMigration-20261023/a1-2547/history'),files=[['result.json','2a7a3f284df641659b691f84600f31335d77947937d827253ac061013dea59a7'],['native-result.json','2850ad18914927f98744ea0c0a31ac90d8a11577e09b093ebbbdeaf7abd22bd1'],['consumer-result.json','ea76797d7142bde1e05dd0422113af3bde1bfec0e939983b37c2e6ea01ca8859']];
@@ -386,6 +409,13 @@ export async function runParent({repoRoot=path.resolve(import.meta.dirname,'../.
    save(path.join(out,'processes',proof.id+'.json'),proof);report.processes.push(proof);
    traceStage(proof.id,'returned',{pid:proof.pid,elapsedMs:proof.elapsedMs,exitCode:proof.exitCode,timedOut:proof.timedOut,error:proof.error,rawOwnedProducer:true});checkpoint();return proof;
   }
+  const runOriginalJs=name=>guard('original.'+name,()=>{
+   const artifact=path.join(work,name),env={...process.env,YMCC_DECKY_ARTIFACT_ROOT:artifact};const p=exec('original.'+name,processExec,originalJsRegressionArgs(repo,name,artifact),60000,{cwd:repo,env});naturalExit(p,0);
+   let proof;if(name===HOST_JS_REGRESSION)proof=read(p.stdout.path);else{const file={decky_loader_official_selftest:'OFFICIAL-LOADER-CONSUMER.json',decky_sidebar_safety_selftest:'SAFETY-NOTIFICATION.json',decky_sidebar_client_selftest:'validation/MIRROR-CLIENT-SELFTEST.json',decky_sidebar_hang_recovery_selftest:'validation/MIRROR-HANG-RECOVERY.json',decky_sidebar_stability_matrix_selftest:'validation/DECKY-STABILITY-MATRIX.json'}[name];const actual=path.join(artifact,file);assert(fs.existsSync(actual),'ORIGINAL_JS_RESULT_MISSING:'+name);proof=read(actual);report.rawEvidence.push(pin(actual));}
+   assert(proof.passed===true||proof.status==='passed'||(name==='decky_sidebar_client_selftest'&&proof.productionClientSource===true),'ORIGINAL_JS_NOT_PASS');const results=proof.results??(Array.isArray(proof.cases)?proof.cases:null);assert(Array.isArray(results)&&results.length>0,'ORIGINAL_JS_CASES_REQUIRED');assert(results.every(r=>r.passed!==false&&r.status!=='failed'),'ORIGINAL_JS_RAW_CASE_FAILED');add(p.id,true,{originalCases:results.length,process:pin(path.join(out,'processes',p.id+'.json'))});
+  });
+  // The full Host VM regression owns its own inputs; no native or baseline output is required.
+  await runOriginalJs(HOST_JS_REGRESSION);
   if(!baselineResult&&declaration.rawProgramLauncher){
    // Resolve one real pinned tool, never a shell alias or inferred business PID.
    const actualPowerShell=declaration.rawProgramLauncher.program;
@@ -414,7 +444,7 @@ export async function runParent({repoRoot=path.resolve(import.meta.dirname,'../.
   }
   const current=await guard('current.native.entry',async()=>{
    const process=initialNative?persistRaw(await initialNative.wait()):exec('current.native.entry',processExec,[path.join(repo,MODULE,'current-parent-native.mjs'),'--evidence-dir',childEvidence,'--workspace-dir',childWork],BUDGETS.current,{cwd:repo});
-   const rawPath=path.join(childEvidence,'result.json');assert(fs.existsSync(rawPath),'CURRENT_NATIVE_RESULT_MISSING');report.rawEvidence.push(pin(rawPath));const value=validateCurrentEnvelope(read(rawPath),process);report.rawEvidence.push(...verifyCurrentDisk(value,sourcePins,currentChildToolPins(declaration,toolPins),childEvidence,childWork));
+   const rawPath=path.join(childEvidence,'result.json');assert(fs.existsSync(rawPath),'CURRENT_NATIVE_RESULT_MISSING');report.rawEvidence.push(pin(rawPath));const value=validateCurrentEnvelope(read(rawPath),process);report.rawEvidence.push(...verifyCurrentDisk(value,sourcePins,currentChildToolPins(declaration,toolPins),childEvidence,childWork,repo));
    const aggregate=aggregateSeven(value);add('current.native.entry',true,{exitCode:2,scope:'Exact original 25/7 INCOMPLETE child, not accepted parent',raw:pin(rawPath)});report.cases.push(...value.cases);report.cases.push(...aggregate.cases);report.lifecycleEvidence.features[0].observations=aggregate.observations;return value;
   });
   await guard('original.plugins.decky-update-recovery',async()=>{
@@ -425,11 +455,7 @@ export async function runParent({repoRoot=path.resolve(import.meta.dirname,'../.
    report.rawEvidence.push(pin(rawPath));validateBaselineReceipt(value,process,sourcePins,declaration.baselineRequiredSources);report.originalUpdateRecovery={raw:pin(rawPath),process,sourceVerified:true,reused:!!baselineResult};add('original.plugins.decky-update-recovery',true,{raw:pin(rawPath),reusedBoundReceipt:!!baselineResult});
   });
   await guard('official-byte-identity',()=>{const p=exec('official-byte-identity',processExec,[path.join(repo,'tools/decky-loader-contract.mjs'),'verify'],45000,{cwd:repo});naturalExit(p,0);add(p.id,true,{rawProcess:pin(path.join(out,'processes',p.id+'.json'))});});
-  for(const name of JS_REGRESSIONS)await guard('original.'+name,()=>{
-   const artifact=path.join(work,name),env={...process.env,YMCC_DECKY_ARTIFACT_ROOT:artifact};const p=exec('original.'+name,processExec,[path.join(repo,'tools',name+'.mjs'),artifact],60000,{cwd:repo,env});naturalExit(p,0);
-   let proof;if(name==='decky_sidebar_host_selftest')proof=read(p.stdout.path);else{const file={decky_loader_official_selftest:'OFFICIAL-LOADER-CONSUMER.json',decky_sidebar_safety_selftest:'SAFETY-NOTIFICATION.json',decky_sidebar_client_selftest:'validation/MIRROR-CLIENT-SELFTEST.json',decky_sidebar_hang_recovery_selftest:'validation/MIRROR-HANG-RECOVERY.json',decky_sidebar_stability_matrix_selftest:'validation/DECKY-STABILITY-MATRIX.json'}[name];const actual=path.join(artifact,file);assert(fs.existsSync(actual),'ORIGINAL_JS_RESULT_MISSING:'+name);proof=read(actual);report.rawEvidence.push(pin(actual));}
-   assert(proof.passed===true||proof.status==='passed'||(name==='decky_sidebar_client_selftest'&&proof.productionClientSource===true),'ORIGINAL_JS_NOT_PASS');const results=proof.results??(Array.isArray(proof.cases)?proof.cases:null);assert(Array.isArray(results)&&results.length>0,'ORIGINAL_JS_CASES_REQUIRED');assert(results.every(r=>r.passed!==false&&r.status!=='failed'),'ORIGINAL_JS_RAW_CASE_FAILED');add(p.id,true,{originalCases:results.length,process:pin(path.join(out,'processes',p.id+'.json'))});
-  });
+  for(const name of JS_REGRESSIONS)if(name!==HOST_JS_REGRESSION)await runOriginalJs(name);
   const tool=selectedNativeTools().native;
   const nativeEnv=Object.fromEntries(Object.entries(process.env).map(([k,v])=>[k.toUpperCase(),v]));Object.assign(nativeEnv,{INCLUDE:tool.include.join(';'),LIB:tool.lib.join(';'),PATH:path.dirname(tool.compiler)+';'+path.dirname(tool.linker)+';'+process.env.SystemRoot+'/System32',CL:'',_CL_:'',LINK:'',_LINK_:'',TEMP:work,TMP:work});
   for(const native of NATIVE_REGRESSIONS){

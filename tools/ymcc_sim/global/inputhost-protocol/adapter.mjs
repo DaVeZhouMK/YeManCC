@@ -1,8 +1,36 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 export const MODULE='tools/ymcc_sim/global/inputhost-protocol';
 export const REPO=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
+// Explicit relocation of the reviewed SDK is allowed only with the same
+// declared bytes. External tools (for example Node) keep their original paths.
+export function relocatedToolchain(repo=REPO,dotnetRoot){
+ if(typeof dotnetRoot!=='string'||!path.isAbsolute(dotnetRoot))throw Error('INPUTHOST_TOOLCHAIN_ROOT_ABSOLUTE_REQUIRED');
+ const spec=JSON.parse(fs.readFileSync(path.join(repo,MODULE,'toolchain-inputs.json'),'utf8').replace(/^\uFEFF/,''));
+ if(!path.isAbsolute(spec.dotnetRoot)||!Array.isArray(spec.pinned)||!spec.pinned.length)throw Error('INPUTHOST_TOOLCHAIN_DECLARATION_INVALID');
+ const root=path.resolve(dotnetRoot),relocate=file=>{
+  if(typeof file!=='string'||!path.isAbsolute(file))throw Error('INPUTHOST_TOOLCHAIN_PATH_INVALID');
+  const relative=path.relative(spec.dotnetRoot,file);
+  return relative===''?root:!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep)?path.join(root,relative):path.resolve(file);
+ };
+ const next={...spec,dotnetRoot:root,pinned:spec.pinned.map(row=>({...row,path:relocate(row.path)})),
+  expectedArtifactFiles:(spec.expectedArtifactFiles??[]).map(relocate),msbuildRuntimeAssets:(spec.msbuildRuntimeAssets??[]).map(row=>({...row,path:relocate(row.path)})),evaluatedSdkImports:(spec.evaluatedSdkImports??[]).map(relocate)};
+ const declared=new Map();
+ for(const row of next.pinned){
+  if(!/^[0-9a-f]{64}$/.test(row.sha256)||declared.has(row.path.toLowerCase()))throw Error('INPUTHOST_TOOLCHAIN_PIN_INVALID');
+  if(!fs.existsSync(row.path)||!fs.statSync(row.path).isFile())throw Error('INPUTHOST_TOOLCHAIN_FILE_MISSING:'+row.path);
+  const actual=createHash('sha256').update(fs.readFileSync(row.path)).digest('hex');
+  if(actual!==row.sha256)throw Error('INPUTHOST_TOOLCHAIN_BYTES_CHANGED:'+row.path);
+  declared.set(row.path.toLowerCase(),row.sha256);
+ }
+ for(const file of toolchainFiles(repo,next)){
+  const relative=path.relative(root,file),inside=relative===''||!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep);
+  if(inside&&!declared.has(file.toLowerCase()))throw Error('INPUTHOST_TOOLCHAIN_UNDECLARED_MEMBER:'+file);
+ }
+ return next;
+}
 export const CASES=Object.freeze({
  'controller.inputhost-cpu-cost-window':{mode:'cpu',title:'Actual InputHost cost-window consumers with fake counters and observation-window regression',sources:['InputHost/Program.cs','InputHost/HostCpuCostWindow.cs','tools/inputhost_cpu_cost_window_selftest.mjs','tools/inputhost_cpu_cost_window_selftest.cs']},
  'controller.inputhost-optional-trigger-protocol':{mode:'trigger',title:'Actual InputHost envelope and optional trigger consumer with explicit fallback fault control',sources:['InputHost/Program.cs','InputHost/MsiVirtualReportChain1410.cs','InputHost/MsiSteamDeckReleaseFence1726.cs','InputHost/ScreenTouchpadReport.cs','InputHost/ScreenButtonReport.cs','InputHost/CanonicalFrameFingerprintMemo.cs','native/controller_persona.h','native/main.cpp','tools/inputhost_optional_trigger_selftest.py','tools/inputhost_optional_trigger_selftest.cs']}

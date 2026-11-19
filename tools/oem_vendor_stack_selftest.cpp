@@ -211,19 +211,221 @@ static int journalNativeIo(){
 }
 #endif
 
+// Directed continuation of the original vendor consumer; default cases stay intact.
+static int queueLifecycleCases(const std::string& selected) {
+    if(selected!="cancel" && selected!="exception" && selected!="controls" && selected!="all" && selected!="tail" && selected!="final" && selected!="rog-preserve") return 2;
+    const auto selectedCase=[&](const char* group){return selected=="all" || (selected=="tail" && std::string(group)!="cancel") || selected==group;};
+    const auto assertQueue=[&](bool ok,const char* message){
+        check(ok,message);if(!ok)throw std::runtime_error(message);
+    };
+    json completed=json::array();
+    try {
+        if(selected=="rog-preserve") {
+            const std::vector<std::pair<YmccFamily,const char*>> models={
+                {YmccFamily::AsusRogAlly,"XboxROGAlly"},
+                {YmccFamily::AsusRogAllyX,"XboxROGAllyX"},
+                {YmccFamily::AsusRogAllyClassic,"ROGAlly"},
+                {YmccFamily::AsusRogAllyXClassic,"ROGAllyX"}};
+            for(const auto& model:models) {
+                reset();g_machineIdentity.family=model.first;
+                g_machineIdentity.deviceClass=std::string("HandheldCompanion.Devices.")+model.second;seed();
+                assertQueue(services.size()==3,"legacy ROG return allowlist still recognizes exactly three services");
+                const auto original=services;
+                for(const auto bit:{kOemBitCc,kOemBitAc,kOemBitLib}) {
+                    assertQueue(!oemVendorStackRuleCanTakeover(model.first,bit,true,"press"),"single ROG press binding cannot implicitly disable the official frontend");
+                    assertQueue(!oemVendorStackRuleCanTakeover(model.first,bit,true,"double"),"single ROG double binding cannot implicitly disable the official frontend");
+                }
+                oemVendorStackRecordingRequest(true);drain();
+                assertQueue(!g_oemVendorRecordingWanted&&!g_oemVendorStackWanted,"ROG recording has no implicit service takeover owner");
+                assertQueue(oemVendorStackRecordingSnapshot()["applied"]==false,"preserved ROG recording never reports official service suppression");
+                oemVendorStackRequest(oemVendorStackRuleCanTakeover(model.first,kOemBitLib,true,"press"));drain();
+                oemVendorStackRecordingRequest(false);drain();
+                const auto settled=g_oemVendorStackRequested;
+                for(int n=0;n<100;++n){oemVendorStackRecordingRequest(true);oemVendorStackSchedule();}
+                assertQueue(stops==0&&mutationCount==0&&g_oemVendorServiceLeases.empty(),"ROG rule and recording storms perform zero service mutation");
+                assertQueue(jobs.empty()&&!g_oemVendorStackOpQueued&&g_oemVendorStackRequested==settled,"settled ROG recording creates no recurring queue work");
+                for(const auto& [name,before]:original)
+                    assertQueue(services[name].type==before.type&&services[name].state==before.state,"all ROG official services retain their original state");
+
+                // The original durable lease is a return obligation after an
+                // upgrade, even though automatic acquisition is now refused.
+                reset();g_machineIdentity.family=model.first;
+                g_machineIdentity.deviceClass=std::string("HandheldCompanion.Devices.")+model.second;seed();
+                json entries=json::array();
+                for(auto& [name,service]:services){
+                    entries.push_back({{"name",W2U(name)},{"originalStartType",SERVICE_AUTO_START},{"wasRunning",true}});
+                    service.type=SERVICE_DISABLED;service.state=SERVICE_STOPPED;
+                }
+                journal=json({{"schema",1},{"family",static_cast<int>(model.first)},{"services",entries},{"tasks",json::array()},
+                              {"foreignExtension",{{"preserve",true}}}}).dump();journalExists=true;
+                oemVendorStackRecordingRequest(true);drain();
+                assertQueue(starts==3&&stops==0&&g_oemVendorServiceLeases.empty(),"old ROG lease restores all three services without stopping them again");
+                for(const auto& [name,service]:services)
+                    assertQueue(service.type==SERVICE_AUTO_START&&service.state==SERVICE_RUNNING,"old ROG return restores exact original service startup and running state");
+                assertQueue(json::parse(journal)["foreignExtension"]["preserve"]==true,"ROG migration preserves unrelated journal extension fields");
+                const auto writes=mutationCount;
+                oemVendorStackRequest(oemVendorStackRuleCanTakeover(model.first,kOemBitLib,true,"press"));drain();
+                assertQueue(mutationCount==writes&&stops==0,"a still-saved ROG binding cannot reacquire restored services");
+            }
+            reset();g_machineIdentity.family=YmccFamily::MsiClaw;seed();
+            tasks[L"MSI_Center_M_Server"]={};tasks[L"MSI_Center_M_Updater"]={};
+            assertQueue(oemVendorStackRuleCanTakeover(YmccFamily::MsiClaw,kOemBitClaw,true,"press"),"MSI explicit key takeover policy remains available");
+            oemVendorStackShieldRequest(true);drain();
+            assertQueue(!tasks.contains(L"MSI_Center_M_Server")&&!tasks.contains(L"MSI_Center_M_Updater"),"MSI shield still removes only the original two task definitions");
+            oemVendorStackRecordingRequest(true);drain();oemVendorStackRecordingRequest(false);drain();
+            assertQueue(g_oemVendorShieldWanted&&g_oemVendorStackWanted,"MSI shield survives recording end independently");
+            oemVendorStackShieldRequest(false);drain();
+            assertQueue(tasks.contains(L"MSI_Center_M_Server")&&tasks.contains(L"MSI_Center_M_Updater"),"MSI OFF still returns its original task definitions");
+            completed.push_back("rog-preserve");
+        }
+        if(selected=="final") {
+            reset();g_machineIdentity.family=YmccFamily::AsusRogAlly;g_machineIdentity.deviceClass="HandheldCompanion.Devices.XboxROGAlly";seed();
+            g_oemVendorStackCompleted=g_oemVendorStackRequested;
+            for(int n=0;n<32;++n)oemVendorStackSchedule();
+            assertQueue(jobs.empty()&&!g_oemVendorStackOpQueued,"settled ordinary refresh creates no new work");
+            const auto names=oemVendorServiceNamesForFamily(g_machineIdentity.family);
+            services[names[0]].type=SERVICE_DISABLED;services[names[0]].state=SERVICE_STOPPED;
+            services[names[1]].type=SERVICE_DEMAND_START;services[names[1]].state=SERVICE_RUNNING;
+            services[names[2]].type=SERVICE_AUTO_START;services[names[2]].state=SERVICE_STOPPED;
+            const auto original=services;
+            oemVendorStackRequest(true);assertQueue(jobs.size()==1,"actual XboxROGAlly class can queue existing native preparation");
+            jobs.clear();assertQueue(!g_oemVendorStackOpQueued&&mutationCount==0,"final admission retains exact cancelled-ticket return");
+            assertQueue(oemVendorStackShieldRuntimeSnapshot()["operationStage"]=="queue-abandoned","cancellation stage remains observable before refresh");
+            oemVendorStackSchedule();drain();assertQueue(g_oemVendorStackLastOutcomeOk&&!g_oemVendorStackOpQueued,"fresh request completes after final ticket allocation placement");
+            assertQueue(oemVendorStackShieldRuntimeSnapshot()["externalDefaultActionSuppressed"]=="NOT_CONFIRMED","mixed original state readback still does not prove external suppression");
+            oemVendorStackRequest(false);drain();
+            for(const auto& [name,before]:original)assertQueue(services[name].type==before.type&&services[name].state==before.state,"return preserves original Disabled/manual/auto and stopped/running state");
+            assertQueue(g_oemVendorServiceLeases.empty()&&!g_oemVendorStackOpQueued,"all mixed original-state debt is returned");
+            completed.push_back("final");
+        }
+        if(selectedCase("cancel")) {
+            reset();seed();oemVendorStackRequest(true);
+            assertQueue(jobs.size()==1 && g_oemVendorStackOpQueued,"accepted closure owns one pending publication");
+            const auto attempts=g_oemVendorStackAttempts;
+            jobs.clear(); // Same callback lifetime as the real serial queue's clear.
+            assertQueue(!g_oemVendorStackOpQueued,"discarded serial closure returns pending publication");
+            assertQueue(g_oemVendorStackAttempts==attempts && mutationCount==0,"discarding a closure spends no attempt and performs no original-action mutation");
+#ifdef YMCC_VENDOR_QUEUE_TICKET
+            assertQueue(oemVendorStackShieldRuntimeSnapshot()["operationStage"]=="queue-abandoned","snapshot distinguishes abandoned work from still queued work");
+#endif
+            oemVendorStackSchedule();drain();
+            assertQueue(stops==3 && !g_oemVendorStackOpQueued,"original refresh can continue after queue cancellation");
+            oemVendorStackRequest(false);drain();
+            assertQueue(g_oemVendorServiceLeases.empty() && starts==3,"continued operation returns the three exact original service leases");
+            completed.push_back("cancel");
+        }
+        if(selectedCase("exception")) {
+            reset();seed();queueScmThrows=true;
+            oemVendorStackRequest(true);
+            bool escaped=false;try{drain();}catch(...){escaped=true;}
+            assertQueue(!g_oemVendorStackOpQueued,"exception returns pending publication instead of wedging all later requests");
+            assertQueue(!escaped && g_oemVendorStackAttempts==1,"exception settles as one existing failed attempt");
+            assertQueue(stops==0 && g_oemVendorStackRetryAt>tick,"failure preserves original retry delay without extra writes");
+            oemVendorStackSchedule();assertQueue(jobs.empty(),"retry remains blocked before the original deadline");
+            tick=g_oemVendorStackRetryAt;oemVendorStackSchedule();drain();
+            assertQueue(stops==3 && g_oemVendorStackAttempts==2,"same failed request continues within original retry allowance");
+            assertQueue(state("worker-exception") && state("worker-finished"),"exception and terminal queue stages are distinguishable");
+            oemVendorStackRequest(false);drain();
+            assertQueue(g_oemVendorServiceLeases.empty(),"exception path retains and eventually returns original-state debt");
+            completed.push_back("exception");
+        }
+        if(selectedCase("controls")) {
+            reset();seed();queueFail=true;oemVendorStackRequest(true);
+            assertQueue(jobs.empty()&&!g_oemVendorStackOpQueued&&g_oemVendorStackAttempts==0,"queue refusal retains no pending owner and spends no attempt");
+#ifdef YMCC_VENDOR_QUEUE_TICKET
+            assertQueue(oemVendorStackShieldRuntimeSnapshot()["operationStage"]=="queue-refused","queue refusal has a precise snapshot reason");
+#endif
+            queueFail=false;oemVendorStackSchedule();drain();assertQueue(stops==3,"existing refresh handles a refused publication");
+            reset();seed();oemVendorStackRequest(true);oemVendorStackRequest(false);drain();
+            assertQueue(stops==0 && mutationCount==0 && !g_oemVendorStackOpQueued,"latest OFF beats previously queued ON");
+            reset();seed();oemVendorStackRequest(true);g_exitRequested=true;drain();
+            assertQueue(stops==0 && mutationCount==0 && !g_oemVendorStackOpQueued,"exit refuses original-action mutation and settles pending work");
+            reset();seed();oemVendorStackRequest(true);onPersist=[]{oemVendorStackRequest(false);};drain();
+            assertQueue(jobs.empty()&&!g_oemVendorStackOpQueued&&g_oemVendorServiceLeases.empty(),"new return owner survives destruction of older settled ticket");
+            assertQueue(stops==0 && mutationCount==0,"new OFF during persisted preparation prevents old ON writes");
+            for(const auto& model:std::vector<std::pair<YmccFamily,const char*>>{
+                    {YmccFamily::AsusRogAlly,"ROGAlly"},{YmccFamily::AsusRogAllyX,"XboxROGAllyX"},
+                    {YmccFamily::AsusRogAllyClassic,"ROGAlly"},{YmccFamily::AsusRogAllyXClassic,"ROGAllyX"}}) {
+                reset();g_machineIdentity.family=model.first;g_machineIdentity.deviceClass=std::string("HandheldCompanion.Devices.")+model.second;seed();
+                oemVendorStackRequest(true);
+                const auto pending=oemVendorStackShieldRuntimeSnapshot();
+                assertQueue(pending["pending"]==true && stops==0,"family request alone never proves original-action suppression");
+                drain();const auto observed=oemVendorStackShieldRuntimeSnapshot();
+                assertQueue(observed["lastOutcomeOk"]==true && stops==3,"four reviewed ROG identities use the existing native consumer");
+#ifdef YMCC_VENDOR_QUEUE_TICKET
+                assertQueue(observed["externalDefaultActionSuppressed"]=="NOT_CONFIRMED","service readback never becomes external default-action proof");
+                assertQueue(observed["operationStage"]=="settled","completed queue stage is observable");
+#endif
+                const auto writes=mutationCount;for(int n=0;n<32;++n)oemVendorStackShieldRuntimeSnapshot();
+                assertQueue(writes==mutationCount,"read-only stage queries cannot invoke OEM operations");
+                oemVendorStackRequest(false);drain();assertQueue(starts==3&&g_oemVendorServiceLeases.empty(),"exact original service state is restored for each ROG identity");
+            }
+            reset();seed();queueDiagnosticThrows=true;oemVendorStackRequest(true);drain();queueDiagnosticThrows=false;
+            assertQueue(stops==3 && g_oemVendorStackAttempts==1 && !g_oemVendorStackOpQueued,"new diagnostic failures cannot change work or wedge its owner");
+            // Observe the real service boundaries without changing default-action proof.
+            reset();seed();oemVendorStackRequest(true);drain();
+            unsigned stopBegins=0, stopReturns=0;
+            for(const auto& row:logs) if(row.value("call","")=="ControlService:STOP") {
+                assertQueue(row["executionEpoch"]==g_oemVendorStackRequested && row["epochBound"]==true,
+                    "service trace is bound to the executing intent");
+                assertQueue(row["target"].is_string() && !row["target"].get<std::string>().empty(),
+                    "service trace names the existing declared target");
+                if(row["state"]=="io-call-begin")++stopBegins;
+                if(row["state"]=="io-call-return")++stopReturns;
+            }
+            assertQueue(stopBegins==3 && stopReturns==3 && stops==3,
+                "each existing service stop has one begin and return with no extra operation");
+            oemVendorStackRequest(false);drain();
+            assertQueue(g_oemVendorStackIoTraceEpoch==0 && starts==3 && g_oemVendorServiceLeases.empty(),
+                "diagnostic context returns while original service leases restore");
+            reset();queueDiagnosticClobbersError=true;
+            unsigned invocations=0;bool sawIncoming=false;
+            SetLastError(ERROR_REVISION_MISMATCH);
+            const bool returned=oemVendorStackIoCall("fixture","failure",L"declared-target",[&] {
+                ++invocations;sawIncoming=GetLastError()==ERROR_REVISION_MISMATCH;
+                SetLastError(ERROR_ACCESS_DENIED);return false;
+            });
+            assertQueue(!returned && invocations==1 && sawIncoming && GetLastError()==ERROR_ACCESS_DENIED,
+                "diagnostics preserve incoming and returned last-error and invoke once");
+            bool caught=false;queueDiagnosticThrows=true;
+            try { OemVendorStackIoTraceScope trace(91);
+                oemVendorStackIoCall("fixture","exception",L"declared-target",[&]() -> bool {
+                    ++invocations;SetLastError(ERROR_ACCESS_DENIED);throw std::runtime_error("original-operation");
+                });
+            } catch(const std::runtime_error& error) { caught=std::string(error.what())=="original-operation"; }
+            queueDiagnosticThrows=false;queueDiagnosticClobbersError=false;
+            assertQueue(caught && invocations==2 && GetLastError()==ERROR_ACCESS_DENIED && g_oemVendorStackIoTraceEpoch==0,
+                "throwing diagnostics cannot swallow or duplicate the operation exception");
+            completed.push_back("controls");
+        }
+    } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';}
+    const bool complete=completed.size()==(selected=="all"?3:selected=="tail"?2:1);
+    json result={{"selection",selected},{"completed",completed},{"checks",cases},{"failures",failed},
+        {"pass",failed==0&&complete},{"defaultSuiteExecuted",false},{"realOemActions",0},
+        {"scope","actual vendor queue/lifetime consumer with original in-memory SCM/task/process/serial/file leaves"}};
+    std::ofstream("queue-lifecycle-result.json",std::ios::binary)<<result.dump(2);
+    std::cout<<result.dump()<<'\n';return result["pass"].get<bool>()?0:1;
+}
+
 int main(int argc,char** argv){
+ if(argc>1 && std::string(argv[1])=="--queue-lifecycle") return queueLifecycleCases(argc>2?argv[2]:"");
  // Recording is a third, temporary owner of the existing reversible lease.
  for (const auto family : {YmccFamily::AsusRogAlly, YmccFamily::AsusRogAllyX, YmccFamily::AsusRogAllyClassic,
         YmccFamily::AsusRogAllyXClassic, YmccFamily::LenovoLegionGo, YmccFamily::MsiClaw, YmccFamily::ZotacGamingZone}) {
   reset();g_machineIdentity.family=family;seed();
   if(family==YmccFamily::AsusRogAllyX)g_machineIdentity.deviceClass="HandheldCompanion.Devices.XboxROGAllyX";
   if(family==YmccFamily::MsiClaw){tasks[L"MSI_Center_M_Server"]={};tasks[L"MSI_Center_M_Updater"]={};}
-  oemVendorStackRecordingRequest(true);check(g_oemVendorRecordingWanted&&g_oemVendorStackWanted&&!g_oemVendorShortcutWanted,"recording owns takeover without a saved rule on every supported family");drain();
+     if(family==YmccFamily::AsusRogAlly||family==YmccFamily::AsusRogAllyX||family==YmccFamily::AsusRogAllyClassic||family==YmccFamily::AsusRogAllyXClassic){
+    oemVendorStackRecordingRequest(true);drain();
+    check(!g_oemVendorRecordingWanted&&!g_oemVendorStackWanted&&mutationCount==0,"ROG recording preserves the official frontend services");
+    oemVendorStackRecordingRequest(false);drain();continue;
+   }
+   oemVendorStackRecordingRequest(true);check(g_oemVendorRecordingWanted&&g_oemVendorStackWanted&&!g_oemVendorShortcutWanted,"recording owns takeover without a saved rule on every supported family");drain();
   check(oemVendorStackRecordingSnapshot()["applied"]==true,"recording preparation uses the actual reversible vendor lease");
   oemVendorStackRequest(true);drain();oemVendorStackRecordingRequest(false);drain();check(g_oemVendorStackWanted&&g_oemVendorShortcutWanted&&!g_oemVendorRecordingWanted,"ending recording does not restore a saved-rule-owned takeover");
   oemVendorStackRequest(false);drain();check(!g_oemVendorStackWanted,"last owner releases temporary takeover");for(const auto& item:services)check(item.second.state==SERVICE_RUNNING&&item.second.type==SERVICE_AUTO_START,"recording restores original service state");
  }
- reset();seed();scmFail=true;oemVendorStackRecordingRequest(true);drain();check(g_oemVendorRecordingWanted&&oemVendorStackRecordingSnapshot()["applied"]==false,"failed vendor preparation retains the recording request for fallback");oemVendorStackRecordingRequest(false);drain();check(!g_oemVendorRecordingWanted,"failed preparation still releases the recording owner");
+ reset();g_machineIdentity.family=YmccFamily::LenovoLegionGo;seed();scmFail=true;oemVendorStackRecordingRequest(true);drain();check(g_oemVendorRecordingWanted&&oemVendorStackRecordingSnapshot()["applied"]==false,"failed vendor preparation retains the recording request for fallback");oemVendorStackRecordingRequest(false);drain();check(!g_oemVendorRecordingWanted,"failed preparation still releases the recording owner");
  reset();g_machineIdentity.family=YmccFamily::Unknown;g_machineIdentity.deviceClass="unknown";oemVendorStackRecordingRequest(true);check(!g_oemVendorRecordingWanted&&oemVendorStackRecordingSnapshot()["applied"]==false,"unsupported vendor takeover is explicit and does not invent success");
  reset();g_machineIdentity.family=YmccFamily::MsiClaw;seed();tasks[L"MSI_Center_M_Server"]={};tasks[L"MSI_Center_M_Updater"]={};oemVendorStackShieldRequest(true);drain();oemVendorStackRecordingRequest(true);drain();oemVendorStackRecordingRequest(false);drain();check(g_oemVendorShieldWanted&&g_oemVendorStackWanted,"ending recording preserves the independent MSI controller-only shield");oemVendorStackRestore("recording-fixture-exit");check(!g_oemVendorRecordingWanted&&!g_oemVendorStackWanted,"exit clears every temporary recording owner");
 

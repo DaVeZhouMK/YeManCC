@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "originalScript": {
     "path": "tools/sleep_game_pause_selftest.py",
-    "sha256": "b5c0c63d62e7d9b7fdfcd277cd9f03b56ba9927f9547dea9a300dbc7c1955007",
-    "priorReviewedSha256": "886cf55b4ef5221245c1b9c427023627f48f61d65e6e9eccb47e37acccf4e09a",
+    "sha256": "e53e7010bf5a19530f28fa40e1889c89082c60cee33cdebdcc1625a3ec11d17b",
+    "priorReviewedSha256": "f6d27eda0fbdd13504fad37b010b853e9d8e3b4eabc3926d7a6a1fbc67ae7b46",
     "priorReviewedEventContractSha256": "79cca43d2a39f455fea9635321a8a5738d235f531cfa414225eb14b729620808"
   },
   "productSources": [
@@ -16,7 +16,48 @@
     "native/msi_visibility_wake_runtime.h",
     "native/msi_visibility_wake_diagnostics.h",
     "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
-    "native/sleep_request_fallback.h"
+    "native/sleep_request_fallback.h",
+    "native/wake_game_recovery.h",
+    "native/sleep_cancel_ready.h",
+    "native/sleep_power_dispatch.h",
+    "native/sleep_power_state.h",
+    "native/sleep_power_observation.h",
+    "native/input_host_shared_power.h",
+    "native/sleep_resume_classification_native.inc",
+    "native/sleep_timeout_policy.h",
+    "native/sleep_timeout_native.inc",
+    "native/sleep_kernel_cycle.h",
+    "tools/fixtures/sleep_non_user_wake/abort_cancel.py",
+    "tools/fixtures/sleep_non_user_wake/abort_cancel_ports.inc",
+    "tools/fixtures/sleep_non_user_wake/pause_current_power_ports.py",
+    "native/sleep_returned_pause_native.inc",
+    "tools/fixtures/sleep_non_user_wake/returned_public_dispatch.cpp",
+    "tools/fixtures/sleep_non_user_wake/queue_recovery.py",
+    "tools/fixtures/sleep_non_user_wake/pause_completion.py",
+    "tools/fixtures/sleep_non_user_wake/retained_delivery.py",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-retained-delivery.json",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-review.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/run.mjs",
+    "tools/fixtures/sleep_non_user_wake/broadcast_consumers.py",
+    "native/log_frequency_policy.h",
+    "native/sleep_fact_log_record.h",
+    "native/sensor_thread_mailbox.h",
+    "native/touch_feedback_lease.h",
+    "native/touch_haptic_dispatch.h",
+    "native/sleep_static_wake_schedule_native.inc",
+    "native/battery_charge_client.h",
+    "native/battery_managed_runtime.h",
+    "native/sleep_static_wake_schedule.h",
+    "tools/fixtures/sleep_residency/static_wake_schedule_admission.py",
+    "tools/fixtures/sleep_residency/static_wake_schedule_harness.inc",
+    "tools/sleep_residency_evidence_selftest.py",
+    "tools/ymcc_sim/global/sleep-fixtures/residency-entry.mjs",
+    "tools/fixtures/sleep_residency/static_wake_pool_harness.inc",
+    "tools/fixtures/sleep_residency/static_wake_pool_exit_harness.inc",
+    "tools/fixtures/sleep_residency/static_wake_pool_crt_harness.inc",
+    "native/input_host_diagnostic_dispatch.h",
+    "native/input_host_diagnostic_runtime.h"
   ],
   "sharedLeaves": [
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
@@ -41,7 +82,38 @@
     "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context.mjs",
     "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context.h.in",
     "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context-review.json",
-    "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context.test.mjs"
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context.test.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-review.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-s4.json",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/worker.mjs",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context-current.json",
+    "tools/sleep_wake_resume_selftest.py",
+    "tools/sleep_recovery_api_selftest.py",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-source-successor.json",
+    "tools/sleep_game_pause_selftest.py",
+    "native/main.cpp",
+    "native/sleep_resume_classification_native.inc",
+    "native/sleep_static_wake_schedule_native.inc",
+    "tools/fixtures/sleep_residency/static_wake_schedule_admission.py",
+    "tools/fixtures/sleep_residency/static_wake_schedule_harness.inc",
+    "tools/sleep_residency_evidence_selftest.py",
+    "tools/ymcc_sim/global/sleep-fixtures/residency-entry.mjs",
+    "native/input_host_diagnostic_runtime.h",
+    "tools/steam_original_recovery_dual_route_selftest.py",
+    "native/steam_original_recovery_runtime.h",
+    "native/log_snapshot_state.h",
+    "native/steam_command_coordinator.h",
+    "native/steam_original_recovery_engine.cpp",
+    "native/steam_original_recovery_engine.h",
+    "native/msi_native_foreground_isolation_runtime.h",
+    "native/wake_game_recovery.h",
+    "tools/steam_original_recovery_dual_route_fixture.cpp.in",
+    "tools/fixtures/sleep_non_user_wake/resume_classification.py",
+    "tools/fixtures/sleep_non_user_wake/resume_classification_cases.inc",
+    "native/sleep_timeout_native.inc",
+    "native/sleep_kernel_cycle.h",
+    "tools/sleep-steam-export-guard.ps1",
+    "tools/sleep_steam_only_selftest.py"
   ],
   "privateFault": {
     "path": "native/main.cpp",
@@ -63,13 +135,19 @@
     "systemSleep": false,
     "portableGuard": "No windows.h; original explicit memory HANDLE/OpenProcess functions retained. Startup PE import parser rejects real external process/power/network imports, compile macros reject absent external ports.",
     "additionalPureMainFunctions": 1,
-    "additionalPureHeaderFunctions": 2,
+    "additionalPureHeaderFunctions": 3,
     "originalFamilyExpectationsPreserved": true,
     "addedDesktopCapabilityTests": 4,
-    "totalPassGroups": 28,
+    "totalPassGroups": 43,
     "checkedReadHelpersExtractedVerbatim": 2,
     "memoryMarkerBirthIndependentOfCurrentProcessBirth": true,
-    "typedMarkerFilePortsOnlyInMemory": true
+    "typedMarkerFilePortsOnlyInMemory": true,
+    "pauseReceiptChecks": 10,
+    "resumeDrainActualFunctions": [
+      "sgDrainProcessSuspendCountIfCurrent",
+      "sgDrainProcessSuspendCount"
+    ],
+    "realNtResumePort": "counted memory fnNtResume only"
   },
   "originalCompatibilityRisks": [
     "new sleepRecoveryAutoCloseSuspendEpisode/oemVendorStackShieldWakeBegin/currentFanPowerGeneration contexts missing",
@@ -82,19 +160,19 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
-      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+      "sha256": "7e5600fdd9a0e396a4d75b96f4ed4f6eaad178d12eae74a139e9aa9aafc55738"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
-      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+      "sha256": "de5026dfc3c6207a92b979f1f43d3b7c8cdcc0764f8a77c81c56ed69cca5173b"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
-      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+      "sha256": "30ea844250b2735c55d26ea582bf9d4318181d181dc2d260908dff8e2bdb417d"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
-      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+      "sha256": "920faaf9193486e91a82a71c22f27c11e6696f7257b4e250f6fec0836ec51728"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
@@ -102,27 +180,27 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
-      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+      "sha256": "4a01815cd4bf7aaca1b9624d998c5121d273077a9bee75aae1101f4c5bdf440f"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
-      "sha256": "4a0fdff6a9b1507023ca7e2fc5963a113346fe7f607d9dfdd9caa39780061eb3"
+      "sha256": "dd666ee2db082b2df9f9be93e220e1ec2febe46a827f7fa92e8025009746ca4c"
     },
     {
       "path": "tools/ymcc_sim/global/host-process.ps1",
-      "sha256": "5b531a161afb33cd0596b92444a38caabb9fe2e23b80c981516f71c926a6c3bb"
+      "sha256": "0779bc14096e2e8cdcc7046cf3072bfdd36fb4ed8d1c01f969b8babb2759efdb"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
-      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+      "sha256": "b82c1b62fa2ed9bfea3ae5e7170d921ea9d3c626c6db759df94a6805113f6192"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
-      "sha256": "39aa4ead41e3f519eb3eae18e03d744409ae5da4d2522039baef86378d69afaa"
+      "sha256": "15d5bc0ebb5b0e6791a5822abf7eeed131b7724444835a8662189b73bd67c476"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/sitecustomize.py",
-      "sha256": "8d9ee20f9d9b4c1050a4dac689106e5694099cbaa6d9871566f742cafac18813"
+      "sha256": "dfe0bc66778fb68a0d83e7e750a3bddf3337ede5719df33585bebfb7963bbc65"
     }
   ],
   "fixtureMaintenance": {
@@ -224,7 +302,7 @@
   },
   "observerContextReview": {
     "manifest": "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context-review.json",
-    "sha256": "f2a3e9f5d042bd17049e725a2998b0cd9ea046979d2fa154b6073f61318e2089",
+    "sha256": "73a748870a9fa096f4681f605b6114207049ae93fffafd854e570470802fc6dc",
     "originalGeneratorUnchanged": false,
     "originalGroups": 28,
     "originalIdentityNegativeUnchanged": true,
@@ -242,7 +320,8 @@
       "originalCaseCountUnchanged": true,
       "productChanged": false
     },
-    "powerResumeRegressionAssertionsReviewed": true
+    "powerResumeRegressionAssertionsReviewed": true,
+    "priorS4Sha256": "f2a3e9f5d042bd17049e725a2998b0cd9ea046979d2fa154b6073f61318e2089"
   },
   "corePidToolMaintenance": {
     "date": "2026-11-02",
@@ -330,5 +409,279 @@
       }
     ],
     "originalGroupsAndNegativesPreserved": true
+  },
+  "priorS4OriginalScript": {
+    "path": "tools/sleep_game_pause_selftest.py",
+    "sha256": "b5c0c63d62e7d9b7fdfcd277cd9f03b56ba9927f9547dea9a300dbc7c1955007",
+    "priorReviewedSha256": "886cf55b4ef5221245c1b9c427023627f48f61d65e6e9eccb47e37acccf4e09a",
+    "priorReviewedEventContractSha256": "79cca43d2a39f455fea9635321a8a5738d235f531cfa414225eb14b729620808"
+  },
+  "priorS4ReviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
+      "sha256": "f1e3ce0c8f4a798be007e1dfcd84ca42102114212c2d4222a9ca223e988afbf8"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "4a0fdff6a9b1507023ca7e2fc5963a113346fe7f607d9dfdd9caa39780061eb3"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "5b531a161afb33cd0596b92444a38caabb9fe2e23b80c981516f71c926a6c3bb"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "39aa4ead41e3f519eb3eae18e03d744409ae5da4d2522039baef86378d69afaa"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/sitecustomize.py",
+      "sha256": "8d9ee20f9d9b4c1050a4dac689106e5694099cbaa6d9871566f742cafac18813"
+    }
+  ],
+  "s4CompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-game-pause-consumer/current-source-review.json",
+    "sha256": "a27c3cb7401a994c17ad427df4c76e68d07b9c0531a83331c1226a93221108f6",
+    "oldIdentitiesRetained": true,
+    "sourceApproval": false
+  },
+  "cancellationSourceSuccessor": {
+    "sourceApproval": false,
+    "defaultGlobalParentPassed": false,
+    "existingOriginalScriptIdentityRetained": true,
+    "qualifiedOriginalScript": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\import-ready\\after\\tools\\sleep_game_pause_selftest.py",
+      "bytes": 62407,
+      "sha256": "968d3be9d6499a927217ac2504c0a9c2a069ce75e8de4cdbb8da4619dd904c7a"
+    },
+    "selectedOptionalArgument": "--cancel-boundary-only",
+    "positive169": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SleepCancelReady-20261115-154143\\final-cancel-r9\\RESULT.json",
+      "bytes": 127024,
+      "sha256": "358042b1ca7bcc249683f662e81e2a98c71baf9c161106f0b4fe6448d0ae64f4"
+    },
+    "finalWake7": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SleepCancelReady-20261115-154143\\wake-r7\\RESULT.json",
+      "bytes": 2756,
+      "sha256": "3eea5df6d42155f15c3d8a9528682ce35e67a0508cdafa93e0b062cfaa9679f1"
+    },
+    "legacy43": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r8.json",
+      "bytes": 1594,
+      "sha256": "3cb1d1227eeaa576420411ab2f79a698c0ca48c643e22bb854a593b8c408217c"
+    },
+    "historicalWholeSourceS4Gate": "UNCHANGED_NOT_BYPASSED"
+  },
+  "returnedPauseContinuation": {
+    "sourceApproval": false,
+    "selectedArguments": [
+      "--returned-pause-only",
+      "--returned-pause-bottom-only"
+    ],
+    "scenarios": 20,
+    "wholeDefaultParentPassed": false,
+    "steamCaptureReplayed": false,
+    "newResidentTasks": false,
+    "actualBottomSuspendFunction": true,
+    "physicalNtPort": "counted only",
+    "raw": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r19.json",
+      "bytes": 7978,
+      "sha256": "a9e3d27820a3f5edea0e2d9b31e0eb8b8f19d2433f58a1380397c7ee9f350f7c"
+    }
+  },
+  "ordinaryPauseWitness": {
+    "sourceApproval": false,
+    "selectedArguments": [
+      "--ordinary-pause-only",
+      "--ordinary-pause-case"
+    ],
+    "immutableQueueReceipt": true,
+    "actualFullBottomSuspend": true,
+    "actualDispatchHeaderChecks": 8,
+    "receiptClockScope": "process-received time; no physical power proof",
+    "original21": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r26.json",
+      "bytes": 6882,
+      "sha256": "330743f86c1c21895165a41a01792f1d4db71493c214680a74a0c29cfa0c2a1b"
+    },
+    "clockBoundary": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r34.json",
+      "bytes": 2023,
+      "sha256": "3c5489efa41731cb1ee839347c2e87b669163d3003de26a9f97e6507d78d619e"
+    },
+    "realQueueDedupBoundary": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r35.json",
+      "bytes": 2012,
+      "sha256": "3cff7466306f46e0f7a125db339a4929bce3054ea5568e31a52d97905d120038"
+    },
+    "defaultGlobalParentPassed": false,
+    "currentTicketQueueSuccessor": {
+      "sourceApproval": false,
+      "sameOriginalId": true,
+      "originalBoundaries": 22,
+      "newBoundaries": 8,
+      "totalBoundaries": 30,
+      "staleOrdinaryAndReturnedTickets": true,
+      "manualAndActualPublicResumeInputs": true,
+      "actualQueueFullPauseAndSecondTuPublicDispatch": true,
+      "currentAndLegacyDedupKept": true,
+      "sharedPublicProductWrites": 0,
+      "newResidentTasks": 0,
+      "ordinarySourceReady": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r71.json",
+        "bytes": 9173,
+        "sha256": "3588de0fcd173fb4e200e9a59b2f20c8fe6669c97df59cef9f15f621ae323487"
+      },
+      "necessaryControls": [
+        {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r72.json",
+          "bytes": 1860,
+          "sha256": "5cc1ee85efadf74d400e895cf543f8e7f0bfe1e83612563a3ca174e5197ef51c"
+        },
+        {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r73.json",
+          "bytes": 1860,
+          "sha256": "d9cae9ebb1d50cbda222261b4dcc820c515de9057683a3cacc0fbc117d3beb9b"
+        }
+      ],
+      "fullDefaultParentPassed": false
+    },
+    "queuedRecoveryOwnership": {
+      "sourceApproval": false,
+      "sameOriginalId": true,
+      "selectedArgument": "--ordinary-pause-case recovery-queue-ownership",
+      "boundaries": 17,
+      "actualOriginalRecoveryBodies": true,
+      "actualWorkerPauseFragment": true,
+      "actualPublicDispatchSecondTu": true,
+      "originalOrdinary30": true,
+      "originalReturned33": true,
+      "originalGroups43": true,
+      "headerDirectedRetirement2": true,
+      "wholeDefaultParentPassed": false,
+      "sharedHeaderWrites": 0,
+      "newResidentTasks": 0,
+      "positive": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r97.json",
+        "bytes": 7913,
+        "sha256": "e6cb5c9531db9c90277762b0e4762b9d27a8d208fb3fb2ebb7e5d337d14d2806"
+      },
+      "necessaryControls": [
+        {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r98.json",
+          "bytes": 2005,
+          "sha256": "56bbd4009f50e96ef72dc95f1b5e78d794859d6367edbff72d20c4088474259b"
+        },
+        {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r99.json",
+          "bytes": 2004,
+          "sha256": "10060ac0edc19c6a202ad5a5f42b5b6c142cafce8e1eab2b2692432cfd23dcdf"
+        }
+      ],
+      "priorFullHeaderPortCompileFailuresRetained": [
+        {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\HEADER-CLOSING-r103.json",
+          "bytes": 1131,
+          "sha256": "b7245c542351bd27cfe7b7cbd39c4a9637ed09b6ec64e4127a18fd798cbce558"
+        },
+        {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\HEADER-CLOSING-r104.json",
+          "bytes": 1134,
+          "sha256": "5ea719c277a939ff0a61bdd15e1257a957a4599ac702f820a060ade291898386"
+        }
+      ]
+    },
+    "pauseCompletionOwnership": {
+      "sourceApproval": false,
+      "sameOriginalId": true,
+      "selectedArgument": "--ordinary-pause-case pause-completion-ownership",
+      "boundaries": 44,
+      "entireOriginalSuspendBranch": true,
+      "wholeWorkLoopExecuted": false,
+      "callbackAfterPauseAndDuringSkippedJournal": true,
+      "actualOriginalUiAbortAfterNtAccepted": true,
+      "exactIssuedLeaseRetainedAndReturnedOnce": true,
+      "existingDeliveryAcknowledgementOnly": true,
+      "publicHeadersWritten": false,
+      "newResidentTasks": 0,
+      "positive": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r113.json",
+        "bytes": 19865,
+        "sha256": "678f6e94b257870105699ab7b70ed92437d13ca5b9d443c7a439bc45ade21eab"
+      },
+      "necessaryControls": [
+        {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r114.json",
+          "bytes": 2055,
+          "sha256": "bb69d5276c53b4136ea7f3c5d711660dd9b332ebeff566dedaa10e06102abd7f"
+        },
+        {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r115.json",
+          "bytes": 2055,
+          "sha256": "be7c79e8e1b89005cb80794f5ad15fe776ef8ab22d0c4cfbda3a6c40a8ce94c4"
+        }
+      ],
+      "originalOrdinary30": true,
+      "originalReturned33": true,
+      "original43Receipt10": true,
+      "originalRecovery17": true,
+      "timerWaitR15RemainsRejected": true,
+      "defaultWholeParentPassed": false
+    }
+  },
+  "returnedPublicResumeWitness": {
+    "sourceApproval": false,
+    "sameOriginalId": true,
+    "selectedArgument": "--returned-pause-bottom-only",
+    "originalReturnedCases": 20,
+    "addedPublicBoundaries": 13,
+    "completePublicDispatchInSecondTu": true,
+    "publicProductHeadersChanged": false,
+    "noGlobalParentApproval": true,
+    "positive": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\LEGACY-CLOSING-r41.json",
+      "bytes": 14471,
+      "sha256": "e149d3b8b95dbbc8368705d8e10117eeb28f559911ac6e4de69e7fc9e43f70f4"
+    }
+  },
+  "retainedDeliveryCompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-retained-delivery.json",
+    "sha256": "bcad13f0261ac1c4473be5e2a583a9432333e9c2a7097b9521be963a873546a8"
+  },
+  "observerContextCompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context-current.json",
+    "sha256": "0263bb3bd398c969564588d3580439f7f36041f83804d31eb48b528278603a0e"
+  },
+  "sourceSuccessorCompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-source-successor.json",
+    "sha256": "fa1d70309e12dab3ceb441c1ecce3678b82ac68310161ed479fe980dfb2d20d0"
   }
 }

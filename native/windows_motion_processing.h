@@ -4,10 +4,28 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#if defined(_M_X64) || defined(__SSE2__)
+#include <emmintrin.h>
+#endif
 namespace ymcc::sensors::processing {
 struct Recipe {std::string deviceClass,selector,gyro,accel,digest;bool bound=false;};
 inline bool sameId(const std::string& a,const std::string& b) noexcept {
- if(a.size()!=b.size())return false;for(std::size_t i=0;i<a.size();++i){const auto upper=[](unsigned char c){return c>='a'&&c<='z'?c-'a'+'A':c;};if(upper(a[i])!=upper(b[i]))return false;}return true;
+ const std::size_t n=a.size();if(n!=b.size())return false;std::size_t i=0;
+#if defined(_M_X64) || defined(__SSE2__)
+ if(n>=16){
+  const auto lower=_mm_set1_epi8('a'-1),upper=_mm_set1_epi8('z'+1),asciiCase=_mm_set1_epi8(0x20);
+  for(;n-i>=16;i+=16){
+   const auto l=_mm_loadu_si128(reinterpret_cast<const __m128i*>(a.data()+i));
+   const auto r=_mm_loadu_si128(reinterpret_cast<const __m128i*>(b.data()+i));
+   const auto lc=_mm_and_si128(_mm_cmpgt_epi8(l,lower),_mm_cmpgt_epi8(upper,l));
+   const auto rc=_mm_and_si128(_mm_cmpgt_epi8(r,lower),_mm_cmpgt_epi8(upper,r));
+   const auto lu=_mm_xor_si128(l,_mm_and_si128(lc,asciiCase));
+   const auto ru=_mm_xor_si128(r,_mm_and_si128(rc,asciiCase));
+   if(_mm_movemask_epi8(_mm_cmpeq_epi8(lu,ru))!=0xffff)return false;
+  }
+ }
+#endif
+ for(;i<n;++i){const auto upper=[](unsigned char c){return c>='a'&&c<='z'?c-'a'+'A':c;};if(upper(a[i])!=upper(b[i]))return false;}return true;
 }
 struct Metadata {std::string gyroId,accelId,gyroApi,accelApi;bool gyroLegacy=false,accelLegacy=false;};
 struct Identity {

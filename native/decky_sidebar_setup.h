@@ -105,7 +105,7 @@ inline std::string inspectManagedPackage(const std::filesystem::path& home,const
     try{
         for(const auto& entry:manifest["files"]){
             const auto name=entry.at("path").get<std::string>();
-            const auto target=home/std::filesystem::u8path(name);
+            const auto target=home/ymcc::deckyresources::utf8Path(name);
             if(!safeManagedPath(target))return "resource-unsafe-path";
             if(!std::filesystem::is_regular_file(target)||std::filesystem::file_size(target)!=entry["bytes"].get<std::uintmax_t>())return "resource-package-mismatch";
             const auto actual=name=="PluginLoader_noconsole.exe"?result.value("loaderObservedSha256",std::string{}):digest(target.wstring());
@@ -188,7 +188,10 @@ inline Json prepare(const std::filesystem::path& steam, const std::filesystem::p
         if(error==ERROR_FILE_EXISTS||error==ERROR_ALREADY_EXISTS)return withMaintenance(readEnvironment());
         result["reason"]=error==ERROR_ACCESS_DENIED?"steam-debug-access-denied":"steam-debug-create-failed";result["error"]=error;return result;
     }
-    CloseHandle(file);result=withMaintenance(inspect(steam,home,digest,bundledManifest));result["createdSteamDebugMarker"]=true;
+    // Final verification has the same owner as the initial read. In isolated
+    // preparation it must stay in that worker; a newly created debug marker
+    // cannot move resource hashing back onto the parent Runtime/UI thread.
+    CloseHandle(file);result=withMaintenance(readEnvironment());result["createdSteamDebugMarker"]=true;
     if(mayPrepare&&!mayPrepare()){result["ready"]=false;result["reason"]="preparation-cancelled";return result;}
     if(steamRunning){result["ready"]=false;result["reason"]="steam-restart-required";}
     return result;

@@ -1,10 +1,203 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$ValidationRoot,
-  [string]$OldNativeExe='', [string]$NewNativeExe='', [string]$RealProjectRoot='')
+  [string]$OldNativeExe='', [string]$NewNativeExe='', [string]$RealProjectRoot='', [switch]$ProcessLifetimeOnly,
+  [switch]$GuardSuccessorOnly,[string]$SteamGuardSuccessorReceipt='', [string]$RecoveredProducerInputs='',
+  [string]$PartialNativeGraph='', [string[]]$GuardSuccessorCases=@())
 $ErrorActionPreference='Stop'
 if (-not $RealProjectRoot) { $RealProjectRoot=Split-Path -Parent $PSScriptRoot }
 $ValidationRoot=[IO.Path]::GetFullPath($ValidationRoot)
 New-Item -ItemType Directory -Force -Path $ValidationRoot | Out-Null
+if($GuardSuccessorOnly){
+  if($ProcessLifetimeOnly -or $OldNativeExe -or $NewNativeExe -or -not $SteamGuardSuccessorReceipt -or -not $RecoveredProducerInputs){throw 'GuardSuccessorOnly requires its two explicit receipts and no other selection'}
+  if(Test-Path -LiteralPath (Join-Path $ValidationRoot 'RESULT.json')){throw 'Fresh guard-successor output required'}
+  $availableCases=@([regex]::Matches([IO.File]::ReadAllText($PSCommandPath),"(?m)^\s*GuardCase '([^']+)'")|ForEach-Object {$_.Groups[1].Value})
+  if($PSBoundParameters.ContainsKey('GuardSuccessorCases') -and ($GuardSuccessorCases.Count -eq 0 -or @($GuardSuccessorCases|Where-Object {$_ -notin $availableCases}).Count -or @($GuardSuccessorCases|Select-Object -Unique).Count -ne $GuardSuccessorCases.Count)){throw 'Unknown/empty/duplicate guard successor selection'}
+  $guardReceiptInput=$SteamGuardSuccessorReceipt
+  . (Join-Path $PSScriptRoot 'export-steam-guard-successor.ps1')
+  $approved=Read-YmccGuardPinnedJson (Get-YmccGuardPin $guardReceiptInput) (Get-YmccSteamGuardSuccessorPolicy).receipt
+  $product=$approved.fixedProductRoot;$work=[IO.Path]::GetFullPath((Join-Path $product '../..'))
+  $rows=[Collections.Generic.List[object]]::new()
+  function GuardCase([string]$Name,[string]$ErrorCode,[scriptblock]$Body){
+    if($GuardSuccessorCases.Count -and $Name -notin $GuardSuccessorCases){return}
+    $actual=$null
+    try{& $Body|Out-Null}catch{$actual=$_.Exception.Message}
+    $passed=if($ErrorCode){$actual -ceq $ErrorCode}else{$null -eq $actual}
+    $rows.Add([ordered]@{name=$Name;expectedError=$ErrorCode;error=$actual;passed=$passed})
+  }
+  $context=New-YmccSteamGuardSuccessorContext $guardReceiptInput $product $work
+  GuardCase 'approved receipt selects fixed product' '' {Assert-YmccSteamGuardSuccessorCurrent $context $product $work}
+  $badReceipt=Join-Path $ValidationRoot 'changed-receipt.json'
+  [IO.File]::WriteAllText($badReceipt,([IO.File]::ReadAllText($guardReceiptInput)+' '),[Text.UTF8Encoding]::new($false))
+  GuardCase 'changed explicit receipt rejected' 'EXPORT_GUARD_SUCCESSOR_NOT_APPROVED' {New-YmccSteamGuardSuccessorContext $badReceipt $product $work}
+  GuardCase 'other product root rejected' 'EXPORT_GUARD_SUCCESSOR_SCOPE_MISMATCH' {New-YmccSteamGuardSuccessorContext $guardReceiptInput (Join-Path $product 'wrong') $work}
+  GuardCase 'other workspace rejected' 'EXPORT_GUARD_SUCCESSOR_SCOPE_MISMATCH' {New-YmccSteamGuardSuccessorContext $guardReceiptInput $product (Join-Path $work 'wrong')}
+  GuardCase 'missing build verifier binding rejected' 'EXPORT_GUARD_SUCCESSOR_BUILD_BINDING_MISMATCH' {Assert-YmccSteamGuardBuildBinding $null $context}
+  GuardCase 'default consumer cannot inherit explicit binding' 'EXPORT_GUARD_SUCCESSOR_EXPLICIT_RECEIPT_REQUIRED' {Assert-YmccSteamGuardBuildBinding $context.binding $null}
+  $badBinding=$context.binding|ConvertTo-Json -Depth 10|ConvertFrom-Json;$badBinding.workspaceRoot=Join-Path $work 'wrong'
+  GuardCase 'changed build binding rejected' 'EXPORT_GUARD_SUCCESSOR_BUILD_BINDING_MISMATCH' {Assert-YmccSteamGuardBuildBinding $badBinding $context}
+  $copyRoot=Join-Path $ValidationRoot 'private-tools'
+  if(Test-Path -LiteralPath $copyRoot){throw 'Fresh private tools required'}
+  New-Item -ItemType Directory -Path $copyRoot|Out-Null
+  foreach($tool in $context.binding.tools){Copy-Item -LiteralPath $tool.path -Destination (Join-Path $copyRoot ([IO.Path]::GetFileName($tool.path)))}
+  . (Join-Path $copyRoot 'export-steam-guard-successor.ps1')
+  $privateContext=New-YmccSteamGuardSuccessorContext $guardReceiptInput $product $work
+  $toolPath=Join-Path $copyRoot 'package-release.ps1';$toolBytes=[IO.File]::ReadAllBytes($toolPath)
+  [IO.File]::AppendAllText($toolPath,"`n# drift",[Text.UTF8Encoding]::new($false))
+  GuardCase 'late verifier tool drift rejected' 'EXPORT_GUARD_SUCCESSOR_PIN_CHANGED' {Assert-YmccSteamGuardSuccessorCurrent $privateContext $product $work}
+  [IO.File]::WriteAllBytes($toolPath,$toolBytes)
+  GuardCase 'restored private tool context revalidates' '' {Assert-YmccSteamGuardSuccessorCurrent $privateContext $product $work}
+  . (Join-Path $PSScriptRoot 'export-steam-guard-successor.ps1')
+  $fakeRecovery=Join-Path $ValidationRoot 'changed-recovery.json'
+  [IO.File]::WriteAllText($fakeRecovery,([IO.File]::ReadAllText($RecoveredProducerInputs)+' '),[Text.UTF8Encoding]::new($false))
+  GuardCase 'changed producer recovery rejected before resume' 'EXPORT_GUARD_SUCCESSOR_NOT_APPROVED' {Get-YmccGuardRecoveredProducer $context $fakeRecovery}
+  $badPin=[ordered]@{path=$context.binding.guard.path;bytes=$context.binding.guard.bytes;sha256=('0'*64)}
+  GuardCase 'arbitrary replacement guard rejected' 'EXPORT_GUARD_SUCCESSOR_NOT_APPROVED' {Assert-YmccGuardPin $badPin (Get-YmccSteamGuardSuccessorPolicy).newGuard}
+  $packageScript=Join-Path $PSScriptRoot 'package-release.ps1'
+  GuardCase 'package missing explicit receipt rejects before processing' 'EXPORT_GUARD_SUCCESSOR_ORDINARY_EXPLICIT_SCOPE_REQUIRED' {& $packageScript -ProductRoot $product -WorkspaceRoot $work}
+  GuardCase 'package full acceptance cannot borrow successor' 'EXPORT_GUARD_SUCCESSOR_ORDINARY_EXPLICIT_SCOPE_REQUIRED' {& $packageScript -ProductRoot $product -WorkspaceRoot $work -SteamGuardSuccessorReceipt $guardReceiptInput -FullAcceptance}
+  GuardCase 'package wrong scope rejects before processing' 'EXPORT_GUARD_SUCCESSOR_SCOPE_MISMATCH' {& $packageScript -ProductRoot $product -WorkspaceRoot (Join-Path $work 'wrong') -SteamGuardSuccessorReceipt $guardReceiptInput}
+  . (Join-Path $PSScriptRoot 'release-export-identity.ps1') -SteamGuardSuccessorReceipt $guardReceiptInput -GuardProductRoot $product -GuardWorkspaceRoot $work
+  GuardCase 'official identity import selects actual repaired contract' '' {$c=Get-SteamSleepExportContract $product;if(-not $c){throw 'Missing actual contract'}}
+  GuardCase 'official identity reimport retains explicit binding' '' {
+    . (Join-Path $PSScriptRoot 'release-export-identity.ps1') -SteamGuardSuccessorReceipt $guardReceiptInput -GuardProductRoot $product -GuardWorkspaceRoot $work
+    Assert-ExportVerifierSuccessor $product $work $context.binding -CheckBinding
+  }
+  if($PartialNativeGraph){
+    $changedGraph=Join-Path $ValidationRoot 'changed-partial-graph.json'
+    [IO.File]::WriteAllText($changedGraph,([IO.File]::ReadAllText($PartialNativeGraph)+' '),[Text.UTF8Encoding]::new($false))
+  }else{$changedGraph=''}
+  GuardCase 'changed partial native graph rejected' 'EXPORT_GUARD_SUCCESSOR_NOT_APPROVED' {if(-not $changedGraph){throw 'PartialNativeGraph required for this selection'};Get-YmccGuardRecoveredProducer $context $RecoveredProducerInputs $changedGraph}
+  GuardCase 'deploy child missing explicit product rejects before processing' 'EXPORT_GUARD_SUCCESSOR_EXPLICIT_PRODUCT_REQUIRED' {& (Join-Path $PSScriptRoot 'deploy-installed.ps1') -SteamGuardSuccessorReceipt $guardReceiptInput}
+  GuardCase 'deploy child wrong scope rejects before processing' 'EXPORT_GUARD_SUCCESSOR_SCOPE_MISMATCH' {& (Join-Path $PSScriptRoot 'deploy-installed.ps1') -ProductRoot (Join-Path $product 'wrong') -WorkspaceRoot $work -SteamGuardSuccessorReceipt $guardReceiptInput}
+  GuardCase 'local deploy missing product rejects before transaction' 'EXPORT_GUARD_SUCCESSOR_EXPLICIT_PRODUCT_REQUIRED' {& (Join-Path $PSScriptRoot 'deploy-local-mainline.ps1') -ExpectedArchiveSha256 ('0'*64) -PreviousArchive 'unused' -PreviousArchiveSha256 ('0'*64) -EvidenceDir $ValidationRoot -SteamGuardSuccessorReceipt $guardReceiptInput}
+  GuardCase 'export workspace uses approved core evidence root' '' {if($context.binding.evidenceRoot -cne 'G:\YeManCC-Work\Testing\YMCC\Evidence'){throw 'Wrong evidence root'}}
+  $tupleSource=Join-Path $ValidationRoot 'tuple-product';$tupleComplete=Join-Path $ValidationRoot 'tuple-complete'
+  $tupleRows=@(foreach($name in @('HIDMaestroSetup.exe','HIDMaestroSetup.dll','HIDMaestroSetup.deps.json','HIDMaestroSetup.runtimeconfig.json','HIDMaestroSetup.manifest.json')){
+    $relative='PowerControl/redist/'+$name
+    foreach($root in @($tupleSource,$tupleComplete)){
+      $file=Join-Path $root $relative
+      if(Test-Path -LiteralPath $file){throw 'Fresh inert tuple required'}
+      [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($file))|Out-Null
+      [IO.File]::WriteAllText($file,('inert-'+$name),[Text.UTF8Encoding]::new($false))
+    }
+    $pin=Get-YmccGuardPin (Join-Path $tupleSource $relative)
+    [ordered]@{path=$relative;bytes=$pin.bytes;sha256=$pin.sha256}
+  })
+  GuardCase 'completed prerequisite tuple accepts exactly five inert files' '' {$tuple=Assert-YmccGuardPrerequisiteEntries $tupleRows $tupleSource $tupleComplete;if($tuple.files.Count -ne 5 -or $tuple.producerReexecuted){throw 'Wrong tuple result'}}
+  $tupleDll=Join-Path $tupleSource 'PowerControl/redist/HIDMaestroSetup.dll';$tupleDllBytes=[IO.File]::ReadAllBytes($tupleDll)
+  [IO.File]::AppendAllText($tupleDll,'changed',[Text.UTF8Encoding]::new($false))
+  GuardCase 'changed prerequisite source rejects completed tuple' 'EXPORT_GUARD_SUCCESSOR_PIN_CHANGED' {Assert-YmccGuardPrerequisiteEntries $tupleRows $tupleSource $tupleComplete}
+  [IO.File]::WriteAllBytes($tupleDll,$tupleDllBytes)
+  GuardCase 'missing prerequisite manifest entry rejects completed tuple' 'EXPORT_GUARD_PREREQUISITE_TUPLE_INCOMPLETE' {Assert-YmccGuardPrerequisiteEntries @($tupleRows|Where-Object {$_.path -notlike '*.manifest.json'}) $tupleSource $tupleComplete}
+  $failed=@($rows|Where-Object {-not $_.passed}).Count
+  if($GuardSuccessorCases.Count -and $rows.Count -ne $GuardSuccessorCases.Count){throw 'Selected guard successor cases were not executed exactly'}
+  $result=[ordered]@{status=$(if($failed){'failed'}else{'passed'});selected='guard-successor-only';requestedCases=@($GuardSuccessorCases);cases=$rows.Count;failed=$failed;results=@($rows);defaultCasesExecuted=$false;productExecuted=$false;buildTailExecuted=$false;packageProcessingExecuted=$false;deploymentExecuted=$false;fieldAcceptance=$false}
+  $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($result|ConvertTo-Json -Depth 8))
+  $stream=[IO.File]::Open((Join-Path $ValidationRoot 'RESULT.json'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+  try{$stream.Write($bytes,0,$bytes.Length)}finally{$stream.Dispose()}
+  $result|ConvertTo-Json -Depth 8
+  if($failed){exit 1};exit 0
+}
+if($ProcessLifetimeOnly) {
+  if($OldNativeExe -or $NewNativeExe){throw 'ProcessLifetimeOnly is separate from actual EXE checks'}
+  . (Join-Path $PSScriptRoot 'sleep-steam-export-guard.ps1')
+  $source=Join-Path $ValidationRoot 'lifetime-source'
+  $native=Join-Path $source 'native'
+  if((Test-Path -LiteralPath $source) -or (Test-Path -LiteralPath (Join-Path $ValidationRoot 'RESULT.json'))){throw 'Fresh process-lifetime output required'}
+  New-Item -ItemType Directory -Path $native|Out-Null
+  foreach($file in Get-ChildItem -LiteralPath (Join-Path $RealProjectRoot 'native') -File){
+    if($file.Extension -in @('.h','.cpp','.js','.json','.inc')){Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $native $file.Name)}
+  }
+  $path=Join-Path $native 'steam_game_link_runtime.h';$original=[IO.File]::ReadAllText($path)
+  $implicit='const auto tracker=tracking(client,game);'
+  $ongoingPattern='const\s+auto\s+tracker\s*=\s*tracking\s*\(\s*client\s*,\s*game\s*(?:,\s*TrackingScope::ProcessLifetime\s*(?:,\s*ymcc::steamgamefacts::TrackerGroupCapturePolicy::Capture\s*)?)?\)\s*;'
+  $ongoingMatches=[regex]::Matches($original,$ongoingPattern)
+  if($ongoingMatches.Count -ne 1){throw 'Original ongoing tracking seam changed'}
+  $ongoing=$ongoingMatches[0].Value
+  $implicitSource=$original.Replace($ongoing,$implicit)
+  $explicit=$original.Replace($ongoing,'const auto tracker=tracking(client,game,TrackingScope::ProcessLifetime);')
+  $captureCall='const auto tracker=tracking(client,game,TrackingScope::ProcessLifetime,ymcc::steamgamefacts::TrackerGroupCapturePolicy::Capture);'
+  $capture=$original.Replace($ongoing,$captureCall)
+  $currentListOngoing=if($ongoing.Contains('TrackingScope::ProcessLifetime')){$ongoing.Replace('TrackingScope::ProcessLifetime','TrackingScope::RunningListAndProcess')}else{'const auto tracker=tracking(client,game,TrackingScope::RunningListAndProcess);'}
+  $scope='TrackingScope scope=TrackingScope::ProcessLifetime'
+  $sharedRead=[regex]::Match($original,'nativeSteamGameTrackerReadFresh\(client,game,logScope(?:,&freshDiagnostic(?:,groupPolicy,requestCurrent(?:,completion)?)?)?\)')
+  $shared=$sharedRead.Success
+  $groupTracking=$shared -and $sharedRead.Value -match ',groupPolicy,requestCurrent(?:,completion)?\)$'
+  $completionTracking=$groupTracking -and $sharedRead.Value.EndsWith(',completion)')
+  $completionArgument=if($completionTracking){',completion'}else{''}
+  $inventoryBefore=if($shared){'parsed.runningList:parsed.processLifetime'}else{'trackedProcessInventory(lines,scope)'}
+  $inventoryAfter=if($shared){'parsed.runningList:parsed.runningList'}else{'trackedProcessInventory(lines,TrackingScope::RunningListAndProcess)'}
+  $bindingBefore=if($shared){'result.binding.status=selected.binding.status;'}else{"        scope);"}
+  $bindingAfter=if($shared){'result.binding.status=parsed.runningList.binding.status;'}else{"        TrackingScope::RunningListAndProcess);"}
+  $cases=@(
+    @{name='current implicit default lifetime';text=$implicitSource;accept=$true},
+    @{name='old explicit lifetime';text=$explicit;accept=$true},
+    @{name='current-list only initial reads remain independent';text=$original.Replace('tracking(client,game,TrackingScope::RunningListAndProcess','tracking(client, game, TrackingScope::RunningListAndProcess');accept=$true},
+    @{name='default lifetime removed';text=$original.Replace($scope,'TrackingScope scope=TrackingScope::RunningListAndProcess');accept=$false},
+    @{name='ongoing read changed to current-list';text=$original.Replace($ongoing,$currentListOngoing);accept=$false},
+    @{name='inventory scope forwarding removed';text=$original.Replace($inventoryBefore,$inventoryAfter);accept=$false},
+    @{name='binding scope forwarding removed';text=$original.Replace($bindingBefore,$bindingAfter);accept=$false},
+    @{name='comment cannot supply ongoing read';text=$original.Replace($ongoing,'/* const auto tracker=tracking(client,game,TrackingScope::ProcessLifetime); */');accept=$false},
+    @{name='string cannot supply ongoing read';text=$original.Replace($ongoing,'const char* ignored="tracking(client,game,TrackingScope::ProcessLifetime)";');accept=$false},
+    @{name='exact Capture ongoing lifetime accepted';text=$capture;accept=$true},
+    @{name='unknown ongoing capture policy rejected';text=$original.Replace($ongoing,$captureCall.Replace('TrackerGroupCapturePolicy::Capture','TrackerGroupCapturePolicy::Unknown'));accept=$false}
+  )
+  if($shared){
+    $cases+=@(
+      @{name='shared read scope forwarding removed';text=$original.Replace($sharedRead.Value,$sharedRead.Value.Replace('logScope','ymcc::steamgamefacts::TrackerLogScope::RunningListAndProcess'));accept=$false},
+      @{name='shared lifetime branch changed to current-list';text=$original.Replace(':ymcc::steamgamefacts::TrackerLogScope::ProcessLifetime;',':ymcc::steamgamefacts::TrackerLogScope::RunningListAndProcess;');accept=$false},
+      @{name='shared diagnostic presence is scope-neutral';text=$original.Replace($sharedRead.Value,$(if($completionTracking){'nativeSteamGameTrackerReadFresh(client,game,logScope, &freshDiagnostic, groupPolicy, requestCurrent, completion)'}elseif($groupTracking){'nativeSteamGameTrackerReadFresh(client,game,logScope, &freshDiagnostic, groupPolicy, requestCurrent)'}elseif($sharedRead.Value.Contains('freshDiagnostic')){'nativeSteamGameTrackerReadFresh(client,game,logScope)'}else{'nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic)'}));accept=$true},
+      @{name='unknown shared diagnostic argument rejected';text=$original.Replace($sharedRead.Value,'nativeSteamGameTrackerReadFresh(client,game,logScope,&otherDiagnostic)');accept=$false},
+      @{name='extra shared argument rejected';text=$original.Replace($sharedRead.Value,'nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic,otherLease)');accept=$false}
+    )
+  }
+  if($groupTracking){
+    $groupParameters=[regex]::Match($original,',\s*ymcc::steamgamefacts::TrackerGroupCapturePolicy groupPolicy=ymcc::steamgamefacts::TrackerGroupCapturePolicy::None,\s*const ymcc::steamgamefacts::TrackerOwnerCurrent& requestCurrent=\{\}(?<completionParameter>,\s*NativeSteamTrackerFreshCompletion\s*\*\s*completion\s*=\s*nullptr)?')
+    if(-not $groupParameters.Success){throw 'Group tracking parameter seam changed'}
+    $legacySignature=$original.Remove($groupParameters.Index,$groupParameters.Length).Replace($ongoing,$implicit)
+    $cases+=@(
+      @{name='legacy three argument facade remains accepted';text=$legacySignature.Replace($sharedRead.Value,'nativeSteamGameTrackerReadFresh(client,game,logScope)');accept=$true},
+      @{name='legacy four argument diagnostic remains accepted';text=$legacySignature.Replace($sharedRead.Value,'nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic)');accept=$true},
+      @{name='group parameters cannot be silently dropped';text=$original.Replace($sharedRead.Value,'nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic)');accept=$false},
+      @{name='group policy must be forwarded';text=$original.Replace($sharedRead.Value,('nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic,ymcc::steamgamefacts::TrackerGroupCapturePolicy::None,requestCurrent'+$completionArgument+')'));accept=$false},
+      @{name='request current must be forwarded';text=$original.Replace($sharedRead.Value,('nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic,groupPolicy,{}'+$completionArgument+')'));accept=$false},
+      @{name='group current order cannot change';text=$original.Replace($sharedRead.Value,('nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic,requestCurrent,groupPolicy'+$completionArgument+')'));accept=$false},
+      @{name='group capture default must remain none';text=$original.Replace('groupPolicy=ymcc::steamgamefacts::TrackerGroupCapturePolicy::None','groupPolicy=ymcc::steamgamefacts::TrackerGroupCapturePolicy::Both');accept=$false}
+    )
+  }
+  if($completionTracking){
+    $completionParameter=$groupParameters.Groups['completionParameter']
+    if(-not $completionParameter.Success){throw 'Typed completion parameter seam changed'}
+    $sixSignature=$original.Remove($completionParameter.Index,$completionParameter.Length)
+    $cases+=@(
+      @{name='legacy six argument group facade remains accepted';text=$sixSignature.Replace($sharedRead.Value,'nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic,groupPolicy,requestCurrent)');accept=$true},
+      @{name='typed completion forwarding cannot be dropped';text=$original.Replace($sharedRead.Value,'nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic,groupPolicy,requestCurrent)');accept=$false},
+      @{name='typed completion cannot be supplied without typed parameter';text=$sixSignature;accept=$false},
+      @{name='typed completion pointer type must remain exact';text=$original.Replace($completionParameter.Value,',json* completion=nullptr');accept=$false},
+      @{name='typed completion must remain optional';text=$original.Replace($completionParameter.Value,',NativeSteamTrackerFreshCompletion* completion');accept=$false},
+      @{name='typed completion must retain nullptr default';text=$original.Replace($completionParameter.Value,',NativeSteamTrackerFreshCompletion* completion=otherCompletion');accept=$false},
+      @{name='typed completion cannot be replaced with null';text=$original.Replace($sharedRead.Value,'nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic,groupPolicy,requestCurrent,nullptr)');accept=$false},
+      @{name='unknown typed completion argument rejected';text=$original.Replace($sharedRead.Value,'nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic,groupPolicy,requestCurrent,otherCompletion)');accept=$false},
+      @{name='typed completion argument order cannot change';text=$original.Replace($sharedRead.Value,'nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic,groupPolicy,completion,requestCurrent)');accept=$false},
+      @{name='eighth shared argument rejected';text=$original.Replace($sharedRead.Value,'nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic,groupPolicy,requestCurrent,completion,otherLease)');accept=$false}
+    )
+  }
+  $rows=@()
+  foreach($case in $cases){
+    if($case.text -ceq $original -and -not $case.accept){throw 'Negative mutation did not alter source'}
+    [IO.File]::WriteAllText($path,$case.text,[Text.UTF8Encoding]::new($false))
+    $accepted=$false;$errorText=$null
+    try{$contract=Get-SteamSleepExportContract $source;$accepted=$true}catch{$errorText=$_.Exception.Message}
+    $passed=if($case.accept){$accepted}else{-not $accepted -and $errorText -ceq 'EXPORT_STEAM_ORIGINAL_PROCESS_LIFETIME_MISSING'}
+    $rows+=,[ordered]@{name=$case.name;expectedAccepted=$case.accept;accepted=$accepted;passed=$passed;error=$errorText}
+  }
+  [IO.File]::WriteAllText($path,$original,[Text.UTF8Encoding]::new($false))
+  $failed=@($rows|Where-Object {-not $_.passed}).Count
+  $result=[ordered]@{status=$(if($failed){'failed'}else{'passed'});selected='process-lifetime-only';cases=$rows.Count;failed=$failed;results=$rows;defaultCasesExecuted=$false;productExecuted=$false;fieldAcceptance=$false}
+  [IO.File]::WriteAllText((Join-Path $ValidationRoot 'RESULT.json'),($result|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
+  $result|ConvertTo-Json -Depth 6
+  if($failed){exit 1};exit 0
+}
 . (Join-Path $PSScriptRoot 'release-export-identity.ps1')
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $results=[Collections.Generic.List[object]]::new()

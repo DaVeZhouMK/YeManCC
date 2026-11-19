@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "kind": "exact-public-shared-launch-successor",
+  "sourceApproval": false,
+  "defaultParentApprovalRenewed": false,
+  "originalSourceReviewFunctionSha256": "2c8cbfd4eb3532fb70a1e882ff6c7abe2153febf566951d64e917384e8109599",
+  "deltas": [
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "beforeSha256": "7e714655f8a8ab2b7537165daff816a22238ddea250abe04a516718520cb0102",
+      "afterSha256": "2b6c4d09a4f8da6b0135c887b65ff7cf9e23336f8da18e024d5720c91149fb85",
+      "edits": [
+        {
+          "beforeOffset": 35361,
+          "afterOffset": 35361,
+          "beforeBase64": "ICYgKEpvaW4tUGF0aCAkUFNIT01FICdwd3NoLmV4ZScpIC1Ob0xvZ28gLU5vUHJvZmlsZSAtTm9uSW50ZXJhY3RpdmUgLUZpbGUgJFNjcmlwdFBhdGggQHRlc3RBcmd1bWVudHM=",
+          "afterBase64": "CiAgJHNjcmlwdENoaWxkSW5mbz1bRGlhZ25vc3RpY3MuUHJvY2Vzc1N0YXJ0SW5mb106Om5ldygpCiAgJHNjcmlwdENoaWxkSW5mby5GaWxlTmFtZT1Kb2luLVBhdGggJFBTSE9NRSAncHdzaC5leGUnCiAgJHNjcmlwdENoaWxkSW5mby5Vc2VTaGVsbEV4ZWN1dGU9JGZhbHNlOyRzY3JpcHRDaGlsZEluZm8uQ3JlYXRlTm9XaW5kb3c9JHRydWUKICAkc2NyaXB0Q2hpbGRJbmZvLlJlZGlyZWN0U3RhbmRhcmRPdXRwdXQ9JHRydWU7JHNjcmlwdENoaWxkSW5mby5SZWRpcmVjdFN0YW5kYXJkRXJyb3I9JHRydWUKICAkc2NyaXB0Q2hpbGRJbmZvLlN0YW5kYXJkT3V0cHV0RW5jb2Rpbmc9W1RleHQuRW5jb2RpbmddOjpVVEY4OyRzY3JpcHRDaGlsZEluZm8uU3RhbmRhcmRFcnJvckVuY29kaW5nPVtUZXh0LkVuY29kaW5nXTo6VVRGOAogICRzY3JpcHRDaGlsZEluZm8uV29ya2luZ0RpcmVjdG9yeT0oR2V0LUxvY2F0aW9uKS5Qcm92aWRlclBhdGgKICBmb3JlYWNoKCRzY3JpcHRDaGlsZEFyZyBpbiBAKCctTm9Mb2dvJywnLU5vUHJvZmlsZScsJy1Ob25JbnRlcmFjdGl2ZScsJy1GaWxlJywkU2NyaXB0UGF0aCkrJHRlc3RBcmd1bWVudHMpeyRzY3JpcHRDaGlsZEluZm8uQXJndW1lbnRMaXN0LkFkZChbc3RyaW5nXSRzY3JpcHRDaGlsZEFyZyl9CiAgJHNjcmlwdENoaWxkUHJvY2Vzcz1bRGlhZ25vc3RpY3MuUHJvY2Vzc106OlN0YXJ0KCRzY3JpcHRDaGlsZEluZm8pCiAgdHJ5IHsKICAgJHNjcmlwdENoaWxkT3V0cHV0PSRzY3JpcHRDaGlsZFByb2Nlc3MuU3RhbmRhcmRPdXRwdXQuUmVhZFRvRW5kQXN5bmMoKTskc2NyaXB0Q2hpbGRFcnJvcj0kc2NyaXB0Q2hpbGRQcm9jZXNzLlN0YW5kYXJkRXJyb3IuUmVhZFRvRW5kQXN5bmMoKQogICAkc2NyaXB0Q2hpbGRQcm9jZXNzLldhaXRGb3JFeGl0KCkKICAgJHNjcmlwdENoaWxkRXhpdENvZGU9JHNjcmlwdENoaWxkUHJvY2Vzcy5FeGl0Q29kZQogICBbQ29uc29sZV06Ok91dC5Xcml0ZSgkc2NyaXB0Q2hpbGRPdXRwdXQuR2V0QXdhaXRlcigpLkdldFJlc3VsdCgpKTtbQ29uc29sZV06OkVycm9yLldyaXRlKCRzY3JpcHRDaGlsZEVycm9yLkdldEF3YWl0ZXIoKS5HZXRSZXN1bHQoKSkKICAgJGdsb2JhbDpMQVNURVhJVENPREU9JHNjcmlwdENoaWxkRXhpdENvZGUKICB9IGZpbmFsbHkgeyRzY3JpcHRDaGlsZFByb2Nlc3MuRGlzcG9zZSgpfQo="
+        }
+      ]
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "beforeSha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547",
+      "afterSha256": "920faaf9193486e91a82a71c22f27c11e6696f7257b4e250f6fec0836ec51728",
+      "edits": [
+        {
+          "beforeOffset": 165,
+          "afterOffset": 165,
+          "beforeBase64": "JiAkTm9kZSAkV29ya2VyICRSb290CmV4aXQgJExBU1RFWElUQ09ERQ0=",
+          "afterBase64": "JHdvcmtlck5vZGVJbmZvPVtEaWFnbm9zdGljcy5Qcm9jZXNzU3RhcnRJbmZvXTo6bmV3KCkKJHdvcmtlck5vZGVJbmZvLkZpbGVOYW1lPSROb2RlOyR3b3JrZXJOb2RlSW5mby5Vc2VTaGVsbEV4ZWN1dGU9JGZhbHNlOyR3b3JrZXJOb2RlSW5mby5DcmVhdGVOb1dpbmRvdz0kdHJ1ZQokd29ya2VyTm9kZUluZm8uUmVkaXJlY3RTdGFuZGFyZE91dHB1dD0kdHJ1ZTskd29ya2VyTm9kZUluZm8uUmVkaXJlY3RTdGFuZGFyZEVycm9yPSR0cnVlCiR3b3JrZXJOb2RlSW5mby5TdGFuZGFyZE91dHB1dEVuY29kaW5nPVtUZXh0LkVuY29kaW5nXTo6VVRGODskd29ya2VyTm9kZUluZm8uU3RhbmRhcmRFcnJvckVuY29kaW5nPVtUZXh0LkVuY29kaW5nXTo6VVRGOAokd29ya2VyTm9kZUluZm8uV29ya2luZ0RpcmVjdG9yeT0oR2V0LUxvY2F0aW9uKS5Qcm92aWRlclBhdGgKJHdvcmtlck5vZGVJbmZvLkFyZ3VtZW50TGlzdC5BZGQoJFdvcmtlcik7JHdvcmtlck5vZGVJbmZvLkFyZ3VtZW50TGlzdC5BZGQoJFJvb3QpCiR3b3JrZXJOb2RlUHJvY2Vzcz1bRGlhZ25vc3RpY3MuUHJvY2Vzc106OlN0YXJ0KCR3b3JrZXJOb2RlSW5mbykKdHJ5IHsKICR3b3JrZXJOb2RlT3V0cHV0PSR3b3JrZXJOb2RlUHJvY2Vzcy5TdGFuZGFyZE91dHB1dC5SZWFkVG9FbmRBc3luYygpOyR3b3JrZXJOb2RlRXJyb3I9JHdvcmtlck5vZGVQcm9jZXNzLlN0YW5kYXJkRXJyb3IuUmVhZFRvRW5kQXN5bmMoKQogJHdvcmtlck5vZGVQcm9jZXNzLldhaXRGb3JFeGl0KCk7JHdvcmtlck5vZGVFeGl0PSR3b3JrZXJOb2RlUHJvY2Vzcy5FeGl0Q29kZQogW0NvbnNvbGVdOjpPdXQuV3JpdGUoJHdvcmtlck5vZGVPdXRwdXQuR2V0QXdhaXRlcigpLkdldFJlc3VsdCgpKTtbQ29uc29sZV06OkVycm9yLldyaXRlKCR3b3JrZXJOb2RlRXJyb3IuR2V0QXdhaXRlcigpLkdldFJlc3VsdCgpKQp9IGZpbmFsbHkgeyR3b3JrZXJOb2RlUHJvY2Vzcy5EaXNwb3NlKCl9CmV4aXQgJHdvcmtlck5vZGVFeGl0"
+        }
+      ]
+    }
+  ],
+  "meaning": "Only actual current shared host/worker bytes reconstruct their immediately previous public bytes. Existing original script/fixture/tool/shared-leaf/source-review refusals remain authoritative; no historical identities or default parent acceptance renewed."
+}

@@ -3,6 +3,7 @@
 #include <charconv>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 #include "virtual_controller_runtime_contract.h"
 
@@ -99,3 +100,22 @@ struct Scope {
         executingPlayerStartWork=previousPlayerWork;}
 };
 } // namespace ymcc::inputHost::queuedPlayerStart
+
+
+// VC-PARTIAL-START-CLEANUP-OWNER-20261109-R1. Immutable queue provenance,
+// not a new lifecycle or recovery authority. Immediate Stop keeps its caller's
+// ownership; a delayed exception cleanup can only retire its original tuple.
+namespace ymcc::inputHost::partialStartCleanup {
+inline constexpr std::string_view prefix="fault-stop:partial-start-exception:";
+static std::string bind(std::uint64_t epoch,const std::string& run) {
+    return std::string(prefix)+std::to_string(epoch)+":"+run;
+}
+static bool current(std::string_view reason,std::uint64_t epoch,std::string_view run) noexcept {
+    if(reason.rfind(prefix,0)!=0)return true; // all other existing Stop origins
+    const auto tuple=reason.substr(prefix.size());const auto split=tuple.find(':');
+    if(split==std::string_view::npos || split==0 || split>20 || tuple.size()-split-1>128)return false;
+    std::uint64_t original=0;const auto parsed=std::from_chars(tuple.data(),tuple.data()+split,original);
+    return parsed.ec==std::errc{} && parsed.ptr==tuple.data()+split &&
+        original==epoch && tuple.substr(split+1)==run;
+}
+} // namespace ymcc::inputHost::partialStartCleanup

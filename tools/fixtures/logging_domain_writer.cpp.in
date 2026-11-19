@@ -1,0 +1,103 @@
+#define NOMINMAX
+#include <windows.h>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstring>
+#include <deque>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <vector>
+#include "json.hpp"
+#include "buffered_domain_log.h"
+#include "log_frequency_policy.h"
+#include "input_host_diagnostic_dispatch.h"
+#include "input_pipe_test_allocation_fault.h"
+using json=nlohmann::json;namespace fspath=std::filesystem;
+static bool fixtureUnknownBirth=false;
+static unsigned processTimeQueries=0,pathQueries=0,timeQueries=0;
+static BOOL domainProcessTimes(HANDLE process,LPFILETIME creation,LPFILETIME exit,LPFILETIME kernel,LPFILETIME user){
+    ++processTimeQueries;if(fixtureUnknownBirth){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}
+    return ::GetProcessTimes(process,creation,exit,kernel,user);
+}
+#define GetProcessTimes domainProcessTimes
+#include "sleep_fact_log_record.h"
+#undef GetProcessTimes
+static std::wstring root;
+static std::wstring yemancc_data_dir(){++pathQueries;return root;}
+static std::mutex g_domainLogMx;
+static ymcc::logging::BufferedDomainLog g_domainLogStreams[3];
+static std::atomic<bool> g_domainLogEnabled[2]={false,false};
+static unsigned long long kLogMaxBytes=4*1024*1024;
+static std::string nativeLifecycleTimestamp(){return "producer-time-"+std::to_string(++timeQueries);}
+static void rotateOneLogFile(const std::wstring&,unsigned long long){}
+static void appendDomainLog(const char*,const char*,const json&);
+static const std::string* inputHostCriticalDiagnosticReplayTime() noexcept;
+static const std::string* inputHostCriticalDiagnosticReplayDomainPayload() noexcept;
+static void inputHostDeferDomainDiagnostic(const char*,const char*,const json&) noexcept;
+static std::vector<std::function<void()>> fixturePosted;
+static unsigned otherSinks=0;
+static bool poolTrySubmitExisting(std::function<void()> work){fixturePosted.push_back(std::move(work));return true;}
+static void appendNativeLifecyclePrepared(const char*,const json&,bool,const std::string*){++otherSinks;}
+static void mirrorLifecycleToDomains(const char*,const json&){++otherSinks;}
+static void writeLog(const std::string&,const std::string&){++otherSinks;}
+// ACTUAL_IDENTITY
+#include "input_host_diagnostic_runtime.h"
+// ACTUAL_GATE
+// ACTUAL_PATH
+// ACTUAL_INDEX
+// ACTUAL_FLUSH
+// ACTUAL_APPEND
+static json checks=json::array();
+static void check(bool ok,const char* name){checks.push_back({{"name",name},{"pass",ok}});}
+static json read(const wchar_t* name){std::ifstream f(fspath::path(root)/name,std::ios::binary);json out=json::array();for(std::string line;std::getline(f,line);)if(!line.empty())out.push_back(json::parse(line));return out;}
+static void pump(){while(!fixturePosted.empty()){auto work=std::move(fixturePosted.front());fixturePosted.erase(fixturePosted.begin());work();}}
+int wmain(int argc,wchar_t** argv){try{
+    if(argc!=3)return 3;root=argv[1];fixtureUnknownBirth=std::wstring(argv[2])==L"unknown";
+    if(fspath::exists(root)||!fspath::create_directory(root))return 3;
+    const auto finish=[&](){flushDomainLogs(true);auto rows=read(L"gyro-motion.log");unsigned failures=0;for(const auto& q:checks)failures+=!q["pass"].get<bool>();std::cout<<json{{"checks",checks},{"failures",failures},{"processTimeQueries",processTimeQueries},{"unknownBirth",fixtureUnknownBirth},{"gyroRows",rows},{"virtualRows",read(L"virtual-gamepad.log")},{"focusRows",read(L"focus-trace.log")},{"hardwareActions",0},{"newWorkerThreads",0}}.dump(2)<<std::endl;return failures?2:0;};
+    const json payload={{"pid",17},{"hostPid",31},{"mode","off"},{"processorReady",true},{"writerPid",9},{"writerProcessCreation100ns","123"},{"writerEnvelopeSchema",8}};
+    ymcc::testing::allocationFault::failAfter(0);
+    for(unsigned i=0;i<100000;++i){appendDomainLog("gyro","gyro-status-second",payload);appendDomainLog("virtual","sample",payload);appendDomainLog("focus","sample",payload);}
+    const auto arm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(arm==0&&processTimeQueries==0&&pathQueries==0&&timeQueries==0&&fspath::is_empty(root),"300000 disabled Domain offers do no heap path timestamp or identity work");
+    g_domainLogEnabled[0]=true;const auto original=payload;appendDomainLog("gyro","gyro-status-second",payload);flushDomainLogs(false);auto first=read(L"gyro-motion.log");
+    check(first.size()==1&&first[0].value("writerEnvelopeSchema",0)==1&&first[0].contains("writerProcessCreation100ns")&&first[0]["writerProcessCreation100ns"]==ymcc::sleepfactlog::writerCreation100nsJson(),"actual ordinary Domain writer retains cached current process lifetime envelope");
+#ifdef YMCC_DOMAIN_WRITER_OLD_ONLY
+    return finish();
+#else
+    check(payload==original&&first[0]["writerPid"]==GetCurrentProcessId()&&first[0]["pid"]==17&&first[0]["hostPid"]==31,"original payload subjects and input object are preserved separately from writer");
+    check(first[0]["producerWriterPid"]==9&&first[0]["producerWriterProcessCreation100ns"]=="123"&&first[0]["producerWriterEnvelopeSchema"]==8,"reserved writer field conflicts are preserved under producer names");
+    check(processTimeQueries==1&&(fixtureUnknownBirth?first[0]["writerProcessCreation100ns"].is_null():first[0]["writerProcessCreation100ns"].is_string()),"known decimal birth and failed cached observation null stay distinct");
+    const auto beforeToggle=fixtureUnknownBirth;fixtureUnknownBirth=false;
+    for(unsigned i=0;i<8;++i)appendDomainLog("gyro","repeat",{{"n",i}});flushDomainLogs(false);
+    auto repeated=read(L"gyro-motion.log");check(processTimeQueries==1&&repeated.size()==9&&repeated.back()["writerProcessCreation100ns"]==first[0]["writerProcessCreation100ns"],"repeated enabled records never retry the original process-time observation");fixtureUnknownBirth=beforeToggle;
+    inputHostCriticalDiagnosticsStartup();const auto beforeDeferredRows=read(L"gyro-motion.log").size();const auto beforeTime=timeQueries;
+    {ymcc::inputHost::diagnostics::Scope critical;appendDomainLog("gyro","deferred-sample",payload);}
+    const auto queueBefore=inputHostCriticalDiagnosticsEvidence();
+    check(queueBefore["accepted"]==1&&queueBefore["pendingRows"]==1&&fixturePosted.size()==1&&read(L"gyro-motion.log").size()==beforeDeferredRows,"actual critical producer queues encoded metadata without inline file write");
+    pump();flushDomainLogs(false);auto after=read(L"gyro-motion.log");
+    check(after.size()==beforeDeferredRows+1&&after.back()["writerEnvelopeSchema"]==1&&after.back()["writerProcessCreation100ns"]==first[0]["writerProcessCreation100ns"],"actual original Dispatcher and replay retain the producer lifetime envelope");
+    check(timeQueries==beforeTime+1&&after.back()["time"]=="producer-time-"+std::to_string(beforeTime+1)&&inputHostCriticalDiagnostics::replayTime==nullptr&&inputHostCriticalDiagnostics::replayRecord==nullptr,"encoded replay keeps original producer time and returns TLS replay pointers");
+    check(after.back()["producerWriterPid"]==9&&otherSinks==0&&inputHostCriticalDiagnosticsEvidence()["sinkReturned"]==1,"deferred Domain path preserves subject metadata and touches no other sink");
+    g_domainLogEnabled[1]=true;appendDomainLog("virtual","virtual-test",payload);appendDomainLog("focus","focus-test",payload);flushDomainLogs(false);
+    check(read(L"virtual-gamepad.log").size()==1&&read(L"focus-trace.log").size()==1&&read(L"virtual-gamepad.log")[0]["writerEnvelopeSchema"]==1&&read(L"focus-trace.log")[0]["writerEnvelopeSchema"]==1,"all three existing Domain files use the same writer envelope");
+    const auto unsupportedQueries=processTimeQueries;appendDomainLog("unknown","ignored",payload);appendDomainLog(nullptr,"ignored",payload);
+    check(processTimeQueries==unsupportedQueries&&fixturePosted.empty(),"unknown and null domains retain their original no-write admission");
+    const auto priorSize=read(L"gyro-motion.log").size();g_domainLogEnabled[0]=false;
+    {ymcc::inputHost::diagnostics::Scope critical;appendDomainLog("gyro","off-critical",payload);}pump();flushDomainLogs(false);
+    check(read(L"gyro-motion.log").size()==priorSize&&inputHostCriticalDiagnosticsEvidence()["accepted"]==1,"detail OFF suppresses critical Domain before queue or metadata preparation");
+    g_domainLogEnabled[0]=true;
+    {ymcc::inputHost::diagnostics::Scope critical;appendDomainLog("gyro","oversized",{{"large",std::string(65536,'x')}});}
+    check(inputHostCriticalDiagnosticsEvidence()["rejectedOversized"]==1&&inputHostCriticalDiagnosticsEvidence()["accepted"]==1,"new metadata remains charged to the original 65536-byte queue record limit");
+    appendDomainLog("gyro","array-input",json::array({1}));flushDomainLogs(false);auto normalized=read(L"gyro-motion.log");check(normalized.back()["writerEnvelopeSchema"]==1&&!normalized.back().contains("0"),"original nonobject-to-empty normalization keeps only new writer metadata");
+    inputHostCriticalDiagnosticsClose();pump();const auto finalQueue=inputHostCriticalDiagnosticsEvidence();auto* owner=inputHostCriticalDiagnostics::queue.exchange(nullptr);delete owner;
+    check(finalQueue["pendingRows"]==0&&!finalQueue["sinkActive"].get<bool>()&&fixturePosted.empty(),"original diagnostic owner closes with pending callbacks and fixture owner returned");
+    flushDomainLogs(true);check(!g_domainLogStreams[0].isOpen()&&!g_domainLogStreams[1].isOpen()&&!g_domainLogStreams[2].isOpen(),"all original Domain streams close after explicit flush");
+    return finish();
+#endif
+}catch(const std::exception& e){ymcc::testing::allocationFault::failAfter(-1);std::cerr<<e.what()<<std::endl;return 4;}}

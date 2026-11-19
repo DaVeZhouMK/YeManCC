@@ -9,17 +9,13 @@
 #include <type_traits>
 #include <utility>
 #include "input_signal_activity_evidence.h"
-#include "json.hpp"
+#include "input_signal_activity_log_scope.h"
 
 // Caller-drain diagnostics only. No recorder, lock, hook, polling, injection or
 // scan-code conversion. select/capture use bounded arrays and never allocate;
 // only toJson allocates, on the existing caller's drain path. Ops must not throw.
 namespace ymcc::inputKeyStateEvidence {
 inline constexpr std::size_t candidateCapacity = 16;
-enum Reason : std::uint32_t {
-    CallbackHeld = 1, SelfHeldAssumption = 2, RecentActivity = 4,
-    KeyboardRow = 8, MouseButtonRow = 16
-};
 struct Candidate {
     std::uint16_t virtualKey = 0;
     std::uint32_t reasonBits = 0;
@@ -192,7 +188,7 @@ template<class Ops> inline Capture capture(bool enabled, const inputActivity::Sn
     result.endTick = ops.now(); ops.setError(savedError);
     return result;
 }
-inline nlohmann::json toJson(const Capture& capture) {
+inline nlohmann::json toJson(const Capture& capture, bool includeFixedScope = true) {
     using Json = nlohmann::json;
     const auto& s = capture.selection;
     auto keys = Json::array();
@@ -224,7 +220,7 @@ inline nlohmann::json toJson(const Capture& capture) {
             {"pidReadError", f.windowPresent && !f.pidKnown ? Json(f.error) : Json(nullptr)}};
     };
     const bool foregroundKnown = capture.sampled && capture.foregroundBefore.pidKnown && capture.foregroundAfter.pidKnown;
-    return {{"schemaVersion", 1}, {"capturePhase", "existing-activity-drain"},
+    Json result = {{"schemaVersion", inputActivityLogScope::KeyStateSchema}, {"capturePhase", "existing-activity-drain"},
         {"detailedGateEnabled", capture.enabled}, {"activityEnabled", capture.activityEnabled}, {"selectionPerformed", capture.selectionPerformed}, {"sampled", capture.sampled},
         {"captureBeginTick", capture.sampled ? Json(capture.beginTick) : Json(nullptr)},
         {"captureEndTick", capture.sampled ? Json(capture.endTick) : Json(nullptr)},
@@ -250,18 +246,12 @@ inline nlohmann::json toJson(const Capture& capture) {
         {"upstreamRejectedInvalid", s.upstreamRejectedInvalid}, {"upstreamDiscardedOnReset", s.upstreamDiscardedOnReset},
         {"upstreamDiscardedHeldOnReset", s.upstreamDiscardedHeldOnReset}, {"upstreamDiscardedStaleEpoch", s.upstreamDiscardedStaleEpoch},
         {"upstreamOmissionCountsMayOverlap", true},
-        {"selectionReasonBits", {{"callbackHeld", CallbackHeld}, {"selfHeldAssumption", SelfHeldAssumption}, {"recentActivity", RecentActivity}, {"keyboardRow", KeyboardRow}, {"mouseButtonRow", MouseButtonRow}}},
-        {"selectionPolicy", "held callback/self-assumption first; descending last retained tick; ascending literal VK for ties"},
-        {"selectionScope", "retained Keyboard/MouseButton rows only; no scan-code conversion; no generic/side-key remapping"},
-        {"keyboardVirtualKeyFilter", "literal supplied VK 1..255 only; 0/out-of-range excluded"},
-        {"mouseButtonPolicy", "1=VK_LBUTTON;2=VK_RBUTTON;3=VK_MBUTTON;4=VK_XBUTTON1;5=VK_XBUTTON2;no swap inference"},
         {"mouseAsyncInterpretationVerified", false}, {"mouseLogicalButtonMappingVerified", false}, {"mouseButtonSwapObserved", false},
-        {"mouseAsyncScope", "Unverified mouse interpretation: GetAsyncKeyState button state may differ from logical button mapping; button-swap configuration is unobserved. Standard VK selection is not a physical/logical button mapping proof."},
-        {"asyncApi", "GetAsyncKeyState-high-bit-only"}, {"queueApi", "GetKeyboardState-calling-thread-message-queue"},
         {"asyncZeroIsAbsenceProof", false}, {"callingThreadQueueIsGameState", false}, {"crossKeyAtomicSnapshot", false},
         {"eventTimeStateProven", false}, {"eventEdgesCaptured", false}, {"sourceIdentityKnown", false},
         {"physicalOrInjectedOriginKnown", false}, {"gameKeyboardReceiptProven", false}, {"keyReleaseProven", false},
-        {"automaticReleaseProven", false}, {"completeKeyCoverageProven", false},
-        {"scope", "Bounded drain-time observations only. Selection reasons describe retained callbacks/self assumptions, not OS held state. Zero is not absence proof; async reads can be desktop-restricted, and queue state belongs to the calling thread. Sequential samples miss edges/omitted rows and prove no source identity, game receipt, cross-key atomicity or release."}};
+        {"automaticReleaseProven", false}, {"completeKeyCoverageProven", false}};
+    if (includeFixedScope) result.update(inputActivityLogScope::keyStateFields());
+    return result;
 }
 } // namespace ymcc::inputKeyStateEvidence

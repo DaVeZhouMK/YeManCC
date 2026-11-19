@@ -1,4 +1,6 @@
 #include <iostream>
+#include <memory>
+#include <cstdint>
 #include <fstream>
 #include <iterator>
 #include <filesystem>
@@ -34,7 +36,20 @@ static bool running = true, timer = false, copyOk = true, writeOk = true, settin
 static bool registryAccount = true;
 static DWORD activeAccount = 42, mockSteamPid = 1234;
 static std::atomic<bool> g_sdmEventPending{false};
+using ULONGLONG=unsigned long long;using LSTATUS=long;
+constexpr LSTATUS ERROR_SUCCESS=0,ERROR_NOT_READY=21;
+//__PUBLIC_IDENTITY_TYPES__
+static unsigned sharedSnapshotReads=0,sharedRefreshRequests=0;
+static std::function<std::shared_ptr<const ymcc::steamsession::IdentitySnapshot>()> fixtureIdentityRead;
+static std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> fixtureMouseIdentity(){
+ ++sharedSnapshotReads;return fixtureIdentityRead?fixtureIdentityRead():nullptr;
+}
 static struct {
+
+ using IdentitySnapshot=ymcc::steamsession::IdentitySnapshot;
+ std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> identitySnapshot()const{return fixtureMouseIdentity();}
+ void requestIdentityRefresh(){++sharedRefreshRequests;}
+ //__PUBLIC_IDENTITY_CURRENT__
  int windows = 0; std::function<void(bool)> changed; std::function<bool()> needsRetry;
  void beginWindow() { ++windows; }
  int steamPresence(){return running?1:0;}
@@ -49,6 +64,7 @@ static bool sofRegDWORD(int, const wchar_t*, const wchar_t* name, DWORD* out) {
  if(!registryAccount){*out=0;return false;}*out=activeAccount;return true;
 }
 static bool sofFindLocalConfig(std::wstring* path,std::string* account) { if(account)*account=std::to_string(activeAccount?activeAccount:42);if(path)*path=L"S:\\Steam\\localconfig.vdf";return true; }
+static bool sofFindLocalConfigAt(const std::wstring&,DWORD,std::wstring* p,std::string* a){return sofFindLocalConfig(p,a);}
 static bool sofSteamRunning() { return running; }
 static int SetTimer(int,int,int,void*) { timer=true;return 1; }
 static int KillTimer(int,int) { timer=false;return 1; }
@@ -65,6 +81,14 @@ namespace ymcc { static json effectiveGameInput(const json& j,int) { return j; }
 // Match the current effective-input accessor; this fixture models one desktop owner.
 static json effectiveRuntimeInputSettings() { return ymcc::effectiveGameInput(ymSettingsSection("input"),gameInputOwnerSession()); }
 static bool steamDesktopMouseSelected(){return false;}
+static const bool fixtureInstallSharedIdentity=[] {
+ fixtureIdentityRead=[] {
+  auto receipt=std::make_shared<ymcc::steamsession::IdentitySnapshot>();receipt->registryRoot=mockSteamRoot;receipt->rootReadError=receipt->registeredPidReadError=ERROR_SUCCESS;
+  receipt->accountReadError=registryAccount?ERROR_SUCCESS:ERROR_NOT_READY;receipt->presence=running?1:0;
+  receipt->session={mockSteamRoot,running?mockSteamPid:0,registryAccount?activeAccount:0,running?100ull:0ull};receipt->registeredPid=mockSteamPid;
+  receipt->processEpoch=1;receipt->accountEpoch=1;return receipt;
+ };return true;
+}();
 static json steamDesktopMouseRead(){throw std::runtime_error("unexpected-standard-read");}
 static json steamDesktopMouseWrite(bool,int,bool){throw std::runtime_error("unexpected-standard-write");}
 static std::string liveMode = "live-debug-unavailable";

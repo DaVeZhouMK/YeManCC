@@ -7,14 +7,20 @@ import test from 'node:test';
 import { auditFanTestResult, FAN_GLOBAL_TESTS } from './run.mjs';
 const receiptFile = process.env.YMCC_FAN_GLOBAL_RESULT;
 const unitRoot = process.env.YMCC_FAN_GLOBAL_UNIT_ROOT;
-assert(receiptFile && unitRoot && path.isAbsolute(unitRoot), 'EXPLICIT_ORIGINAL_RESULT_AND_OWNED_UNIT_ROOT_REQUIRED');
-const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
-fs.mkdirSync(unitRoot, { recursive: true });
-const original = receipt.cases[0];
-const clone = () => structuredClone(original);
+let loadedReceipt;
+function originalReceipt() {
+  assert(receiptFile, 'EXPLICIT_ORIGINAL_RESULT_REQUIRED');
+  return loadedReceipt ??= JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
+}
+function clone() {
+  const original = originalReceipt().cases?.[0];
+  assert(original, 'ORIGINAL_EXECUTED_CASE_REQUIRED');
+  return structuredClone(original);
+}
 const directory = path.dirname(fileURLToPath(import.meta.url));
 
 test('all registered original tests executed actual bundled product logic', () => {
+  const receipt = originalReceipt();
   assert.equal(receipt.status, 'PASS');
   assert.deepEqual(receipt.cases.map(row => row.id), FAN_GLOBAL_TESTS.map(row => row.id));
   assert.equal(receipt.summary.executed, FAN_GLOBAL_TESTS.length);
@@ -55,6 +61,8 @@ test('a bundle without the real lifecycle cannot stand in for execution', () => 
   assert(auditFanTestResult(row).some(item => item.code === 'REAL_PRODUCT_LIFECYCLE_NOT_BUNDLED'));
 });
 async function guardProbe(source) {
+  assert(unitRoot && path.isAbsolute(unitRoot), 'EXPLICIT_OWNED_UNIT_ROOT_REQUIRED');
+  fs.mkdirSync(unitRoot, { recursive: true });
   const caseRoot = fs.mkdtempSync(path.join(unitRoot, 'boundary-'));
   const receiptPath = path.join(caseRoot, 'runtime-boundary.json');
   const configuration = path.join(caseRoot, 'configuration.json');

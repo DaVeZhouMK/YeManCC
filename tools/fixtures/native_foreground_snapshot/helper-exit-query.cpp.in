@@ -1,0 +1,85 @@
+#include <iostream>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
+#include "json.hpp"
+using json=nlohmann::json;
+using DWORD=unsigned long;using BOOL=int;using HANDLE=void*;
+constexpr DWORD ERROR_SUCCESS=0,WAIT_OBJECT_0=0,WAIT_TIMEOUT=258;
+constexpr BOOL FALSE=0,TRUE=1;
+struct InertWriter {
+ struct Attempt{std::string attemptId;};
+ bool retire(HANDLE root){if(root)throw std::logic_error("unselected tracked writer");return true;}
+ const std::string& reason()const{throw std::logic_error("unselected writer reason");}
+ const Attempt* attempt()const{throw std::logic_error("unselected writer attempt");}
+};
+struct Lease {
+ static constexpr int kPowerDeferred=3;
+ bool unissuedWriterRetirement=false;
+ @@QUERY_STATE@@
+ DWORD helperExitCode=259,helperError=0;std::string helperFailure,retiredNativeWriterAttempt;
+ HANDLE cycleProcess=nullptr;bool cycleAccepted=false;
+ std::unique_ptr<InertWriter> nativeRefreshWriter;json nativeRefreshWriterDiagnostic;
+};
+using MsiNativeForegroundLease=Lease;
+static Lease g_msiNativeForegroundLease;
+static bool g_msiNativeForegroundCyclePending=false;
+static HANDLE childHandle=reinterpret_cast<HANDLE>(11);
+static unsigned waits=0,queries=0,errorReads=0,closes=0,settles=0,receipts=0;
+static bool queryOk=true,closeOk=true;static DWORD waitResult=WAIT_OBJECT_0,childExit=0,queryError=5;
+static json receipt;
+static DWORD WaitForSingleObject(HANDLE h,DWORD timeout){if(h!=childHandle||timeout!=0)throw std::logic_error("foreign or blocking wait");++waits;return waitResult;}
+static BOOL GetExitCodeProcess(HANDLE h,DWORD* out){if(h!=childHandle)throw std::logic_error("foreign query");++queries;if(queryOk)*out=childExit;return queryOk?TRUE:FALSE;}
+static DWORD GetLastError(){++errorReads;return queryError;}
+static BOOL CloseHandle(HANDLE h){if(h!=childHandle)throw std::logic_error("foreign close");++closes;return closeOk?TRUE:FALSE;}
+static json queryEvidence(const Lease& s){return json{@@QUERY_JSON@@};}
+static void msiNativeForegroundReceipt(const char* phase,const char* reason){++receipts;receipt={{"phase",phase},{"reason",reason},{"helperExitQuery",queryEvidence(g_msiNativeForegroundLease)["helperExitQuery"]}};}
+static void msiNativeForegroundSettleHelperDiagnosticLocked(DWORD){++settles;}
+static json nativeRefreshWriterEvidence(const InertWriter&,const char* phase){return {{"phase",phase}};}
+@@POLL@@
+static bool directQuery(){auto& s=g_msiNativeForegroundLease;struct{HANDLE hProcess;}pi{childHandle};
+ @@QUERY_DIRECT@@
+ s.helperExitCode=exitCode;return ok;
+}
+static void originalAttemptReset(){auto& s=g_msiNativeForegroundLease;@@QUERY_RESET@@}
+static void reset(){g_msiNativeForegroundLease={};g_msiNativeForegroundLease.cycleProcess=childHandle;g_msiNativeForegroundCyclePending=true;waits=queries=errorReads=closes=settles=receipts=0;queryOk=closeOk=true;waitResult=WAIT_OBJECT_0;childExit=0;queryError=5;receipt=nullptr;}
+int main(){unsigned checks=0;std::vector<std::string> names;std::string failure;
+ const auto check=[&](const char* name,bool pass){++checks;names.push_back(name);if(!pass)throw std::runtime_error(name);};
+ try{
+  reset();g_msiNativeForegroundLease.cycleProcess=nullptr;
+  check("idle poll does not invent an exit query",msiNativeForegroundPollCycleLocked()==-1&&queries==0&&!g_msiNativeForegroundLease.helperExitQueryAttempted);
+  reset();waitResult=WAIT_TIMEOUT;
+  check("pending poll keeps original handle without query",msiNativeForegroundPollCycleLocked()==-1&&waits==1&&queries==0&&closes==0&&g_msiNativeForegroundLease.cycleProcess==childHandle);
+  reset();
+  check("terminal zero keeps original success and one close",msiNativeForegroundPollCycleLocked()==0&&queries==1&&closes==1&&settles==1&&receipts==1&&!g_msiNativeForegroundLease.cycleProcess);
+  check("terminal-zero-query-provenance",receipt["helperExitQuery"]["attempted"]==true&&receipt["helperExitQuery"]["succeeded"]==true&&receipt["helperExitQuery"]["error"].is_null()&&errorReads==0);
+  reset();childExit=6;
+  check("nonzero child exit stays separate from successful query",msiNativeForegroundPollCycleLocked()==2&&g_msiNativeForegroundLease.helperExitCode==6&&receipt["helperExitQuery"]["succeeded"]==true&&errorReads==0);
+  reset();queryOk=false;
+  check("query failure keeps original fallback code and result",msiNativeForegroundPollCycleLocked()==2&&g_msiNativeForegroundLease.helperExitCode==1&&g_msiNativeForegroundLease.helperError==0&&g_msiNativeForegroundLease.helperFailure=="helper-terminal-nonzero-exit");
+  check("query failure captures its own error once",receipt["helperExitQuery"]["attempted"]==true&&receipt["helperExitQuery"]["succeeded"]==false&&receipt["helperExitQuery"]["errorDomain"]=="win32-last-error"&&receipt["helperExitQuery"]["error"]==5&&queries==1&&errorReads==1&&closes==1);
+  reset();queryOk=false;queryError=0;
+  check("failed query can report known last-error zero",msiNativeForegroundPollCycleLocked()==2&&receipt["helperExitQuery"]["succeeded"]==false&&receipt["helperExitQuery"]["error"]==0&&errorReads==1);
+  reset();closeOk=false;
+  check("close denial retains original pending handle",msiNativeForegroundPollCycleLocked()==-1&&g_msiNativeForegroundCyclePending&&g_msiNativeForegroundLease.cycleProcess==childHandle&&queries==1&&receipts==0);
+  check("query provenance survives close denial",g_msiNativeForegroundLease.helperExitQueryAttempted&&g_msiNativeForegroundLease.helperExitQuerySucceeded&&g_msiNativeForegroundLease.helperExitQueryError==0);
+  closeOk=true;
+  check("original next poll alone completes retained handle",msiNativeForegroundPollCycleLocked()==0&&queries==2&&closes==2&&receipts==1&&!g_msiNativeForegroundLease.cycleProcess);
+  reset();
+  check("original immediate query scalar keeps success",directQuery()&&g_msiNativeForegroundLease.helperExitQueryAttempted&&g_msiNativeForegroundLease.helperExitQuerySucceeded&&errorReads==0&&queries==1);
+  reset();queryOk=false;queryError=6;
+  check("original immediate query scalar captures failure",!directQuery()&&g_msiNativeForegroundLease.helperExitCode==1&&g_msiNativeForegroundLease.helperExitQueryAttempted&&!g_msiNativeForegroundLease.helperExitQuerySucceeded&&g_msiNativeForegroundLease.helperExitQueryError==6&&errorReads==1);
+  originalAttemptReset();const auto clear=queryEvidence(g_msiNativeForegroundLease)["helperExitQuery"];
+  check("original new attempt reset cannot borrow prior query",clear["attempted"]==false&&clear["succeeded"].is_null()&&clear["errorDomain"].is_null()&&clear["error"].is_null());
+  reset();g_msiNativeForegroundLease.cycleProcess=nullptr;g_msiNativeForegroundLease.helperExitCode=6;
+  g_msiNativeForegroundLease.retiredNativeWriterAttempt="previous-issued";
+  g_msiNativeForegroundLease.nativeRefreshWriter=std::make_unique<InertWriter>();
+  g_msiNativeForegroundLease.unissuedWriterRetirement=true;
+  check("retired unissued reservation cannot replace prior helper receipt",msiNativeForegroundPollCycleLocked()==Lease::kPowerDeferred&&
+      !g_msiNativeForegroundLease.nativeRefreshWriter&&!g_msiNativeForegroundCyclePending&&
+      g_msiNativeForegroundLease.retiredNativeWriterAttempt=="previous-issued"&&g_msiNativeForegroundLease.helperExitCode==6&&queries==0&&closes==0);
+ }catch(const std::exception& e){failure=e.what();}
+ std::cout<<json{{"passed",failure.empty()},{"checks",checks},{"caseNames",names},{"failure",failure},{"mode","helper-exit-query"},{"hardwareAccess",false},{"realProcessesLaunched",false},{"boundary","full original poll plus source-exact immediate scalar query/reset/receipt member;inert process and writer ports;not full Cycle or resource-owner acceptance"}}.dump()<<"\n";
+ return failure.empty()?0:1;
+}

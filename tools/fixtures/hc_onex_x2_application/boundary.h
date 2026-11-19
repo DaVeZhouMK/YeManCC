@@ -8,6 +8,7 @@
 #include <mutex>
 #include <utility>
 #include "json.hpp"
+#include "desktop_function_shortcut.h"
 using json = nlohmann::json;
 namespace appmock {
 inline ULONGLONG now=10000;

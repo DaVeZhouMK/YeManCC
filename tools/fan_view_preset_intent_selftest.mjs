@@ -49,10 +49,10 @@ async function preset(name) {
 }
 async function finishFirstOn() {
   await page.evaluate(()=>window.__chain.releaseGate());
-  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
   // Route remount removes the first input lock, without faking the control path.
   await page.evaluate(()=>window.__fanRemount());
-  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+  await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
 }
 async function waitIdle() {
   await page.waitForFunction(()=>!document.querySelector('.control-dropdown button')?.disabled);
@@ -66,7 +66,7 @@ try {
     await preset('暴力转速');
     await page.waitForFunction(()=>window.__chain.trace.some(x=>x.op==='save-aggressive'));
     await page.evaluate(()=>window.__chain.releaseGate());
-    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
     await waitIdle();
     const s=await snap(),writes=s.trace.filter(x=>x.op==='enable');
     assert.equal(writes.length,1,'pending preset must replace rather than write old balanced then new aggressive');
@@ -85,7 +85,7 @@ try {
     const s=await snap();
     assert.equal(s.trace.filter(x=>x.op==='enable').length,before,'OFF must retire the preset continuation before a new bridge apply');
     assert.equal(s.hasIntent,false,'OFF remains terminal');
-    assert.equal(s.button,'风扇未操控');
+    assert.equal(s.button,'点击启用');
     assert.equal(s.active,false);
   });
   await check('older delayed preset save cannot overwrite or resubmit the newer preset',async()=>{
@@ -106,7 +106,7 @@ try {
     await page.getByRole('button',{name:'重置转速',exact:true}).click();
     await page.waitForFunction(()=>window.__chain.trace.filter(x=>x.op==='save-balanced').length===2);
     await page.evaluate(()=>window.__chain.releaseGate());
-    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');await waitIdle();
+    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');await waitIdle();
     const writes=(await snap()).trace.filter(x=>x.op==='enable');assert.equal(writes.length,1);
     assert.deepEqual(writes[0].nodes,await page.evaluate(()=>window.__chain.curves.balanced));
   });
@@ -116,9 +116,9 @@ try {
     await page.getByRole('button',{name:'重置转速',exact:true}).click();
     await page.waitForFunction(()=>window.__chain.saveReached==='balanced');
     await page.locator('.fan-toggle').click();
-    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇未操控'&&!document.querySelector('.fan-toggle').disabled);
+    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击启用'&&!document.querySelector('.fan-toggle').disabled);
     await page.locator('.fan-toggle').click();
-    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
     const before=(await snap()).trace.filter(x=>x.op==='enable').length;
     await page.evaluate(()=>window.__chain.releaseSave());await waitIdle();
     assert.equal((await snap()).trace.filter(x=>x.op==='enable').length,before,'reset from the previous control epoch cannot write again');
@@ -132,7 +132,7 @@ try {
     assert.equal((await snap()).trace.filter(x=>x.op==='enable').length,before,'failed current save must not write hardware');
     await preset('暴力转速');
     await page.waitForFunction(n=>window.__chain.trace.filter(x=>x.op==='enable').length===n,before+1);
-    assert.equal((await snap()).button,'风扇已开启');
+    assert.equal((await snap()).button,'点击关闭');
   });
   for (const editor of ['dropdown','pointer','gamepad']) await check('node editing '+editor+' waits for persistence and a rejected save cannot write or claim success',async()=>{
     await fresh('GPDWin5');await finishFirstOn();
@@ -165,7 +165,7 @@ try {
     await page.evaluate(()=>{window.__chain.saveHold='';window.__chain.saveThrow=false;});
     await preset('暴力转速');
     await page.waitForFunction(n=>window.__chain.trace.filter(x=>x.op==='enable').length===n,before+1);
-    assert.equal((await snap()).button,'风扇已开启','save failure cannot poison the next explicit curve');
+    assert.equal((await snap()).button,'点击关闭','save failure cannot poison the next explicit curve');
   });
 
   for (const rejects of [false,true]) await check('node editing delayed '+(rejects?'rejection':'success')+' cannot overwrite a newer explicit preset',async()=>{
@@ -190,9 +190,9 @@ try {
     await page.getByRole('option',{name:'80 %',exact:true}).click();
     await page.waitForFunction(()=>window.__chain.saveReached==='balanced');
     await page.locator('.fan-toggle').click();
-    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇未操控'&&!document.querySelector('.fan-toggle').disabled);
+    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击启用'&&!document.querySelector('.fan-toggle').disabled);
     await page.locator('.fan-toggle').click();
-    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='风扇已开启');
+    await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent==='点击关闭');
     assert.equal((await snap()).trace.filter(x=>x.op==='enable').length,before+1,'explicit ON must reach the owner without waiting on the pending settings save');
     await page.evaluate(()=>window.__chain.releaseSave());await waitIdle();
     assert.equal((await snap()).trace.filter(x=>x.op==='enable').length,before+1,'late node save must not submit a second curve after OFF/ON');
@@ -212,7 +212,7 @@ try {
     await page.waitForFunction(n=>window.__chain.trace.filter(x=>x.op==='enable').length===n,before+1);
     await waitIdle();
     const s=await snap();assert.deepEqual(s.trace.filter(x=>x.op==='enable').at(-1).nodes,saved);
-    assert.equal(s.button,'风扇已开启');assert(!/保存失败/.test(s.status));
+    assert.equal(s.button,'点击关闭');assert(!/保存失败/.test(s.status));
   });
   for(const editor of ['pointer','gamepad']) await check('uncommitted '+editor+' edit retires an older saved curve continuation without writing the moving curve',async()=>{
     await fresh('GPDWin5');await finishFirstOn();
@@ -247,7 +247,7 @@ try {
     assert.notDeepEqual(saves.at(-1).nodes,firstSaved,'the newer confirmed curve differs from the older saved one');
     assert.equal(writes.length,before+1,'confirmation writes exactly once');
     assert.deepEqual(writes.at(-1).nodes,saves.at(-1).nodes,'only the newly saved curve is submitted');
-    assert.equal(done.button,'风扇已开启');
+    assert.equal(done.button,'点击关闭');
   });
   for(const editor of ['pointer','gamepad']) await check('uncommitted '+editor+' no-op at the limit does not discard the current saved curve',async()=>{
     await fresh('GPDWin5');await finishFirstOn();
@@ -294,7 +294,7 @@ try {
     const s=await snap();
     assert(!/保存失败/.test(s.status),'a retired local save error cannot cover the newer successful mirror action: '+s.status);
     assert.equal(s.hasIntent,action==='ON');
-    assert.equal(s.button,action==='ON'?'风扇已开启':'风扇未操控');
+    assert.equal(s.button,action==='ON'?'点击关闭':'点击启用');
     assert.equal(s.status,action==='ON'?'控制已开启':'风扇控制未开启');
     if(action==='ON')assert.deepEqual(s.trace.filter(x=>x.op==='enable').at(-1).nodes,await page.evaluate(()=>window.__chain.curves.aggressive));
   });
@@ -309,7 +309,7 @@ try {
     await page.waitForFunction(n=>window.__chain.trace.filter(x=>x.op==='state').length>n,stateReads,{timeout:6500});
     await waitIdle();const s=await snap();
     assert.match(s.status,/保存失败/,'existing live old curve is not proof that a failed new curve was saved');
-    assert.equal(s.button,'风扇已开启');
+    assert.equal(s.button,'点击关闭');
   });
   const sourceBinding={uiSha256:createHash('sha256').update(fs.readFileSync(process.env.YMCC_FAN_PRESET_UI_BEFORE||path.join(root,'src/views/FanView.vue'))).digest('hex'),bridgeSha256:createHash('sha256').update(fs.readFileSync(process.env.YMCC_FAN_BRIDGE_SOURCE_BEFORE||path.join(root,'src/bridge/fanHost.ts'))).digest('hex'),fixtureSha256:createHash('sha256').update(fs.readFileSync(fixture)).digest('hex'),bundleSha256:createHash('sha256').update(js).digest('hex')};
   const summary={sourceBinding,ok:cases.every(x=>x.ok)&&errors.length===0,checks:cases.length,cases,pageErrors:errors,scope:'real FanView + real FanHostLifecycle + real Vue remount; controlled settings completion and inert adapter/native/launcher, no device/CPU comparison'};

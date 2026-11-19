@@ -6,6 +6,25 @@ import {CASE_ID,MODULE,PRODUCT,FILES,FAULTS,hash,need,write,sourcePins,verifySou
 import {buildConsumer} from './build.mjs';
 import {runCases,CASE_IDS} from './browser-cases.mjs';
 import {checkUiBrowserTerminal} from '../ui-navigation/tool-inputs.mjs';
+
+function faultCaseDetected(fault,rows) {
+  if(!Array.isArray(rows)||rows.length!==1)return false;
+  const row=rows[0];
+  return row?.id===fault.caseId&&row.phase===fault.id&&row.status==='FAIL'&&row.assertionName==='AssertionError'&&
+    Array.isArray(row.pageErrors)&&row.pageErrors.length===0&&typeof row.error==='string'&&row.error.split(/\r?\n/,1)[0]===fault.expected;
+}
+
+export function routeCasesAccepted(normal,negative) {
+  const pendingCases=new Set(CASE_IDS),pendingFaults=new Map(FAULTS.map(fault=>[fault.id,fault]));
+  if(pendingCases.size!==CASE_IDS.length||pendingFaults.size!==FAULTS.length)return false;
+  if(!Array.isArray(normal)||normal.length!==pendingCases.size||!normal.every(row=>row?.status==='PASS'&&row.phase==='normal'&&pendingCases.delete(row.id)))return false;
+  return Array.isArray(negative)&&negative.length===pendingFaults.size&&negative.every(row=>{
+    const fault=pendingFaults.get(row?.id);
+    return Boolean(fault&&row.status==='FAIL'&&row.expectedFailureDetected===true&&row.designatedAssertion===fault.expected&&
+      faultCaseDetected(fault,row.cases)&&pendingFaults.delete(fault.id));
+  });
+}
+
 export async function main(args=process.argv.slice(2)) {
   const options={};for(let i=0;i<args.length;i+=2){need(['--repo-root','--evidence-dir'].includes(args[i])&&args[i+1]&&!Object.hasOwn(options,args[i]),'ARGUMENT_REJECTED');options[args[i]]=args[i+1];}
   const root=path.resolve(options['--repo-root']??path.resolve(import.meta.dirname,'../../../..'));
@@ -33,7 +52,7 @@ export async function main(args=process.argv.slice(2)) {
     deadline=setTimeout(()=>{timedOut=true;void browserServer.close();},remaining);
     normal.push(...await runCases(browser,path.join(out,'normal','consumer.js')));
     for(const fault of FAULTS){const rows=await runCases(browser,path.join(out,fault.id,'consumer.js'),{phase:fault.id,only:[fault.caseId]});
-      const detected=rows.length===1&&rows[0].status==='FAIL'&&rows[0].assertionName==='AssertionError'&&rows[0].error.includes(fault.expected);
+      const detected=faultCaseDetected(fault,rows);
       const record={id:fault.id,status:'FAIL',expectedFailureDetected:detected,sourceMutation:builds[fault.id].product,designatedAssertion:fault.expected,cases:rows};
       write(path.join(out,fault.id,'raw-failure.json'),record);negative.push(record);
       console.log('MUTANT FAIL '+fault.id+' expectedFailureDetected='+detected);
@@ -50,7 +69,7 @@ export async function main(args=process.argv.slice(2)) {
     catch(error){errors.push({phase:'postflight-identity',message:error.message});}
   }
   const elapsedMs=Date.now()-started;
-  const status=!timedOut&&elapsedMs<=30000&&!errors.length&&normal.length===CASE_IDS.length&&normal.every(row=>row.status==='PASS')&&negative.length===FAULTS.length&&negative.every(row=>row.expectedFailureDetected)?'PASS':'FAIL';
+  const status=!timedOut&&elapsedMs<=30000&&!errors.length&&routeCasesAccepted(normal,negative)?'PASS':'FAIL';
   const report={schemaVersion:1,id:CASE_ID,status,pass:status==='PASS',budgetMs:30000,elapsedMs,timedOut,
     actualConsumer:{product:PRODUCT,productSha256:sources?.find(row=>row.path===PRODUCT)?.sha256,module:MODULE,files:FILES},
     sourcePins:sources,builds,cases:normal,negativeDetections:negative,errors,browserProof,

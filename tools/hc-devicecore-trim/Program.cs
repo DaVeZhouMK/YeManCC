@@ -4,6 +4,7 @@ using HcDeviceCoreTrim;
 try
 {
     if(args.Length==0)throw new ArgumentException("Commands: inspect <dll> <json>; trim <dll> <policy.json> <upstream-manifest.json> <output-directory>; verify <original> <candidate> <policy> <output-directory>");
+    if(args[0]=="kun-color-order"&&args.Length==3) { KunColorPatch.Build(args[1],args[2]); return; }
     if(args[0]=="sdl-touchpad-guard"&&args.Length==4) { SdlTouchpadGuard.Build(args[1],args[2],args[3]); return; }
     if(args[0]=="sdl-timer-patch"&&args.Length==4) { SdlTimerPatch.Build(args[1],args[2],args[3]); return; }
     if(args[0]=="sdl-timer-audit"&&args.Length==3) { SdlTimerAudit.Run(args[1],args[2]); return; }

@@ -2,7 +2,8 @@
 import { useVirtualTargetPolicy, currentVirtualTargetPolicy } from '@/bridge/virtualTargetPolicyState';
 import { virtualTargetOptions, virtualTargetSelectionError, requireVirtualTargetAllowed, STEAM_DECK_SELF_OUTPUT_MESSAGE } from '@/bridge/virtualTargetPolicy';
 import { virtualTargetShortcutError } from '@/bridge/virtualTargetPolicy';
-import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, inject, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
+import { controllerEditorBackgroundHoldKey } from '@/bridge/backgroundPolicy';
 import Dropdown from '@/components/Dropdown.vue';
 import { preserveControllerShortcutRecords } from '@/bridge/controllerShortcutStorage';
 import { globalShortcutContainer, effectiveShortcutContainer, hasModeShortcutOverride, hasStoredGlobalShortcuts } from '@/bridge/bootModeSharedShortcuts';
@@ -55,6 +56,15 @@ import {
 export interface ControllerShortcutPresetDraft { name:string; rules:ControllerShortcutRule[]; apps?:Array<{name:string;path:string}>; }
 const props = withDefaults(defineProps<{ presetDraft?: ControllerShortcutPresetDraft; initialActionId?: string; persona?: string; teleportTo?: string | HTMLElement; layoutVariant?: 'dock' | 'inline' | 'popover'; globalActionsLayout?: 'top' | 'bottom' | 'split'; inputFlowVariant?: 'quick' | 'confirm' | 'picker'; outputActionVariant?: 'tiles' | 'steps' | 'library' }>(), { persona: '', teleportTo: 'body', layoutVariant: 'popover', globalActionsLayout: 'top', inputFlowVariant: 'quick', outputActionVariant: 'tiles' });
 const emit = defineEmits<{ (event: 'close'): void; (event:'preset-apply',rules:ControllerShortcutRule[]):void }>();
+const acquireBackgroundHold = inject(controllerEditorBackgroundHoldKey, null);
+let releaseBackgroundHold: (() => void) | null = null;
+function holdCoveredBackground(): void {
+  if (!releaseBackgroundHold) releaseBackgroundHold = acquireBackgroundHold?.() || null;
+}
+function releaseCoveredBackground(): void {
+  releaseBackgroundHold?.();
+  releaseBackgroundHold = null;
+}
 const dialogEl = ref<HTMLElement | null>(null);
 const overlayEl = ref<HTMLElement | null>(null);
 const previewStageEl = ref<HTMLElement | null>(null);
@@ -99,10 +109,13 @@ const creating = computed(()=>Boolean(newDraft.value && activeId.value===newDraf
 const creationSteps = [{id:'input',label:'录制输入'},{id:'trigger',label:'设置触发'},{id:'output',label:'选择动作'},{id:'finish',label:'完成新建'}] as const;
 const creationHelp = computed(()=>({input:inputMethod.value==='oem'?'选择专用键或背部按键，点击“使用所选按键”继续。':'点击“录制输入”，按下你要用的组合，再全部松开。',trigger:'选择按下、长按或双击，决定什么时候执行动作。',output:'点击“点击更换动作”，选择这个组合要执行的功能。',finish:'核对输入和输出，点击“完成新建”加入动作列表。'})[newStep.value]);
 const dirty = ref(false);
-const presetCloseConfirm = ref(false);
-const presetCloseCancel = ref<HTMLButtonElement | null>(null);
-const presetCloseDiscard = ref<HTMLButtonElement | null>(null);
-let presetCloseFocus: HTMLElement | null = null;
+const closeConfirm = ref(false);
+const closeCancel = ref<HTMLButtonElement | null>(null);
+const closeDialog = ref<HTMLElement | null>(null);
+const closeSaving = ref(false);
+const closeProblem = ref('');
+const hasUnsavedChanges = computed(() => dirty.value || Boolean(newDraft.value || pendingCombination.value));
+let closeFocus: HTMLElement | null = null;
 const busy = ref(false);
 const status = ref('读取规则配置…');
 const recordMode = ref<ControllerShortcutRecordMode>('controller');
@@ -146,7 +159,7 @@ async function releaseEditorWindowWidth(): Promise<void> {
 }
 defineExpose({ releaseEditorWindowWidth });
 const allActionOptions = CONTROLLER_SHORTCUT_ACTIONS.filter((action) => action.available).map((action) => ({ value: action.id, label: `${action.category} · ${action.label}` }));
-const holdTimeOptions = [100, 200, 300, 400, 500, 750, 1000, 1500, 2000, 3000, 5000].map((value) => ({ value, label: `${value} ms` }));
+const holdTimeOptions = [100, 200, 250, 300, 400, 500, 750, 1000, 1500, 2000, 3000, 5000].map((value) => ({ value, label: `${value} ms` }));
 const doubleTimeOptions = holdTimeOptions.filter(option => option.value >= 200 && option.value <= 2000);
 const repeatHoldTimeOptions = [{ value: 0, label: '立即（0 ms）' }, ...holdTimeOptions];
 const repeatIntervalOptions = [40, 60, 80, 100, 150, 200, 250, 300, 500, 750, 1000].map((value) => ({ value, label: `${value} ms` }));
@@ -230,7 +243,7 @@ function confirmOemCombination(): void {
   const inputs = pendingCombination.value;
   if (hasUnavailableOemInput(inputs)) return;
   stageCombination(inputs);
-  recordingStatus.value = '已使用所选按键；应用修改后保存。';
+  recordingStatus.value = '已使用所选按键；应用保存后保存。';
   void nextTick(() => focusEditorControl(true));
 }
 
@@ -447,7 +460,13 @@ function updateNumber(key: 'holdMs' | 'doubleWindowMs' | 'intervalMs', event: Ev
 }
 function updateTiming(key: 'holdMs' | 'doubleWindowMs' | 'intervalMs', value: string | number): void {
   const numeric = Number(value);
-  if (Number.isFinite(numeric)) updateRule({ [key]: Math.round(numeric) });
+  if (!Number.isFinite(numeric)) return;
+  const rounded = Math.round(numeric);
+  const current = activeRule.value;
+  if (key === 'holdMs' && current?.defaultKey === 'enabled' && current.origin === 'native-default' && current.actionId === 'window.summon') {
+    // An explicit 500 ms edit is not the stored 500 ms factory template.
+    updateRule({ holdMs: rounded, params: { ...current.params, explicitSummonHold: rounded === 500 } });
+  } else updateRule({ [key]: rounded });
 }
 function updateParameter(id: string, value: string | number | boolean): void {
   const current = activeRule.value;
@@ -475,9 +494,17 @@ function finishNewAction(): void {
   const problems=validateControllerShortcutRules([newDraft.value],oemKeys.value);
   if(problems.length){creationProblem.value=problems[0];newStep.value='input';return}
   const draft=newDraft.value;rules.value=[...rules.value,draft];newDraft.value=null;
-  selectRule(draft.id);touch();status.value='新动作已加入列表，点击顶部“应用修改”保存。';
+  selectRule(draft.id);touch();status.value='新动作已加入列表，点击顶部“应用保存”保存。';
 }
 function returnToInputStep(): void {if(creating.value&&!recording.value)newStep.value='input'}
+function continueToOutputStep(): void {
+  if (!creating.value || newStep.value !== 'trigger' || busy.value || recording.value) return;
+  newStep.value = 'output';
+  void nextTick(() => {
+    if (editorDisposed || !creating.value || newStep.value !== 'output') return;
+    focusGamepadElement(dialogEl.value?.querySelector<HTMLElement>('.output-summary:not(:disabled)') || null);
+  });
+}
 
 function removeRule(): void {
   const current = activeRule.value;
@@ -511,14 +538,14 @@ function restoreNativeDefaults(): void {
     !(rule.origin === 'native-default' && NATIVE_DEFAULT_SHORTCUTS.some(definition => definition.defaultKey === rule.defaultKey)))];
   selectRule(entries.find((rule) => rule.enabled)?.id || entries[0]?.id || '');
   touch();
-  status.value = '已恢复原版默认设置；点击“应用修改”后写入。';
+  status.value = '已恢复原版默认设置；点击“应用保存”后写入。';
 }
 async function load(): Promise<void> {
   if(props.presetDraft){
     rules.value=cloneRules(props.presetDraft.rules);quickAppChoices.value=(props.presetDraft.apps||[]).map(app=>({value:app.path,label:app.name}));
     gamepad.value={...gamepad.value,...Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map(definition=>[definition.defaultKey,rules.value.some(rule=>rule.origin==='native-default'&&rule.defaultKey===definition.defaultKey&&rule.enabled)]))};
     oemKeys.value=await oemKeysGet().catch(()=>OEM_EMPTY_SNAPSHOT);previewFocus.reset();newDraft.value=null;creationProblem.value='';rulePage.value=0;
-    selectRule(visibleRules.value.find(rule=>rule.enabled)?.id||visibleRules.value[0]?.id||'');explicitFields.clear();dirty.value=false;status.value='正在编辑 '+props.presetDraft.name+' 的手柄预设，应用修改后由外层保存。';return;
+    selectRule(visibleRules.value.find(rule=>rule.enabled)?.id||visibleRules.value[0]?.id||'');explicitFields.clear();dirty.value=false;status.value='正在编辑 '+props.presetDraft.name+' 的手柄预设，应用保存后由外层保存。';return;
   }
   const settings = await loadSettings();
   const sharedRules = globalShortcutContainer(settings);
@@ -542,25 +569,25 @@ async function load(): Promise<void> {
   status.value = hasStoredGlobalShortcuts(settings) && !Array.isArray(sharedRules.shortcutRules)
     ? '规则表格式异常，已保留原数据。可点击“恢复默认”修复，或新建动作。'
     : reconciled.seeded > 0
-    ? `已按默认模板生成 ${reconciled.seeded} 条默认快捷；修改后点击“应用修改”才会写入配置。`
-    : visibleRules.value.length ? '已读取规则草稿。修改后需点击“应用修改”才会写入配置。' : '尚无快捷规则。可在左侧新建动作，或在顶部恢复默认。';
+    ? `已按默认模板生成 ${reconciled.seeded} 条默认快捷；修改后点击“应用保存”才会写入配置。`
+    : visibleRules.value.length ? '已读取规则草稿。修改后需点击“应用保存”才会写入配置。' : '尚无快捷规则。可在左侧新建动作，或在顶部恢复默认。';
 }
 async function discardChanges(): Promise<void> {
   if (busy.value || recording.value || recordingBusy.value) return;
   busy.value = true;
-  try { await load(); status.value = '已取消全部未应用修改。'; }
+  try { await load(); status.value = '已取消全部未保存修改。'; }
   catch { status.value = '重新读取配置失败，未应用的修改已保留。'; }
   finally { busy.value = false; }
 }
-async function apply(): Promise<void> {
-  if (newDraft.value) {creationProblem.value='请先完成或取消正在新建的动作。';return}
-  if (pendingCombination.value) { status.value = '请先确认新组合，或选择保留原组合。'; return; }
+async function apply(): Promise<boolean> {
+  if (newDraft.value) {creationProblem.value='请先完成或取消正在新建的动作。';return false}
+  if (pendingCombination.value) { status.value = '请先确认新组合，或选择保留原组合。'; return false; }
   if ((!snapshot.value&&!props.presetDraft) || busy.value || recording.value) {
     if (recording.value) status.value = '请先完成或取消当前录制。';
-    return;
+    return false;
   }
-  if (validation.value.length) { status.value = validation.value[0]; return; }
-  if(props.presetDraft){emit('preset-apply',cloneRules(rules.value));dirty.value=false;status.value='手柄预设草稿已更新，请在开机模式中保存更改。';return;}
+  if (validation.value.length) { status.value = validation.value[0]; return false; }
+  if(props.presetDraft){emit('preset-apply',cloneRules(rules.value));dirty.value=false;status.value='手柄预设草稿已更新，请在开机模式中保存更改。';return true;}
   busy.value = true;
   try {
     const baseline = snapshot.value!;
@@ -570,7 +597,7 @@ async function apply(): Promise<void> {
     let storageRules = readControllerShortcutRules(storageBase);
     const targetAllowed = () => !virtualTargetShortcutError(storageRules, savedRules, currentVirtualTargetPolicy());
     const blocked = virtualTargetShortcutError(storageRules, savedRules, currentVirtualTargetPolicy());
-    if (blocked) { status.value = blocked; return; }
+    if (blocked) { status.value = blocked; return false; }
     const patchFor = (entries: ControllerShortcutRule[]) => ({
       buttonMapping: { rules: { schemaVersion: 2, closure: 'UNENCLOSED', shortcutRules: preserveControllerShortcutRecords(storageBase, storageRules, entries, explicitFields) } },
     });
@@ -584,10 +611,10 @@ async function apply(): Promise<void> {
       if (merged.ok === false) {
         dirty.value = true;
         status.value = '此动作已被其他页面修改，当前草稿已保留；请重新读取后再编辑。';
-        return;
+        return false;
       }
       const problems = validateControllerShortcutRules(rulesToValidate(merged.rules), oemKeys.value);
-      if (problems.length) { dirty.value = true; status.value = `合并未保存，草稿已保留：${problems[0]}`; return; }
+      if (problems.length) { dirty.value = true; status.value = `合并未保存，草稿已保留：${problems[0]}`; return false; }
       savedRules = merged.rules;
       storageBase = result.globalShortcutRules ?? result.value.buttonMapping?.rules;
       storageRules = readControllerShortcutRules(storageBase);
@@ -598,7 +625,7 @@ async function apply(): Promise<void> {
       status.value = result.reason === 'revision-conflict' ? '配置仍在变更，草稿已保留，请稍后再次应用。'
         : result.reason === 'write-failed' ? '保存失败，草稿已保留，请重试。'
         : result.reason === 'cancelled' ? '保存已取消，草稿已保留。' : '专属配置正在接管，草稿已保留。';
-      return;
+      return false;
     }
     snapshot.value = { ...result.value, buttonMapping: { ...result.value.buttonMapping, rules: result.globalShortcutRules ?? result.value.buttonMapping?.rules } };
     rules.value = readControllerShortcutRules(snapshot.value.buttonMapping?.rules);
@@ -616,7 +643,8 @@ async function apply(): Promise<void> {
     status.value = nativeSyncFailed ? '规则已保存，但默认快捷开关未同步，草稿已保留，请再次应用。'
       : hasModeShortcutOverride(await loadSettings()) ? '全局快捷已保存；当前模式使用单独设置，跟随全局的模式会使用新快捷键。'
       : '全局规则已保存。重新打开后保留当前设置，请按键验证动作。';
-  } catch (error) { status.value = `保存失败：${(error as Error).message}`; }
+    return !nativeSyncFailed;
+  } catch (error) { dirty.value = true; status.value = `保存失败：${(error as Error).message}`; return false; }
   finally {
     busy.value = false;
     void nextTick(() => {
@@ -662,7 +690,7 @@ function finishRecording(inputs: ControllerShortcutInput[]): void {
   }
   stageCombination(normalized);
   recording.value = false;
-  recordingStatus.value = `已录入 ${normalized.length}/${CONTROLLER_SHORTCUT_MAX_INPUTS} 个按键：${formatInputs(normalized)}`;
+  recordingStatus.value = `已录入 ${normalized.length}/${CONTROLLER_SHORTCUT_MAX_INPUTS} 个输入项：${formatInputs(normalized)}`;
   void stopNativeRecording();
   clearDesktopRecording();
   if (props.inputFlowVariant !== 'confirm') void nextTick(() => focusEditorControl(true));
@@ -772,7 +800,7 @@ function keepCapturedOemInput(): boolean {
       inputs.length > CONTROLLER_SHORTCUT_MAX_INPUTS || hasUnavailableOemInput(inputs)) return false;
   finishRecording(inputs);
   if (recording.value) return false;
-  recordingStatus.value = '已保留识别到的专用按键；原动作可能同时触发，应用修改后保存。';
+  recordingStatus.value = '已保留识别到的专用按键；原动作可能同时触发，应用保存后保存。';
   return true;
 }
 function onWindowBlur(): void {
@@ -806,43 +834,64 @@ function onNativeRecordingStopped(data: { reason?: unknown }): void {
   if (data?.reason === 'focus-lost' && keepCapturedOemInput()) return;
   cancelRecording(`录制已停止：${typeof data?.reason === 'string' ? data.reason : '输入所有权变化'}`);
 }
-/**
- * 2026-09-28 用户裁决：关闭=“取消并关闭”（不保存、直接退出）。
- * 普通编辑器保留直接取消并关闭；presetDraft 的未应用修改先确认放弃。
- * 顶部关闭 / B 键 / Esc / 点击遮罩全部走同一路径。
- */
+/** B, Esc, the close button and backdrop share the same unsaved-change guard. */
 function requestClose(): void {
-  if (busy.value || editorDisposed) return;
-  if (props.presetDraft && (dirty.value || newDraft.value || pendingCombination.value)) {
-    if (presetCloseConfirm.value) return;
+  if (busy.value || closeSaving.value || editorDisposed) return;
+  if (hasUnsavedChanges.value) {
+    if (closeConfirm.value) return;
     cancelRecording();
-    presetCloseFocus = document.activeElement as HTMLElement | null;
-    presetCloseConfirm.value = true;
-    void nextTick(() => { if (!editorDisposed && presetCloseConfirm.value) focusGamepadElement(presetCloseCancel.value); });
+    closeFocus = document.activeElement as HTMLElement | null;
+    closeProblem.value = '';
+    closeConfirm.value = true;
+    void nextTick(() => { if (!editorDisposed && closeConfirm.value) focusGamepadElement(closeCancel.value); });
     return;
   }
   cancel();
 }
-function resumePresetEditing(): void {
-  presetCloseConfirm.value = false;
+function resumeEditing(): void {
+  if (busy.value || closeSaving.value || editorDisposed) return;
+  closeConfirm.value = false;
+  closeProblem.value = '';
   void nextTick(() => {
-    if (editorDisposed || presetCloseConfirm.value) return;
-    if (presetCloseFocus?.isConnected && dialogEl.value?.contains(presetCloseFocus) && focusGamepadElement(presetCloseFocus)) return;
+    if (editorDisposed || closeConfirm.value) return;
+    if (closeFocus?.isConnected && dialogEl.value?.contains(closeFocus) && focusGamepadElement(closeFocus)) return;
     focusEditorControl();
   });
 }
-function discardPresetAndClose(): void {
-  if (!presetCloseConfirm.value || busy.value || editorDisposed) return;
-  presetCloseConfirm.value = false;
+function discardAndClose(): void {
+  if (!closeConfirm.value || busy.value || closeSaving.value || editorDisposed) return;
+  closeConfirm.value = false;
   cancel();
 }
-function presetCloseKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Tab') return;
-  const target = event.shiftKey ? presetCloseDiscard.value : presetCloseCancel.value;
-  if (document.activeElement === (event.shiftKey ? presetCloseCancel.value : presetCloseDiscard.value)) {
-    event.preventDefault();
-    focusGamepadElement(target);
+async function saveAndClose(): Promise<void> {
+  if (!closeConfirm.value || busy.value || closeSaving.value || editorDisposed) return;
+  closeProblem.value = '';
+  // Half-created actions and unconfirmed input must never be silently omitted.
+  if (newDraft.value || pendingCombination.value) {
+    closeProblem.value = newDraft.value ? '请先取消退出，完成或取消正在新建的动作，再保存。' : '请先取消退出，确认或取消所选组合，再保存。';
+    return;
   }
+  closeSaving.value = true;
+  try {
+    if (dirty.value && !await apply()) {
+      if (!editorDisposed) closeProblem.value = status.value;
+      return;
+    }
+    if (editorDisposed) return;
+    closeConfirm.value = false;
+    cancel();
+  } finally {
+    closeSaving.value = false;
+    void nextTick(() => { if (!editorDisposed && closeConfirm.value) focusGamepadElement(closeCancel.value); });
+  }
+}
+function closeKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Tab') return;
+  const controls = Array.from(closeDialog.value?.querySelectorAll<HTMLElement>('button:not(:disabled)') || []);
+  event.preventDefault();
+  if (!controls.length) return;
+  const index = controls.indexOf(document.activeElement as HTMLElement);
+  focusGamepadElement(controls[(index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length]);
 }
 function cancel(): void {
   if (editorDisposed) return;
@@ -857,7 +906,7 @@ function onKeydown(event: KeyboardEvent): void {
   if (recording.value) return;
   if (event.key === 'Escape') {
     event.preventDefault();
-    if (presetCloseConfirm.value) resumePresetEditing();
+    if (closeConfirm.value) resumeEditing();
     else if (managementId.value) closeActionManagement();
     else requestClose();
   }
@@ -871,7 +920,7 @@ function onKeydown(event: KeyboardEvent): void {
  */
 function focusEditorControl(preferTrigger = false): void {
   if (editorDisposed) return;
-  if (presetCloseConfirm.value) { focusGamepadElement(presetCloseCancel.value); return; }
+  if (closeConfirm.value) { if (!closeSaving.value) focusGamepadElement(closeCancel.value); return; }
   const root = dialogEl.value;
   if (!root) return;
   const nextStep = preferTrigger ? root.querySelector<HTMLElement>('.action-trigger-bubble .seg-btn.active:not(:disabled)')
@@ -892,8 +941,8 @@ function onGamepadBack(event: Event): void {
   if (!root || !root.getClientRects().length) return;
   // A Dropdown listener may already have consumed B in the same dispatch.
   // Respect that decision and keep the editor mounted.
-  if (event.defaultPrevented || root.querySelector('[data-gp-modal="keyboard-output"]')) return;
-  if (presetCloseConfirm.value) { event.preventDefault(); resumePresetEditing(); return; }
+  if (event.defaultPrevented || root.querySelector('.output-picker, [data-gp-modal="keyboard-output"]')) return;
+  if (closeConfirm.value) { event.preventDefault(); resumeEditing(); return; }
   const openTrigger = Array.from(root.querySelectorAll<HTMLElement>(
     '[aria-expanded="true"][aria-haspopup="listbox"]',
   )).find((el) => root.contains(el));
@@ -905,6 +954,7 @@ function onGamepadBack(event: Event): void {
 
 let firstLoadPending = true;
 onMounted(() => {
+  holdCoveredBackground();
   observePreviewStage();
   void setEditorWindowWidth();
   void load()
@@ -923,8 +973,10 @@ onMounted(() => {
   stopGamepadRecordingState = onIpc('shortcut.recording.stopped', onNativeRecordingStopped);
   nextTick(() => dialogEl.value?.focus({ preventScroll: true }));
 });
-onActivated(() => { if (!firstLoadPending && !props.initialActionId && !dirty.value && !recording.value) void load().catch(() => undefined); });
+onActivated(() => { holdCoveredBackground(); if (!firstLoadPending && !props.initialActionId && !dirty.value && !recording.value) void load().catch(() => undefined); });
+onDeactivated(releaseCoveredBackground);
 onBeforeUnmount(() => {
+  releaseCoveredBackground();
   previewResizeObserver?.disconnect(); previewResizeObserver = null;
   editorDisposed = true;
   void releaseEditorWindowWidth();
@@ -947,9 +999,9 @@ onBeforeUnmount(() => {
   <Teleport :to="props.teleportTo">
     <div ref="overlayEl" class="editor-overlay" data-gp-modal="controller-shortcut-editor" data-gp-scope="controller-shortcut-editor" data-gp-spatial="nearest" data-gp-pane-bridge @pointerdown.self="requestClose">
       <div class="editor-stage" :style="stageStyle">
-      <section ref="dialogEl" class="editor-dialog" :data-controller-editor-scale="editorScale" :inert="presetCloseConfirm || undefined" :data-layout-variant="layoutVariant" :data-global-layout="globalActionsLayout" :data-input-flow="'record'" :data-output-variant="outputActionVariant" role="dialog" aria-modal="true" aria-label="自定义快捷规则编辑器" tabindex="-1">
+      <section ref="dialogEl" class="editor-dialog" :data-controller-editor-scale="editorScale" :inert="closeConfirm || undefined" :data-layout-variant="layoutVariant" :data-global-layout="globalActionsLayout" :data-input-flow="'record'" :data-output-variant="outputActionVariant" role="dialog" aria-modal="true" aria-label="自定义快捷规则编辑器" tabindex="-1">
         <header class="editor-top">
-          <div class="editor-heading"><div><h3>{{presetDraft?'手柄自定义':'快捷动作'}}</h3><small class="shortcut-scope">{{ presetDraft ? presetDraft.name : '全局快捷动作' }}</small></div><span class="editor-save-state" :class="{ dirty: dirty || Boolean(newDraft) }" aria-live="polite"><i aria-hidden="true" />{{ newDraft ? '正在新建' : dirty ? '未应用修改' : '已同步' }}</span></div>
+          <div class="editor-heading"><div><h3>{{presetDraft?'手柄自定义':'快捷动作'}}</h3><small class="shortcut-scope">{{ presetDraft ? presetDraft.name : '全局快捷动作' }}</small></div><span class="editor-save-state" :class="{ dirty: dirty || Boolean(newDraft) }" aria-live="polite"><i aria-hidden="true" />{{ newDraft ? '正在新建' : dirty ? '未保存修改' : '已同步' }}</span></div>
           <div class="editor-toolbar"><label class="preview-selector"><span>手柄图示</span><Dropdown :teleport-to="teleportTo" :model-value="selectedDiagramPersona || diagramPersona" :options="diagramPersonaOptions" aria-label="手柄图示" :disabled="busy || recording || recordingBusy" @update:model-value="selectedDiagramPersona=String($event)"/><small v-if="previewKind==='keyboard'">当前预览：键盘</small></label><ControllerEditorGlobalActions v-if="globalActionsLayout !== 'bottom'" :mode="globalActionsLayout === 'split' ? 'draft' : 'all'" :dirty="dirty" :pending="Boolean(pendingCombination || newDraft)" :busy="busy" :recording="recording || recordingBusy" @restore="restoreNativeDefaults" @discard="discardChanges" @apply="apply" @close="requestClose" /></div>
         </header>
         <main class="editor-layout">
@@ -1007,7 +1059,7 @@ onBeforeUnmount(() => {
               <div v-if="activeAction?.parameters?.some(p => p.presentation !== 'key-grid')" class="editor-bubble"><span class="field-label">动作参数</span><details v-if="activeAction.description" class="output-help"><summary>功能说明</summary><p class="field-hint">{{ activeAction.description }}</p></details><div class="parameter-grid" :class="{ 'keyboard-key-grid': keyGridParameter }" :style="keyGridParameter ? { '--key-grid-columns': keyGridParameter.gridColumns || 6 } : undefined"><template v-for="parameter in (activeAction?.parameters || []).filter(p => p.presentation !== 'key-grid')" :key="parameter.id"><template v-if="parameter.presentation === 'key-grid'"><button v-for="option in parameter.options || []" :key="option.value" class="keyboard-key-action" :class="{ active: String(activeRule.params[parameter.id] ?? parameter.default) === option.value }" type="button" :disabled="busy || recording" @click="updateParameter(parameter.id, option.value)">{{ option.label }}</button></template><label v-else-if="parameter.type !== 'boolean'"><span>{{ parameter.label }}</span><Dropdown :teleport-to="teleportTo" v-if="parameter.type === 'select'" :model-value="String(activeRule.params[parameter.id] ?? parameter.default)" :options="parameter.options || []" color="accent" :disabled="busy || recording" @update:model-value="updateParameter(parameter.id, $event)" /><input v-else type="number" :min="parameter.min" :max="parameter.max" :step="parameter.step || 1" :value="Number(activeRule.params[parameter.id] ?? parameter.default)" :disabled="busy || recording" @change="updateParameter(parameter.id, Number(($event.target as HTMLInputElement).value))"></label><label v-else class="parameter-toggle-field"><span>{{ parameter.label }}</span><button class="parameter-toggle-action" :class="{ active: Boolean(activeRule.params[parameter.id] ?? parameter.default) }" type="button" :disabled="busy || recording" @click="updateParameter(parameter.id, !Boolean(activeRule.params[parameter.id] ?? parameter.default))">{{ parameter.label }}{{ Boolean(activeRule.params[parameter.id] ?? parameter.default) ? '已开启' : '已关闭' }}</button></label></template></div></div>
               </ControllerOutputAction></div>
 
-              <div v-if="creating && !recording" class="creation-controls"><button v-if="newStep!=='input'" type="button" class="creation-back" :disabled="busy" @click="returnToInputStep">重新录制输入</button><button v-if="newStep==='trigger'" class="creation-next" type="button" @click="newStep='output'">下一步：选择动作</button><button v-if="newStep==='finish'" class="creation-finish" type="button" @click="finishNewAction">完成新建</button><button type="button" class="creation-cancel" @click="cancelNewAction">取消新建</button></div>
+              <div v-if="creating && !recording" class="creation-controls"><button v-if="newStep!=='input'" type="button" class="creation-back" :disabled="busy" @click="returnToInputStep">重新录制输入</button><button v-if="newStep==='trigger'" class="creation-next" type="button" @click="continueToOutputStep">下一步：选择动作</button><button v-if="newStep==='finish'" class="creation-finish" type="button" @click="finishNewAction">完成新建</button><button type="button" class="creation-cancel" @click="cancelNewAction">取消新建</button></div>
 
             </section>
             <section v-else class="card empty-editor"><InlineIcon name="keyboard" /><h3>选择一个动作</h3><p>从左侧选择或新建动作，在这里编辑组合输入与参数。</p></section>
@@ -1019,11 +1071,16 @@ onBeforeUnmount(() => {
         </footer>
       </section>
       </div>
-      <div v-if="presetCloseConfirm" class="preset-close-shade" @pointerdown.self="resumePresetEditing">
-        <section class="preset-close-dialog" role="dialog" aria-modal="true" aria-label="放弃未应用的手柄修改" data-gp-modal="controller-preset-discard" data-gp-scope="controller-preset-discard" data-gp-spatial="nearest" data-gp-page-lock @keydown="presetCloseKeydown">
-          <h2>放弃未应用的手柄修改？</h2>
-          <p>这些修改尚未应用到模式草稿。继续编辑可保留修改，放弃后返回配置工作台。</p>
-          <div class="preset-close-actions"><button ref="presetCloseCancel" type="button" @click="resumePresetEditing"><span class="controller-key" data-controller-key="B">B</span> 继续编辑</button><button ref="presetCloseDiscard" class="confirm" type="button" @click="discardPresetAndClose">放弃并返回</button></div>
+      <div v-if="closeConfirm" class="editor-close-shade" @pointerdown.self="resumeEditing">
+        <section ref="closeDialog" class="editor-close-dialog" :style="{ zoom: editorScale }" role="dialog" aria-modal="true" aria-label="退出前保存修改" data-gp-modal="controller-editor-unsaved" data-gp-scope="controller-editor-unsaved" data-gp-spatial="nearest" data-gp-page-lock @keydown="closeKeydown">
+          <h2>有未保存的修改</h2>
+          <p>{{ presetDraft ? '是否将修改保存到当前模式草稿后退出？模式仍需在外层保存。' : '是否保存这些修改后退出手柄编辑菜单？' }}</p>
+          <p v-if="closeProblem" class="editor-close-error" role="alert">{{ closeProblem }}</p>
+          <div class="editor-close-actions">
+            <button class="discard" type="button" data-close-choice="discard" :disabled="busy || closeSaving" @click="discardAndClose">放弃变动并退出</button>
+            <button class="save" type="button" data-close-choice="save" :disabled="busy || closeSaving" @click="saveAndClose">{{ closeSaving ? '保存中…' : '保存并退出' }}</button>
+            <button ref="closeCancel" type="button" data-close-choice="cancel" :disabled="busy || closeSaving" @click="resumeEditing"><span class="controller-key" data-controller-key="B">B</span> 取消</button>
+          </div>
         </section>
       </div>
     </div>
@@ -1032,9 +1089,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* Match the existing GameProfileRemoveDialog confirmation surface and actions. */
-.preset-close-shade{position:fixed;inset:0;z-index:1500;display:grid;place-items:center;padding:20px;box-sizing:border-box;background:rgba(0,0,0,.45)}
-.preset-close-dialog{width:min(440px,100%);max-height:calc(100vh - 40px);overflow-y:auto;box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:18px 20px;background:var(--bg-panel);box-shadow:0 16px 40px #0008;display:flex;flex-direction:column;gap:12px;color:var(--text)}.preset-close-dialog h2{margin:0;font-size:17px}.preset-close-dialog p{margin:0;font-size:14px;line-height:1.65;color:var(--text-dim)}
-.preset-close-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:3px}.preset-close-actions button{min-height:44px;border:1px solid var(--border);border-radius:9px;background:var(--bg-input);color:var(--text);font:inherit;font-size:14px;font-weight:600;cursor:pointer}.preset-close-actions .confirm{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,transparent);background:color-mix(in srgb,var(--danger) 12%,var(--bg-input))}.preset-close-actions b{margin-right:5px}
+.editor-close-shade{position:fixed;inset:0;z-index:1500;display:grid;place-items:center;padding:20px;box-sizing:border-box;background:rgba(0,0,0,.45)}
+.editor-close-dialog{width:min(600px,100%);max-height:calc(100vh - 40px);overflow-y:auto;box-sizing:border-box;border:1px solid var(--border);border-radius:12px;padding:18px 20px;background:var(--bg-panel);box-shadow:0 16px 40px #0008;display:flex;flex-direction:column;gap:12px;color:var(--text)}.editor-close-dialog h2{margin:0;font-size:17px}.editor-close-dialog p{margin:0;font-size:14px;line-height:1.65;color:var(--text-dim)}
+.editor-close-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:3px}.editor-close-actions button{min-height:44px;border:1px solid var(--border);border-radius:9px;background:var(--bg-input);color:var(--text);font:inherit;font-size:14px;font-weight:600;cursor:pointer}.editor-close-actions .discard{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,transparent);background:color-mix(in srgb,var(--danger) 12%,var(--bg-input))}.editor-close-actions .save{border-color:#4897d2;background:#287ebd;color:#fff}.editor-close-actions button:disabled{opacity:.6;cursor:default}.editor-close-dialog .editor-close-error{color:var(--danger)}@media(max-width:500px){.editor-close-actions{grid-template-columns:1fr}}
 
 .editor-overlay{position:fixed;z-index:1100;inset:0;display:grid;place-items:center;padding:16px;background:rgba(2,7,13,.72);backdrop-filter:none}.editor-dialog{width:min(1280px,calc(100vw - 32px));height:min(720px,calc(100dvh - 32px));box-sizing:border-box;overflow:auto;padding:14px;border:1px solid rgba(255,255,255,.11);border-radius:18px;background:linear-gradient(145deg,color-mix(in srgb,var(--bg-card) 97%,#152334),var(--bg-panel));box-shadow:0 28px 80px rgba(0,0,0,.58);color:var(--text);outline:none}.editor-top{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;margin-bottom:12px}.editor-top h3,.card h3{margin:1px 0 0;font-size:15px}.editor-top h3 .inline-icon{color:var(--accent)}.back,.small-action,.outline-action,.apply-action,.remove-action,.record-action,.clear-action{min-height:34px;padding:0 10px;border-radius:var(--radius-ctrl);font-size:11px;font-weight:800;cursor:pointer}.back,.outline-action,.clear-action{border:1px solid color-mix(in srgb,var(--accent) 52%,transparent);background:transparent;color:var(--accent)}.small-action,.apply-action,.record-action{border:1px solid var(--accent);background:var(--accent);color:#06121d}.remove-action{border:1px solid color-mix(in srgb,var(--danger) 48%,transparent);background:color-mix(in srgb,var(--danger) 9%,transparent);color:#ff9ea1}.back:disabled,.small-action:disabled,.outline-action:disabled,.apply-action:disabled,.remove-action:disabled,.record-action:disabled,.clear-action:disabled{opacity:.46;cursor:default}.eyebrow{color:var(--accent);font-size:10px;font-weight:800;letter-spacing:.08em}.state-chip{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:999px;background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent);font-size:10px;font-weight:800}.state-chip.dirty{border-color:color-mix(in srgb,#f5b93d 48%,transparent);background:color-mix(in srgb,#f5b93d 10%,transparent);color:#ffd47a}.editor-layout{display:grid;grid-template-columns:minmax(190px,.72fr) minmax(215px,.82fr) minmax(380px,1.32fr);gap:10px;align-items:start}.preview-column,.rules-column,.edit-column{display:grid;gap:10px;min-width:0}.card{padding:11px;border:1px solid rgba(255,255,255,.07);border-radius:var(--radius-card);background:color-mix(in srgb,var(--bg-card) 93%,transparent)}.card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.card-head>span{color:var(--text-dim);font-size:10px;font-weight:700}.mirror-card :deep(.gamepad-visualizer){margin-top:8px;transform:scale(.82);transform-origin:top center;margin-bottom:-26px}.edit-head-preview{margin-left:9px;color:var(--accent);font-size:11px;font-weight:800;vertical-align:middle;white-space:nowrap}.route-note,.field-hint{margin:7px 0 0;color:var(--text-dim);font-size:10px;line-height:1.45}.route-note{display:flex;gap:5px}.route-note .inline-icon{flex:0 0 auto;color:#f5b93d}.rule-tools{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:9px 0}.rule-tools small{color:var(--text-dim);font-size:10px}.rule-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;max-height:510px;overflow:auto;padding-right:2px}.rule-row{min-height:50px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px solid rgba(255,255,255,.09);border-radius:var(--radius-ctrl);background:var(--bg-input);color:var(--text);text-align:left;cursor:pointer}.rule-row.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--bg-input));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 36%,transparent)}.rule-row.disabled{opacity:.55}.rule-row span{display:grid;gap:2px;min-width:0}.rule-row b{font-size:11px}.rule-row small{overflow:hidden;color:var(--text-dim);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.rule-row i{padding:3px 6px;border-radius:999px;background:rgba(255,255,255,.09);color:var(--text-dim);font-size:9px;font-style:normal;font-weight:800}.rule-editor-card{display:grid;gap:8px}.editor-bubble,.status-bubble{padding:10px;border:1px solid rgba(255,255,255,.07);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--bg-input) 88%,transparent)}.field-label{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;color:var(--text-dim);font-size:11px;font-weight:800}.field-label small{font-size:10px}.recorder-bubble :deep(.seg-button){margin-bottom:8px}.recorded-inputs{display:flex;align-items:center;flex-wrap:wrap;gap:5px;min-height:38px;padding:7px;border:1px dashed rgba(255,255,255,.15);border-radius:8px;background:var(--bg-panel);color:var(--text-dim);font-size:10px}.recorded-inputs.recording{border-color:var(--accent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 28%,transparent);color:var(--accent)}.recorded-inputs kbd{padding:4px 6px;border:1px solid color-mix(in srgb,var(--accent) 46%,transparent);border-radius:6px;background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--text);font:700 10px/1 system-ui}.record-actions{display:grid;grid-template-columns:1fr auto;gap:7px;margin-top:7px}.record-action{display:flex;align-items:center;justify-content:center;gap:5px}.timing-row,.parameter-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:8px}.timing-row label,.parameter-grid label{position:relative;display:grid;gap:4px;color:var(--text-dim);font-size:10px;font-weight:700}.timing-row input,.parameter-grid input{min-width:0;height:30px;padding:0 25px 0 8px;border:1px solid rgba(255,255,255,.12);border-radius:7px;background:var(--bg-panel);color:var(--text);font-size:11px}.timing-row i{position:absolute;right:7px;bottom:8px;color:var(--text-dim);font-size:9px;font-style:normal}.parameter-grid :deep(.toggle-row){min-height:30px;padding:0}.parameter-grid :deep(.toggle-label){font-size:10px}.editor-actions{display:grid;grid-template-columns:auto 1fr auto;gap:7px}.status-bubble{display:flex;align-items:flex-start;gap:7px;color:var(--text-dim);font-size:10px;line-height:1.45}.status-bubble .inline-icon{flex:0 0 auto;color:var(--accent)}.status-bubble.warning{border-color:color-mix(in srgb,#f5b93d 45%,transparent);color:#ffd47a}.status-bubble.warning .inline-icon{color:#f5b93d}.empty,.empty-editor{display:grid;gap:8px;place-items:center;min-height:150px;text-align:center}.empty p,.empty-editor p{margin:0;color:var(--text-dim);font-size:11px}.empty-editor .inline-icon{color:var(--accent)}@media(max-width:980px){.editor-dialog{height:auto;max-height:calc(100dvh - 16px);width:min(840px,calc(100vw - 16px));padding:10px}.editor-layout{grid-template-columns:minmax(220px,.75fr) minmax(350px,1.25fr)}.rules-column{grid-column:1/-1}.rule-list{grid-template-columns:repeat(2,minmax(0,1fr));max-height:250px}.mirror-card :deep(.gamepad-visualizer){transform:scale(.74);margin-bottom:-34px}}@media(max-width:650px){.editor-overlay{padding:7px}.editor-dialog{width:calc(100vw - 14px);max-height:calc(100dvh - 14px);padding:8px}.editor-layout{grid-template-columns:1fr}.rules-column{grid-column:auto}.rule-list{grid-template-columns:repeat(2,minmax(0,1fr));max-height:none}.preview-column{display:none}.editor-top{grid-template-columns:auto 1fr}.editor-top .state-chip{display:none}.timing-row,.parameter-grid{grid-template-columns:1fr 1fr}.editor-actions{grid-template-columns:auto 1fr auto}}@media(max-width:420px){.timing-row,.parameter-grid{grid-template-columns:1fr}.editor-actions{grid-template-columns:1fr 1fr}.editor-actions span{display:none}}
 /*
@@ -1299,7 +1356,7 @@ onBeforeUnmount(() => {
 </style>
 
 <style scoped>
-.editor-top{display:flex;justify-content:space-between;align-items:center;gap:12px}.editor-heading h3{margin:0;font-size:17px}.editor-toolbar{display:flex;align-items:center;gap:10px;min-width:0}.preview-selector{display:flex;align-items:center;gap:7px;position:relative;font-size:11px;white-space:nowrap}.preview-selector :deep(.dd){width:142px}.preview-selector :deep(.dropdown-trigger),.preview-selector :deep(.dd-trigger){min-height:40px}.preview-selector small{position:absolute;right:0;bottom:-14px;font-size:10px;color:var(--text-dim)}.io-flow{display:flex;align-items:center;justify-content:space-between;gap:5px;color:var(--text-dim);font-size:12px;min-height:30px}.io-flow .current{color:var(--accent);font-weight:700}.flow-arrow{color:var(--accent)}.creation-guide{padding:12px;background:var(--bg-input);border-radius:8px;color:var(--text)}.creation-guide b{font-size:12px}.creation-guide p{font-size:12px;line-height:1.7;margin:6px 0 0;color:var(--text-dim)}.creation-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.creation-controls button{min-height:42px;padding:8px;border:1px solid var(--border);border-radius:7px;background:var(--bg-input);font:inherit;font-size:12px;color:var(--text);cursor:pointer}.creation-controls .creation-next,.creation-controls .creation-finish{grid-column:1/-1;background:var(--accent);color:#fff;font-weight:700}.creation-controls .creation-cancel{grid-column:1/-1}.input-issue{display:flex;align-items:flex-start;gap:6px;padding:10px;margin:0;border-radius:7px;background:color-mix(in srgb,var(--danger) 12%,var(--bg-panel));color:var(--danger);font-size:12px;line-height:1.6}.rule-row.creating{border-style:dashed;animation:new-action-pending 1.6s ease-in-out infinite}.creation-dot{display:inline-block;width:6px;height:6px;margin-right:5px;border-radius:50%;background:var(--accent);animation:new-action-dot 1.6s ease-in-out infinite}.handheld-key-bubbles span.live{background:var(--accent);border-color:var(--accent);color:#fff}.rule-row.creating i{padding:0}.rule-row.creating .rule-copy b{color:var(--accent)}@keyframes new-action-pending{50%{background:color-mix(in srgb,var(--accent) 15%,var(--bg-input))}}@keyframes new-action-dot{50%{opacity:.3}}@media(prefers-reduced-motion:reduce){.rule-row.creating,.creation-dot{animation:none}}
+.editor-top{display:flex;justify-content:space-between;align-items:center;gap:12px}.editor-heading h3{margin:0;font-size:17px}.editor-toolbar{display:flex;align-items:center;gap:10px;min-width:0}.preview-selector{display:flex;align-items:center;gap:7px;position:relative;font-size:11px;white-space:nowrap}.preview-selector :deep(.dd){width:142px}.preview-selector :deep(.dropdown-trigger),.preview-selector :deep(.dd-trigger){min-height:40px}.preview-selector small{position:absolute;right:0;bottom:-14px;font-size:10px;color:var(--text-dim)}.io-flow{display:flex;align-items:center;justify-content:space-between;gap:5px;color:var(--text-dim);font-size:12px;min-height:30px}.io-flow .current{color:var(--accent);font-weight:700}.flow-arrow{color:var(--accent)}.creation-guide{padding:12px;background:var(--bg-input);border-radius:8px;color:var(--text)}.creation-guide b{font-size:12px}.creation-guide p{font-size:12px;line-height:1.7;margin:6px 0 0;color:var(--text-dim)}.creation-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.creation-controls button{min-height:42px;padding:8px;border:1px solid var(--border);border-radius:7px;background:var(--bg-input);font:inherit;font-size:12px;color:var(--text);cursor:pointer}.creation-controls .creation-next,.creation-controls .creation-finish{grid-column:1/-1;background:var(--accent);color:#fff;font-weight:700}.creation-controls .creation-cancel{grid-column:1/-1}.input-issue{display:flex;align-items:flex-start;gap:6px;padding:10px;margin:0;border-radius:7px;background:color-mix(in srgb,var(--danger) 12%,var(--bg-panel));color:var(--danger);font-size:12px;line-height:1.6}.rule-row.creating{position:relative;isolation:isolate;border-style:dashed}.rule-row.creating::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;background:var(--accent);opacity:0;animation:new-action-pending 1.6s ease-in-out infinite;will-change:opacity}.creation-dot{display:inline-block;width:6px;height:6px;margin-right:5px;border-radius:50%;background:var(--accent);animation:new-action-dot 1.6s ease-in-out infinite}.handheld-key-bubbles span.live{background:var(--accent);border-color:var(--accent);color:#fff}.rule-row.creating i{padding:0}.rule-row.creating .rule-copy b{color:var(--accent)}@keyframes new-action-pending{50%{opacity:.15}}@keyframes new-action-dot{50%{opacity:.3}}@media(prefers-reduced-motion:reduce){.rule-row.creating::before,.creation-dot{animation:none}}
 </style>
 
 <style scoped>

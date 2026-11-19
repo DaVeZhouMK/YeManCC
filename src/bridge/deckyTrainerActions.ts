@@ -61,7 +61,12 @@ export function createTrainerMirrorActions(deps: {
         // validates files/hash/current target, and owns the bounded receipt wait.
         void Promise.resolve().then(() => { checkpoint(); return deps.launch(target, isTargetCurrent); }).then(
           (receipt) => { if (!ended) outcome = { identity: context.gameIdentity!, source, notice: receipt && typeof receipt === 'object' && 'notice' in receipt && typeof receipt.notice === 'string' ? receipt.notice : '已启动当前游戏修改器' }; },
-          () => { if (!ended) outcome = { identity: context.gameIdentity!, source, notice: '修改器启动未确认，请在 YMCC 查看；不会自动下载或重试' }; },
+          (error) => {
+            // Detailed file paths and hashes stay in the local YMCC diagnostics.
+            const detail = error instanceof Error && !/[a-z]:[\\/]|\\\\|[a-f0-9]{64}/i.test(error.message) ? error.message : '';
+            if (!ended) outcome = { identity: context.gameIdentity!, source, notice: detail && !detail.startsWith('TRAINER_MIRROR_')
+              ? `修改器启动未确认：${detail.slice(0, 400)}` : '修改器启动未确认，请在 YMCC 查看；不会自动下载或重试' };
+          },
         ).finally(() => { if (active === token) active = null; if (!ended) deps.invalidate(); });
         deps.invalidate();
         return { saved: false, applied: false, pending: true, notice: '修改器正在启动，等待启动确认' };

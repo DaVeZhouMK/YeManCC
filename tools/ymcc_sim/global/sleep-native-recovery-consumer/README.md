@@ -30,3 +30,18 @@ The API fixture adds four explicit compatibility-only original Steam owner funct
 `originalWakeScriptHistoricallyUnchanged` is now false. `reviewedScriptsUnchangedDuringRun` still means selected reviewed bytes are frozen between the positive and private-fault variants. Assertions were maintained as described; no confirmation/policy assertion is skipped. The wake fixture's new deletion-failure test opens only its own marker through the unchanged owned-root boundary. OS denials, pinned compiler/Python inputs, byte-preserving archives and cleanup checks remain enforced.
 
 All earlier failures and their raw evidence remain valid historical observations, including the long-path error and stale-script-pin refusals. A current compiler failure or boundary failure remains a failed run, never a detected semantic fault. This maintenance does not claim original-engine, real Steam, OS sleep, controller or full-product acceptance.
+
+## S4 compatibility maintenance (2026-11-07)
+
+script-maintenance-s4.json reverses the current API/wake script edits before invoking the unchanged v2 and v1 verifiers. The API edit adds the current observation argument and existing toolchain calibration command; policy assertions remain. The wake consumer includes the actual S4 helpers, sgRealWake, checked reads of owned temporary markers and overlap controls (73 groups). A local AST composition replaces only the exact subprocess command branch of the unchanged Python audit: pinned calibration Node, the two exact compiler batches and the original API-to-wake child. File/network/OS boundaries, confirmation fault, compiler input evaluation, Job ownership and the 240-second adapter budget remain.
+
+
+## Current public Dispatch compatibility
+
+The current review reconstructs the complete historical S4 wake bytes, then the existing v2/v1 script bytes and policy contracts. The former S4 whole-source snapshot is historical; current exact main/header/toolchain contracts have separate execution qualification. The new `--p0-case public-dispatch` covers pending Suspend/Query before the UI consumes a receipt. It does not replace the default API/wake chain or confer source, physical, SDK, or full product approval. Default attempts and all original policy assertions remain.
+
+Current Windows entry fixes PATHEXT to .COM;.EXE;.BAT;.CMD, launches the pinned Node worker through the existing Program mode, and preserves exact inner Job/deadline/spawn receipts. Shared host source remains unchanged.
+
+The original API script supports an explicit --wake-cpp-reference / --wake-cpp-sha256 pair and --api-only scope. Its normal complete default remains unchanged. These inputs require corresponding reviewed source, CPP and original upstream runtime evidence; they do not imply that the complete default parent ran. C104 raw original-parent failures remain failures.
+
+Canceled sleep lease continuation consumes the current exact-source review chain through script-maintenance-canceled-lease.json. The unchanged current/S4/v2/v1 validators run on independently reconstructed historical bytes. Its sourceApproval and default-parent renewal remain false. Optional owned-child cancellation selectors retain the original sleep.game-pause-consumer identity and exact default cases; real owned-child evidence is separate from this module's deterministic default ports. No installed application or physical sleep approval follows.

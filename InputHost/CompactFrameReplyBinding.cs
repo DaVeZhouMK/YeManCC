@@ -4,8 +4,11 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 // Owned by one HostSession. Call under that session's lifecycle gate, including
-// the check and the associated backend submit/response. This token selects a
-// reply format; it never replaces full request, sequence, or phase validation.
+// the check and the associated backend submit/response. It selects compact replies;
+// an explicit compactFrameRequestVersion:1 advertisement also permits a frame to
+// borrow the current validated tuple. Requests still carry the nonce and sequence
+// and pass the original phase/content gates. Never grant this lease across a
+// controller replacement, quiesce, release, shutdown, or HostSession boundary.
 internal sealed class CompactFrameReplyBinding
 {
     private object? _controller;

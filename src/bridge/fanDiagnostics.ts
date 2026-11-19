@@ -1,8 +1,11 @@
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { invoke, isNativeRuntime } from './ipc';
 
 /** Fan-only diagnostics. Disabled by default and isolated from app.log. */
 export const fanDiagnosticLoggingEnabled = ref(false);
+let fanDiagnosticLoggingEpoch = 0;
+watch(fanDiagnosticLoggingEnabled, () => { fanDiagnosticLoggingEpoch += 1; }, { flush: 'sync' });
+export function getFanDiagnosticLoggingEpoch(): number { return fanDiagnosticLoggingEpoch; }
 export const fanDiagnosticLogPath = ref<string | null>(null);
 let activePowerGeneration = 0;
 
@@ -37,6 +40,11 @@ export interface FanDiagnosticExportResult {
   path?: string;
   files?: string[];
   reason?: string;
+  lastError?: string;
+  win32Error?: number;
+  attempts?: number;
+  unverifiedPath?: string;
+  cleanupOk?: boolean;
 }
 
 export async function exportFanDiagnosticLogs(): Promise<FanDiagnosticExportResult> {
@@ -88,6 +96,11 @@ function sanitize(value: unknown, key = ''): unknown {
     return Object.fromEntries(entries);
   }
   return value;
+}
+
+export function fanDiagnosticStateKey(state: unknown, receipt: unknown): string | undefined {
+  const key = JSON.stringify([sanitize(state), sanitize(receipt)]);
+  return key.length >= 1024 && key.length <= 16384 ? key : undefined;
 }
 
 export async function configureFanDiagnosticLogging(enabled: boolean): Promise<string | null> {

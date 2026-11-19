@@ -20,7 +20,7 @@ param(
  [string]$DeadlineReceiptPath=''
 )
 $ErrorActionPreference='Stop'
-# Optional raw producer protocol. The original Script/Program branches below are unchanged.
+# Optional raw producer protocol. Legacy Script/Program cleanup is observed separately below.
 if($RawProgram){
  $rawLimit=16777216L;$rawStdout=$null;$rawStderr=$null;$rawBegin=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();$rawJob=$null;$rawOwner=$null;$rawImageLock=$null;$rawLease=$null;$rawTerminal=$null
  $rawInputLocks=@();$cancelPin=$null;$rawReason='PREFLIGHT_FAILURE';$rawError=$null;$rawExit=10;$rawRootExit=$null;$rawZero=$false;$rawPinsMatch=$false;$rawLogsClosed=$false;$rawLogPins=$null;$rawOutputBytes=0L;$rawErrorBytes=0L;$rawQueryError=$null;$rawToolPolicy=$null;$rawToolCleanupEligible=$false;$rawToolCleanupVerified=@();$rawMembersBeforeTermination=@();$rawMemberObservationError=$null;$rawProof=$null;$rawRequest=$null;$rawPins=@();$rawPostPins=@();$rawRequestPin=$null;$rawArgsPin=$null;$rawStarted=$null;$rawFinalQuery=$null
@@ -316,15 +316,36 @@ if($Child){
  }
  $testArguments=@(Get-Content -LiteralPath $ArgumentsPath -Raw -Encoding UTF8|ConvertFrom-Json)
  if($ProgramPath){ & $ProgramPath @testArguments }
- else { & (Join-Path $PSHOME 'pwsh.exe') -NoLogo -NoProfile -NonInteractive -File $ScriptPath @testArguments }
+ else {
+  $scriptChildInfo=[Diagnostics.ProcessStartInfo]::new()
+  $scriptChildInfo.FileName=Join-Path $PSHOME 'pwsh.exe'
+  # Inherit the gated child's hidden UTF-8 console; a new console resets to the system code page.
+  $scriptChildInfo.UseShellExecute=$false;$scriptChildInfo.CreateNoWindow=$false
+  $scriptChildInfo.WindowStyle=[Diagnostics.ProcessWindowStyle]::Hidden
+  $scriptChildInfo.RedirectStandardOutput=$true;$scriptChildInfo.RedirectStandardError=$true
+  $scriptChildInfo.StandardOutputEncoding=[Text.Encoding]::UTF8;$scriptChildInfo.StandardErrorEncoding=[Text.Encoding]::UTF8
+  $scriptChildInfo.WorkingDirectory=(Get-Location).ProviderPath
+  foreach($scriptChildArg in @('-NoLogo','-NoProfile','-NonInteractive','-File',$ScriptPath)+$testArguments){$scriptChildInfo.ArgumentList.Add([string]$scriptChildArg)}
+  $scriptChildProcess=[Diagnostics.Process]::Start($scriptChildInfo)
+  try {
+   $scriptChildOutput=$scriptChildProcess.StandardOutput.ReadToEndAsync();$scriptChildError=$scriptChildProcess.StandardError.ReadToEndAsync()
+   $scriptChildProcess.WaitForExit()
+   $scriptChildExitCode=$scriptChildProcess.ExitCode
+   [Console]::Out.Write($scriptChildOutput.GetAwaiter().GetResult());[Console]::Error.Write($scriptChildError.GetAwaiter().GetResult())
+   $global:LASTEXITCODE=$scriptChildExitCode
+  } finally {$scriptChildProcess.Dispose()}
+ }
  exit $LASTEXITCODE
 }
 Add-Type -TypeDefinition @"
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Collections.Generic;
+using System.Text;
 public sealed class YmccGlobalOwnedJob : IDisposable {
  [StructLayout(LayoutKind.Sequential)] struct IO_COUNTERS { public ulong r,w,o,rb,wb,ob; }
+ [StructLayout(LayoutKind.Sequential)] struct ACCOUNTING { public long a,b,c,d; public uint faults,total,active,terminated; }
  [StructLayout(LayoutKind.Sequential)] struct BASIC {
   public long perProcess,perJob; public uint flags;
   public UIntPtr minWorking,maxWorking; public uint active;
@@ -337,9 +358,76 @@ public sealed class YmccGlobalOwnedJob : IDisposable {
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr CreateJobObject(IntPtr attrs,string name);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job,int type,ref EXTENDED info,uint length);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job,IntPtr process);
- [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job,int type,out ACCOUNTING info,uint length,IntPtr needed);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateJobObject(IntPtr job,uint code);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
+ [StructLayout(LayoutKind.Sequential)] struct PROCESS_TIME {public uint low,high;public ulong Value {get{return ((ulong)high<<32)|low;}}}
+ [DllImport("kernel32.dll",EntryPoint="QueryInformationJobObject",SetLastError=true)] static extern bool QueryMemberList(IntPtr job,int type,IntPtr data,uint bytes,IntPtr needed);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint access,bool inherit,uint pid);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool IsProcessInJob(IntPtr process,IntPtr job,out bool yes);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetProcessTimes(IntPtr process,out PROCESS_TIME start,out PROCESS_TIME end,out PROCESS_TIME kernel,out PROCESS_TIME user);
+ [DllImport("kernel32.dll",SetLastError=true,CharSet=CharSet.Unicode)] static extern bool QueryFullProcessImageNameW(IntPtr process,uint flags,StringBuilder image,ref int length);
  IntPtr handle;
+ public int QueryCount { get; private set; }
+ public uint? ActiveBeforeCleanup { get; private set; }
+ public uint? ActiveFinal { get; private set; }
+ public bool ZeroObservedBeforeDispose { get; private set; }
+ public bool TerminationRequested { get; private set; }
+ public bool TerminationSucceeded { get; private set; }
+  public sealed class MemberIdentity {
+   public uint pid {get;set;} public bool handleBound {get;set;} public bool ownedAtQuery {get;set;}
+   public string image {get;set;} public string startFileTimeUtc {get;set;} public bool handleClosed {get;set;}
+   public bool identityComplete {get;set;} public string error {get;set;}
+  }
+  public MemberIdentity[] MembersBeforeTermination {get;private set;}
+  public string MemberObservationStatus {get;private set;} public string MemberObservationError {get;private set;}
+  public bool MemberObservationComplete {get;private set;} public long MemberObservationElapsedMs {get;private set;}
+  public int MemberObservationBudgetMs {get;private set;} public uint? MemberListAssigned {get;private set;}
+  public uint? MemberListCount {get;private set;} public bool MemberObservationMatchesAccounting {get;private set;}
+  public const int MemberLimit=64;
+  MemberIdentity ObserveMember(uint pid,System.Diagnostics.Stopwatch clock,long cutoff) {
+   var row=new MemberIdentity();row.pid=pid;if(clock.ElapsedMilliseconds>=cutoff){row.error="OBSERVATION_BUDGET_EXHAUSTED";return row;}IntPtr process=OpenProcess(0x1000,false,pid);
+   if(process==IntPtr.Zero){row.error="OPEN_PROCESS:"+Marshal.GetLastWin32Error();return row;}
+   row.handleBound=true;
+   try {
+    if(clock.ElapsedMilliseconds>=cutoff){row.error="OBSERVATION_BUDGET_EXHAUSTED";return row;}bool owned;
+    if(!IsProcessInJob(process,handle,out owned)){row.error="MEMBERSHIP_QUERY:"+Marshal.GetLastWin32Error();return row;}
+    row.ownedAtQuery=owned;if(!owned){row.error="MEMBER_CHANGED_BEFORE_QUERY";return row;}
+    if(clock.ElapsedMilliseconds>=cutoff){row.error="OBSERVATION_BUDGET_EXHAUSTED";return row;}var image=new StringBuilder(32768);int length=image.Capacity;
+    if(QueryFullProcessImageNameW(process,0,image,ref length))row.image=image.ToString();else row.error="IMAGE_QUERY:"+Marshal.GetLastWin32Error();
+    if(clock.ElapsedMilliseconds>=cutoff){row.error=(row.error==null?"":row.error+"; ")+"OBSERVATION_BUDGET_EXHAUSTED";return row;}PROCESS_TIME start,end,kernel,user;
+    if(GetProcessTimes(process,out start,out end,out kernel,out user))row.startFileTimeUtc=start.Value.ToString();else row.error=(row.error==null?"":row.error+"; ")+"BIRTH_QUERY:"+Marshal.GetLastWin32Error();
+   } catch(Exception error){row.error=error.GetType().Name;}
+   finally {
+    row.handleClosed=CloseHandle(process);if(!row.handleClosed)row.error=(row.error==null?"":row.error+"; ")+"CLOSE_MEMBER_HANDLE:"+Marshal.GetLastWin32Error();
+    row.identityComplete=row.handleBound&&row.ownedAtQuery&&row.handleClosed&&row.image!=null&&row.startFileTimeUtc!=null&&row.error==null;
+   }
+   return row;
+  }
+  void ObserveMembers(System.Diagnostics.Stopwatch clock,int maximumMs) {
+   var rows=new List<MemberIdentity>();IntPtr data=IntPtr.Zero;long began=clock.ElapsedMilliseconds;
+   long cutoff=Math.Min(200,Math.Max(0,maximumMs/4));MemberObservationBudgetMs=(int)Math.Max(0,cutoff-began);
+   MemberObservationStatus="QUERYING";
+   try {
+    if(clock.ElapsedMilliseconds>=cutoff){MemberObservationStatus="SKIPPED_BUDGET";return;}
+    int bytes=8+MemberLimit*IntPtr.Size;data=Marshal.AllocHGlobal(bytes);if(clock.ElapsedMilliseconds>=cutoff){MemberObservationStatus="BUDGET_EXHAUSTED";return;}
+    if(!QueryMemberList(handle,3,data,(uint)bytes,IntPtr.Zero)){MemberObservationStatus="QUERY_FAILED";MemberObservationError="QUERY_MEMBER_LIST:"+Marshal.GetLastWin32Error();return;}
+    uint assigned=unchecked((uint)Marshal.ReadInt32(data,0)),count=unchecked((uint)Marshal.ReadInt32(data,4));MemberListAssigned=assigned;MemberListCount=count;
+    MemberObservationMatchesAccounting=ActiveBeforeCleanup.HasValue&&ActiveBeforeCleanup.Value==count;
+    if(count>MemberLimit){MemberObservationStatus="MEMBER_LIMIT";MemberObservationError="MEMBER_LIST_EXCEEDS_BUFFER";return;}
+    for(uint i=0;i<count;i++){
+     if(clock.ElapsedMilliseconds>=cutoff){MemberObservationStatus="BUDGET_EXHAUSTED";break;}
+     uint pid=unchecked((uint)Marshal.ReadIntPtr(data,8+(int)i*IntPtr.Size).ToInt64());rows.Add(ObserveMember(pid,clock,cutoff));
+    }
+    bool complete=MemberObservationMatchesAccounting&&rows.Count==count&&assigned==count;foreach(var row in rows)if(!row.identityComplete)complete=false;
+    MemberObservationComplete=complete&&clock.ElapsedMilliseconds<cutoff;
+    MemberObservationStatus=MemberObservationComplete?"COMPLETE":clock.ElapsedMilliseconds>=cutoff?"BUDGET_EXHAUSTED":!MemberObservationMatchesAccounting?"MEMBER_SET_CHANGED":assigned!=count?"LIST_CHANGED_OR_TRUNCATED":"PARTIAL_IDENTITY";
+   } catch(Exception error){MemberObservationStatus="ERROR";MemberObservationError=error.GetType().Name;}
+   finally {if(data!=IntPtr.Zero)Marshal.FreeHGlobal(data);MembersBeforeTermination=rows.ToArray();MemberObservationElapsedMs=clock.ElapsedMilliseconds-began;}
+  }
+ uint QueryActive() { ACCOUNTING info;if(!QueryInformationJobObject(handle,1,out info,(uint)Marshal.SizeOf(typeof(ACCOUNTING)),IntPtr.Zero))throw new Win32Exception(Marshal.GetLastWin32Error());QueryCount++;ActiveFinal=info.active;return info.active; }
  public YmccGlobalOwnedJob() {
+  MembersBeforeTermination=new MemberIdentity[0];MemberObservationStatus="NOT_ATTEMPTED";
   handle=CreateJobObject(IntPtr.Zero,null);
   if(handle==IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
   var info=new EXTENDED(); info.basic.flags=0x00002000;
@@ -348,14 +436,64 @@ public sealed class YmccGlobalOwnedJob : IDisposable {
   }
  }
  public void Assign(IntPtr process) {if(!AssignProcessToJobObject(handle,process)) throw new Win32Exception(Marshal.GetLastWin32Error());}
- public void Dispose(){if(handle!=IntPtr.Zero){CloseHandle(handle);handle=IntPtr.Zero;}}
+ public void ObserveAndReclaim(int maximumMs,uint code) {
+  var started=System.Diagnostics.Stopwatch.StartNew();var active=QueryActive();ActiveBeforeCleanup=active;
+  if(active>0){try{ObserveMembers(started,maximumMs);}catch(Exception error){MemberObservationStatus="ERROR";MemberObservationError=error.GetType().Name;}TerminationRequested=true;if(!TerminateJobObject(handle,code))throw new Win32Exception(Marshal.GetLastWin32Error());TerminationSucceeded=true;}
+  else {MemberObservationStatus="NO_ACTIVE_AT_ACCOUNTING_QUERY";MemberObservationComplete=true;MemberListAssigned=0;MemberListCount=0;MemberObservationMatchesAccounting=true;}
+  do {active=QueryActive();if(active==0){ZeroObservedBeforeDispose=true;return;}if(started.ElapsedMilliseconds>=maximumMs)return;System.Threading.Thread.Sleep(5);}while(true);
+ }
+ public void Dispose(){if(handle!=IntPtr.Zero){if(!CloseHandle(handle))throw new Win32Exception(Marshal.GetLastWin32Error());handle=IntPtr.Zero;}}
 }
 "@
+function Complete-OwnedTestJob($OwnedJob,[uint32]$TerminateCode) {
+ $receipt=[ordered]@{resourceObservationVersion=1;activeProcessesBeforeCleanup=$null;activeProcessesFinal=$null;zeroObservedBeforeDispose=$false;jobQueryCount=0;terminationRequested=$false;terminationSucceeded=$false;cleanupError=$null;jobDisposed=$false;memberObservationVersion=1;membersBeforeTermination=@();memberObservationStatus='NOT_ATTEMPTED';memberObservationError=$null;memberObservationComplete=$false;memberObservationElapsedMs=0;memberObservationBudgetMs=0;memberListAssigned=$null;memberListCount=$null;memberObservationMatchesAccounting=$false;memberObservationLimit=64}
+ $cleanupLimitMs=if($CleanupReserveMs -gt 0){$CleanupReserveMs}else{1000}
+ $cleanupMs=if($DeadlineEpochMs -gt 0){[Math]::Max(0,[Math]::Min($cleanupLimitMs,$DeadlineEpochMs-[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()))}else{[Math]::Min(1000,$cleanupLimitMs)}
+ try {$OwnedJob.ObserveAndReclaim([int]$cleanupMs,$TerminateCode)} catch {$receipt.cleanupError='OWNED_JOB_RECLAIM_FAILED: '+$_.Exception.GetType().Name}
+ $receipt.activeProcessesBeforeCleanup=$OwnedJob.ActiveBeforeCleanup;$receipt.activeProcessesFinal=$OwnedJob.ActiveFinal
+ $receipt.zeroObservedBeforeDispose=$OwnedJob.ZeroObservedBeforeDispose;$receipt.jobQueryCount=$OwnedJob.QueryCount
+ $receipt.terminationRequested=$OwnedJob.TerminationRequested;$receipt.terminationSucceeded=$OwnedJob.TerminationSucceeded
+ $receipt.membersBeforeTermination=@($OwnedJob.MembersBeforeTermination);$receipt.memberObservationStatus=$OwnedJob.MemberObservationStatus
+ $receipt.memberObservationError=$OwnedJob.MemberObservationError;$receipt.memberObservationComplete=$OwnedJob.MemberObservationComplete
+ $receipt.memberObservationElapsedMs=$OwnedJob.MemberObservationElapsedMs;$receipt.memberObservationBudgetMs=$OwnedJob.MemberObservationBudgetMs
+ $receipt.memberListAssigned=$OwnedJob.MemberListAssigned;$receipt.memberListCount=$OwnedJob.MemberListCount;$receipt.memberObservationMatchesAccounting=$OwnedJob.MemberObservationMatchesAccounting
+ if(-not $receipt.zeroObservedBeforeDispose -and -not $receipt.cleanupError){$receipt.cleanupError='OWNED_JOB_ZERO_NOT_OBSERVED'}
+ try {$OwnedJob.Dispose();$receipt.jobDisposed=$true} catch {$receipt.cleanupError=(@($receipt.cleanupError,'OWNED_JOB_CLOSE_FAILED: '+$_.Exception.GetType().Name)|Where-Object {$_}) -join '; '}
+ return [pscustomobject]$receipt
+}
 $eventName='Local\YMCC-Global-Owned-Test-'+[Guid]::NewGuid().ToString('N')
 $ready=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$eventName)
-$job=$null;$process=$null;$code=10;$deadlineExpired=$false;$jobDisposed=$false
+$job=$null;$process=$null;$code=10;$deadlineExpired=$false;$jobDisposed=$false;$rootExitCode=$null;$cleanup=$null;$jobAssigned=$false;$childExitedBeforeReturn=$null
+# Only this helper owns the CreateNew stream; a failed staging file is retained, never published.
+$receiptTempPath=$null;$receiptStream=$null;$receiptTempOwned=$false;$receiptPublished=$false;$receiptWriteStage=$null;$receiptWriteFailure=$null;$receipt=$null;$receiptOriginalExit=$null
+$receiptDispose=[ordered]@{process=[ordered]@{present=$false;attempted=$false;returned=$false;error=$null};ready=[ordered]@{present=$false;attempted=$false;returned=$false;error=$null};temporaryStream=[ordered]@{attempted=$false;returned=$false;error=$null}}
 try {
- if($DeadlineEpochMs -gt 0 -and [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge ($DeadlineEpochMs-$CleanupReserveMs)){throw 'OWNED_TEST_BUDGET_EXHAUSTED_BEFORE_START'}
+ # Preserve an already exhausted budget as 124 even if receipt admission also fails.
+ $budgetExhaustedBeforeAdmission=$DeadlineEpochMs -gt 0 -and [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge ($DeadlineEpochMs-$CleanupReserveMs)
+ if($budgetExhaustedBeforeAdmission){$deadlineExpired=$true;$code=124}
+ if($DeadlineReceiptPath){
+  try {
+   $receiptWriteStage='admission-path'
+   $receiptFinalPath=[IO.Path]::GetFullPath($DeadlineReceiptPath)
+   # Reject an existing final or a lookup error; only genuine absence admits creation.
+   try {[void][IO.File]::GetAttributes($receiptFinalPath);throw [IO.IOException]::new('OWNED_TEST_RECEIPT_FINAL_EXISTS')}
+   catch [IO.FileNotFoundException] {}
+   catch [IO.DirectoryNotFoundException] {}
+   $receiptTempPath=[IO.Path]::Combine([IO.Path]::GetDirectoryName($receiptFinalPath),('.ymcc-receipt-'+$PID+'-'+[Guid]::NewGuid().ToString('N')+'.tmp'))
+   $receiptWriteStage='admission-create'
+   $receiptStream=[IO.FileStream]::new($receiptTempPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+   $receiptTempOwned=$true
+   # Probe real data allocation and flush on the same stream later used for the JSON.
+   $receiptWriteStage='admission-write'
+   $receiptProbe=[Text.Encoding]::UTF8.GetBytes('YMCC_SIM_RECEIPT_PENDING')
+   $receiptStream.Write($receiptProbe,0,$receiptProbe.Length)
+   $receiptWriteStage='admission-flush';$receiptStream.Flush($true)
+  } catch {
+   $receiptWriteError=$_.Exception.GetBaseException()
+   $receiptWriteFailure=[ordered]@{stage=$receiptWriteStage;code=$receiptWriteError.HResult;errorId=$_.FullyQualifiedErrorId;exceptionType=$receiptWriteError.GetType().FullName;hresult=$receiptWriteError.HResult;message=$receiptWriteError.Message}
+   throw
+  }
+ }
  $job=[YmccGlobalOwnedJob]::new()
  $info=[Diagnostics.ProcessStartInfo]::new()
  $info.FileName=Join-Path $PSHOME 'pwsh.exe'
@@ -368,33 +506,88 @@ try {
  $launchArguments=@('-NoLogo','-NoProfile','-NonInteractive','-File',$PSCommandPath,'-Child','-ReadyEvent',$eventName,'-OwnerProcessId',[string]$PID,'-OwnerStartTicks',[string]$taskGuardOwnerBirth,'-ArgumentsPath',$ArgumentsPath)
  if($ProgramPath){$launchArguments+=@('-ProgramPath',$ProgramPath)}else{$launchArguments+=@('-ScriptPath',$ScriptPath)}
  foreach($arg in $launchArguments){$info.ArgumentList.Add($arg)}
+ # Receipt admission consumes the original budget; it never grants a new deadline.
+ if($DeadlineReceiptPath -and $DeadlineEpochMs -gt 0 -and [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge ($DeadlineEpochMs-$CleanupReserveMs)){throw 'OWNED_TEST_BUDGET_EXHAUSTED_BEFORE_START'}
  $process=[Diagnostics.Process]::Start($info)
  $stdout=$process.StandardOutput.ReadToEndAsync()
  $stderr=$process.StandardError.ReadToEndAsync()
  $job.Assign($process.Handle)
+ $jobAssigned=$true
  [void]$ready.Set()
  Write-Output ('YMCC_SIM_OWNED_JOB childPid='+$process.Id)
  if($DeadlineEpochMs -gt 0){
   $remaining=[Math]::Max(1,[Math]::Min([int]::MaxValue,$DeadlineEpochMs-$CleanupReserveMs-[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()))
   if(-not $process.WaitForExit([int]$remaining)){$deadlineExpired=$true;$code=124}
  }else{$process.WaitForExit()}
- if(-not $deadlineExpired){$code=$process.ExitCode}
- $job.Dispose();$job=$null;$jobDisposed=$true
- if($deadlineExpired){[void]$process.WaitForExit([Math]::Max(1,$CleanupReserveMs))}
- [Console]::Out.Write($stdout.GetAwaiter().GetResult())
- [Console]::Error.Write($stderr.GetAwaiter().GetResult())
- if(-not $deadlineExpired){$code=$process.ExitCode}
+ if(-not $deadlineExpired){$rootExitCode=$process.ExitCode;$code=$rootExitCode}
+ $cleanup=Complete-OwnedTestJob $job ([uint32]$(if($deadlineExpired){124}else{1}));$jobDisposed=$cleanup.jobDisposed;$job=$null
+ if($cleanup.cleanupError -and $code -eq 0){$code=10}
+ if($deadlineExpired){$waitMs=if($DeadlineEpochMs -gt 0){[Math]::Max(0,[Math]::Min([Math]::Max(0,$CleanupReserveMs),$DeadlineEpochMs-[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()))}else{[Math]::Max(0,$CleanupReserveMs)};[void]$process.WaitForExit([int]$waitMs)}
+ $drainMs=if($DeadlineEpochMs -gt 0){[Math]::Max(1,[Math]::Min([int]::MaxValue,$DeadlineEpochMs-[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()))}else{[Math]::Max(1,[Math]::Min(1000,[Math]::Max(1,$CleanupReserveMs)))}
+ if([Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout,$stderr),[int]$drainMs)){
+  [Console]::Out.Write($stdout.GetAwaiter().GetResult());[Console]::Error.Write($stderr.GetAwaiter().GetResult())
+ }else{$cleanup.cleanupError=(@($cleanup.cleanupError,'OWNED_JOB_OUTPUT_DRAIN_TIMEOUT')|Where-Object {$_}) -join '; ';if($code -eq 0){$code=10}}
 } catch {
- Write-Error ('OWNED_TEST_JOB_FAILED: '+$_.Exception.GetType().Name) -ErrorAction Continue
- if($process -and -not $process.HasExited){$process.Kill()}
+ if(-not $receiptWriteFailure){Write-Error ('OWNED_TEST_JOB_FAILED: '+$_.Exception.GetType().Name) -ErrorAction Continue}
+ if($process -and -not $process.HasExited){
+  $process.Kill()
+  $unassignedWaitMs=if($DeadlineEpochMs -gt 0){[Math]::Max(0,[Math]::Min(1000,$DeadlineEpochMs-[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()))}else{1000}
+  [void]$process.WaitForExit([int]$unassignedWaitMs)
+ }
  $code=if($_.Exception.Message -eq 'OWNED_TEST_BUDGET_EXHAUSTED_BEFORE_START'){124}else{10}
  $deadlineExpired=$deadlineExpired -or ($code -eq 124)
 } finally {
- if($job){$job.Dispose();$jobDisposed=$true}
+ try {
+ if($job){$cleanup=Complete-OwnedTestJob $job ([uint32]$(if($deadlineExpired){124}else{1}));$jobDisposed=$cleanup.jobDisposed;$job=$null}
+ if($cleanup -and $cleanup.cleanupError -and $code -eq 0){$code=10}
+ if($process){$childExitedBeforeReturn=$process.HasExited}
  if($DeadlineReceiptPath){
-  [ordered]@{schemaVersion=1;status=if($deadlineExpired){'TIMEOUT'}elseif($code -eq 0){'EXITED'}else{'FAILED'};exitCode=$code;deadlineExpired=$deadlineExpired;jobDisposed=$jobDisposed;childPid=if($process){$process.Id}else{$null};deadlineEpochMs=$DeadlineEpochMs;cleanupReserveMs=$CleanupReserveMs;finishedEpochMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}|ConvertTo-Json|Set-Content -LiteralPath $DeadlineReceiptPath -Encoding utf8
+  $receiptOriginalExit=$code
+  $receipt=[ordered]@{schemaVersion=1;status=if($deadlineExpired){'TIMEOUT'}elseif($code -eq 0){'EXITED'}else{'FAILED'};exitCode=$code;rootExitCode=$rootExitCode;deadlineExpired=$deadlineExpired;jobDisposed=$jobDisposed;jobAssigned=$jobAssigned;childExitedBeforeReturn=$childExitedBeforeReturn;childPid=if($process){$process.Id}else{$null};deadlineEpochMs=$DeadlineEpochMs;cleanupReserveMs=$CleanupReserveMs;finishedEpochMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}
+  if($cleanup){foreach($key in @('resourceObservationVersion','activeProcessesBeforeCleanup','activeProcessesFinal','zeroObservedBeforeDispose','jobQueryCount','terminationRequested','terminationSucceeded','cleanupError','memberObservationVersion','membersBeforeTermination','memberObservationStatus','memberObservationError','memberObservationComplete','memberObservationElapsedMs','memberObservationBudgetMs','memberListAssigned','memberListCount','memberObservationMatchesAccounting','memberObservationLimit')){$receipt[$key]=$cleanup.$key}}
+  if(-not $receiptWriteFailure){
+   try {
+    $receiptWriteStage='serialize'
+    $receiptBytes=[Text.UTF8Encoding]::new($false).GetBytes(($receipt|ConvertTo-Json -Depth 12)+[Environment]::NewLine)
+    $receiptWriteStage='write'
+    $receiptStream.Position=0;$receiptStream.SetLength(0);$receiptStream.Write($receiptBytes,0,$receiptBytes.Length)
+    $receiptWriteStage='flush';$receiptStream.Flush($true)
+    $receiptWriteStage='close-before-publish';$receiptDispose.temporaryStream.attempted=$true
+    $receiptStream.Dispose();$receiptDispose.temporaryStream.returned=$true;$receiptStream=$null
+    # Two-argument Move never replaces an existing final, including a late arrival.
+    $receiptWriteStage='publish';[IO.File]::Move($receiptTempPath,$receiptFinalPath)
+    $receiptPublished=$true;$receiptTempOwned=$false
+   } catch {
+    if($receiptWriteStage -eq 'close-before-publish'){$receiptDispose.temporaryStream.error=$_.Exception.ToString()}
+    $receiptWriteError=$_.Exception.GetBaseException()
+    $receiptWriteFailure=[ordered]@{stage=$receiptWriteStage;code=$receiptWriteError.HResult;errorId=$_.FullyQualifiedErrorId;exceptionType=$receiptWriteError.GetType().FullName;hresult=$receiptWriteError.HResult;message=$receiptWriteError.Message}
+    if($code -eq 0){$code=10}
+   }
+  }
  }
- if($process){$process.Dispose()}
- $ready.Dispose()
+ } finally {
+  # Each owned wrapper is attempted even when receipt writing or another Dispose throws.
+  $disposeFailure=$null
+  $receiptDispose.process.present=$null -ne $process
+  if($process){
+   $receiptDispose.process.attempted=$true
+   try {$process.Dispose();$receiptDispose.process.returned=$true} catch {$receiptDispose.process.error=$_.Exception.ToString();$disposeFailure=$_}
+  }
+  $receiptDispose.ready.present=$null -ne $ready
+  if($ready){
+   $receiptDispose.ready.attempted=$true
+   try {$ready.Dispose();$receiptDispose.ready.returned=$true} catch {$receiptDispose.ready.error=$_.Exception.ToString();if(-not $disposeFailure){$disposeFailure=$_}}
+  }
+  if($receiptStream -and -not $receiptDispose.temporaryStream.attempted){
+   $receiptDispose.temporaryStream.attempted=$true
+   try {$receiptStream.Dispose();$receiptDispose.temporaryStream.returned=$true} catch {$receiptDispose.temporaryStream.error=$_.Exception.ToString();if(-not $disposeFailure){$disposeFailure=$_}}
+  }
+  if($receiptWriteFailure){
+   if($null -eq $receiptOriginalExit){$receiptOriginalExit=$code}
+   if($code -eq 0){$code=10}
+   $receiptFailureDiagnostic=[ordered]@{schemaVersion=1;kind='ymcc-legacy-receipt-write-failure-v1';helperPid=$PID;receiptPath=$DeadlineReceiptPath;receipt=$receipt;originalEffectiveExitCode=$receiptOriginalExit;effectiveExitCode=$code;writeFailure=$receiptWriteFailure;temporaryFile=[ordered]@{path=$receiptTempPath;owned=$receiptTempOwned;published=$receiptPublished;retentionPolicy='RETAIN_OWNED_STAGE_ON_FAILURE'};dispose=$receiptDispose}
+   [Console]::Error.WriteLine('YMCC_SIM_RECEIPT_WRITE_FAILED '+($receiptFailureDiagnostic|ConvertTo-Json -Depth 20 -Compress))
+  } elseif($disposeFailure){throw $disposeFailure}
+ }
 }
 exit $code

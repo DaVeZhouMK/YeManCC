@@ -29,6 +29,27 @@ export function validatePipeReceiptMembership(configurations,{negative=false,nam
  }
  return true;
 }
+export function validateParentExitRelease(child,retry){
+ need(child.finalCleanupOk===true&&child.hasController===false&&child.hasContext===false,'PARENT_EXIT_DID_NOT_FINISH_ACTUAL_SESSION');
+ const pending=['localReleasePending','outputReleasePending','idleCtsReleasePending','steamDeckReleasePending'];
+ const returned=state=>state?.hasController===false&&state.hasContext===false&&pending.every(key=>state[key]===false);
+ const count=retry?2:1, releases=child.terminalReleaseAttempts, settlement=child.terminalSettlement;
+ need(Array.isArray(releases)&&releases.length===count&&releases.at(-1)?.ok===true&&settlement?.ReleaseAttempts===count,'PARENT_EXIT_RELEASE_ATTEMPT_BUDGET');
+ need(returned(releases.at(-1).after)&&returned(child.stateAfterFinalCleanup),'PARENT_EXIT_RELEASE_DEBT_REMAINING');
+ const stops=child.outputStopResults;
+ need(Array.isArray(stops)&&stops.length===count&&stops.at(-1)?.result===true,'PARENT_EXIT_STOP_BARRIER_MISSING');
+ if(retry){
+  const failed=releases[0]?.after;
+  need(releases[0]?.ok===false&&failed?.localReleasePending===true&&failed.outputReleasePending===true&&failed.hasController===true&&failed.hasContext===true&&stops[0]?.result===false,'PARENT_EXIT_RETRY_BARRIER_MISSING');
+ }
+ // Both event views come from the same ordered managed event list.
+ const trace=child.eventTrace,events=child.events;
+ need(Array.isArray(trace)&&Array.isArray(events)&&trace.length===events.length&&trace.every((row,index)=>row?.index===index&&row.value===events[index]),'PARENT_EXIT_EVENT_TRACE_MISMATCH');
+ const stopIndices=stops.map(row=>row.eventIndex);
+ need(stopIndices.every((index,i)=>Number.isSafeInteger(index)&&events[index]==='output-stop'&&(i===0||index>stopIndices[i-1]))&&events.filter(value=>value==='output-stop').length===count,'PARENT_EXIT_STOP_EVENT_MISMATCH');
+ const barrier=stopIndices.at(-1);
+ for(const name of ['controller-dispose','context-dispose'])need(events.indexOf(name)>barrier&&events.lastIndexOf(name)===events.indexOf(name),'PARENT_EXIT_DISPOSAL_ORDER:'+name);
+}
 export async function execute(root){
  root=path.resolve(root);const pathContext=wirePathContext(root,path.join(WORKSPACE,'Testing/YMCC'));need((inside(path.join(WORKSPACE,'Build'),root)||inside(path.join(WORKSPACE,'Testing/YMCC/Evidence'),root))&&!fs.existsSync(root),'FRESH_OWNED_EVIDENCE_REQUIRED');fs.mkdirSync(root,{recursive:true});
  const steps=[];
@@ -62,10 +83,9 @@ export async function execute(root){
        const item=rows.find(row=>row.parentLifetime.abruptExit===abrupt&&row.parentLifetime.firstStopFailure===retry);need(item,'PARENT_EXIT_KIND_MISSING:'+persona);
        const p=item.parentLifetime,child=item.managedReceipt;need(p.actualParentHandle&&p.serverHeldOpenUntilHostExit&&p.watchedPid!==p.supervisorPid&&p.watchedPid===child.parentPid&&p.creationTime.length>0&&p.nativeReleaseCommands===0,'PARENT_EXIT_NOT_ISOLATED_FROM_PIPE_CLOSE');
        need(item.commands.length===5&&item.commands.every(row=>!['QUIESCE','RELEASE_TARGET','SHUTDOWN'].includes(row.command))&&child.creates===1,'PARENT_EXIT_USED_NORMAL_RELEASE_OR_RECREATED');
-       need(child.exitReasons.length===1&&child.exitReasons[0].reason==='parent-exited'&&child.pipeLoopExitCode===0&&child.finalCleanupOk&&!child.hasController&&!child.hasContext,'PARENT_EXIT_DID_NOT_FINISH_ACTUAL_SESSION');
+       need(child.exitReasons.length===1&&child.exitReasons[0].reason==='parent-exited'&&child.pipeLoopExitCode===0,'PARENT_EXIT_DID_NOT_FINISH_ACTUAL_SESSION');
        need(child.actualProductionTerminalSettlement&&child.terminalSettlement.ManagedReleaseComplete&&child.terminalSettlement.ExitCode===0&&child.stateAfterLoop.hasController&&child.stateAfterLoop.hasContext,'PARENT_EXIT_UNIQUE_TERMINAL_SETTLEMENT_MISSING');
-       const releases=child.terminalReleaseAttempts;need(releases.length===(retry?2:1)&&releases.at(-1).ok,'PARENT_EXIT_RELEASE_ATTEMPT_BUDGET');
-       if(retry)need(!releases[0].ok&&releases[0].after.localReleasePending&&releases[0].after.hasController&&releases[0].after.hasContext&&child.outputStopResults.length===2&&!child.outputStopResults[0].result&&child.outputStopResults[1].result,'PARENT_EXIT_RETRY_BARRIER_MISSING');
+       validateParentExitRelease(child,retry);
       }
      }
      for(const item of c.result.cases){

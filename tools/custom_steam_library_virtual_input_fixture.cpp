@@ -15,13 +15,18 @@
 #include "json.hpp"
 #include "dsu_frame.h"
 #include "controller_persona.h"
+#include "gamepad_ui_gate_evidence.h"
 using json = nlohmann::json;
+static uint64_t currentPowerGeneration();
+static unsigned long long inputHostEpochToken();
+static std::atomic<unsigned long long> g_msiMainSourceRevision{1};
 
 struct FixtureWindow {
     bool valid = true, visible = true, iconic = false, present = false;
     DWORD pid = 77;
     ULONG_PTR owner = 2, parentPid = 42;
     std::wstring image = L"G:\\Fixture\\CustomSteamLibrary.exe";
+    const wchar_t* windowClass = L"FixtureWindow";
     HWND root = nullptr;
 };
 static FixtureWindow mainWindow, childWindow, mainPopup, otherWindow;
@@ -35,8 +40,10 @@ static bool processDenied = false, processQueryFailed = false;
 static bool g_webviewReady = true, directFocusAllowed = true, altFocusAllowed = true, altInserted = false, altInsertionSucceeds = true;
 static unsigned foregroundAttempts = 0, altAttempts = 0, windowRestores = 0;
 static unsigned foregroundReads = 0, findWindowCalls = 0;
+static unsigned windowPropertyReads = 0;
 static std::function<void()> duringImageQuery;
 static json discoveryReceipts=json::array();
+static json uiHandoffReceipts=json::array();
 static unsigned assertionCount=0;
 static unsigned processOpens = 0, imageQueries = 0, processCloses = 0;
 struct FixtureWebViewController {
@@ -52,10 +59,22 @@ static BOOL fixtureIsVisible(HWND window) { return fixtureIsWindow(window) && fi
 static BOOL fixtureIsIconic(HWND window) { return fixtureIsWindow(window) && fixture(window)->iconic; }
 static HWND fixtureForeground() { ++foregroundReads; return foregroundWindow; }
 static HWND fixtureAncestor(HWND window, UINT) { return window ? fixture(window)->root : nullptr; }
+static int fixtureClassName(HWND window, wchar_t* name, int size) {
+    if (!fixtureIsWindow(window) || !fixture(window)->windowClass) return 0;
+    const auto text = fixture(window)->windowClass;
+    const int count = (std::min)(static_cast<int>(std::wcslen(text)), size - 1);
+    std::copy_n(text, count, name);
+    name[count] = L'\0';
+    return count;
+}
 static HWND fixtureFindWindow(const wchar_t* name, const wchar_t*) {
     ++findWindowCalls;return childWindow.present && std::wcscmp(name, L"YeManSteamLibraryWorkspace") == 0 ? childHandle : nullptr;
 }
 static HANDLE fixtureGetProp(HWND window, const wchar_t* name) {
+    ++windowPropertyReads;
+#ifdef YMCC_WINDOW_PROPERTY_NAMES
+    if (IS_INTRESOURCE(name)) name = reinterpret_cast<ULONG_PTR>(name) == 0xC201 ? L"YeManSteamLibrary.InputOwner" : L"YeManSteamLibrary.ParentPid";
+#endif
     if (!window) return nullptr;
     return reinterpret_cast<HANDLE>(std::wcscmp(name, L"YeManSteamLibrary.InputOwner") == 0
         ? fixture(window)->owner : fixture(window)->parentPid);
@@ -86,10 +105,39 @@ static BOOL fixtureShowWindow(HWND window, int command) {
     if (command == SW_RESTORE) { fixture(window)->visible = true; fixture(window)->iconic = false; ++windowRestores; }
     return TRUE;
 }
+// Light-mode modifier admission belongs to its own original consumer. Fail
+// explicitly if this ordinary-window projection ever reaches those OS leaves.
+static BOOL fixtureGetKeyboardState(PBYTE) { throw std::runtime_error("light keyboard state outside selected window consumer"); }
+static SHORT fixtureGetAsyncKeyState(int) { throw std::runtime_error("light async key state outside selected window consumer"); }
+#ifdef YMCC_WINDOW_PROPERTY_NAMES
+static FixtureWindow propertyNameHolder;
+static HWND propertyNameHolderHandle=reinterpret_cast<HWND>(&propertyNameHolder);
+static BOOL fixtureNameSet(HWND window,const wchar_t* name,HANDLE value) {
+    if(window!=propertyNameHolderHandle)return FALSE;
+    if(std::wcscmp(name,L"YeManSteamLibrary.InputOwner")==0)propertyNameHolder.owner=reinterpret_cast<ULONG_PTR>(value);
+    else propertyNameHolder.parentPid=reinterpret_cast<ULONG_PTR>(value);
+    return TRUE;
+}
+static HANDLE fixtureNameRemove(HWND window,const wchar_t* name) {
+    if(window!=propertyNameHolderHandle)return nullptr;
+    auto& field=std::wcscmp(name,L"YeManSteamLibrary.InputOwner")==0?propertyNameHolder.owner:propertyNameHolder.parentPid;
+    const auto old=field;field=0;return reinterpret_cast<HANDLE>(old);
+}
+static ATOM fixtureNameFind(const wchar_t* name) {
+    if(std::wcscmp(name,L"YeManSteamLibrary.InputOwner")==0)return propertyNameHolder.owner?0xC201:0;
+    return propertyNameHolder.parentPid?0xC202:0;
+}
+static int fixtureNameEnum(HWND,PROPENUMPROCEXW,LPARAM){return -1;}
+#define SetPropW fixtureNameSet
+#define RemovePropW fixtureNameRemove
+#define GlobalFindAtomW fixtureNameFind
+#define EnumPropsExW fixtureNameEnum
+#endif
 #define IsWindow fixtureIsWindow
 #define IsWindowVisible fixtureIsVisible
 #define IsIconic fixtureIsIconic
 #define GetForegroundWindow fixtureForeground
+#define GetClassNameW fixtureClassName
 #define GetAncestor fixtureAncestor
 #define FindWindowW fixtureFindWindow
 #define GetPropW fixtureGetProp
@@ -104,6 +152,8 @@ static BOOL fixtureShowWindow(HWND window, int command) {
 #define SetActiveWindow fixtureSetActive
 #define SetFocus fixtureSetFocus
 #define ShowWindow fixtureShowWindow
+#define GetKeyboardState fixtureGetKeyboardState
+#define GetAsyncKeyState fixtureGetAsyncKeyState
 
 namespace ymcc::keyboardEvents { enum class SourceId { FocusAltFallback }; }
 static UINT keyboardSelfSendWithEvidence(ymcc::keyboardEvents::SourceId, UINT requested, INPUT*) {
@@ -112,6 +162,7 @@ static UINT keyboardSelfSendWithEvidence(ymcc::keyboardEvents::SourceId, UINT re
     return altInserted ? requested : 0;
 }
 
+//__PRODUCTION_REFOCUS_SUPPORT__
 struct { bool enabled = true, virtualTargetEnabled = true; std::string virtualTargetPersona; bool invertHorizontal=false,invertVertical=false; } g_realStickTest;
 static XINPUT_GAMEPAD g_curPad{};
 static WORD g_prevW = 0;
@@ -120,6 +171,18 @@ static WORD g_prevW = 0;
 namespace ymcc::screenpads {
 struct Snapshot { bool present = false; };
 static json snapshotJson(const Snapshot&) { return json::object(); }
+}
+// This consumer exercises the original main/library window route. The game
+// overlay is a separate owner and is explicitly inactive in these cases.
+static struct FixtureInactiveOverlay {
+    bool active() const noexcept { return false; }
+    void requestCheck() const noexcept {}
+} g_gameOverlay;
+static bool gameOverlayInputEligible() { throw std::runtime_error("overlay input is outside this window consumer"); }
+static bool gameOverlayOutputOwns() noexcept { return false; }
+namespace ymcc::logging {
+struct FixtureLogDeliveryEpoch { unsigned long long recoveryEpoch() const noexcept { return 0; } };
+static FixtureLogDeliveryEpoch& nativeLogFailureEvidence() { static FixtureLogDeliveryEpoch epoch; return epoch; }
 }
 //__PRODUCTION_OWNER_DECLARATIONS__
 //__PRODUCTION_WINDOW_HELPERS__
@@ -132,6 +195,7 @@ static HANDLE g_inputHostProcess = reinterpret_cast<HANDLE>(static_cast<uintptr_
 static bool g_inputHostPrepared = true, g_inputHostNeutralized = true, g_inputHostTransportFault = false;
 static std::string g_inputHostBoundPersona;
 static unsigned long long g_inputHostEpoch = 1;
+static unsigned long long inputHostEpochToken() { return g_inputHostEpoch; }
 static std::atomic<bool> g_inputHostFaultHoldsStart{false}, g_inputReady{true}, g_inputHostPowerAdmissionRevoked{false};
 static std::atomic<unsigned long long> g_focusIsolationSubmitSkipped{0}, g_focusIsolationNeutralFrames{0};
 static bool fixtureHostLifecycleBusy = false, fixtureVirtualWriterAllowed = true;
@@ -143,11 +207,15 @@ static void appendNativeLifecycleLog(const char* event, const json& receipt) {
     row["event"] = event;
     outputReceipts.push_back(row);
 }
+//__PRODUCTION_UI_LOG_RECOVERY_MEMO__
 //__PRODUCTION_OUTPUT_GATES__
 //__PRODUCTION_FRAME_ASSEMBLY__
 
 static std::vector<std::string> childActions, parentActions;
-static void gamepadEmitUiAction(const char* action, bool repeat = false, ULONGLONG heldMs = 0) {
+//__PRODUCTION_UI_SAMPLE__
+static void gamepadObserveUiGate(ymcc::logging::UiInputGate, WORD) noexcept {}
+static void gamepadEmitUiAction(const char* action, bool repeat = false, ULONGLONG heldMs = 0,
+                               const UiActionSharedHidSample& = {}) {
     if (!gamepadUiInputEligible()) return;
     if (customSteamLibraryChildForeground()) {
         if (const auto semantic = customSteamLibrarySemanticAction(action)) childActions.push_back(semantic);
@@ -156,6 +224,9 @@ static void gamepadEmitUiAction(const char* action, bool repeat = false, ULONGLO
 //__PRODUCTION_UI_PROCESS__
 static bool physicalRelease = false;
 static bool physicalReleaseWindowActive() { return physicalRelease; }
+static std::uint64_t fixtureDsuTicket=1;
+static std::uint64_t fixtureDsuDemand() {return fixtureDsuTicket;}
+#define dsu_frame_demand fixtureDsuDemand
 static json outputFrame(const FocusPlan& focusPlan, const FocusFrameContent& frameContent) {
 //__PRODUCTION_FINAL_OUTPUT_DECISION__
     const bool semanticNeutral = submitNeutral;
@@ -169,6 +240,11 @@ size_t dsu_encode_pad_data_for_test(uint8_t* out, size_t outLen, int slot, uint6
 }
 static ymcc::dsu::Frame lastDsuFrame;
 static void fixtureDsuPublish(const ymcc::dsu::Frame& frame) {lastDsuFrame=frame;dsu_publish(frame);}
+static unsigned fixtureDsuPublishes=0;
+static bool fixtureDsuPublishForDemand(std::uint64_t ticket, ymcc::dsu::Frame&& frame) {
+    if(!ticket||ticket!=fixtureDsuTicket)return false;
+    ++fixtureDsuPublishes;fixtureDsuPublish(frame);return true;
+}
 // Source metadata is a controlled seam in this focus-only regression. Actual
 // source retirement and producer admission run in dsu_motion_selftest.mjs.
 static uint64_t currentPowerGeneration(){return 1;}
@@ -184,6 +260,7 @@ static struct { long long dsuUs = 0; } g_tickPreHostSub;
 struct TickPreHostSubScope { TickPreHostSubScope(int, long long*) {} };
 //__PRODUCTION_DSU_NEUTRAL__
 #define dsu_publish fixtureDsuPublish
+#define dsu_publish_for_demand fixtureDsuPublishForDemand
 static std::array<uint8_t, 100> dsuOutput(const FocusPlan& focusPlan, bool live = true) {
     const auto canonicalPad = g_curPad;
     const auto focusMaskedButtons = canonicalPad.wButtons;
@@ -198,6 +275,8 @@ static std::array<uint8_t, 100> dsuOutput(const FocusPlan& focusPlan, bool live 
     return packet;
 }
 #undef dsu_publish
+#undef dsu_frame_demand
+#undef dsu_publish_for_demand
 static FocusPlan nativeDsuPlan() {
     g_realStickTest.enabled = g_realStickTest.virtualTargetEnabled = false;
     g_inputHostProcess = nullptr;
@@ -243,17 +322,19 @@ static void checkDsuLive(const std::array<uint8_t, 100>& packet) {
     check(gyro == 11, "Background DSU wire lost motion");
 }
 static void reset() {
+    fixtureDsuTicket=1;fixtureDsuPublishes=0;
     g_controllerFrontendIsolationEnabled.store(true);
     fixtureKnownMsi = false;
     g_inputReleaseRequired.store(false);
     mainWindow = {}; childWindow = {}; mainPopup = {}; otherWindow = {};
+    childWindow.windowClass = L"YeManSteamLibraryWorkspace";
     mainWindow.root = mainHandle; childWindow.root = childHandle;
     mainPopup.root = mainHandle; otherWindow.root = otherHandle;
     g_hwnd = mainHandle; foregroundWindow = mainHandle;
     processDenied = processQueryFailed = physicalRelease = false;
     g_webviewReady = directFocusAllowed = altFocusAllowed = altInsertionSucceeds = true;
     altInserted = false; foregroundAttempts = altAttempts = windowRestores = 0;
-    foregroundReads = findWindowCalls = 0;duringImageQuery={}; processOpens = imageQueries = processCloses = 0;
+    foregroundReads = findWindowCalls = windowPropertyReads = 0;duringImageQuery={}; processOpens = imageQueries = processCloses = 0;
     fixtureController.moves = 0; g_ctrl = &fixtureController;
     g_inputHostProcess = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(1));
     g_inputHostPrepared = g_inputHostNeutralized = fixtureVirtualWriterAllowed = true;
@@ -262,7 +343,7 @@ static void reset() {
     g_inputHostFaultHoldsStart = g_inputHostPowerAdmissionRevoked = false; g_inputReady = true;
     g_focusIsolationSubmitSkipped = g_focusIsolationNeutralFrames = 0;
     fixtureTick = 50000; g_realStickTest = {true, true};
-    g_radialUiOwnsInput=false;g_radialReturning=false;
+    radialInputIsolationInvalidate();
     g_customSteamLibraryInputPhase.store(static_cast<int>(CustomSteamLibraryInputPhase::disabled));
     g_customSteamLibraryInputDeadline.store(fixtureTick + kCustomSteamLibraryLaunchTimeoutMs);
     g_prevW = 0; g_curPad = {}; childActions.clear(); parentActions.clear();
@@ -278,7 +359,7 @@ static void useChild() {
 }
 static void sample(WORD buttons, ULONGLONG now) {
     g_curPad.wButtons = buttons;
-    gamepadProcessUiInput(buttons, now); g_prevW = buttons;
+    gamepadProcessUiInput(buttons, now, {}); g_prevW = buttons;
 }
 static FocusFrameContent liveFrame() {
     FocusFrameContent frame; frame.buttons = XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_X;
@@ -291,6 +372,10 @@ static FocusFrameContent liveFrame() {
     return frame;
 }
 int main(int argc,char** argv) {
+#ifdef YMCC_WINDOW_PROPERTY_NAMES
+    propertyNameHolder.owner=propertyNameHolder.parentPid=0;
+    if(!g_customSteamLibraryPropertyNames.attach(propertyNameHolderHandle))throw std::runtime_error("test property-name holder not attached");
+#endif
     const std::vector<std::string> selected(argv+1,argv+argc);
     const bool defaultFrontendIsolationEnabled = g_controllerFrontendIsolationEnabled.load();
     json cases = json::array();
@@ -345,14 +430,15 @@ int main(int argc,char** argv) {
     test("frontend-isolation-off-keeps-radial-and-return-protected", [] {
         g_controllerFrontendIsolationEnabled.store(false); foregroundWindow = otherHandle;
         for (const bool returning : {false, true}) {
-            g_radialUiOwnsInput.store(!returning); g_radialReturning.store(returning);
+            radialInputIsolationOwnership(true);
+            if (returning) radialInputIsolationOwnership(false);
             check(gamepadUiOutputIsolationEligible(), "Isolation OFF bypassed radial ownership or return");
             for (const auto& persona : {"elite", "steamdeck", "dualsense-edge"})
                 check(outputFrame(virtualPlan(persona), liveFrame()) == focusIsolationAssembleFrame(focusIsolationNeutralContent()), "Radial-owned virtual output retained input with isolation OFF");
             const auto nativePlan = nativeDsuPlan(); dsuLiveSample(); checkDsuNeutral(dsuOutput(nativePlan));
             g_realStickTest = {true, true}; g_inputHostProcess = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(1));
         }
-        g_radialReturning.store(false);
+        radialInputIsolationObserve(true);
         check(!gamepadUiOutputIsolationEligible(), "Radial return release retained background output ownership");
     });
     test("frontend-isolation-off-keeps-verified-child-and-navigation-protected", [] {
@@ -464,6 +550,27 @@ int main(int argc,char** argv) {
         discoveryReceipts.push_back({{"iterations",2000},{"suppressionDecisions",4000},{"findWindowCalls",findWindowCalls},{"processOpens",processOpens},{"imageQueries",imageQueries},{"processCloses",processCloses}});
         check(findWindowCalls==0,"unrelated foreground repeats global child-window discovery");
     });
+    test("unrelated-window-class-skips-owner-properties-but-clears-phase", [] {
+        useChild();foregroundWindow=otherHandle;
+        g_customSteamLibraryInputPhase.store(static_cast<int>(CustomSteamLibraryInputPhase::active));
+        for(int i=0;i<2000;++i)check(!customSteamLibraryInputSuppressed(),"Unrelated class claimed input");
+        check(windowPropertyReads==0&&findWindowCalls==0&&processOpens==0,"Unrelated class read live ownership");
+        check(g_customSteamLibraryInputPhase.load()==static_cast<int>(CustomSteamLibraryInputPhase::disabled)&&
+            g_customSteamLibraryInputDeadline.load()==0,"Unrelated class left stale input phase or deadline");
+    });
+    test("library-class-keeps-late-properties-and-class-query-fallback", [] {
+        useChild();childWindow.windowClass=L"yemansteamlibraryworkspace";
+        childWindow.owner=0;childWindow.parentPid=0;
+        check(!customSteamLibraryInputSuppressed(),"Window without an owner claimed input");
+        childWindow.owner=2;
+        check(!customSteamLibraryInputSuppressed(),"Window without a parent claimed input");
+        childWindow.parentPid=42;
+        check(customSteamLibraryInputSuppressed(),"Late owner properties did not take effect");
+        childWindow.windowClass=nullptr;
+        check(customSteamLibraryInputSuppressed(),"Failed class lookup lost valid ownership");
+        childWindow.owner=0;
+        check(!customSteamLibraryInputSuppressed(),"Revoked owner property stayed active");
+    });
     test("hidden-and-minimized-library-probes-do-zero-process-identity-work", [] {
         useChild(); childWindow.visible=false;
         for(int i=0;i<1000;++i)check(!customSteamLibraryInputSuppressed(),"Hidden child acquired input");
@@ -490,6 +597,22 @@ int main(int argc,char** argv) {
         check(!gamepadUiInputEligible(),"Prior identity bypassed failed verification");
         processQueryFailed=false;duringImageQuery=[] {foregroundWindow=otherHandle;};
         check(!customSteamLibraryInputSuppressed(),"Focus loss during fresh image query retained child admission");
+        for (const bool before : {false,true}) for (const bool after : {false,true}) {
+            reset(); useChild(); mainWindow.visible=true;
+            g_controllerFrontendIsolationEnabled.store(before);
+            duringImageQuery=[after] {foregroundWindow=mainHandle;g_controllerFrontendIsolationEnabled.store(after);};
+            check(gamepadUiOutputIsolationEligible()==after,"Preference changed during image query used its old main-window value");
+            check(g_customSteamLibraryInputPhase.load()==static_cast<int>(CustomSteamLibraryInputPhase::disabled),"Rejected child left active phase");
+            check(g_customSteamLibraryInputDeadline.load()==0,"Rejected child left launch deadline");
+            check(processOpens==processCloses && imageQueries==1,"Same decision retained or duplicated the child image handle");
+        }
+        reset(); useChild(); check(gamepadUiOutputIsolationEligible(),"Current child lost isolation");
+        childWindow.image=L"G:\\Fixture\\Unrelated.exe";
+        check(!gamepadUiOutputIsolationEligible(),"Previous output decision cached the old executable");
+        childWindow.image=L"G:\\Fixture\\CustomSteamLibrary.exe"; const auto closesBeforeDenied=processCloses; processDenied=true;
+        check(!gamepadUiOutputIsolationEligible(),"Previous output decision survived denied fresh identity");
+        check(processCloses==closesBeforeDenied,"Denied open incorrectly produced an owned handle to close");
+
     });
     test("deck-main-foreground-still-neutral", [] { check(steamDeckUiOwnsInput(deckPlan()), "Main UI lost Deck neutral output"); });
     test("deck-main-root-owner-popup-still-neutral", [] { foregroundWindow = popupHandle; check(steamDeckUiOwnsInput(deckPlan()), "Main root-owner foreground behavior changed"); });
@@ -610,6 +733,8 @@ int main(int argc,char** argv) {
         });
         test(("virtual-" + persona + "-reuses-same-tick-foreground-observation").c_str(), [&] {
             check(gamepadUiInputEligible(), "Fixture UI must be foreground eligible");
+            foregroundReads = 0;
+            check(gamepadUiOutputIsolationEligible(), "Fixture output must be foreground eligible");
             const auto singleObservationReads = foregroundReads;
             foregroundReads = 0;
             (void)outputFrame(virtualPlan(persona), liveFrame());
@@ -733,6 +858,19 @@ int main(int argc,char** argv) {
         checkDsuNeutral(dsuOutput(plan));
         check(std::memcmp(&physical, &g_curPad, sizeof(physical)) == 0, "DSU shielding changed physical UI sample");
     });
+    test("dsu-idle-skips-window-probes-and-fresh-subscription-honors-child", [] {
+        const auto plan=nativeDsuPlan();dsuLiveSample();useChild();
+        fixtureDsuTicket=0;
+        const auto reads=foregroundReads,opens=processOpens;
+        for(unsigned i=0;i<1000;++i)(void)dsuOutput(plan);
+        check(foregroundReads==reads&&processOpens==opens,"Idle DSU still checks foreground ownership");
+        check(fixtureDsuPublishes==0,"Idle DSU still publishes frames");
+        fixtureDsuTicket=2;
+        checkDsuNeutral(dsuOutput(plan));
+        check(fixtureDsuPublishes==1&&foregroundReads>reads&&processOpens>opens,"First subscribed frame skipped current child admission");
+        foregroundWindow=otherHandle;
+        check(dsuOutput(plan)[54]==g_curPad.bRightTrigger&&!lastDsuFrame.semanticNeutral,"Active DSU did not release child gate on current focus loss");
+    });
     test("dsu-native-child-foreground-neutral-wire", [] {
         const auto plan = nativeDsuPlan(); useChild(); dsuLiveSample();
         checkDsuNeutral(dsuOutput(plan));
@@ -830,9 +968,35 @@ int main(int argc,char** argv) {
         check(outputReceipts.size() == 2 && outputReceipts[1].value("phase", "") == "passthrough", "DSU return receipt missing");
     });
 
+    for(const std::string plane:{"virtual","dsu"}) {
+        test(("radial-owner-during-child-query-neutral-"+plane).c_str(),[&] {
+            useChild();
+            const auto plan=plane=="virtual"?virtualPlan("elite"):nativeDsuPlan();
+            if(plane=="dsu")dsuLiveSample();
+            duringImageQuery=[] {radialInputIsolationOwnership(true);foregroundWindow=otherHandle;};
+            if(plane=="virtual") {
+                const auto actual=outputFrame(plan,liveFrame());
+                const auto neutral=focusIsolationAssembleFrame(focusIsolationNeutralContent());
+                uiHandoffReceipts.push_back({{"plane",plane},{"actualFrame",actual},{"expectedNeutralFrame",neutral},
+                    {"radialOwnsAfterQuery",radialHasInputOwner()}});
+                check(actual==neutral,"Radial owner established during child identity query leaked a live virtual frame");
+            } else {
+                const auto packet=dsuOutput(plan);
+                uiHandoffReceipts.push_back({{"plane",plane},{"semanticNeutral",lastDsuFrame.semanticNeutral},
+                    {"wire",packet},{"radialOwnsAfterQuery",radialHasInputOwner()}});
+                checkDsuNeutral(packet);
+            }
+            duringImageQuery={};
+            check(radialHasInputOwner(),"Fixture never established radial ownership during identity query");
+        });
+    }
+
     size_t failures = 0; for (const auto& result : cases) if (!result["passed"].get<bool>()) ++failures;
     if(!selected.empty()&&cases.size()!=selected.size())++failures;
-    std::cout << json{{"allPassed", failures == 0},{"assertions",assertionCount},{"discoveryReceipts",discoveryReceipts}, {"caseCount", cases.size()}, {"failedCount", failures}, {"cases", cases},
+    std::cout << json{{"allPassed", failures == 0},{"assertions",assertionCount},{"discoveryReceipts",discoveryReceipts},{"uiHandoffReceipts",uiHandoffReceipts}, {"caseCount", cases.size()}, {"failedCount", failures}, {"cases", cases},
         {"productionHelpersExecuted", true}, {"win32AndActionsMocked", true}, {"realSteamFilesModified", false}, {"realDeviceIo", false}}.dump(2) << '\n';
+#ifdef YMCC_WINDOW_PROPERTY_NAMES
+    g_customSteamLibraryPropertyNames.detach(propertyNameHolderHandle);
+#endif
     return failures ? 1 : 0;
 }

@@ -50,6 +50,7 @@ function New-AppearanceMutex([string]$Purpose) {
 }
 
 # Unexpected process/identity/network routes fail before a system call.
+function Get-AppearanceTcpListeners {param($LocalPort) throw 'APPEARANCE_FIXTURE_PORT_QUERY_DENIED'}
 function Get-CimInstance {throw 'APPEARANCE_FIXTURE_CIM_DENIED'}
 function Invoke-CimMethod {throw 'APPEARANCE_FIXTURE_CIM_METHOD_DENIED'}
 function Invoke-WebRequest {throw 'APPEARANCE_FIXTURE_NETWORK_DENIED'}

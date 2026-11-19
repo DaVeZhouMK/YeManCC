@@ -7,18 +7,51 @@
 namespace {
 using J=nlohmann::json;
 using namespace ymcc::deckybinding;
+namespace cleanup=ymcc::deckyrepair::cleanupworker;
 void need(bool value,const char* reason){if(!value)throw std::runtime_error(reason);}
 J request(std::uint64_t generation){return{{"schema",worker::schema},{"id",std::string(32,'a')},{"generation",std::to_string(generation)},{"steam",{{"root","C:/source-fixture/Steam"},{"pid",GetCurrentProcessId()},{"created","123456789012345678"},{"account",12345678},{"windowsSession",0}}},{"bootstrap",{{"endpoint","ws://127.0.0.1:1/mirror"},{"token",std::string(64,'b')},{"runId",std::string(32,'c')}}},{"requireFreshContext",true},{"retainedFrontendOnly",false}};}
 std::vector<std::uint8_t> bytes(const std::string& value){return{value.begin(),value.end()};}
 J state(const Snapshot& s){return{{"processId",s.processId},{"exitCode",s.exitCode},{"handles",s.handles},{"activeCalls",s.activeCalls},{"pendingIo",s.pendingIo},{"jobActiveProcesses",s.jobActiveProcesses},{"childExited",s.childExited},{"fullyDestroyed",s.fullyDestroyed}};}
+J checkSharedIdentityReceipt(const char* schema,bool delegated,const char* reason){
+    Owner owner;need(static_cast<bool>(owner.start()),"owner-start");const auto generation=owner.snapshot().generation;
+    auto raw=request(generation);
+    const bool binding=std::string_view(schema)==worker::schema;
+    if(!binding){
+        raw["schema"]=schema;raw.erase("bootstrap");raw.erase("requireFreshContext");raw.erase("retainedFrontendOnly");
+        auto& steam=raw["steam"];steam["fromUi"]=false;
+        raw["state"]={{"enabled",true},{"pid",0u},{"phase","frontend-attached"},{"reason","retained-frontend-connected"},{"revision",7u},
+            {"cleanupNativeHost","123:456"}};
+        if(std::string_view(schema)==cleanup::lifecycleSchema)
+            raw["args"]={{"task","inspect"},{"modeEpoch","fixture:1"},{"frontendBuildId",std::string(64,'b')},
+                {"loaderVersion","v3.3.1"},{"backendPid",0u},{"backendBirth","0"}};
+        else raw["args"]={{"finalCleanup",true},{"pid",steam.at("pid")},{"birth",steam.at("created")},{"revision",7u},{"modeEpoch","fixture:1"}};
+    }
+    if(delegated)raw["steam"]["identitySource"]="shared-steam-observer.v1";
+    need(static_cast<bool>(owner.writeFrame(bytes(raw.dump()),1500,generation)),"request-send");
+    const auto frame=owner.readFrame(3000,generation);need(static_cast<bool>(frame),"shared-identity-receipt-missing");
+    const auto packet=J::parse(frame.payload);const auto& detail=packet.at("detail");
+    need(packet.at("schema")==schema&&packet.at("id")==raw.at("id")&&packet.at("generation")==raw.at("generation")&&
+        detail.at("ok")==false&&detail.at("mutated")==false&&detail.at("reason")==reason,"shared-identity-receipt-invalid");
+    need(binding?packet.at("kind")=="result":!packet.contains("kind"),"shared-identity-receipt-kind");
+    need(!detail.contains("uncertain"),"shared-identity-receipt-uncertain");
+    const auto stopped=owner.stop();const auto after=owner.snapshot();
+    need(stopped.fullyDestroyed&&after.handles==0&&after.pendingIo==0&&after.activeCalls==0&&after.jobActiveProcesses==0&&after.childExited,"worker-resources-not-destroyed");
+    return {{"reply",packet},{"atExit",state(after)}};
+}
 }
 int main(int argc,char** argv){
-    int workerExit=0;if(ymcc::deckybinding::entry::tryRunCommandLine(GetCommandLineW(),workerExit))return workerExit;
+    int workerExit=0;if(ymcc::deckybinding::entry::tryRunCommandLine(GetCommandLineW(),workerExit,[](const J& input,HANDLE cancel,const auto& emit,int& exit){
+        return cleanup::tryRun(input,cancel,emit,exit,[](const auto& request,HANDLE inherited)->J{
+            need(inherited&&request.identity.delegatedIdentity,"cleanup-entered-without-delegation");
+            return {{"ok",false},{"mutated",false},{"reason","fixture-reached-cleanup-hook"}};
+        });
+    }))return workerExit;
     if(argc!=2)return 3;J cases=J::array();
     const auto test=[&](const char* name,const auto& body){try{auto row=body();row["name"]=name;row["passed"]=true;cases.push_back(std::move(row));}catch(const std::exception& e){cases.push_back({{"name",name},{"passed",false},{"reason",e.what()}});}};
     test("actual-worker-refuses-unqualified-session-with-correlated-packet",[]{
         Owner owner;need(static_cast<bool>(owner.start()),"owner-start");const auto generation=owner.snapshot().generation;
-        need(static_cast<bool>(owner.writeFrame(bytes(request(generation).dump()),1500,generation)),"request-send");
+        auto input=request(generation);input["steam"]["identitySource"]="shared-steam-observer.v1";
+        need(static_cast<bool>(owner.writeFrame(bytes(input.dump()),1500,generation)),"request-send");
         const auto reply=owner.readFrame(2500,generation);need(static_cast<bool>(reply),"worker-refusal-read");
         const auto packet=J::parse(reply.payload);need(packet["schema"]==worker::schema&&packet["id"]==std::string(32,'a')&&packet["generation"]==std::to_string(generation)&&packet["kind"]=="result"&&packet["detail"]["ok"]==false&&packet["detail"]["mutated"]==false&&packet["detail"]["reason"]=="mirror-bootstrap-session-changed","bad-worker-receipt");
         need(packet.dump().find(std::string(64,'b'))==std::string::npos,"private-token-echoed");
@@ -31,6 +64,11 @@ int main(int argc,char** argv){
         need(stopped.fullyDestroyed&&after.handles==0&&after.pendingIo==0&&after.activeCalls==0&&after.jobActiveProcesses==0&&after.childExited,"worker-resources-not-destroyed");
         return J{{"reply",packet},{"atExit",state(after)},{"sameExecutableChild",true}};
     });
+    test("binding-entry-rejects-unmarked-identity",[]{return checkSharedIdentityReceipt(worker::schema,false,"mirror-bootstrap-shared-identity-required");});
+    test("cleanup-entry-rejects-unmarked-identity",[]{return checkSharedIdentityReceipt(cleanup::schema,false,"decky-cleanup-worker-shared-identity-required");});
+    test("lifecycle-entry-rejects-unmarked-identity",[]{return checkSharedIdentityReceipt(cleanup::lifecycleSchema,false,"decky-cleanup-worker-shared-identity-required");});
+    test("cleanup-delegation-reaches-hook",[]{return checkSharedIdentityReceipt(cleanup::schema,true,"fixture-reached-cleanup-hook");});
+    test("lifecycle-delegation-reaches-hook",[]{return checkSharedIdentityReceipt(cleanup::lifecycleSchema,true,"fixture-reached-cleanup-hook");});
     test("malformed-input-exits-child-without-ordinary-startup-or-private-echo",[]{
         Owner owner;need(static_cast<bool>(owner.start()),"owner-start");const auto generation=owner.snapshot().generation;
         need(static_cast<bool>(owner.writeFrame(bytes("private-malformed-input"),1500,generation)),"request-send");

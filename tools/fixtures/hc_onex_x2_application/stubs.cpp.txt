@@ -29,6 +29,12 @@ static bool msiWmiShortcutAuthoritative(){return false;}
 static bool hardwareWriteAllowed(){++appmock::permissionChecks;return appmock::writePermissionOverride?appmock::writePermissionOverride():appmock::hardwareAllowed&&g_powerLifecycle.load()==PowerLifecycle::Ready;}
 static bool msiWmiGenerationCurrent(uint64_t){return false;}
 static bool gamepadSerialSubmit(std::function<void()> fn,SerialJobKind){if(!appmock::serialAccepted)return false;appmock::jobs.push_back(std::move(fn));return true;}
+// The explicit desktop function route is inactive in this OneX source fixture.
+static std::atomic<bool>g_desktopFunctionHookActive{false};
+static std::atomic<uint32_t>g_desktopFunctionKeys{0},g_desktopFunctionPhysicalKeys{0};
+static ymcc::input::desktopFunction::EdgeQueue g_desktopFunctionEdges;
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& value){return value.generation==g_powerGeneration.load()&&g_powerLifecycle.load()==PowerLifecycle::Ready;}
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& value){value={};value.generation=g_powerGeneration.load();value.flags=ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed;return g_powerLifecycle.load()==PowerLifecycle::Ready&&value.generation!=0;}
 // @forward
 static uint64_t oemProducerAuthorityMask();
 static uint64_t oemProducerPhysicalMask();

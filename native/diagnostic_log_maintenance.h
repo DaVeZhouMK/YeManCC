@@ -83,7 +83,7 @@ private:
 
 enum class CurrentLogDirectory { data, app, sleep, webview };
 struct CurrentLogSpec { const char* name; CurrentLogDirectory directory; };
-inline constexpr std::array<CurrentLogSpec, 16> currentDiagnosticLogSpecs = {{
+inline constexpr std::array<CurrentLogSpec, 17> currentDiagnosticLogSpecs = {{
     {"gyro-motion.log", CurrentLogDirectory::data}, {"virtual-gamepad.log", CurrentLogDirectory::data},
     {"focus-trace.log", CurrentLogDirectory::data}, {"app.log", CurrentLogDirectory::app},
     {"native-lifecycle.log", CurrentLogDirectory::app}, {"native-detail.log", CurrentLogDirectory::app},
@@ -91,7 +91,8 @@ inline constexpr std::array<CurrentLogSpec, 16> currentDiagnosticLogSpecs = {{
     {"hardware-coordinator.log", CurrentLogDirectory::data}, {"sleep-facts.log", CurrentLogDirectory::sleep},
     {"tdp.log", CurrentLogDirectory::data}, {"tdp-detail.log", CurrentLogDirectory::data},
     {"frontend-errors.log", CurrentLogDirectory::webview}, {"frontend-trace.log", CurrentLogDirectory::webview},
-    {"frontend-trace-detail.log", CurrentLogDirectory::webview}, {"webview-failures.log", CurrentLogDirectory::webview}
+    {"frontend-trace-detail.log", CurrentLogDirectory::webview}, {"webview-failures.log", CurrentLogDirectory::webview},
+    {"gyro-motion-samples.log", CurrentLogDirectory::data}
 }};
 struct DiagnosticLogDirectories { std::filesystem::path data, app, sleep, webview; };
 

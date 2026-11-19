@@ -1,9 +1,15 @@
 #define NOMINMAX
 #include <windows.h>
 #include <atomic>
+#include <thread>
+#include <condition_variable>
+#include <mutex>
+#include <future>
+#include "sleep_power_state.h"
 #include <functional>
 #include <vector>
 #include <fstream>
+#include <iostream>
 #include <stdexcept>
 #include "monitor_hwinfo_manager.h"
 #include "monitor_hwinfo_recovery.h"
@@ -15,11 +21,21 @@ static unsigned long long powerGeneration=1,tick=100000;static unsigned managedC
 static bool demandActive=true,queueAvailable=true,lastElevationAllowed=true;
 static std::vector<std::function<void()>> jobs;static json events=json::array();
 static unsigned long long currentPowerGeneration(){return powerGeneration;}
+static std::atomic<bool> sharedKnown{true},sharedGate{true},sharedPending{false};
+static std::atomic<unsigned long long> sharedSequence{1},sharedSerial{0},sharedRevision{1},sharedReads{0};
+static int __cdecl fixtureSharedRead(ymcc::sleeppower::SharedPowerV1* out,uint32_t bytes){
+ ++sharedReads;if(!sharedKnown||bytes!=sizeof(*out))return 0;
+ *out={};out->generation=powerGeneration;out->publicationRevision=sharedRevision;out->observedNotificationSequence=sharedSequence;out->suspendSerial=sharedSerial;
+ out->phase=g_powerLifecycle==PowerLifecycle::Ready?0:2;out->flags=ymcc::sleeppower::kKnown|(sharedGate?ymcc::sleeppower::kHardwareAllowed:0)|(sharedPending?ymcc::sleeppower::kNotificationPending:0);return 1;
+}
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out){return ymcc::sleeppower::capturePower(&fixtureSharedRead,out);}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& p){return ymcc::sleeppower::powerCurrent(&fixtureSharedRead,p);}
+// ACTUAL_SHARED_READY
 static bool monitorHWiNFODemandActive(){return demandActive;}
 static void appendNativeLifecycleLog(const char*name,const json& detail){events.push_back({{"event",name},{"detail",detail}});}
 // ACTUAL_GLOBALS
 static ymcc::hwinfo::Result managedResult;static int managementThrows=0;
-static ymcc::hwinfo::Result nativeHWiNFOManage(ymcc::hwinfo::Request request,unsigned long long generation=0,unsigned long long demand=0,bool permit=true){++managedCalls;lastElevationAllowed=permit;if(managementThrows==2)throw 42;if(managementThrows==1)throw std::runtime_error("inert manager exception");if(!request.restart||!request.recoverOnly||!generation)throw std::runtime_error("wrong management request");return managedResult;}
+static ymcc::hwinfo::Result nativeHWiNFOManage(ymcc::hwinfo::Request request,unsigned long long generation=0,unsigned long long demand=0,bool permit=true,const ymcc::sleeppower::SharedPowerV1* expectedPower=nullptr){++managedCalls;lastElevationAllowed=permit;if(managementThrows==2)throw 42;if(managementThrows==1)throw std::runtime_error("inert manager exception");if(!request.restart||!request.recoverOnly||!generation)throw std::runtime_error("wrong management request");return managedResult;}
 static bool poolSubmit(std::function<void()> job){if(!queueAvailable)return false;jobs.push_back(std::move(job));return true;}
 static bool monitorHWiNFOCancelled();
 // ACTUAL_WORKER
@@ -30,10 +46,67 @@ static bool admission(){return
 // ACTUAL_ADMISSION
 ;}
 static void consume(ymcc::monitorrecovery::RetryBudget& hwRecoveryBudget,ymcc::monitorrecovery::StalledProducer& hwProducerStall,bool hwHealthy=false){
+ymcc::sleeppower::SharedPowerV1 collectionPower;captureSharedPowerLifecycle(collectionPower);
 // ACTUAL_CONSUMER
 }
 #undef GetTickCount64
-static void publish(int code,unsigned long long power,unsigned long long demand=1){g_monitorHWiNFORecoveryGeneration=power;g_monitorHWiNFORecoveryDemandGeneration=demand;g_monitorHWiNFORecoveryResult=code;}
+static void publish(int code,unsigned long long power,unsigned long long demand=1){g_monitorHWiNFORecoveryGeneration=power;g_monitorHWiNFORecoveryDemandGeneration=demand;g_monitorHWiNFORecoveryResult=code;
+#if HW_SHARED_POWER
+ g_monitorHWiNFORecoveryNotification=sharedSequence.load();g_monitorHWiNFORecoverySuspendSerial=sharedSerial.load();
+#endif
+}
+static std::mutex g_nativeMonitorMx;static std::condition_variable g_nativeMonitorCv;static bool g_nativeMonitorStop=false;
+// ACTUAL_POWER_WAIT
+namespace ymcc::hwinfo {
+static unsigned fixtureManagerCalls=0;static std::function<void()> fixtureManagerStep;static std::function<bool()> fixtureCancellation;
+inline Result fixtureManagerRun(Request,std::function<bool()> cancelled,bool){++fixtureManagerCalls;fixtureCancellation=cancelled;if(fixtureManagerStep)fixtureManagerStep();return cancelled&&cancelled()?Result{15,false,ERROR_CANCELLED,"fixture cancelled",{}}:Result{};}
+}
+namespace actualManagement {
+static std::wstring POWER_CONTROL_DIR=L"C:/inert/PowerControl";
+#define run fixtureManagerRun
+// ACTUAL_MANAGER
+#undef run
+}
+static int runSharedPower(const char* output){json checks=json::array();bool ok=true;const auto check=[&](const char*name,bool good){checks.push_back({{"name",name},{"ok",good}});ok&=good;};
+ const auto reset=[&]{g_powerLifecycle=PowerLifecycle::Ready;powerGeneration=7;sharedKnown=true;sharedGate=true;sharedPending=false;sharedSequence=31;sharedSerial=4;sharedRevision=20;g_poolCancel=false;demandActive=true;queueAvailable=true;g_monitorHWiNFOManagementPending=false;g_monitorHWiNFORecoveryResult=-1;g_monitorHWiNFODemandGeneration=1;jobs.clear();};
+ const auto execute=[&]{if(!jobs.empty()){auto job=std::move(jobs.front());jobs.erase(jobs.begin());job();}};
+ reset();sharedPending=true;check("pending notification blocks recovery before phase projection",monitorHWiNFOCancelled()&&!monitorLaunchHWiNFORecovery()&&jobs.empty());
+ reset();sharedGate=false;check("same Ready phase with closed shared gate blocks recovery",monitorHWiNFOCancelled()&&!monitorLaunchHWiNFORecovery());
+ reset();sharedKnown=false;check("unknown shared reader never grants recovery",monitorHWiNFOCancelled()&&!monitorLaunchHWiNFORecovery());
+ reset();auto before=managedCalls;monitorLaunchHWiNFORecovery();++sharedSequence;execute();check("same-generation notification retires the queued worker",managedCalls==before&&g_monitorHWiNFORecoveryResult==15&&!g_monitorHWiNFOManagementPending);
+ reset();before=managedCalls;monitorLaunchHWiNFORecovery();++sharedSerial;execute();check("same-generation suspend serial retires the queued worker",managedCalls==before&&g_monitorHWiNFORecoveryResult==15);
+ reset();before=managedCalls;monitorLaunchHWiNFORecovery();++sharedRevision;managedResult={};execute();check("diagnostic publication advance preserves healthy queued work",managedCalls==before+1&&g_monitorHWiNFORecoveryResult==0);
+ reset();before=managedCalls;monitorLaunchHWiNFORecovery();++g_monitorHWiNFODemandGeneration;execute();check("OFF ON demand still retires old queued work",managedCalls==before&&g_monitorHWiNFORecoveryResult==15);
+ reset();ymcc::monitorrecovery::RetryBudget b;ymcc::monitorrecovery::StalledProducer stall;consume(b,stall);b.started();publish(7,7);++sharedSequence;consume(b,stall);check("old same-generation completion cannot impose a new cooldown",!b.waiting);
+ reset();consume(b,stall);publish(7,7);consume(b,stall);check("current failure preserves the original thirty-second cooldown",b.waiting&&b.retryAt==tick+30000);
+ reset();ymcc::hwinfo::fixtureManagerCalls=0;ymcc::hwinfo::fixtureManagerStep=[]{sharedPending=true;++sharedSequence;};auto res=actualManagement::nativeHWiNFOManage({});const auto cancelled=ymcc::hwinfo::fixtureCancellation;sharedPending=false;check("actual manager cannot revive its cancellation after same-generation Ready",res.code==15&&cancelled&&cancelled());
+ reset();ymcc::hwinfo::fixtureManagerStep=[]{++sharedRevision;};res=actualManagement::nativeHWiNFOManage({});check("actual manager tolerates metadata-only publication",res.code==0);
+ reset();sharedKnown=false;const auto managerBefore=ymcc::hwinfo::fixtureManagerCalls;res=actualManagement::nativeHWiNFOManage({});check("actual manager rejects unknown before producer operations",res.code==15&&ymcc::hwinfo::fixtureManagerCalls==managerBefore);
+#if HW_SHARED_POWER
+ reset();sharedGate=false;sharedReads=0;std::promise<bool> done;auto future=done.get_future();std::thread waiter([&]{ymcc::sleeppower::SharedPowerV1 p;done.set_value(monitorWaitForSharedPower(p));});
+ const auto limit=GetTickCount64()+2000;while(!sharedReads&&GetTickCount64()<limit)Sleep(1);const auto reads=sharedReads.load();const bool blocked=future.wait_for(std::chrono::milliseconds(40))==std::future_status::timeout;check("collector shared wait performs no periodic power query",blocked&&reads==sharedReads.load());
+ {std::lock_guard<std::mutex> lock(g_nativeMonitorMx);sharedGate=true;g_nativeMonitorCv.notify_all();}const bool ready=future.wait_for(std::chrono::seconds(2))==std::future_status::ready;if(!ready){std::lock_guard<std::mutex> lock(g_nativeMonitorMx);g_nativeMonitorStop=true;g_nativeMonitorCv.notify_all();}waiter.join();check("shared owner notification resumes the same collector wait",ready&&future.get());
+ reset();sharedGate=false;sharedReads=0;std::promise<bool> stopped;auto stopFuture=stopped.get_future();std::thread finalWaiter([&]{ymcc::sleeppower::SharedPowerV1 p;stopped.set_value(monitorWaitForSharedPower(p));});const auto stopLimit=GetTickCount64()+2000;while(!sharedReads&&GetTickCount64()<stopLimit)Sleep(1);{std::lock_guard<std::mutex> lock(g_nativeMonitorMx);g_nativeMonitorStop=true;g_nativeMonitorCv.notify_all();}finalWaiter.join();check("application stop returns the suspended collector without Ready",!stopFuture.get());g_nativeMonitorStop=false;
+#else
+ check("collector shared wait performs no periodic power query",false);check("shared owner notification resumes the same collector wait",false);check("application stop returns the suspended collector without Ready",false);
+#endif
+ const json result={{"ok",ok},{"selection","shared-power"},{"cases",checks},{"systemPowerQueries",0},{"hardwareWrites",false},{"error",""}};const auto text=result.dump(2);const auto f=CreateFileW(std::filesystem::path(output).c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);if(f==INVALID_HANDLE_VALUE)return 2;DWORD wrote=0;const bool saved=WriteFile(f,text.data(),(DWORD)text.size(),&wrote,nullptr)&&wrote==text.size();CloseHandle(f);std::cout<<text;return saved?(ok?0:3):2;
+}
+static int runScopeRearm(const char* output){
+ json checks=json::array();bool ok=true;const auto check=[&](const char*name,bool good){checks.push_back({{"name",name},{"ok",good}});ok&=good;};
+ for(unsigned mode=0;mode<3;++mode){
+  ymcc::sleeppower::SharedPowerV1 previousCollectionPower;captureSharedPowerLifecycle(previousCollectionPower);auto collectionPower=previousCollectionPower;
+  if(mode==2)++collectionPower.publicationRevision;else ++collectionPower.observedNotificationSequence;
+  ymcc::monitorrecovery::RetryBudget hwRecoveryBudget;hwRecoveryBudget.waiting=mode==1;hwRecoveryBudget.retryAt=123456;
+  bool g_nativeHWiNFORecoveryArmed=false;struct Reset {unsigned count=0;void reset(){++count;}void stop(){++count;}}hwParseReuse,hwProducerStall,frameOutput,batteryModel,batteryFallback,fpsLimitReader,fileSystemReader;
+  unsigned g_monitorFreshness=9;long long g_monitorLastFreshMs=42;
+// ACTUAL_COLLECTION_SCOPE
+  if(mode==0)check("same-generation Ready rearms cancelled recovery",g_nativeHWiNFORecoveryArmed&&!hwRecoveryBudget.waiting&&hwParseReuse.count==1);
+  if(mode==1)check("owed failure cooldown survives a new notification scope",!g_nativeHWiNFORecoveryArmed&&hwRecoveryBudget.waiting&&hwRecoveryBudget.retryAt==123456);
+  if(mode==2)check("metadata-only publication does not rearm or reset",!g_nativeHWiNFORecoveryArmed&&hwParseReuse.count==0&&g_monitorFreshness==9&&g_monitorLastFreshMs==42);
+ }
+ const auto text=json{{"selection","scope-rearm"},{"ok",ok},{"cases",checks},{"error",""},{"hardwareWrites",false}}.dump(2);std::ofstream(output)<<text;std::cout<<text;return ok?0:3;
+}
 struct TransactionOps {
  std::vector<std::string> calls;std::string invalidate;bool cancelled=false,healthyValue=false;unsigned proofCount=0,released=0;
  void call(const char*n){calls.push_back(n);if(invalidate==n)cancelled=true;}
@@ -88,7 +161,43 @@ static Result invoke(bool permit){
 #endif
 }
 }
-int main(int argc,char**argv){if(argc!=2)return 2;bool ok=true;std::string error;json checks=json::array();
+// HWINFO_STARVATION_RECOVERY_SELECTION_BEGIN
+static constexpr const char* kStarvationRecoveryCaseNames[] = {
+ "producer-recovers-during-resolve",
+ "producer-recovers-during-prepare",
+ "producer-healthy-before-transaction",
+ "persistent-stall-still-recovers-and-proves-two-samples",
+ "explicit-user-restart-remains-explicit",
+ "cancellation-before-stop-still-wins"
+};
+struct StarvationRecoveryOps:TransactionOps {
+ std::string recoverAt;bool denyRecoveredStop=false;unsigned healthReads=0,stopCalls=0;
+ bool healthy(){++healthReads;return TransactionOps::healthy();}
+ std::wstring resolve(const std::wstring& path){auto result=TransactionOps::resolve(path);if(recoverAt=="resolve")healthyValue=true;return result;}
+ void prepare(const std::wstring& path,const ymcc::hwinfo::Request& request){TransactionOps::prepare(path,request);if(recoverAt=="prepare")healthyValue=true;}
+ void stop(){++stopCalls;if(denyRecoveredStop&&healthyValue)throw ymcc::hwinfo::Error(4,"inert stop refusal: already healthy producer");TransactionOps::stop();}
+};
+static int runStarvationRecovery(const char* output){json rows=json::array();unsigned failed=0;
+ const auto scenario=[&](const char* name,StarvationRecoveryOps ops,ymcc::hwinfo::Request request,bool mustReuse,int expectedCode){
+  const auto result=ymcc::hwinfo::transaction(ops,request);
+  const bool ok=result.code==expectedCode&&ops.released==1&&(mustReuse?ops.stopCalls==0&&!ops.saw("launch")&&result.dataReady:expectedCode==15?ops.stopCalls==0&&!ops.saw("launch"):ops.stopCalls==1&&ops.saw("launch")&&ops.proofCount==2);
+  if(!ok)++failed;rows.push_back({{"name",name},{"ok",ok},{"code",result.code},{"detail",result.detail},{"dataReady",result.dataReady},{"healthReads",ops.healthReads},{"stops",ops.stopCalls},{"launches",ops.saw("launch")?1:0},{"proofs",ops.proofCount},{"mutexReleased",ops.released},{"calls",ops.calls}});
+ };
+ ymcc::hwinfo::Request automatic;automatic.restart=true;automatic.recoverOnly=true;
+ for(const char* stage:{"resolve","prepare"}){StarvationRecoveryOps ops;ops.recoverAt=stage;ops.denyRecoveredStop=true;scenario(stage==std::string("resolve")?kStarvationRecoveryCaseNames[0]:kStarvationRecoveryCaseNames[1],ops,automatic,true,0);}
+ {StarvationRecoveryOps ops;ops.healthyValue=true;scenario(kStarvationRecoveryCaseNames[2],ops,automatic,true,0);}
+ {StarvationRecoveryOps ops;scenario(kStarvationRecoveryCaseNames[3],ops,automatic,false,0);}
+ {StarvationRecoveryOps ops;ops.healthyValue=true;ymcc::hwinfo::Request explicitRestart;explicitRestart.restart=true;scenario(kStarvationRecoveryCaseNames[4],ops,explicitRestart,false,0);}
+ {StarvationRecoveryOps ops;ops.recoverAt="prepare";ops.invalidate="prepare";scenario(kStarvationRecoveryCaseNames[5],ops,automatic,false,15);}
+ const json report={{"selection","starvation-recovery"},{"ok",failed==0},{"failed",failed},{"cases",rows},{"consumer","original ymcc::hwinfo::transaction template and existing TransactionOps with inert OS facts"},{"hardwareOrProcessCalls",0},{"realCpuPressure",false},{"existingStallGraceMs",ymcc::monitorrecovery::StalledProducer::graceMs},{"retryCooldownMs",ymcc::monitorrecovery::RetryBudget::retryDelayMs}};
+ const auto text=report.dump(2);const auto target=std::filesystem::path(output);
+ const auto file=CreateFileW(target.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+ if(file==INVALID_HANDLE_VALUE){std::cerr<<"Refuse missing or existing original result";return 2;}
+ DWORD wrote=0;const bool saved=WriteFile(file,text.data(),static_cast<DWORD>(text.size()),&wrote,nullptr)&&wrote==text.size();CloseHandle(file);
+ if(!saved)return 2;std::cout<<text;return failed?1:0;
+}
+// HWINFO_STARVATION_RECOVERY_SELECTION_END
+int main(int argc,char**argv){if(argc==3&&std::string(argv[2])=="--scope-rearm")return runScopeRearm(argv[1]);if(argc==3&&std::string(argv[2])=="--shared-power")return runSharedPower(argv[1]);if(argc==3&&std::string(argv[2])=="--starvation-recovery")return runStarvationRecovery(argv[1]);if(argc!=2)return 2;bool ok=true;std::string error;json checks=json::array();
 const auto check=[&](const char*n,bool pass){checks.push_back({{"name",n},{"ok",pass}});ok&=pass;};
 try{using ymcc::monitorrecovery::RetryBudget;using ymcc::monitorrecovery::StalledProducer;
  RetryBudget budget;StalledProducer stall;consume(budget,stall);bool slow=true,keepsTrying=true;

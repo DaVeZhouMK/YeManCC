@@ -6,8 +6,10 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createOfflineHostFixture} from './msi_steamdeck_release_fence_1726_selftest.mjs';
 import {extract} from './ymcc_sim/global/inputhost-protocol/extract-parser.mjs';
+import {readInputHostRuntimePool,runtimePoolProbeSource,readRuntimePoolReceipts} from './lib/inputhost_runtime_pool.mjs';
 const self=fileURLToPath(import.meta.url),repo=path.resolve(path.dirname(self),'..');
-const args=process.argv.slice(2),valueOptions=new Set(['--out','--fault','--runtime-source-closure','--source-identity-manifest','--source-identity-sha256','--case']),options=new Map();
+const runtimePool=readInputHostRuntimePool(path.join(repo,'InputHost/YeManInputHost.csproj'));
+const args=process.argv.slice(2),valueOptions=new Set(['--out','--fault','--runtime-source-closure','--source-identity-manifest','--source-identity-sha256','--case','--toolchain-root']),options=new Map();
 for(let i=0;i<args.length;i++){
  const key=args[i];
  if(key!=='--eligibility-only'&&key!=='--prepare-owned-child'&&!valueOptions.has(key))throw Error('MANAGED_TERMINAL_ARGV_UNKNOWN:'+key);
@@ -22,12 +24,18 @@ const out=path.resolve(option('--out','G:/YeManCC-Work/Testing/YMCC/Evidence/VC-
 const fault=option('--fault','none'),eligibility=options.has('--eligibility-only'),prepareOwnedChild=options.has('--prepare-owned-child');
 const closureFile=option('--runtime-source-closure',null),identityFile=option('--source-identity-manifest',null),identitySha=option('--source-identity-sha256',null);
 if([closureFile,identityFile,identitySha].some(Boolean)&&![closureFile,identityFile,identitySha].every(Boolean))throw Error('MANAGED_TERMINAL_ARGV_IDENTITY_ARGUMENTS_REQUIRED_TOGETHER');
-if(!['none','terminal-suppress-failure','terminal-no-retry','terminal-retry-sdk','terminal-repeat-shutdown','terminal-log-fatal'].includes(fault))throw Error('Unsupported semantic negative');
+if(!['none','terminal-suppress-failure','terminal-no-retry','terminal-retry-sdk','terminal-repeat-shutdown','terminal-log-fatal','terminal-close-refresh-forget-terminal'].includes(fault))throw Error('Unsupported semantic negative');
 const selectedCase=option('--case',null),selectedCases=selectedCase===null?null:selectedCase.split(',');
 const permanentCase='terminal-shutdown-output-fixed';
-const directedCases=['terminal-shutdown-healthy-fixed','terminal-read-loss-healthy-fixed',permanentCase];
+const closePendingCases=['terminal-close-refresh-parent-loss','terminal-close-refresh-fatal'];
+const closePending=selectedCases?.some(name=>closePendingCases.includes(name))??false;
+const coldPrepareCases=['terminal-cold-create-exception-healthy-fixed','terminal-cold-admission-failure-healthy-fixed'];
+const coldPrepare=selectedCases?.some(name=>coldPrepareCases.includes(name))??false;
+if(coldPrepare&&selectedCases.some(name=>!coldPrepareCases.includes(name)))throw Error('MANAGED_TERMINAL_MIXED_COLD_PREPARE_SELECTION');
+const directedCases=['terminal-shutdown-healthy-fixed','terminal-read-loss-healthy-fixed',permanentCase,...closePendingCases,...coldPrepareCases];
+if(closePending&&selectedCases.some(name=>!closePendingCases.includes(name)))throw Error('MANAGED_TERMINAL_MIXED_CLOSE_SELECTION');
 if(selectedCases&&(eligibility||selectedCases.length===0||selectedCases.some(name=>!directedCases.includes(name))||new Set(selectedCases).size!==selectedCases.length||selectedCases.includes(permanentCase)&&selectedCases.length!==1))throw Error('MANAGED_TERMINAL_ARGV_CASE_SELECTION_INVALID');
-const directedFaultAllowed=selectedCases?.[0]===permanentCase
+const directedFaultAllowed=coldPrepare?fault==='none':closePending?['none','terminal-close-refresh-forget-terminal'].includes(fault):selectedCases?.[0]===permanentCase
  ? fault==='none'||fault==='terminal-suppress-failure'
  : fault==='none'||fault==='terminal-log-fatal'||fault==='terminal-repeat-shutdown'&&selectedCases?.length===1&&selectedCases[0]==='terminal-shutdown-healthy-fixed';
 if(selectedCases&&!directedFaultAllowed)throw Error('MANAGED_TERMINAL_ARGV_CASE_FAULT_CONFLICT');
@@ -39,7 +47,7 @@ const fixtureRel='tools/fixtures/input_host_managed_lifecycle_20261023';
 const sdkRel='tools/fixtures/hidmaestro/2.0.0';
 const sdkSpec=JSON.parse(fs.readFileSync(path.join(repo,sdkRel,'binary-binding.json')));
 const sourceNames=['Program.cs','ScreenTouchpadReport.cs','ScreenButtonReport.cs','PsEndpointOwnership.cs','HostGameOutputObservation.cs','HostControllerOutputStop.cs','HostControllerIdleCtsRelease.cs','ParentProcessLifetime.cs','MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','CompactFrameReplyBinding.cs','HostTerminalCleanup.cs'];
-const relativeInputs=[...sourceNames.map(n=>'InputHost/'+n),path.relative(repo,self),'tools/msi_steamdeck_release_fence_1726_selftest.mjs','tools/msi_steamdeck_release_fence_1726_selftest.cs','tools/inputhost_lifecycle_selftest.mjs','tools/inputhost_lifecycle_selftest.cs','tools/inputhost_parent_lifecycle_selftest.cs','tools/ymcc_sim/global/inputhost-protocol/extract-parser.mjs','tools/ymcc_sim/global/inputhost-protocol/provenance.mjs','tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json','tools/ymcc_sim/global/host-sdk-stop/BclStopFixture.cs.in','capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs',fixtureRel+'/Workers.cs.in',fixtureRel+'/ManagedCases.cs',fixtureRel+'/TerminalCases.cs',fixtureRel+'/TerminalPorts.cs',sdkRel+'/binary-binding.json',...Object.keys(sdkSpec.members).map(n=>sdkRel+'/'+n)];
+const relativeInputs=['InputHost/YeManInputHost.csproj','tools/lib/inputhost_runtime_pool.mjs',...sourceNames.map(n=>'InputHost/'+n),path.relative(repo,self),'tools/msi_steamdeck_release_fence_1726_selftest.mjs','tools/msi_steamdeck_release_fence_1726_selftest.cs','tools/inputhost_lifecycle_selftest.mjs','tools/inputhost_lifecycle_selftest.cs','tools/inputhost_parent_lifecycle_selftest.cs','tools/ymcc_sim/global/inputhost-protocol/extract-parser.mjs','tools/ymcc_sim/global/inputhost-protocol/provenance.mjs','tools/ymcc_sim/global/inputhost-protocol/adapter.mjs','tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json','tools/ymcc_sim/global/host-sdk-stop/BclStopFixture.cs.in','capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs',fixtureRel+'/Workers.cs.in',fixtureRel+'/ManagedCases.cs',fixtureRel+'/TerminalCases.cs',fixtureRel+'/TerminalPorts.cs',sdkRel+'/binary-binding.json',...Object.keys(sdkSpec.members).map(n=>sdkRel+'/'+n)];
 const inputs=[...new Set(relativeInputs)].map(relative=>{const file=path.join(repo,relative),bytes=fs.readFileSync(file),snapshot=path.join(out,'sources',relative);fs.mkdirSync(path.dirname(snapshot),{recursive:true});fs.writeFileSync(snapshot,bytes,{flag:'wx'});return {relative,path:file,snapshot,sha256:sha(bytes),bytes:bytes.length};});
 const pin=file=>({path:file,sha256:sha(fs.readFileSync(file))});
 let registrationBinding=null;
@@ -57,8 +65,12 @@ const read=relative=>fs.readFileSync(inputs.find(r=>r.relative===relative).snaps
 const write=(file,data)=>fs.writeFileSync(file,typeof data==='string'?data:JSON.stringify(data,null,2)+'\n');
 write(path.join(out,'inputs-before.json'),inputs);
 const dotnetSpec=JSON.parse(read('tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json'));
-const dotnet=path.join(dotnetSpec.dotnetRoot,'dotnet.exe');
-const selectedToolchain=dotnetSpec.pinned.map(p=>({path:p.path,expected:p.sha256,actual:sha(fs.readFileSync(p.path))}));
+const chosenToolchainRoot=option('--toolchain-root',dotnetSpec.dotnetRoot);
+if(!path.isAbsolute(chosenToolchainRoot))throw Error('TOOLCHAIN_ROOT_MUST_BE_ABSOLUTE');
+const relocateTool=p=>{const relative=path.relative(dotnetSpec.dotnetRoot,p);return relative!==''&&!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative)?path.join(chosenToolchainRoot,relative):p;};
+const dotnet=path.join(chosenToolchainRoot,'dotnet.exe');
+const selectedToolchain=dotnetSpec.pinned.map(p=>({path:relocateTool(p.path),declaredPath:p.path,expected:p.sha256,actual:sha(fs.readFileSync(relocateTool(p.path)))}));
+const commandEnv={...process.env,DOTNET_ROOT:chosenToolchainRoot,PATH:chosenToolchainRoot+path.delimiter+(process.env.PATH??''),DOTNET_CLI_USE_MSBUILD_SERVER:'0',MSBUILDDISABLENODEREUSE:'1'};
 if(selectedToolchain.some(p=>p.actual!==p.expected))throw Error('Pinned toolchain changed');
 write(path.join(out,'toolchain.json'),selectedToolchain);
 const sdkFile=path.join(repo,'deps/hidmaestro/HIDMaestro.Core.dll');
@@ -66,8 +78,12 @@ if(sha(fs.readFileSync(sdkFile))!==sdkSpec.sdkSha256||fs.statSync(sdkFile).size!
 for(const [name,entry]of Object.entries(sdkSpec.members))if(sha(fs.readFileSync(path.join(repo,sdkRel,name)))!==entry.sha256)throw Error('Pinned method fixture changed: '+name);
 const project=path.join(out,'integrated');fs.mkdirSync(project);
 const hostSnapshot=path.join(out,'sources/InputHost');
-const generated=createOfflineHostFixture(project,hostSnapshot,true,{includePsOwnershipSupport:true,gameFeedbackCatalogPath:path.join(out,'sources/capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs')});
+const generated=createOfflineHostFixture(project,hostSnapshot,true,{includePsOwnershipSupport:true,closeRefresh:closePending,gameFeedbackCatalogPath:path.join(out,'sources/capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs')});
 let fake=generated.fake;
+// Optional diagnostics stay an explicitly inert constructor leaf in this fixture.
+// Its current writer type is not compiled here; business Task/terminal code is unchanged.
+const optionalWriterCtor='_msiCostDiagnostics = new(_costFlagEnabled, CostStateDir, HostVirtualSignalEvidence.WriteBounded);';
+if(fake.includes(optionalWriterCtor))fake=replaceOnce(fake,optionalWriterCtor,'_msiCostDiagnostics = new(_costFlagEnabled, CostStateDir); /* inert optional diagnostic constructor */');
 function replaceOnce(text,from,to){if(text.split(from).length!==2)throw Error('Nonunique anchor '+from.slice(0,100));return text.replace(from,()=>to);}
 function removeBlock(text,marker){const p=extract(text,marker);return replaceOnce(text,p.text,'');}
 fake=removeBlock(fake,'internal sealed class HMController : IDisposable');
@@ -86,6 +102,7 @@ compatibility=replaceOnce(compatibility,'private sealed class Stage {','private 
 const original=read('InputHost/Program.cs'),screen=read('InputHost/ScreenTouchpadReport.cs');
 const selected=[];
 function actual(source,marker,file){const part=extract(source,marker);selected.push({...part,text:undefined,file,sha256:sha(part.text),marker});return part.text;}
+let mainTerminalMutation=null;
 let pipeLoop='',codec='',mainBlock='throw new NotSupportedException("eligibility-only before Main patch");';
 if(!eligibility){
  pipeLoop=actual(original,'private static async Task<HostTerminalCleanup.LoopResult> RunPipeClientAsync(','InputHost/Program.cs');
@@ -98,11 +115,24 @@ if(!eligibility){
  if(!mainBlock.includes('HostTerminalCleanup.RunAsync(')||mainBlock.includes('session.ReleaseLocal(out _)'))throw Error('Main terminal ownership drift');
  selected.push({file:'InputHost/Program.cs',marker:'Exact Main owned-session initialization and terminal try/finally',sha256:sha(mainBlock),source:mainBlock});
 }
+if(fault==='terminal-close-refresh-forget-terminal'){
+ const before=mainBlock,from='(out string detail) => session.ReleaseLocal(out detail, terminal: true)',to='(out string detail) => session.ReleaseLocal(out detail)';
+ mainBlock=replaceOnce(mainBlock,from,to);
+ mainTerminalMutation={kind:'historical-main-callback-restored-only',from,to,beforeSha256:sha(before),afterSha256:sha(mainBlock)};
+ selected.push({file:'InputHost/Program.cs',marker:'Explicit private Main callback mutation',sha256:sha(mainBlock),source:mainBlock});
+}
 let fatalLogger=actual(original,'private static void LogFatalExit(','InputHost/Program.cs');
 fatalLogger=replaceOnce(fatalLogger,'private static void LogFatalExit(','private static void ActualLogFatalExit(');
 if(fault==='terminal-log-fatal')fatalLogger=replaceOnce(fatalLogger,'\"resource-settlement\"','\"fatal\"');
 fatalLogger=replaceOnce(fatalLogger,'var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YeManCC");','var dir = Path.Combine(AppContext.BaseDirectory, "fixture-owned-logs");');
-const fatalFields=['ProcessStartedUtc','_fatalContextLastCommand','_fatalContextHostInstance'].map(name=>{const match=new RegExp('^        private static [^\\r\\n]*\\b'+name+'[^\\r\\n]*;','m').exec(original);if(!match)throw Error('Fatal context field missing '+name);return match[0];}).join('\n');
+let fatalFields=['ProcessStartedUtc','_fatalContextLastCommand','_fatalContextHostInstance'].map(name=>{const match=new RegExp('^        private static [^\\r\\n]*\\b'+name+'[^\\r\\n]*;','m').exec(original);if(!match)throw Error('Fatal context field missing '+name);return match[0];}).join('\n');
+// This consumer runs inside its fixture process. The actual optional entry
+// owner stays null; exact process termination is tested by owned child cases.
+const processExitField=original.match(/^    private static HostTerminalCleanup\.ProcessExit\? _terminalProcessExit;/m)?.[0];
+if(processExitField){
+ fatalFields+='\n'+processExitField;
+ selected.push({file:'InputHost/Program.cs',marker:'Optional process-entry exit owner, null in this in-process consumer',sha256:sha(processExitField)});
+}
 const idleStop=actual(screen,'private static void StopSteamDeckIdleForRelease(','InputHost/ScreenTouchpadReport.cs');
 let takeover=actual(screen,'private static uint TakeScreenPadReportOwnership(','InputHost/ScreenTouchpadReport.cs');
 takeover=replaceOnce(takeover,'YeManInputHost.Diagnostics.HostControllerIdleCtsRelease.TryStopInputClock(controller,out var detail)','ManagedAdmission.StopClock(controller,out var detail)');
@@ -153,15 +183,16 @@ workers=replaceOnce(workers,'return ((Thread)t).Join(ms);','return TerminalTestP
 workers=replaceOnce(workers,':((Thread)t).Join(0);',':TerminalTestPorts.HasTerminated(t);');
 workers=replaceOnce(workers,'public bool IsPinnedClock(Type t)=>t==typeof(DeviceClock<StreamTick>);','public bool IsPinnedClock(Type t)=>!TerminalTestPorts.CaptureIdentityFailure&&t==typeof(DeviceClock<StreamTick>);');
 write(path.join(project,'Workers.cs'),workers+events);
-write(path.join(project,'Fixture.csproj'),'<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>'+(prepareOwnedChild?'<RuntimeFrameworkVersion>'+dotnetSpec.runtimeVersion+'</RuntimeFrameworkVersion><RollForward>Disable</RollForward>':'')+'<NuGetAudit>false</NuGetAudit><EnableNETAnalyzers>false</EnableNETAnalyzers><UseAppHost>false</UseAppHost></PropertyGroup></Project>');
+write(path.join(project,'RuntimePool.cs'),runtimePoolProbeSource(runtimePool));
+write(path.join(project,'Fixture.csproj'),'<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>'+(prepareOwnedChild?'<RuntimeFrameworkVersion>'+dotnetSpec.runtimeVersion+'</RuntimeFrameworkVersion><RollForward>Disable</RollForward>':'')+'<NuGetAudit>false</NuGetAudit><EnableNETAnalyzers>false</EnableNETAnalyzers><UseAppHost>false</UseAppHost>'+(closePending?'<DefineConstants>CLOSE_REFRESH_FIXTURE</DefineConstants>':'')+runtimePool.projectProperty+'</PropertyGroup></Project>');
 write(path.join(project,'NuGet.Config'),'<configuration><packageSources><clear /></packageSources></configuration>');
 write(path.join(project,'global.json'),{sdk:{version:dotnetSpec.sdkVersion,rollForward:'disable'}});
-write(path.join(out,'consumer-extractions.json'),{generated:generated.receipt,extra:selected,sdk:sdkSpec,mainTerminalBlock:prepareOwnedChild?'Exact current Main owned-session initialization and terminal try/finally prepared only; fixture and product Main never invoked':'Exact current Main owned-session initialization and terminal try/finally executed; only diagnostic type name mapped to existing Stage port; product startup and Main never invoked',eligibilityOnly:eligibility,substitutions:['Existing generator fake PnP/clock/neutral/frame/HidHide/report-chain and diagnostic terminals retained.','Production output/clock helper files unchanged; three call sites route fake metadata through IRuntime seams.','Existing BCL SDK-stop scaffold clock Loop uses owned BCL Thread/Event; native timer pointer zero; native call forbidden.','All five SDK 2.0 HMController stop/dispose methods and three DeviceClock stop/close methods hash-bound; fake context callback only.']});
+write(path.join(out,'consumer-extractions.json'),{generated:generated.receipt,extra:selected,sdk:sdkSpec,...(mainTerminalMutation?{mainTerminalMutation}:{}),mainTerminalBlock:prepareOwnedChild?'Exact current Main owned-session initialization and terminal try/finally prepared only; fixture and product Main never invoked':'Exact current Main owned-session initialization and terminal try/finally executed; only diagnostic type name mapped to existing Stage port; product startup and Main never invoked',eligibilityOnly:eligibility,substitutions:['Existing generator fake PnP/clock/neutral/frame/HidHide/report-chain and diagnostic terminals retained.','Production output/clock helper files unchanged; three call sites route fake metadata through IRuntime seams.','Existing BCL SDK-stop scaffold clock Loop uses owned BCL Thread/Event; native timer pointer zero; native call forbidden.','All five SDK 2.0 HMController stop/dispose methods and three DeviceClock stop/close methods hash-bound; fake context callback only.']});
 const commands=[];
-function command(label,exe,argv,cwd,timeout=60000){const preparedStartedAtUtc=prepareOwnedChild?new Date().toISOString():null,preparedStarted=prepareOwnedChild?performance.now():0;const r=spawnSync(exe,argv,{cwd,encoding:'utf8',windowsHide:true,timeout,maxBuffer:16*1024*1024});write(path.join(out,label+'.log'),(r.stdout??'')+(r.stderr??''));commands.push({label,exe,argv,cwd,status:r.status,signal:r.signal,error:r.error?.message??null,...(prepareOwnedChild?{startedAtUtc:preparedStartedAtUtc,finishedAtUtc:new Date().toISOString(),elapsedMs:performance.now()-preparedStarted}: {})});write(path.join(out,'commands.json'),commands);return r;}
+function command(label,exe,argv,cwd,timeout=60000){const preparedStartedAtUtc=new Date().toISOString(),preparedStarted=performance.now();const r=spawnSync(exe,argv,{cwd,encoding:'utf8',windowsHide:true,timeout,maxBuffer:16*1024*1024,env:commandEnv});write(path.join(out,label+'.log'),(r.stdout??'')+(r.stderr??''));commands.push({label,exe,argv,cwd,status:r.status,signal:r.signal,error:r.error?.message??null,...{startedAtUtc:preparedStartedAtUtc,finishedAtUtc:new Date().toISOString(),elapsedMs:performance.now()-preparedStarted}});write(path.join(out,'commands.json'),commands);return r;}
 const profiles=[];
 for(const config of prepareOwnedChild?['Release']:['Release','Debug']){
- const build=command(config+'-build',dotnet,['build','Fixture.csproj','-c',config,'--nologo','-v:q',...(prepareOwnedChild?['-p:UseSharedCompilation=false','-nodeReuse:false']:[])],project);
+ const build=command(config+'-build',dotnet,['build','Fixture.csproj','-c',config,'--nologo','-v:q',...['-p:UseSharedCompilation=false','-nodeReuse:false']],project);
  if(build.status!==0||prepareOwnedChild&&(build.error||build.signal))throw Error('Build failed: '+path.join(out,config+'-build.log'));
  if(prepareOwnedChild)continue;
  const r=command(config+'-tests',dotnet,[path.join(project,'bin',config,'net10.0/Fixture.dll'),...(eligibility?['--eligibility-only']:selectedCase!==null?['--case',selectedCase]:[])],project);
@@ -170,6 +201,7 @@ for(const config of prepareOwnedChild?['Release']:['Release','Debug']){
  const scopeMatches=Array.isArray(actualNames)&&actualNames.length>0&&result.eligibilityOnly===eligibility&&result.actualMainTerminalBlockExecuted===!eligibility&&(selectedCases===null||result.selectedCase===selectedCase&&JSON.stringify(result.selectedCases)===JSON.stringify(selectedCases)&&JSON.stringify(actualNames)===JSON.stringify(selectedCases));
  profiles.push({config,exit:r.status,result,scopeMatches});
 }
+const actualRuntimePool=prepareOwnedChild?[]:readRuntimePoolReceipts(project,runtimePool);
 const sourceStable=inputs.every(p=>sha(fs.readFileSync(p.path))===p.sha256);
 const failures=profiles.flatMap(p=>(p.result?.cases??[]).filter(r=>!r.pass).map(r=>({config:p.config,...r})));
 const runtimeSourceClosureStable=!registrationBinding||sha(fs.readFileSync(identityFile))===identitySha&&sha(fs.readFileSync(closureFile))===registrationBinding.runtimeSourceClosureIdentity.sha256&&Object.entries(registrationBinding.runtimeSourceClosure).every(([relative,expected])=>sha(fs.readFileSync(path.join(repo,relative)))===expected);
@@ -198,7 +230,7 @@ if(prepareOwnedChild){
  const preparation={schemaVersion:1,status:'PREPARED',preparedOnly:true,executedCases:0,fixtureExecuted:false,behaviorPass:null,descriptor:filePin(descriptorPath),configuration:'Release',sourceStable,runtimeSourceClosureStable,toolchainStable:true,fault};
  emitPrepared(path.join(out,'owned-child-preparation.json'),preparation);console.log(JSON.stringify(preparation));
 }else{
-const result={registrationBinding,runtimeSourceClosureStable,status:sourceStable&&runtimeSourceClosureStable&&profiles.length===2&&profiles.every(p=>p.exit===0&&p.result?.passed===true&&p.scopeMatches)?'PASS':'FAIL',resourceAcceptance:'BOUNDED_TERMINAL_RESULT_ONLY_OS_FALLBACK_UNKNOWN',eligibilityOnly:eligibility,selectedCase,selectedCases,fault,sourceStable,profiles,failures,inputs,toolchain:selectedToolchain,sdk:{path:sdkFile,sha256:sdkSpec.sdkSha256,loaded:false},productionMainExecuted:false,productOrInstalledProcessesTouched:false,ownedFixtureChildProcessesOnly:true,realDriverIo:false};
+const result={runtimePool,actualRuntimePool,registrationBinding,runtimeSourceClosureStable,status:sourceStable&&runtimeSourceClosureStable&&profiles.length===2&&profiles.every(p=>p.exit===0&&p.result?.passed===true&&p.scopeMatches)?'PASS':'FAIL',resourceAcceptance:'BOUNDED_TERMINAL_RESULT_ONLY_OS_FALLBACK_UNKNOWN',eligibilityOnly:eligibility,selectedCase,selectedCases,fault,sourceStable,profiles,failures,inputs,toolchain:selectedToolchain,sdk:{path:sdkFile,sha256:sdkSpec.sdkSha256,loaded:false},productionMainExecuted:false,productOrInstalledProcessesTouched:false,ownedFixtureChildProcessesOnly:true,realDriverIo:false};
 write(path.join(out,'result.json'),result);
 console.log(JSON.stringify({status:result.status,fault,sourceStable,profiles:profiles.map(p=>({config:p.config,exit:p.exit,cases:p.result?.cases.map(r=>({name:r.name,pass:r.pass,error:r.error}))})),result:path.join(out,'result.json')}));
 if(result.status!=='PASS')process.exitCode=1;

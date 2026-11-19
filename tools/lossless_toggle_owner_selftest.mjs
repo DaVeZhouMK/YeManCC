@@ -11,14 +11,17 @@ function valueOf(flag){const i=arguments_.indexOf(flag);if(i<0)return undefined;
 const root=path.resolve(valueOf('--source-root')||process.env.YMCC_LOSSLESS_SOURCE_ROOT||path.join(scriptDirectory,'..'));
 assert.ok(fs.existsSync(path.join(root,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs')),'Supply YMCC_LOSSLESS_SOURCE_ROOT or --source-root when this copy lives in PrivateFixtures');
 const {calibrationToolchainPreamble}=await import(pathToFileURL(path.join(root,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs')).href);
-if(arguments_.includes('--launch-session')){
+if(arguments_.includes('--runtime-power')){
+ const {runtimePowerOnly}=await import(pathToFileURL(path.join(scriptDirectory,'fixtures/lossless_runtime_power.mjs')).href);
+ await runtimePowerOnly({arguments_,root,scriptDirectory,calibrationToolchainPreamble});
+}else if(arguments_.includes('--launch-session')){
  await launchSessionOnly();
 }else if(arguments_.includes('--discovery')){
  await discoveryOnly();
 }else{
 const out=path.resolve(process.argv[2]||path.join(root,'../../../Build/Validation/Lossless-Toggle-Xbox-20261022/owner'));
 fs.mkdirSync(out,{recursive:true});
-const inputs=['native/main.cpp','native/decky_sidebar_diagnostics.h','src/bridge/quickapp.ts','src/bridge/losslessProfiles.ts','src/bridge/losslessProgramState.ts','src/bridge/losslessScaling.ts','src/bridge/deckyLosslessState.ts','tools/lossless_scaling_selftest.mjs','tools/lossless_toggle_owner_selftest.mjs','src/bridge/api.ts','src/bridge/ipc.ts','native/lossless_launch.h','native/lossless_launch_contract.h','native/lossless_scale.h','native/lossless_scale_contract.h','native/lossless_window_refresh.h','native/lossless_runtime.h','native/process_basic_candidates.h','native/process_inventory.h','native/game_process_inventory.h','tools/lossless_discovery_fixture.h','src/bridge/losslessRuntimeState.ts','native/process_efficiency.h','tools/lossless_launch_selftest.cpp','tools/fixtures/lossless_close_probe.ps1','tools/fixtures/lossless_close_owned.cs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
+const inputs=['src/bridge/steamInstallationFacts.ts','tools/fixtures/lossless_steam_installations.mjs','native/main.cpp','native/decky_sidebar_diagnostics.h','src/bridge/quickapp.ts','src/bridge/losslessProfiles.ts','src/bridge/losslessProgramState.ts','src/bridge/losslessScaling.ts','src/bridge/deckyLosslessState.ts','tools/lossless_scaling_selftest.mjs','tools/lossless_toggle_owner_selftest.mjs','src/bridge/api.ts','src/bridge/ipc.ts','native/lossless_launch.h','native/lossless_launch_contract.h','native/lossless_scale.h','native/lossless_scale_contract.h','native/lossless_window_refresh.h','native/lossless_runtime.h','native/sleep_power_state.h','native/sleep_power_observation.h','native/sleep_power_revocation.h','tools/lossless_runtime_power_fixture.h','tools/fixtures/lossless_runtime_power.mjs','tools/fixtures/lossless_runtime_watch_dispatch.inc','tools/fixtures/lossless_runtime_watch_cases.inc','tools/fixtures/lossless_uia_ports.h','tools/fixtures/lossless_uia_client_stubs.inc','tools/fixtures/lossless_uia_element_stubs.inc','tools/fixtures/lossless_uia_cases.inc','tools/fixtures/lossless_runtime_read_fixture.h','tools/fixtures/lossless_runtime_read_cases.inc','tools/ymcc_sim/global/decky-update-recovery/native-source-admission.mjs','native/process_basic_candidates.h','native/process_inventory.h','native/game_process_inventory.h','tools/lossless_discovery_fixture.h','src/bridge/losslessRuntimeState.ts','native/process_efficiency.h','tools/lossless_launch_selftest.cpp','tools/fixtures/lossless_close_probe.ps1','tools/fixtures/lossless_close_owned.cs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
 const hash=name=>createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex');
 const sourceHashes=Object.fromEntries(inputs.map(name=>[name,hash(name)]));
 const run=spawnSync(process.execPath,['tools/lossless_scaling_selftest.mjs'],{cwd:root,encoding:'utf8',windowsHide:true,timeout:30000,
@@ -40,7 +43,8 @@ try{
  });
  const entry=entries.join('\n');
  assert(main.includes('#include "lossless_launch.h"'));
- assert(main.includes('if (cmd == "lossless.ensureRunning" || cmd == "lossless.getState" || cmd == "lossless.ensureScaling" || cmd == "lossless.detect" || cmd == "lossless.watch" || cmd == "lossless.resetFailed") return true;'));
+ assert(main.includes('if (cmd == "lossless.watch") return false;'));
+ assert(main.includes('if (cmd == "lossless.ensureRunning" || cmd == "lossless.getState" || cmd == "lossless.ensureScaling" || cmd == "lossless.detect" || cmd == "lossless.resetFailed") return true;'));
  const consumer=path.join(native,'consumer.cpp');
  fs.writeFileSync(consumer,`#include <atomic>
 #include <iostream>
@@ -56,6 +60,11 @@ using json=nlohmann::json;
 static std::atomic<bool> g_exitRequested{false};
 static unsigned long long currentPowerGeneration(){return 1;}
 static bool hardwareWriteAllowed(){return false;}
+static ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,uint32_t bytes){if(!out||bytes<sizeof(*out))return 0;*out={};return 0;}
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out){return ymcc::sleeppower::capturePower(&readSharedSystemPower,out);}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& captured){return ymcc::sleeppower::powerCurrent(&readSharedSystemPower,captured);}
+static ymcc::sleeppower::RevocationMirrors::Registration observeSharedPowerRevocation(const ymcc::sleeppower::SharedPowerV1& captured){return g_sharedPowerRevocations.observe(&readSharedSystemPower,captured);}
 static std::wstring U2W(const std::string& s){return std::wstring(s.begin(),s.end());}
 static std::string W2U(const std::wstring& s){return std::string(s.begin(),s.end());}
 static void ipc_emit(const char*,const json&){}
@@ -164,6 +173,7 @@ async function discoveryOnly(){
  const pin=p=>{const real=fs.realpathSync(p),bytes=fs.readFileSync(real);return {path:real,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};};
  const normalize=p=>path.resolve(p).replaceAll('\\','/').toLowerCase();
  const requiredInputs=[fileURLToPath(import.meta.url),cpp,fixture,candidateRuntime,candidateHelper,path.join(candidate,'process_inventory.h'),path.join(candidate,'game_process_inventory.h'),
+  ...['sleep_power_revocation.h','sleep_power_state.h','sleep_power_observation.h'].map(file=>path.join(candidate,file)),
   path.join(root,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'),path.join(root,'native/lossless_scale.h'),
   path.join(root,'native/lossless_scale_contract.h'),path.join(root,'native/lossless_launch_contract.h'),path.join(root,'native/lossless_window_refresh.h'),process.execPath];
  const inputStart=performance.now(),inputsBefore=requiredInputs.map(pin),identityMs=performance.now()-inputStart;

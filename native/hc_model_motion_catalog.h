@@ -11,6 +11,7 @@ struct Recipe {
     std::string_view sourcePath, sourceSha256;
     // Empty for new models; reviewed deltas keep the canonical identity tuple.
     std::string_view identityGyroMatrixId{}, identityAccelMatrixId{};
+    std::string_view sourceScope = "hc-a250b19a-resource-json";
 };
 inline constexpr Recipe recipes[] = {
     {"HandheldCompanion.Devices.AYANEO3", "hc-a250b19a:model:AYANEO3", "hc-a250b19a:ayaneo3:gyro:x-neg-z-y", "hc-a250b19a:ayaneo3:accel:neg-x-neg-z-y", "HandheldCompanion/Resources/Devices/AYANEODeviceCEc.json", "f6842f39b7078c87c60cba20dd5f7a215b2abbf8b00a4a2f86d5c03cf03fb803"},
@@ -40,6 +41,7 @@ inline constexpr Recipe recipes[] = {
     {"HandheldCompanion.Devices.OneXPlayerMiniIntel", "hc-a250b19a:reviewed:OneXPlayerMiniIntel", "hc-a250b19a:reviewed-OneXPlayerMiniIntel:gyro:z-neg-x-neg-y", "hc-a250b19a:reviewed-OneXPlayerMiniIntel:accel:x-neg-z-neg-y", "HandheldCompanion/Resources/Devices/OneXPlayerMiniIntel.json", "4908ebbc8d5560218345b49fa0142d8e946c491a5f08d1310e832f1cea35112a", "hc-06c0b954:onexplayer-miniintel:gyro:z-neg-x-neg-y", "hc-06c0b954:onexplayer-miniintel:accel:x-neg-y-neg-z"},
     {"HandheldCompanion.Devices.OneXPlayerMiniPro", "hc-a250b19a:reviewed:OneXPlayerMiniPro", "hc-a250b19a:reviewed-OneXPlayerMiniPro:gyro:x-z-y", "hc-a250b19a:reviewed-OneXPlayerMiniPro:accel:x-neg-z-y", "HandheldCompanion/Resources/Devices/OneXPlayerMiniPro.json", "d3939ee42a4495b87d495e3abc54e3c919348352981eb8b98411eb509cf61b20", "hc-06c0b954:onexplayer-mini:gyro:x-neg-z-y", "hc-06c0b954:onexplayer-minipro:accel:x-neg-y-z"},
     {"HandheldCompanion.Devices.OneXPlayerX1Mini", "hc-a250b19a:reviewed:OneXPlayerX1Mini", "hc-a250b19a:reviewed-OneXPlayerX1Mini:gyro:x-z-y", "hc-a250b19a:reviewed-OneXPlayerX1Mini:accel:x-neg-z-y", "HandheldCompanion/Resources/Devices/OneXPlayerX1Mini.json", "2dd5e2ef9634c0077275790b50dff3bfb950b9f85159d614bae904d1e2bc902a", "hc-06c0b954:onexplayer-g1:gyro:x-y-z", "hc-06c0b954:onexplayer-g1:accel:x-neg-y-z"},
+    {"HandheldCompanion.Devices.GPDWin5", "hc-fdf0bf66:reviewed:GPDWin5", "hc-fdf0bf66:gpd-win5:gyro:y-neg-z-neg-x", "hc-06c0b954:gpd-win5:accel:neg-x-neg-z-y", "capabilities/upstream/fdf0bf66/Win5MotionReview.json", "d0524d599683d07b67fb191b77a9f1efef6ee7068849d2dd618ba6cb650e109f", "hc-06c0b954:gpd-win5:gyro:z-neg-x-neg-y", "hc-06c0b954:gpd-win5:accel:neg-x-neg-z-y", "reviewed-historical-hc-callback-output-to-input"},
 };
 inline constexpr const Recipe* find(std::string_view deviceClass) noexcept {
     for (const auto& recipe : recipes) if (recipe.deviceClass == deviceClass) return &recipe;

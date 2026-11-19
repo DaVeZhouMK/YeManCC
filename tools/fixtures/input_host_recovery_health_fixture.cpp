@@ -7,20 +7,26 @@
 #include "windows_motion_submission.h"
 #include "touch_haptic_dispatch.h"
 #include "game_feedback_receipt.h"
+#include "HcControllerInputCapabilityCatalog.h"
+#include "sleep_power_state.h"
 #include <atomic>
 #include <cstdint>
 #include <functional>
 #include <iostream>
 #include <mutex>
+#include <memory>
 #include <string>
 #include <vector>
 using json=nlohmann::json;using ULONGLONG=unsigned long long;using InputHostMutex=std::mutex;
+// The health fixture never constructs or calls the shared-power owner.
+namespace ymcc::inputHost::sharedPower {class Scope;}
 static ULONGLONG fakeNow=100;static ULONGLONG GetTickCount64(){return fakeNow;}
 static std::atomic<unsigned long long> fakePower{1},g_inputHostPresentationWorkGeneration{1},g_wakeKeptTargetGeneration{0};
 static std::atomic<unsigned> g_xinputTopologyEpoch{1},g_xinputSlotIdentityEpoch{1};
 static std::atomic<unsigned long long> g_msiMainSourceRevision{1};
+static std::atomic<unsigned long long> g_msiFeedbackModeGeneration{0};
 static auto currentPowerGeneration(){return fakePower.load();}
-struct InputCaptureGamepadSnapshot {bool live=true;unsigned connectedMask=1;std::string inputSource="xinput";unsigned long long readAttemptSequence=1,readPowerGeneration=1;ULONGLONG readStartedTick=100,readCompletedTick=100;unsigned readTopologyGeneration=1,readIdentityGeneration=1;bool readContextStable=true;unsigned long long readContinuityGeneration=0,readMsiSourceRevision=1;unsigned primarySlot=0;};
+struct InputCaptureGamepadSnapshot {bool live=true;unsigned connectedMask=1;std::string inputSource="xinput";unsigned long long readAttemptSequence=1,readPowerGeneration=1;ULONGLONG readStartedTick=100,readCompletedTick=100;unsigned readTopologyGeneration=1,readIdentityGeneration=1;bool readContextStable=true;unsigned long long readContinuityGeneration=0,readMsiSourceRevision=1;unsigned primarySlot=0;unsigned physicalReaderPid=0;unsigned long long readMsiModeGeneration=0,commonHidReportSequence=0,physicalReaderSequence=0;};
 static InputCaptureGamepadSnapshot g_inputCaptureGamepadSnapshot;static const InputCaptureGamepadSnapshot* t_commonFrameSource=nullptr;static std::mutex g_inputCaptureGamepadSnapshotMx;
 static std::mutex g_inputHostMx;static std::atomic<ULONGLONG> g_inputHostHealthySinceTick{0};
 static ymcc::input::recoveryHealth::Window g_inputHostRecoveryHealth;static bool g_inputHostRecoveryHealthWasTracking=false;
@@ -40,13 +46,29 @@ namespace ymcc::screenpads {static void observeNativeTransport(unsigned long lon
 static int queueCalls=0,ackCalls=0;static std::vector<json> logs;static void appendNativeLifecycleLog(const char*,const json& row){logs.push_back(row);}static bool inputHostQueueLifecycleWork(const char*){queueCalls++;return true;}
 enum class InputHostRecoveryAdmission{Allowed,DeferredPower,Cancelled,BudgetExhausted};static InputHostRecoveryAdmission inputHostRecoveryAdmissionLocked(){return InputHostRecoveryAdmission::Allowed;}
 static bool g_inputHostActive=true;static std::string g_inputHostLifecycle="ready";
+// Other lifecycle consumers are separate tests. Their queues are inactive here;
+// this harness executes health settlement, never Stop, reopen or target return.
+static std::atomic<bool> g_inputHostSwitchVerificationPending{false},g_inputHostSwitchExecutionReturnPending{false},g_inputHostSwitchRecoveryPending{false},g_inputHostRuntimeRecoveryPending{false};
+static std::string g_inputHostRunId="health-fixture",g_inputHostHostInstanceId="inert-host";
+static std::atomic<unsigned long long> g_inputHostVirtualIntentRevision{1};
+static void inputHostSwitchExecutionReturnMaintenanceLocked(){}
+static void inputHostSwitchRecoveryMaintenanceLocked(){}
+static void inputHostRuntimeRecoveryMaintenanceLocked(){}
+static void inputHostRecoveryFallbackMaintenanceLocked(){}
+static void inputHostSwitchVerificationMaintenanceLocked(){}
+static bool inputHostTupleRecoveryMaintenanceLocked(std::string&){return false;}
+// Diagnostic sink only; it is not the production writer-identity consumer.
+static json inputHostRecoveryEpisodeLogRecord(const json&,unsigned long long,const std::string&,const std::string&,unsigned long long,unsigned long long,unsigned long long,unsigned long long){return json::object();}
+@@WAKE_BINDING@@
 // Downstream serial feedback is outside health settlement; no output worker runs.
 static void gamepadSerialRevokeGameFeedback() {}
 @@FRAME_CONTEXT@@
+static ymcc::input::frameSubmission::ReadProgress g_inputHostReadProgress;
 // Feedback dispatch is an inert downstream terminal; health tests do not drive motors.
 static void nativeSubmitGameFeedbackFrame(const InputFrameSubmission&,bool) {}
 // The health cases supply no motion. Fail closed if a Legion sample is accidentally attached.
 static bool legionMotionSubmissionCurrent(const ymcc::legion_motion::Sample&,ULONGLONG) noexcept {return false;}
+@@STANDARD_INPUT_BINDER@@
 @@SOURCE_GATE@@
 @@HELPERS@@
 @@MAINTENANCE@@
@@ -62,13 +84,21 @@ static json frame(bool semanticNeutral=false,bool physicalSourceAdmitted=true,co
  t_commonFrameSource=nullptr;return {};
 }
 static unsigned long long readSequence=1;
-static void source(ULONGLONG time,bool live=true,const char* route="xinput"){fakeNow=time;
+static void source(ULONGLONG time,bool live=true,const char* route="xinput",unsigned readerPid=0){fakeNow=time;
  @@PRODUCER_PREVIOUS@@
 g_inputCaptureGamepadSnapshot={live,live?1u:0u,live?route:"none",++readSequence,fakePower.load(),time,time,g_xinputTopologyEpoch.load(),g_xinputSlotIdentityEpoch.load(),true};
  g_inputCaptureGamepadSnapshot.readMsiSourceRevision=g_msiMainSourceRevision.load(std::memory_order_acquire);
+ g_inputCaptureGamepadSnapshot.readMsiModeGeneration=g_msiFeedbackModeGeneration.load(std::memory_order_acquire);
+ g_inputCaptureGamepadSnapshot.physicalReaderPid=readerPid;
+ g_inputCaptureGamepadSnapshot.commonHidReportSequence=live&&std::string(route)=="xinput-hid"?readSequence:0;
+ g_inputCaptureGamepadSnapshot.physicalReaderSequence=live&&readerPid&&std::string(route)=="rog-medium-xinput"?readSequence:0;
  @@PRODUCER_COMMIT@@
 }
-static void reset(){g_msiMainSourceRevision=1;fakeMsiBoard=true;fakeMsiEligible=true;g_msiDinputRouteDinputArmed=false;fakeNow=100;fakePower=1;g_xinputTopologyEpoch=1;g_xinputSlotIdentityEpoch=1;g_inputHostPresentationWorkGeneration=1;g_inputHostEpoch=7;g_inputHostBoundPowerGeneration=1;g_inputHostProcess=g_inputHostPrepared=g_inputHostNeutralized=true;g_inputHostTransportFault=false;g_inputHostFaultHoldsStart=false;g_inputHostPowerAdmissionRevoked=false;g_externalPriorityVirtualSuspended=false;g_inputReady=true;g_realStickTest={true,true};g_powerLifecycle=PowerLifecycle::Ready;configuredPersona=boundPersona="elite";exitFence=false;writerAllowed=true;releaseWindow=false;g_inputHostRecoveryPending=false;g_inputHostTupleHealPending=false;g_inputHostRecoveryEpisodeAttempts=2;g_inputHostRecoveryTerminalLogged=true;g_inputHostRecoveryIntentReset=false;g_inputHostRecoveryFallbackState=0;g_inputHostRecoveryDeferredUntil=0;g_inputHostRecoveryLastStartTick=0;g_inputHostHealthySinceTick=0;g_inputHostRecoveryHealth.clear();g_inputHostRecoveryHealthWasTracking=false;personaCopies=0;queueCalls=ackCalls=0;logs.clear();source(100);}
+static void reset(){g_msiMainSourceRevision=1;fakeMsiBoard=true;fakeMsiEligible=true;g_msiDinputRouteDinputArmed=false;fakeNow=100;fakePower=1;g_xinputTopologyEpoch=1;g_xinputSlotIdentityEpoch=1;g_inputHostPresentationWorkGeneration=1;g_inputHostEpoch=7;g_inputHostBoundPowerGeneration=1;g_inputHostProcess=g_inputHostPrepared=g_inputHostNeutralized=true;g_inputHostTransportFault=false;g_inputHostFaultHoldsStart=false;g_inputHostPowerAdmissionRevoked=false;g_externalPriorityVirtualSuspended=false;g_inputReady=true;g_realStickTest={true,true};g_powerLifecycle=PowerLifecycle::Ready;configuredPersona=boundPersona="elite";exitFence=false;writerAllowed=true;releaseWindow=false;g_inputHostRecoveryPending=false;g_inputHostTupleHealPending=false;g_inputHostRecoveryEpisodeAttempts=2;g_inputHostRecoveryTerminalLogged=true;g_inputHostRecoveryIntentReset=false;g_inputHostRecoveryFallbackState=0;g_inputHostRecoveryDeferredUntil=0;g_inputHostRecoveryLastStartTick=0;g_inputHostHealthySinceTick=0;g_inputHostRecoveryHealth.clear();g_inputHostRecoveryHealthWasTracking=false;personaCopies=0;queueCalls=ackCalls=0;logs.clear();g_wakeKeptTargetGeneration=0;g_msiFeedbackModeGeneration=0;
+#ifdef HEALTH_WAKE_BINDING
+ g_inputHostRecreatedWakePowerProof={};
+#endif
+ source(100);}
 static json cases=json::array(),checks=json::array();static void expect(const char* name,json actual,json expected){checks.push_back({{"name",name},{"actual",actual},{"expected",expected},{"passed",actual==expected}});}static void finish(const std::string& name,bool witness=false){bool pass=true;for(const auto& c:checks)pass=pass&&c["passed"].get<bool>();cases.push_back({{"name",name},{"regressionWitness",witness},{"passed",pass},{"checks",checks},{"healthySince",g_inputHostHealthySinceTick.load()},{"attempts",g_inputHostRecoveryEpisodeAttempts.load()},{"ackCalls",ackCalls}});checks=json::array();}
 int main(){
  reset();frame();source(150,false);frame(false,false);fakeNow=3000;inputHostRecoveryMaintenanceTick();expect("source absence clears health",g_inputHostHealthySinceTick.load(),0);expect("single ACK then disconnect does not refund budget",g_inputHostRecoveryEpisodeAttempts.load(),2);finish("single-ACK-source-none-no-new-ACK",true);
@@ -79,7 +109,15 @@ int main(){
   reset();frame();source(3000);if(bad=="power")g_inputCaptureGamepadSnapshot.readPowerGeneration=99;if(bad=="topology")g_inputCaptureGamepadSnapshot.readTopologyGeneration=99;if(bad=="identity")g_inputCaptureGamepadSnapshot.readIdentityGeneration=99;if(bad=="unstable")g_inputCaptureGamepadSnapshot.readContextStable=false;if(bad=="missing-read")g_inputCaptureGamepadSnapshot.readAttemptSequence=0;frame();inputHostRecoveryMaintenanceTick();expect("stale/unknown real-source proof cannot refund budget",g_inputHostRecoveryEpisodeAttempts.load(),2);finish("stale-source-"+bad,true);
  }
  for(const std::string changed:{"host","power","intent","topology","identity"}){
-  reset();frame();if(changed=="host")g_inputHostEpoch++;if(changed=="power"){fakePower++;g_inputHostBoundPowerGeneration=fakePower.load();}if(changed=="intent")g_inputHostPresentationWorkGeneration++;if(changed=="topology")g_xinputTopologyEpoch++;if(changed=="identity")g_xinputSlotIdentityEpoch++;source(3000);frame();inputHostRecoveryMaintenanceTick();expect("new generation restarts rather than inherits old timer",g_inputHostRecoveryEpisodeAttempts.load(),2);finish("new-context-"+changed,true);
+  reset();frame();if(changed=="host")g_inputHostEpoch++;if(changed=="power"){fakePower++;g_inputHostBoundPowerGeneration=fakePower.load();}if(changed=="intent")g_inputHostPresentationWorkGeneration++;if(changed=="topology")g_xinputTopologyEpoch++;if(changed=="identity")g_xinputSlotIdentityEpoch++;source(3000);frame();inputHostRecoveryMaintenanceTick();expect("new generation restarts rather than inherits old timer",g_inputHostRecoveryEpisodeAttempts.load(),2);if(changed=="power"){
+  reset();fakePower=2;source(100);frame();source(1100);frame();source(2200);frame();inputHostRecoveryMaintenanceTick();expect("old protocol power without wake proof cannot settle",g_inputHostRecoveryEpisodeAttempts.load(),2);
+  g_wakeKeptTargetGeneration=2;source(2300);frame();source(3300);frame();source(4400);frame();inputHostRecoveryMaintenanceTick();expect("owned kept proof accepts current power sources",g_inputHostRecoveryEpisodeAttempts.load(),0);
+#ifdef HEALTH_WAKE_BINDING
+  reset();fakePower=2;g_inputHostRecreatedWakePowerProof={g_inputHostEpoch+1,2};source(100);frame();source(1100);frame();source(2200);frame();inputHostRecoveryMaintenanceTick();expect("wrong-epoch recreated proof cannot settle",g_inputHostRecoveryEpisodeAttempts.load(),2);
+  g_inputHostRecreatedWakePowerProof={g_inputHostEpoch,2};source(2300);frame();source(3300);frame();source(4400);frame();inputHostRecoveryMaintenanceTick();expect("same-epoch recreated proof accepts current power sources",g_inputHostRecoveryEpisodeAttempts.load(),0);
+#endif
+ }
+ finish("new-context-"+changed,true);
  }
  for(const std::string changed:{"off","persona","power-revoked","host-not-ready"}){
   reset();frame();source(3000);if(changed=="off")g_realStickTest.virtualTargetEnabled=false;if(changed=="persona")configuredPersona="xbox360";if(changed=="power-revoked")g_inputHostPowerAdmissionRevoked=true;if(changed=="host-not-ready")g_inputHostPrepared=false;inputHostRecoveryMaintenanceTick();expect("current target/power/Host gate blocks completion",g_inputHostRecoveryEpisodeAttempts.load(),2);finish("maintenance-context-"+changed,true);
@@ -107,7 +145,11 @@ int main(){
 #endif
  frame();}
  inputHostRecoveryMaintenanceTick();expect("legal MSI zero-mask reads and receipts can close",g_inputHostRecoveryEpisodeAttempts.load(),0);finish("MSI-canonical-zero-slot-mask");cases.back()["candidateGapWitness"]=true;
- reset();g_msiDinputRouteDinputArmed=true;source(100,true,"msi-dinput");frame();source(1100,true,"msi-dinput");frame();g_msiMainSourceRevision=2;source(2100,true,"msi-dinput");frame();inputHostRecoveryMaintenanceTick();expect("new MSI reader cannot settle old recovery budget",g_inputHostRecoveryEpisodeAttempts.load(),2);source(3100,true,"msi-dinput");frame();source(4100,true,"msi-dinput");frame();inputHostRecoveryMaintenanceTick();expect("new MSI reader fresh accepted window can settle",g_inputHostRecoveryEpisodeAttempts.load(),0);json healthyReceipt=json::object();for(const auto& row:logs)if(row.contains("proofScope"))healthyReceipt=row;expect("ordinary healthy receipt names actual reader",healthyReceipt.value("sourceRoute",std::string{}),"msi-dinput");expect("ordinary healthy receipt binds new source revision",healthyReceipt.value("sourceIncarnation",0ULL),2);expect("ordinary healthy receipt keeps continuity proof",healthyReceipt.value("sourceContinuity",0ULL)!=0,true);finish("MSI-republish-cannot-settle-old-episode");
+ reset();g_msiDinputRouteDinputArmed=true;source(100,true,"msi-dinput");frame();source(1100,true,"msi-dinput");frame();g_msiMainSourceRevision=2;source(2100,true,"msi-dinput");frame();inputHostRecoveryMaintenanceTick();expect("new MSI reader cannot settle old recovery budget",g_inputHostRecoveryEpisodeAttempts.load(),2);source(3100,true,"msi-dinput");frame();source(4100,true,"msi-dinput");frame();inputHostRecoveryMaintenanceTick();expect("new MSI reader fresh accepted window can settle",g_inputHostRecoveryEpisodeAttempts.load(),0);json healthyReceipt=json::object();for(const auto& row:logs)if(row.contains("proofScope"))healthyReceipt=row;expect("ordinary healthy receipt names actual reader",healthyReceipt.value("sourceRoute",std::string{}),"msi-dinput");expect("ordinary healthy receipt binds new source revision",healthyReceipt.value("sourceIncarnation",0ULL),2);expect("ordinary healthy receipt keeps continuity proof",healthyReceipt.value("sourceContinuity",0ULL)!=0,true);reset();g_msiDinputRouteDinputArmed=true;source(100,true,"msi-dinput");frame();source(1100,true,"msi-dinput");frame();g_msiFeedbackModeGeneration=2;
+ expect("old MSI mode read is revoked before next canonical sample",inputHostRecoveryHealthSource(&g_inputCaptureGamepadSnapshot,true).live,false);
+ source(2200,true,"msi-dinput");frame();inputHostRecoveryMaintenanceTick();expect("new MSI mode cannot inherit accepted health",g_inputHostRecoveryEpisodeAttempts.load(),2);
+ source(3200,true,"msi-dinput");frame();source(4300,true,"msi-dinput");frame();inputHostRecoveryMaintenanceTick();expect("new MSI mode fresh window can later settle",g_inputHostRecoveryEpisodeAttempts.load(),0);
+ finish("MSI-republish-cannot-settle-old-episode");
  for(const std::string kind:{"MSI-unauthorized-board","MSI-route-not-armed","MSI-main-not-eligible","XInput-zero-mask","virtual-loop-zero-mask","unknown-source-name","real-source-none"}){
   reset();source(100);g_inputCaptureGamepadSnapshot.inputSource="msi-dinput";g_inputCaptureGamepadSnapshot.connectedMask=0;g_msiDinputRouteDinputArmed=true;
   if(kind=="MSI-unauthorized-board")fakeMsiBoard=false;
@@ -124,8 +166,20 @@ int main(){
   finish(kind);cases.back()["candidateGapWitness"]=true;
  }
  for(const std::string family:{"XInput","ROG","GPD","legacy-XInput-fallback"}){
-  reset();fakeMsiBoard=false;for(const ULONGLONG t:{100ULL,1100ULL,2200ULL}){source(t,true,family=="legacy-XInput-fallback"?"xinput-any-connected":"xinput");frame();}inputHostRecoveryMaintenanceTick();expect("normal non-MSI canonical source remains accepted",g_inputHostRecoveryEpisodeAttempts.load(),0);finish(family+"-normal-canonical");if(family=="legacy-XInput-fallback")cases.back()["candidateGapWitness"]=true;
+  reset();fakeMsiBoard=false;for(const ULONGLONG t:{100ULL,1100ULL,2200ULL}){source(t,true,family=="legacy-XInput-fallback"?"xinput-any-connected":"xinput");frame();}inputHostRecoveryMaintenanceTick();expect("normal non-MSI canonical source remains accepted",g_inputHostRecoveryEpisodeAttempts.load(),0);if(family=="ROG"){
+  for(const char* route:{"rog-hid-raw","rog-medium-xinput"}){reset();fakeMsiBoard=false;for(const ULONGLONG t:{100ULL,1100ULL,2200ULL}){source(t,true,route,std::string(route)=="rog-medium-xinput"?17u:0u);frame();}inputHostRecoveryMaintenanceTick();expect("current ROG raw or medium source settles fresh receipts",g_inputHostRecoveryEpisodeAttempts.load(),0);}
+  reset();source(100,true,"rog-medium-xinput",0);expect("medium reader without PID remains unproven",inputHostRecoveryHealthSource(&g_inputCaptureGamepadSnapshot,true).live,false);
+  reset();source(100,true,"rog-medium-xinput",17);frame();source(1100,true,"rog-medium-xinput",17);frame();source(2200,true,"rog-medium-xinput",18);frame();inputHostRecoveryMaintenanceTick();expect("replacement medium reader cannot inherit prior health",g_inputHostRecoveryEpisodeAttempts.load(),2);source(3200,true,"rog-medium-xinput",18);frame();source(4300,true,"rog-medium-xinput",18);frame();inputHostRecoveryMaintenanceTick();expect("replacement medium reader can settle its own fresh window",g_inputHostRecoveryEpisodeAttempts.load(),0);
  }
+ finish(family+"-normal-canonical");if(family=="legacy-XInput-fallback")cases.back()["candidateGapWitness"]=true;
+ }
+
+#if HEALTH_HAS_STANDARD_INPUT_BINDER
+ reset();fakeMsiBoard=false;
+ for(const ULONGLONG t:{100ULL,1100ULL,2200ULL}){source(t,true,"rog-medium-xinput",17);g_inputCaptureGamepadSnapshot.physicalReaderSequence=0;expect("medium PID and mask without a physical read cannot prove health",inputHostRecoveryHealthSource(&g_inputCaptureGamepadSnapshot,true).live,false);frame();}
+ expect("actual standard binder rejects medium reader without sequence",inputCaptureBindStandardInput(&g_inputCaptureGamepadSnapshot).kind()==ymcc::capabilities::controller::InputKind::None,true);
+ inputHostRecoveryMaintenanceTick();expect("unproven medium reads cannot retain a healthy window",g_inputHostHealthySinceTick.load(),0);expect("unproven medium reads cannot settle recovery budget",g_inputHostRecoveryEpisodeAttempts.load(),2);finish("ROG-medium-PID-mask-without-read-sequence");
+#endif
 
  reset();g_inputHostRecoveryEpisodeAttempts=0;g_inputHostRecoveryTerminalLogged=false;frame();source(700);source(1300);source(1900);source(2300);inputHostRecoveryMaintenanceTick();frame();expect("ordinary path adds no persona copies",personaCopies,0);expect("normal T1 timestamp remains available",g_inputHostHealthySinceTick.load()!=0,true);finish("no-recovery-lightweight-dedupe");cases.back()["candidateGapWitness"]=true;
  for(const bool terminal:{false,true}){

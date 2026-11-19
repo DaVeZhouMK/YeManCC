@@ -17,6 +17,13 @@ static void modelAdaptationChord(int profile, uint32_t chord, uint64_t mapped, b
     value.type={1,static_cast<uint32_t>(profile),mouse?1u:0u,chord,0,mapped};
     value.pressed=true;value.mapped=mapped!=0;modelAdaptationSignals().offer(value);
 }
+static void modelAdaptationAyaKeyboard(unsigned profile,unsigned vk,unsigned source,bool down) noexcept {
+    // Source 4 is diagnostic observation before the business injected filter.
+    // A function-key atom is not a complete chord or an OEM-device identity.
+    ymcc::adaptlog::Signal value;
+    value.type={4,profile,source,vk,0,0};value.pressed=down;value.mapped=false;
+    modelAdaptationSignals().offer(value);
+}
 static void modelAdaptationProducer(unsigned source, uint64_t mask, unsigned code) noexcept {
     if(!mask&&!code)return;
     ymcc::adaptlog::Signal value;
@@ -65,7 +72,7 @@ static void modelAdaptationFlush() noexcept {
             auto result=ymcc::adaptlog::RecordResult::retry;
             try {
             const auto& type=value.type;
-            json identity={{"policy","oem-type-v1"},{"sourceId",type.source},{"profileId",type.source==1?json(type.profile):json(nullptr)},
+            json identity={{"policy","oem-type-v1"},{"sourceId",type.source},{"profileId",type.source==1||type.source==4?json(type.profile):json(nullptr)},
                 {"frameOffset",type.source==2||type.source==3?json(type.profile):json(nullptr)},
                 {"command",type.command},{"code",type.code},{"reportBytes",type.shape},{"reportId",type.reportId},{"canonicalMask",type.canonicalMask}};
             if(type.source==2)identity["protocolSources"]={{"x1",ymcc::capabilities::oem::onex::kX1SourceSha256},
@@ -77,6 +84,16 @@ static void modelAdaptationFlush() noexcept {
                 {"mappingSource",type.source==2?"capabilities/HcOneXVendorInputContract.h + native/main.cpp:onexBackParse":
                     type.source==1?"native/main.cpp:oemChordEvalRules":type.source==3?"native/main.cpp:rogOemKeyParse":type.source==32?"native/main.cpp:msiWmiHandleEvent":"native/main.cpp:nativeOemProducerDrain"},
                 {"consumerActionProven",false},{"pressReleaseMergedAsOneType",true}};
+            if(type.source==4){
+                sample["reason"]="AYA-keyboard-source-observed;complete-chord-not-evaluated";
+                sample["sourceScope"]="AYA-current-profile-F10-F24;not-physical-OEM-device-proof";
+                sample["mappingSource"]="current-total-catalog-profile;source-observation-only";
+                sample["keyboardSourcePath"]=type.command==2?"raw-input":type.command==1?"low-level-injected":"low-level-non-injected";
+                sample["injectedFlagSeen"]=type.command==2?json(nullptr):json(type.command==1);
+                sample["injectedWriterIdentified"]=false;sample["deviceOriginVerified"]=false;
+                sample["completeChordProven"]=false;sample["inputAdmissionChanged"]=false;
+                sample["emptyIsAbsenceProof"]=false;
+            }
             if(value.rawBytes){std::string hex;hex.reserve(value.rawBytes*2);
                 constexpr char digits[]="0123456789abcdef";for(unsigned i=0;i<value.rawBytes;++i){hex+=digits[value.raw[i]>>4];hex+=digits[value.raw[i]&15];}
                 sample["firstRawReportHex"]=hex;sample["rawBytes"]=value.rawBytes;
@@ -94,7 +111,10 @@ static void modelAdaptationObserveRecord(const char* event,const json& detail) n
     if(std::strcmp(event,"machine-identity")&&std::strcmp(event,"oem-key-usage-query")&&
        std::strcmp(event,"gamepad.feedbackCaps")&&std::strcmp(event,"onex-back-bind")&&
        std::strcmp(event,"msi-dinput-bind")&&std::strcmp(event,"msi-wmi-source-capability")&&
-       std::strcmp(event,"oem-producer-edge"))return; // No allocation for other event families.
+       std::strcmp(event,"oem-producer-edge")&&std::strcmp(event,"legion-back-buttons")&&
+       std::strcmp(event,"legion-s-back-buttons")&&std::strcmp(event,"gpd-back-buttons")&&
+       std::strcmp(event,"gpd-back-chord-state")&&std::strcmp(event,"gpd-back-chord-match")&&
+       std::strcmp(event,"virtual-pad-backbuttons"))return; // No allocation for other event families.
     try {
     if(std::strcmp(event,"oem-producer-edge")==0&&detail.value("status","")!="refused"&&
        detail.value("status","")!="failed"&&detail.value("status","")!="unconsumed")return;
@@ -107,10 +127,33 @@ static void modelAdaptationObserveRecord(const char* event,const json& detail) n
         else if(std::strcmp(event,"msi-dinput-bind")==0){category="oem-DInput-binding";copy({"vendorId","productId","product","interfacePath","baseContainer","instanceGuid","buttons","hasBtn15","hasBtn16","mainInterfaceMatched","selectionRule"});}
         else if(std::strcmp(event,"msi-wmi-source-capability")==0){category="oem-WMI-capability";copy({"deviceClass","eventClass","availability","beginHresult","waitHresult","requestIssued","classObject","authorityGranted","subscriptionPolicy","scope"});}
         else if(std::strcmp(event,"oem-producer-edge")==0){category="oem-consumer-rejection";copy({"source","status","reason","code","mask","requiredMask","trigger","legacyWindowDefault"});}
+        else if(!std::strcmp(event,"gpd-back-chord-state")||!std::strcmp(event,"gpd-back-chord-match")||!std::strcmp(event,"virtual-pad-backbuttons")){
+            category="oem-chord-output-first-shape";identity["event"]=event;
+            copy({"deviceClass","profile","gpdBound","gpdEnabled","baseKey","prefixMask",
+                "physicalState","backState","backButtons","persona","reason"});
+        }
+        else if(!std::strcmp(event,"legion-back-buttons")||!std::strcmp(event,"legion-s-back-buttons")||!std::strcmp(event,"gpd-back-buttons")){
+            category="oem-source-first-shape";identity["event"]=event;
+            copy({"schema","state","raw","misaligned","reportId","reportLength","reportBodyOffset",
+                "bodyByte7","bodyByte8","bodyByte9","canonicalMaskDecimal","producerAccepted"});
+        }
         else return;
         if(identity.empty())return;
-        modelAdaptationFacts().offer({modelAdaptationMachine(),std::move(identity),
-            {{"observedFrom",event},{"observedOnly",true},{"hardwareQueryAdded",false},{"capabilityIsNotPhysicalSuccess",true}},category});
+        modelAdaptationFacts().offerLazy(modelAdaptationMachine(),std::move(identity),category,[&]{
+            json sample={{"observedFrom",event},{"observedOnly",true},{"hardwareQueryAdded",false},{"capabilityIsNotPhysicalSuccess",true}};
+            if(!std::strcmp(category,"oem-source-first-shape")){
+                sample["producer"]=virtualAdaptationSanitized(detail);
+                sample["sourceScope"]="first-unique-OEM-source-shape;not-full-input-history-or-physical-button-label-proof";
+                sample["generationAndCountersAreTypeIdentity"]=false;
+            }
+            if(!std::strcmp(category,"oem-chord-output-first-shape")){
+                sample["producer"]=virtualAdaptationSanitized(detail);
+                sample["sourceScope"]="first-unique-Win5-chord/output-log-shape;not-device-origin,Host-SDK-submit-or-game-consumption-proof";
+                sample["sequenceIsTypeIdentity"]=false;
+                sample["frameAssemblyOnly"]=!std::strcmp(event,"virtual-pad-backbuttons");
+            }
+            return sample;
+        });
     }catch(...){}
 }
 // Called once from the existing machine resolver, even when no diagnostics UI opens.

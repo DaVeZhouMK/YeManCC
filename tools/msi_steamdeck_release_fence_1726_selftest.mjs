@@ -38,7 +38,7 @@ function extract(name, file = source, kind = 'method', record = true) {
 }
 const clock = code => code.replaceAll('Environment.TickCount64', 'Fixture.Now').replaceAll('Thread.Sleep', 'Fixture.Sleep');
 const fields = ['BaseFields', 'FrameFields', 'HidHideFields'].map(n => extract(n, source, 'field'));
-const methods = ['TryParseEnvelope', 'AttachReportChainMetadata1410Safely', 'TryReadString', 'TryReadUInt64', 'TryReadInt32', 'TryReadShort', 'TryReadByte', 'TryReadAxis', 'TryReadTrigger', 'TryReadImuAxis', 'TryReadImuQuaternion', 'TryGetVirtualOutputProfile', 'IsSha256', 'CanonicalFrameHash', 'AppendFrameHashBits', 'SameTuple', 'DescribeEndpointCounts', 'DescribePrepareException', 'SanitizeReceiptField'].map(n => extract(n));
+const methods = ['TryParseEnvelope', ...(text.includes('private static string ReuseEnvelopeFieldName(') ? ['ReuseEnvelopeFieldName'] : []), 'AttachReportChainMetadata1410Safely', 'TryReadString', 'TryReadUInt64', 'TryReadInt32', 'TryReadShort', 'TryReadByte', 'TryReadAxis', 'TryReadTrigger', 'TryReadImuAxis', 'TryReadImuQuaternion', 'TryGetVirtualOutputProfile', 'IsSha256', 'CanonicalFrameHash', 'AppendFrameHashBits', 'SameTuple', 'DescribeEndpointCounts', 'DescribePrepareException', 'SanitizeReceiptField'].map(n => extract(n));
 for (const n of ['WaitForEndpointFamilyRemoval', 'WaitForVirtualEndpointArrival', 'WaitForVirtualEndpointRemoval']) methods.push(clock(extract(n)));
 for (const n of ['TryReadScreenPads', 'TryReadScreenPad']) methods.push(extract(n, path.join(host, 'ScreenTouchpadReport.cs')));
 methods.push(extract('TryReadScreenButtons', path.join(host, 'ScreenButtonReport.cs')));
@@ -81,7 +81,10 @@ const frameTerminal = options.compactFrameReplyCost
 const frameEvent = options.compactFrameReplyCost ? '' : 'Fixture.Events.Add("frame");';
 if (options.compactFrameReplyCost) compactSubstitutions.push('Explicit cost-only SDK terminal: identical no-allocation counter/reference/elapsed assignment for both full and compact; no Events or FrameControllers append. Real SDK workers, device IO, encoder and motor callbacks are NOT_RUN.');
 if (options.compactFrameReply) compactSubstitutions.push('TrySubmitFrame is the existing inert SDK terminal, instrumented with call count, controller reference and deterministic per-call elapsed us; actual SDK/frame encoder is not executed.');
-const session = ['HostSession', 'Handle', 'HandleLocked', 'ReleaseLocal', 'ReleaseLocalLocked', 'TryStopSteamDeckIdleForRelease', 'TryStopControllerOutputForRelease', 'TryCompleteIdleCtsRelease', 'RetainSdkDisposeFailure', 'RememberIdempotent', 'TryPrepare', 'SerializeResponse', 'Ack'].map(n => clock(extract(n)));
+const session = ['HostSession', 'Handle', ...(text.includes('public string HandleUtf8(') ? ['HandleUtf8'] : []), 'HandleLocked', 'ReleaseLocal', 'ReleaseLocalLocked', 'TryStopSteamDeckIdleForRelease', 'TryStopControllerOutputForRelease', 'TryCompleteIdleCtsRelease', 'RetainSdkDisposeFailure', 'RememberIdempotent', 'TryPrepare', 'SerializeResponse', 'Ack'].map(n => clock(extract(n)));
+const closeFields=[...text.matchAll(/^        private (?:readonly )?[^\n]*\b_closeRefresh\w*[^\n]*;/gm)].map(m=>{receipt.push({name:'CloseRefresh field',file:source,sha256:sha(m[0])});return m[0];}).join('\n');
+const closeSupport=text.includes('private bool HasCloseRefreshPending(')?['HasCloseRefreshPending','TryCancelCloseRefresh'].map(n=>extract(n)).join('\n'):'private bool HasCloseRefreshPending()=>false;';
+const closeMethods=options.closeRefresh?['HandleCloseRefreshBegin','HandleCloseRefreshPoll'].map(n=>extract(n)).join('\n'):'private string HandleCloseRefreshBegin(CommandEnvelope e){Fixture.Events.Add(e.Command);return Ack(e,"fake-cycle-begin");}\nprivate string HandleCloseRefreshPoll(CommandEnvelope e){Fixture.Events.Add(e.Command);return Ack(e,"fake-cycle-poll");}';
 let fake = `using System.Diagnostics; using System.Security.Cryptography; using System.Text; using System.Text.Json; using System.Threading; using YeManInputHost.Diagnostics;
 internal sealed class HMProfile { public string Id=""; public bool RequiresUsbipBackend; public ushort VendorId=0x28de,Pid=0x1205; public ushort ProductId=>Pid; }
 ${gameOutputSdk}
@@ -114,7 +117,7 @@ internal static partial class Program {
  private static bool TryEnsureDriverInstalled(HMContext c,out string d,bool requireUsbip,UsbipSetupEvidence? usbipDiagnostics=null){d="fake-backend";return true;}
  private static T CreateTargetWithBackendWarning<T>(Func<(bool Ready,string Detail)> prepare,Func<T> create,out string receipt){receipt=prepare().Detail;return create();}
  private sealed partial class HostSession {
- private readonly object _lifecycleGate=new(); private HMContext? _context;private HMController? _controller;private CommandEnvelope? _tuple;
+ private readonly object _lifecycleGate=new(); private HMContext? _context;private HMController? _controller;private HMController? _sonyRawReportOwner;private CommandEnvelope? _tuple;
  private readonly string _startupNonce,_hostInstanceId="fake-host";private readonly int _reportChainParentPid1410;private readonly Dictionary<string,IdempotentReply> _idempotentReplies=new(StringComparer.Ordinal);
  private Phase _phase=Phase.AwaitHello;private ulong _lastSequence;private long _lastActivityAt,_lastSubmitElapsedUs,_costJsonParseUsSum,_costJsonParseCount;private bool _costFlagEnabled,_assetVerified,_targetPnpAdmitted,_virtualEndpointReconciled;
  private VirtualEndpointObservation _virtualEndpoint=new(false,0,0,0,0,0,false,"pnp-not-observed");
@@ -132,8 +135,9 @@ internal static partial class Program {
  private bool TrySubmitFrame(CommandEnvelope e,out string d){${frameEvent}${frameTerminal}d="fake-frame";return !Fixture.FrameFails;}
  private string Error(CommandEnvelope? e,string s,string d,string? releaseDisposition=null)=>SerializeResponse(e,false,s,d,null,releaseDisposition);
  private string HandleHidHideCommand(CommandEnvelope e,out bool shutdown){shutdown=false;Fixture.Events.Add(e.Command);return Ack(e,"fake-hidhide");}
- private string HandleCloseRefreshBegin(CommandEnvelope e){Fixture.Events.Add(e.Command);return Ack(e,"fake-cycle-begin");}
- private string HandleCloseRefreshPoll(CommandEnvelope e){Fixture.Events.Add(e.Command);return Ack(e,"fake-cycle-poll");}
+ ${closeFields}
+ ${closeSupport}
+ ${closeMethods}
  public bool PrepareDirect(CommandEnvelope e,out string d){_tuple=e;return TryPrepare(e,out d);} public MsiSteamDeckReleaseEvidence1726? Receipt=>_msiSteamDeckReleaseFence1726?.Evidence;
  }
 }

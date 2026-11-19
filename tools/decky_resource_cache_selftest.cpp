@@ -8,6 +8,7 @@
 static std::filesystem::path cacheFaultRoot;
 static std::string cacheFault;
 static unsigned cacheFaultMetadata=0;
+static unsigned cacheBlobWriteAttempts=0,cacheBlobWriteCommits=0;
 static bool cacheFaultPath(const std::filesystem::path& path,const wchar_t* leaf){
     return !cacheFault.empty()&&path.filename()==leaf&&path.native().find(cacheFaultRoot.native()+L"\\")!=std::wstring::npos;
 }
@@ -22,7 +23,11 @@ static BOOL WINAPI cacheFixtureFlush(HANDLE file){
 static BOOL WINAPI cacheFixtureMove(LPCWSTR source,LPCWSTR target,DWORD flags){
     if((cacheFault=="metadata-replace"||(cacheFault=="complete-replace"&&cacheFaultMetadata==2))&&cacheFaultPath(source,L"metadata-stage.tmp")){SetLastError(ERROR_SHARING_VIOLATION);return FALSE;}
     if(cacheFault=="live-replace"&&cacheFaultPath(source,L"copy-stage.tmp")&&std::filesystem::path(target).filename()==L"index.js"){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}
-    return ::MoveFileExW(source,target,flags);
+    const bool blob=std::filesystem::path(target).extension()==L".bin";
+    if(blob)++cacheBlobWriteAttempts;
+    const auto result=::MoveFileExW(source,target,flags);
+    if(blob&&result)++cacheBlobWriteCommits;
+    return result;
 }
 static HANDLE cacheCrashReady=nullptr;
 static unsigned cacheCrashPhase=0,cacheMetadataWrites=0;
@@ -132,7 +137,13 @@ int wmain(int argc,wchar_t** argv){try{
     check("corrupt trust metadata is not hidden by cached metadata",[&]{Fixture f(base,"trust");f.seeded();fs::remove(f.home/managedFiles[2]);put(f.receipt,"broken");auto state=f.prepare();need(!state.value("ready",true)&&state["reason"]=="resource-package-invalid","bad receipt was masked");need(!fs::exists(f.home/managedFiles[2]),"untrusted cache recreated plugin");});
     check("absent authority never grants repair even when cached blobs exist",[&]{Fixture f(base,"noauthority");f.seeded();fs::remove(f.receipt);fs::remove(f.home/managedFiles[0]);auto state=f.prepare();need(!state.value("ready",true)&&!fs::exists(f.home/managedFiles[0]),"orphan cache became authority");});
     check("corrupt cached blob never reaches live code",[&]{Fixture f(base,"badblob");f.seeded();auto bad=text(f.cache/L"a"/L"2.bin");bad[0]^=1;put(f.cache/L"a"/L"2.bin",bad);fs::remove(f.home/managedFiles[2]);auto state=f.prepare();need(!state.value("ready",true)&&state.value("resourceRepairReason",std::string{})=="resource-cache-unavailable","bad cached blob accepted");need(!fs::exists(f.home/managedFiles[2]),"bad blob was copied");});
-    check("healthy current files rebuild a corrupted local cache before reporting available",[&]{Fixture f(base,"cache-repair");f.seeded();auto bad=text(f.cache/L"a"/L"2.bin");bad[0]^=1;put(f.cache/L"a"/L"2.bin",bad);auto state=f.prepare();need(state.value("ready",false)&&state.value("resourceCacheAvailable",false)&&text(f.cache/L"a"/L"2.bin")==text(f.home/managedFiles[2]),"damaged cache was declared available");fs::remove(f.home/managedFiles[2]);state=f.prepare();need(state.value("ready",false)&&state.value("resourcesRepaired",0u)==1,"refilled cache cannot heal subsequent loss");});
+    check("healthy current files rebuild a corrupted local cache before reporting available",[&]{Fixture f(base,"cache-repair");f.seeded();auto bad=text(f.cache/L"a"/L"2.bin");bad[0]^=1;put(f.cache/L"a"/L"2.bin",bad);
+        ymcc::deckyresources::Handle verifiedBlob;verifiedBlob.value=CreateFileW((f.cache/L"a"/L"0.bin").c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr);
+        need(verifiedBlob.value!=INVALID_HANDLE_VALUE,"verified cache read lease missing");
+        cacheBlobWriteAttempts=cacheBlobWriteCommits=0;
+        auto state=f.prepare();
+        need(state.value("ready",false)&&state.value("resourceCacheAvailable",false)&&text(f.cache/L"a"/L"2.bin")==text(f.home/managedFiles[2]),"damaged cache was declared available");
+        need(cacheBlobWriteAttempts==1&&cacheBlobWriteCommits==1,"cache repair recopied already verified blobs");fs::remove(f.home/managedFiles[2]);state=f.prepare();need(state.value("ready",false)&&state.value("resourcesRepaired",0u)==1,"refilled cache cannot heal subsequent loss");});
     check("another generation's cache cannot repair the current package",[&]{Fixture f(base,"generation");f.seeded();auto metadata=Json::parse(text(f.cache/L"a"/L"manifest.json"));metadata["manifest"]["loaderVersion"]="v99.0.0";put(f.cache/L"a"/L"manifest.json",metadata.dump());fs::remove(f.home/managedFiles[2]);auto state=f.prepare();need(!state.value("ready",true)&&!fs::exists(f.home/managedFiles[2]),"cache crossed package generation");});
     check("busy backend is preserved and prevents live replacement",[&]{Fixture f(base,"port");f.seeded();fs::remove(f.home/managedFiles[2]);ymcc::deckyresources::PortLease sentinel(0);need(sentinel.acquired(),"sentinel failed");ymcc::deckyresources::Options options;options.backendPort=boundPort(sentinel);auto state=f.prepare({},options);need(!state.value("ready",true)&&state.value("resourceRepairReason",std::string{})=="resource-cache-backend-in-use","busy backend allowed replacement");need(!fs::exists(f.home/managedFiles[2])&&sentinel.acquired(),"foreign backend or live files changed");});
     check("Loader ownership gate prevents resource repair",[&]{Fixture f(base,"owner");f.seeded();fs::remove(f.home/managedFiles[2]);ymcc::deckyresources::Options options;options.mayWrite=[]{return false;};auto state=f.prepare({},options);need(!state.value("ready",true)&&!fs::exists(f.home/managedFiles[2]),"owned Loader gate bypassed");});
@@ -167,7 +178,14 @@ int wmain(int argc,wchar_t** argv){try{
     });
     check("incomplete metadata at either publication step can resume in bounded staging",[&]{
         for(const auto phase:{1u,2u}){Fixture f(base,"metadata-interrupt");for(unsigned n=0;n<3;++n){interruptOwnedCache(f.root,phase);unsigned pending=0;for(const auto& file:fs::recursive_directory_iterator(f.home))if(file.is_regular_file()&&file.path().extension()==L".tmp")++pending;need(pending<=2,"interrupted metadata accumulated temporary files");}
+            ymcc::deckyresources::Handle verifiedBlob;
+            if(phase==2){
+                verifiedBlob.value=CreateFileW((f.cache/L"a"/L"0.bin").c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr);
+                need(verifiedBlob.value!=INVALID_HANDLE_VALUE,"interrupted cache verified blob missing");
+            }
+            cacheBlobWriteAttempts=cacheBlobWriteCommits=0;
             auto result=f.prepare();need(result.value("ready",false)&&result.value("resourceCacheAvailable",false),"metadata interruption prevented cache resumption");
+            need(cacheBlobWriteAttempts==(phase==2?0u:7u)&&cacheBlobWriteCommits==cacheBlobWriteAttempts,"resumed metadata copied previously committed cache blobs");
             fs::remove(f.home/managedFiles[2]);need(f.prepare().value("ready",false),"resumed metadata did not allow actual resource healing");}
     });
     check("missing staging provenance never authorizes deleting a familiar temporary filename",[&]{

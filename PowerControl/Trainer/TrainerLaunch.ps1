@@ -59,6 +59,7 @@ function Resolve-TrainerLaunchPlan {
     $verb = 'open'
     $safe = $false
     $entry = $null
+    $isTable = $false
     if ($Mode -eq 'Manager') {
         $program = Resolve-TrainerManagerProgram $settings $ManagerPath $AppDirectory $GcmSettingsRoot
     } else {
@@ -80,7 +81,7 @@ function Resolve-TrainerLaunchPlan {
             if ([bool](Get-TrainerProperty $settings 'launchAsAdmin' $true)) { $verb = 'runas' }
         }
     }
-    return @{program=$program;arguments=$arguments;workingDirectory=[IO.Path]::GetDirectoryName($program);verb=$verb;safePath=$safe;mode=$Mode;trainer=$entry}
+    return @{program=$program;arguments=$arguments;workingDirectory=[IO.Path]::GetDirectoryName($program);verb=$verb;safePath=$safe;mode=$Mode;trainer=$entry;usesCheatEngine=($Mode -eq 'CheatEngine' -or $isTable)}
 }
 function Find-TrainerRunningProcess([string]$Program) {
     foreach ($process in [Diagnostics.Process]::GetProcessesByName([IO.Path]::GetFileNameWithoutExtension($Program))) {
@@ -109,25 +110,45 @@ function Show-TrainerProcess($Process) {
     [YmccTrainerLaunchNative]::ShowWindowAsync($window,9)|Out-Null
     if(-not [YmccTrainerLaunchNative]::SetForegroundWindow($window)){throw '程序已在运行，但系统未允许切换窗口，请从任务栏打开'}
 }
+function Assert-TrainerLaunchContinuation($Plan) {
+    $guard=Get-TrainerProperty $Plan 'lifecycleGuard' $null
+    if($null -eq $guard){return}
+    if(Test-Path -LiteralPath ($guard.resultPath+'.cancel')){throw '修改器启动已取消，未派发新操作'}
+    $claimed=Read-TrainerJson $guard.resultPath 65536
+    if($null -eq $claimed -or $claimed.requestClaimed -isnot [bool] -or -not $claimed.requestClaimed -or $claimed.pending -isnot [bool] -or -not $claimed.pending -or $claimed.requestId -cne $guard.requestId){throw '修改器启动声明已失效'}
+    foreach($key in $guard.binding.Keys){if($null -eq $claimed.PSObject.Properties[$key] -or $null -eq $claimed.$key -or $claimed.$key.GetType() -ne $guard.binding[$key].GetType() -or $claimed.$key -cne $guard.binding[$key]){throw '修改器启动请求绑定已改变'}}
+    Assert-TrainerLaunchTarget $guard.path $guard.pid $guard.created $guard.sha256
+    if(Test-Path -LiteralPath ($guard.resultPath+'.cancel')){throw '修改器启动已取消，未派发新操作'}
+}
 function Start-TrainerLaunchPlan($Plan,[switch]$InteractiveShell) {
+    Assert-TrainerLaunchContinuation $Plan
     # Reuse singleton manager/trainer processes; cheat tables still need their file argument.
     $running = if (-not $Plan.arguments) { Find-TrainerRunningProcess $Plan.program } else { $null }
     if(-not $running -and $InteractiveShell -and -not $Plan.arguments){$running=Find-TrainerCanonicalRunningProcess $Plan.program}
-    if ($running) { Show-TrainerProcess $running; return @{reused=$true;pid=$running.Id} }
+    if ($running) {
+        # Process lookup may outlive the page/game request. Reusing its window
+        # is an effect and needs the same continuation check as a new launch.
+        Assert-TrainerLaunchContinuation $Plan
+        Show-TrainerProcess $running
+        return @{reused=$true;pid=$running.Id}
+    }
+    if(Get-TrainerProperty $Plan 'usesCheatEngine' $false){Initialize-TrainerCheatEngineFirstRun}
     if ($Plan.safePath) {
         $Plan.program = Get-TrainerSafeLaunchPath $Plan.program
         $Plan.workingDirectory = [IO.Path]::GetDirectoryName($Plan.program)
         if ($Plan.arguments) { $Plan.arguments = '"' + (Get-TrainerSafeLaunchPath $Plan.arguments.Trim('"')) + '"' }
     }
+    Assert-TrainerLaunchContinuation $Plan
     if($InteractiveShell){
         $desktop=$null
         # Only failure BEFORE dispatch can keep the existing launcher.
         try{$desktop=Get-TrainerDesktopShell}catch{}
-        if($desktop){try{return Invoke-TrainerShellPlan $Plan $desktop}finally{Close-TrainerDesktopShell $desktop}}
+        if($desktop){try{Assert-TrainerLaunchContinuation $Plan;return Invoke-TrainerShellPlan $Plan $desktop}finally{Close-TrainerDesktopShell $desktop}}
     }
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName=$Plan.program;$info.Arguments=$Plan.arguments;$info.WorkingDirectory=$Plan.workingDirectory
     $info.UseShellExecute=$true;$info.Verb=$Plan.verb
+    Assert-TrainerLaunchContinuation $Plan
     try { $process=[Diagnostics.Process]::Start($info) }
     catch [ComponentModel.Win32Exception] {
         if ($_.Exception.NativeErrorCode -eq 1223) { throw '已取消系统权限确认，修改器未启动' }
@@ -178,11 +199,15 @@ function Invoke-TrainerLaunch {
     $result=@{requestId=$RequestId;ok=$false;pending=$false;requestClaimed=$true}
     $plan=$null
     try {
+        # Resolving a plan may repair GCM's CE path. A delayed cancelled request
+        # must stop before even that preparation, while retaining its claim.
+        if(Test-Path -LiteralPath ($ResultPath+'.cancel')){throw '修改器启动已取消，未派发新操作'}
         $plan=Resolve-TrainerLaunchPlan -Mode $Mode -TrainerPath $TrainerPath -TrainerFolder $TrainerFolder -ExpectedSha256 $ExpectedSha256 -TrainerGameName $TrainerGameName -TrainerOrigin $TrainerOrigin -GcmResourceId $GcmResourceId -AppDirectory $AppDirectory -GcmSettingsRoot $GcmSettingsRoot -GcmDefaultRoot $GcmDefaultRoot
         Assert-TrainerLaunchTarget $GameExecutablePath $GameProcessId $GameProcessCreated $ExpectedGameSha256
         $resolvedProgram=$plan.program
         $resolvedArguments=$plan.arguments
-        $interactive=$Mode -eq 'Trainer' -and ($InteractiveShell -or (Test-TrainerSteamForeground $AppDirectory) -or (Test-TrainerBackgroundOwner $AppDirectory))
+        $plan.lifecycleGuard=@{resultPath=$ResultPath;requestId=$RequestId;binding=$requestBinding;path=$GameExecutablePath;pid=$GameProcessId;created=$GameProcessCreated;sha256=$ExpectedGameSha256}
+        $interactive=$Mode -eq 'Trainer' -and ($InteractiveShell -or (Test-TrainerBackgroundOwner $AppDirectory))
         $receipt=Start-TrainerLaunchPlan $plan -InteractiveShell:$interactive
         $result.ok=$true;$result.pid=$receipt.pid;$result.reused=$receipt.reused
         if($receipt.ContainsKey('launchBackend')){

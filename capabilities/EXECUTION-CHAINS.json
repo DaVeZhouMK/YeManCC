@@ -740,7 +740,8 @@
       "id": "battery",
       "priority": 2,
       "frequency": "policy-commands-and-readback",
-      "status": "42-exact-rules-12-protocols-connected; apex-field-firmware-rejection-open",
+      "status": "reviewed-source-rules-registered; ordinary-package-and-physical-validation-separate",
+      "sourceRegistrationRef": "capabilities/hc-device-catalog.json#/domains/battery",
       "consumers": [
         {
           "file": "native/BatteryHost/Policy.cs",
@@ -786,6 +787,7 @@
       ],
       "remainingIssues": [
         "BATTERY-SUIPLAY-NOT-ADMITTED",
+        "BATTERY-X2-MINI-PRO-PACKAGE-AND-FIELD-PENDING",
         "BATTERY-OXP3-LIVE-WMI-EC-UNKNOWN",
         "BATTERY-OXP3-BYPASS-NOT-PRODUCT-EXPRESSIBLE",
         "BATTERY-APEX-FIRMWARE-GATE-FIELD-FAILURE",
@@ -815,15 +817,18 @@
           "CapabilityCatalogSha256",
           "CapabilityDeclaredByFrozenHc"
         ],
-        "runtimeContract": "sourceId covers all four linked catalog sources; binary identity remains version-specific",
+        "runtimeContract": "Use the battery source contract of the actual build capture and pair the native contract with the packaged managed module; sourceId alone does not identify an installed DLL.",
         "physicalEffectVerified": false,
-        "identityVsImplementation": "frozen-HC-identity describes model provenance only. GPDWinMini_HX370 has a reviewed native firmware route without a frozen HC declaration; six later models use ymcc.device IDs and reviewed-native-extension origin."
+        "identityVsImplementation": "frozen-HC-identity describes model provenance only. GPDWinMini_HX370 has a reviewed native firmware route without a frozen HC declaration. The generated registration rows carry the exact model, origin and provider for reviewed extensions."
       },
-      "latestSourceAudit": {
+      "currentSourceAuditRef": "capabilities/BATTERY-CAPABILITY-AUDIT.json",
+      "historicalSourceAudit20261105": {
+        "historicalSnapshot": true,
         "dateHongKong": "2026-11-05",
-        "path": "capabilities/BATTERY-CAPABILITY-AUDIT.json",
-        "report": "capabilities/BATTERY-CAPABILITY-AUDIT.md",
-        "sha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
+        "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-260-BATTERY-AUDIT-REPORT-DRIFT/BEFORE/BATTERY-CAPABILITY-AUDIT.json",
+        "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-260-BATTERY-AUDIT-REPORT-DRIFT/BEFORE/BATTERY-CAPABILITY-AUDIT.md",
+        "sha256": "4acd927b35db10946fe151d08c8f6547b5ad98671fd9b9470dbe02d927c5c20e",
+        "previousIndexSha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
         "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105",
         "upstreamCommit": "db93cadd55cb9f199beb1cb1dff016bc0150048e",
         "upstreamDeviceFiles": 104,
@@ -1863,6 +1868,13 @@
       "next": "Reconcile source and actual Windows transport/readback/recovery evidence before considering an admitted writer; do not enable from flags alone."
     },
     {
+      "id": "BATTERY-X2-MINI-PRO-PACKAGE-AND-FIELD-PENDING",
+      "domain": "battery",
+      "status": "open",
+      "problem": "The independent X2 Mini Pro threshold route is present in reviewed source. Ordinary export 20261118-145316 does not contain it; source registration is not ordinary-package, installed-module or hardware acceptance.",
+      "next": "Check the actual ordinary export pointer and same-capture route, native contract and managed DLL. Match field dispatch to both logged source IDs and the managed MVID; verify SET from a different valid initial value, a separate GET and physical cutoff independently. Do not widen the exact firmware gate."
+    },
+    {
       "id": "BATTERY-OXP3-LIVE-WMI-EC-UNKNOWN",
       "domain": "battery",
       "status": "open",
@@ -2202,10 +2214,17 @@
     "wholeGoalComplete": false
   },
   "currentBatteryCapabilityAudit": {
-    "dateHongKong": "2026-11-05",
     "path": "capabilities/BATTERY-CAPABILITY-AUDIT.json",
     "report": "capabilities/BATTERY-CAPABILITY-AUDIT.md",
-    "sha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
+    "scope": "Source coverage and historical field evidence only. The actual ordinary export pointer and packaged DLL determine package inclusion."
+  },
+  "historicalBatteryCapabilityAudit20261105": {
+    "historicalSnapshot": true,
+    "dateHongKong": "2026-11-05",
+    "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-260-BATTERY-AUDIT-REPORT-DRIFT/BEFORE/BATTERY-CAPABILITY-AUDIT.json",
+    "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-260-BATTERY-AUDIT-REPORT-DRIFT/BEFORE/BATTERY-CAPABILITY-AUDIT.md",
+    "sha256": "4acd927b35db10946fe151d08c8f6547b5ad98671fd9b9470dbe02d927c5c20e",
+    "previousIndexSha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
     "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105",
     "upstreamCommit": "db93cadd55cb9f199beb1cb1dff016bc0150048e",
     "upstreamDeviceFiles": 104,

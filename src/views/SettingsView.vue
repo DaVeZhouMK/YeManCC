@@ -15,8 +15,9 @@ import { updatePredownloadState, setUpdatePredownloadEnabled } from '@/bridge/up
 import IntegratedPage from '@/components/IntegratedPage.vue';
 import {useRoute} from 'vue-router';
 const settingsRoute=useRoute();
-import { tdpDiagnosticDeliveryFailures } from '@/bridge/tdpStaticDiagnostics';
-import { frontendDiagnosticDeliveryFailures } from '@/robust/frontendDiagnostics';
+import { tdpDiagnosticDeliveryFailures, tdpDiagnosticDeliveryEvidence } from '@/bridge/tdpStaticDiagnostics';
+import { frontendDiagnosticDeliveryFailures, frontendDiagnosticDeliveryEvidence } from '@/robust/frontendDiagnostics';
+import { getSharedPowerLifecycleDiagnostics } from '@/bridge/powerLifecycleState';
 import { ref, onMounted, onActivated, onBeforeUnmount, computed } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import { radialTestingEnabled } from '@/radial/testingState';
@@ -25,6 +26,7 @@ import SegButton from '@/components/SegButton.vue';
 import { autocloseGet, autocloseSet, msiControllerShieldGet, msiControllerShieldSet, updateAccelGet, updateAccelToggle, sleepFactsGet, sleepFactsSetEnabled, sleepFactsClearLog, sleepFactsExportLog, type AutoCloseConfig, type MsiControllerShieldState, type UpdateAccelState, type SleepFactStatus } from '@/bridge/yeman';
 import { shell, fs, dialog, domainLogs } from '@/bridge/api';
 import { invoke } from '@/bridge/ipc';
+import { rememberOrdinaryExportReply, takeOrdinaryExportReplyEvidence, type OrdinaryExportOperation } from '@/bridge/ordinaryExportReplyEvidence';
 import { APP_VERSION } from '@/version';
 import InlineIcon from '@/components/InlineIcon.vue';
 import { getTheme, setTheme, type ThemeName } from '@/bridge/theme';
@@ -113,6 +115,18 @@ const bgBusy = ref(false);
 const bgKind = ref<'image' | 'video'>('image');
 const videoBatteryPause = ref(getUiSetting('videoBatteryPause'));
 const windowPlacement = ref(getUiSetting('windowPlacement'));
+const floatingSummonEnabled = ref(getUiSetting('floatingSummonEnabled'));
+const floatingSummonBusy = ref(false);
+async function onFloatingSummonChange(enabled: boolean): Promise<void> {
+  if (floatingSummonBusy.value) return;
+  floatingSummonBusy.value = true;
+  try { await setUiSettings({ floatingSummonEnabled: enabled }); }
+  catch (error) { errMsg.value = '悬浮呼出设置保存失败：' + (error as Error).message; }
+  finally {
+    floatingSummonEnabled.value = getUiSetting('floatingSummonEnabled');
+    floatingSummonBusy.value = false;
+  }
+}
 const bgOpacity = ref(Math.round(getBackgroundOpacity() * 100));
 const bgOpacityMax = Math.round(BACKGROUND_OPACITY_MAX * 100);
 const bgOpacityMin = Math.round(BACKGROUND_OPACITY_MIN * 100);
@@ -407,26 +421,34 @@ async function exportAllLogs(): Promise<void> {
   detailLogBusy.value = true;
   detailLogStatus.value = '正在打包全部日志…';
   try {
+    const args = { tdpDiagnosticDeliveryFailures: tdpDiagnosticDeliveryFailures(), tdpDiagnosticDeliveryEvidence: tdpDiagnosticDeliveryEvidence(), frontendDiagnosticDeliveryFailures: frontendDiagnosticDeliveryFailures(), frontendDiagnosticDeliveryEvidence: frontendDiagnosticDeliveryEvidence(), sharedPowerLifecycleDiagnostics: getSharedPowerLifecycleDiagnostics(), priorOrdinaryExportReply: takeOrdinaryExportReplyEvidence() };
+    const started = performance.now();
     const r = await invoke<{
       ok?: boolean; path?: string; count?: number; reason?: string;
-      lastError?: string; win32Error?: number; attempts?: number; cleanupOk?: boolean;
+      exportOperation?: OrdinaryExportOperation;
+      unverifiedPath?: string; lastError?: string; win32Error?: number; attempts?: number; cleanupOk?: boolean;
       snapshotBoundaryWarnings?: number; snapshotInspectionFailures?: number;
       steamLogs?: { status?: string; copied?: number; skipped?: number; discoveryIssues?: number };
     }>(
       'logs.exportAll',
-      { tdpDiagnosticDeliveryFailures: tdpDiagnosticDeliveryFailures(), frontendDiagnosticDeliveryFailures: frontendDiagnosticDeliveryFailures() },
+      args,
       // Two 5-minute archive attempts plus snapshot copying and hash/index work.
       { timeoutMs: 900000 },
     );
-    if (r.ok !== true || !r.path) {
-      const details = [r.reason || '导出失败'];
-      if (r.lastError) details.push(`失败阶段：${r.lastError}`);
-      if (typeof r.win32Error === 'number') details.push(`Win32 代码：${r.win32Error}`);
-      if (typeof r.attempts === 'number') details.push(`尝试次数：${r.attempts}`);
-      if (r.cleanupOk === false) details.push('临时文件清理未完成');
-      throw new Error(details.join('；'));
+    rememberOrdinaryExportReply(r, performance.now() - started);
+    if (r?.ok === false) {
+      if (r.reason === 'promoted-archive-unreadable') {
+        detailLogStatus.value = describeUnverifiedLogArchive(r.unverifiedPath, r.cleanupOk);
+        return;
+      }
+      detailLogStatus.value = `导出未完成：${describeLogExportFailure(r)}`;
+      return;
     }
-    detailLogStatus.value = `已导出 ${r.count ?? 0} 个日志文件到桌面：${r.path}`;
+    if (r?.ok !== true || typeof r.path !== 'string' || !r.path) {
+      detailLogStatus.value = '导出结果未确认：未收到有效的 ZIP 路径。';
+      return;
+    }
+    detailLogStatus.value = `日志 ZIP 已导出到桌面（本次收集 ${r.count ?? 0} 个日志文件）：${r.path}`;
     if ((r.snapshotBoundaryWarnings ?? 0) > 0) detailLogStatus.value += `；${r.snapshotBoundaryWarnings} 个日志存在快照半条尾记录，原始内容已保留，详见 log-export-snapshot.json`;
     if ((r.snapshotInspectionFailures ?? 0) > 0) detailLogStatus.value += `；${r.snapshotInspectionFailures} 项快照检查未完成，详见 log-export-snapshot.json`;
     if (r.steamLogs) {
@@ -438,10 +460,27 @@ async function exportAllLogs(): Promise<void> {
     }
     if (r.cleanupOk === false) detailLogStatus.value += '；临时文件清理未完成';
   } catch (e) {
-    detailLogStatus.value = '导出失败：' + (e instanceof Error ? e.message : String(e));
+    detailLogStatus.value = '导出结果未确认：' + (e instanceof Error ? e.message : String(e));
   } finally {
     detailLogBusy.value = false;
   }
+}
+
+function describeLogExportFailure(result: {
+  reason?: string; lastError?: string; win32Error?: number; attempts?: number; cleanupOk?: boolean;
+}): string {
+  const { reason, lastError, win32Error, attempts, cleanupOk } = result;
+  const details = [reason === 'archive-failed' || reason === 'archive-failed-after-2-attempts' ? '日志打包失败' : reason || '导出失败'];
+  if (lastError) details.push(`失败阶段：${lastError}`);
+  if (typeof win32Error === 'number') details.push(`Win32 代码：${win32Error}`);
+  if (typeof attempts === 'number') details.push(`尝试次数：${attempts}`);
+  if (cleanupOk === false) details.push('临时文件清理未完成');
+  return details.join('；');
+}
+
+function describeUnverifiedLogArchive(path?: string, cleanupOk?: boolean): string {
+  const location = typeof path === 'string' && path ? `：${path}` : '';
+  return `日志文件已移到桌面，但当时无法读取校验${location}${cleanupOk === false ? '；临时文件清理未完成' : ''}`;
 }
 
 // 版本号：构建期由 version.json 注入（scripts/write-version.mjs → src/version.ts）
@@ -635,9 +674,13 @@ async function exportFanLogs(): Promise<void> {
   fanLogStatus.value = '';
   try {
     const result = await exportFanDiagnosticLogs();
+    if (!result.ok && result.reason === 'promoted-archive-unreadable') {
+      fanLogStatus.value = describeUnverifiedLogArchive(result.unverifiedPath, result.cleanupOk);
+      return;
+    }
     fanLogStatus.value = result.ok && result.path
       ? `风扇日志已导出到桌面：${result.path}`
-      : (result.reason || '暂无风扇日志可导出');
+      : describeLogExportFailure({ ...result, reason: result.reason || '暂无风扇日志可导出' });
   } catch (error) {
     fanLogStatus.value = `风扇日志导出失败：${error instanceof Error ? error.message : String(error)}`;
   } finally {
@@ -817,6 +860,7 @@ async function openGithub() {
 }
 
 function syncAppearanceSettings(): void {
+  floatingSummonEnabled.value = getUiSetting('floatingSummonEnabled');
   fxSoundAutoRepair.value = getUiSetting('fxSoundAutoRepair');
   theme.value=getTheme();windowPlacement.value=getUiSetting('windowPlacement');
   bgOpacity.value=Math.round(getBackgroundOpacity()*100);bgBlur.value=getBackgroundBlur();
@@ -831,6 +875,7 @@ onMounted(async () => {
   fanDiagnosticLoggingEnabled.value = fanSettings.diagnosticLoggingEnabled === true;
   await ensureUpdateManager();
   await loadUiSettings();
+  floatingSummonEnabled.value = getUiSetting('floatingSummonEnabled');
   fxSoundAutoRepair.value = getUiSetting('fxSoundAutoRepair');
   videoBatteryPause.value = getUiSetting('videoBatteryPause');
   windowPlacement.value = getUiSetting('windowPlacement');
@@ -865,7 +910,7 @@ onBeforeUnmount(() => {
 <SettingsSections :sections="settingsSections" :initial-section="settingsRoute.query.section === 'device' ? 'device' : undefined" label="设置" class="settings-layout settings-layout-b settings-console">
 <template #appearance="{ active }"><div class="appearance-flow"><div class="setting-position">
 
- <section class="card window-position-settings"><h3 class="card-title"><InlineIcon name="target" />窗口位置</h3><div class="window-placement-options" role="group" aria-label="窗口位置"><button type="button" :class="{active:windowPlacement==='left'}" :aria-pressed="windowPlacement==='left'" @click="onWindowPlacementChange('left')">左侧</button><button type="button" :class="{active:windowPlacement==='right'}" :aria-pressed="windowPlacement==='right'" @click="onWindowPlacementChange('right')">右侧</button></div></section></div>
+ <section class="card window-position-settings"><h3 class="card-title"><InlineIcon name="target" />窗口位置</h3><div class="window-placement-options" role="group" aria-label="窗口位置"><button type="button" :class="{active:windowPlacement==='left'}" :aria-pressed="windowPlacement==='left'" @click="onWindowPlacementChange('left')">左侧</button><button type="button" :class="{active:windowPlacement==='right'}" :aria-pressed="windowPlacement==='right'" @click="onWindowPlacementChange('right')">右侧</button></div><Toggle :model-value="floatingSummonEnabled" label="悬浮呼出" description="使用原呼出键；关闭后，下次呼出使用独立窗口。" color="accent" :disabled="floatingSummonBusy" data-floating-summon-toggle @update:model-value="onFloatingSummonChange" /></section></div>
  <div class="setting-color"><section class="card interface-color-settings">
       <h3 class="card-title"><InlineIcon name="star" /> 界面颜色</h3>
       <SegButton
@@ -918,7 +963,7 @@ onBeforeUnmount(() => {
       <div class="fan-log-actions">
         <button class="fan-log-action" :class="{ enabled: detailLoggingEnabled }" type="button" :disabled="detailLogBusy || detailMaintenanceBusy" :aria-pressed="detailLoggingEnabled" @click="toggleDetailLogging">{{ detailLoggingEnabled ? '高频日志 · 开' : '高频日志 · 关' }}</button>
         <DiagnosticLogPauseClearButton :disabled="detailLogBusy" @busy-change="value=>detailMaintenanceBusy=value" @changed="loadDetailLogging" @status="value=>detailLogStatus=value" @error="value=>errMsg=value" />
-        <button class="fan-log-action" type="button" :disabled="detailLogBusy || detailMaintenanceBusy" @click="exportAllLogs">导出日志</button>
+        <button class="fan-log-action" type="button" :disabled="detailLogBusy || detailMaintenanceBusy" title="包含 Windows 电源报告查询" @click="exportAllLogs">导出日志</button>
       </div>
       <p v-if="detailLogStatus" class="muted body fan-log-status" role="status">{{ detailLogStatus }}</p>
     </section>

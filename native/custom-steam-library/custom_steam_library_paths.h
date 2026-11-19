@@ -18,9 +18,10 @@ namespace fs = std::filesystem;
 // Use the extended Win32 spelling only at IO boundaries. Persisted paths,
 // executable identities and UI URLs must retain their ordinary portable form.
 // Staging suffixes can push an otherwise valid destination beyond MAX_PATH.
-inline fs::path ioPath(const fs::path& path) {
+// Recursive IO may enter long descendants even when its root is short.
+inline fs::path ioPath(const fs::path& path, bool forceExtended = false) {
     auto value = path.wstring();
-    if (value.empty() || value.size() < 248 || value.starts_with(L"\\\\?\\") ||
+    if (value.empty() || (!forceExtended && value.size() < 248) || value.starts_with(L"\\\\?\\") ||
         value.starts_with(L"\\\\.\\")) return path;
     std::error_code error;
     auto absolute = fs::absolute(path, error).lexically_normal();

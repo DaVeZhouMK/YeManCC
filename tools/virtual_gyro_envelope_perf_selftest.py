@@ -6,11 +6,15 @@ import datetime as dt
 import difflib
 import hashlib
 import json
+import os
 import re
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+SOURCE = REPO/'native/main.cpp'
 OUTPUT = Path('G:/YeManCC-Work/Build/Validation/VirtualInputPerf-R15-20261015/gyro-envelope-local')
 EXPECTED_MAIN = '79340b9dcba916e2a02cc2e1da5d9aee8ba01a896ac570bb627df28c930d0ac2'
 PARENT_EVIDENCE = Path('G:/YeManCC-Work/Build/Validation/VirtualInputPerf-R14-20261015/next-node-inspection.json')
@@ -166,7 +170,7 @@ def audit_patch(raw, candidate_main, bound):
             'baselineLineEndings': old_ends, 'candidateLineEndings': new_ends}
 
 def recheck(bound, header_raw, cpp_raw, runner_raw, parent_raw):
-    latest = (REPO/'native/main.cpp').read_bytes(); current = bind(latest)
+    latest = SOURCE.read_bytes(); current = bind(latest)
     drift = [name for name in bound if bound[name]['bytes'] != current[name]['bytes']]
     assert not drift, 'Bound production drift: '+', '.join(drift)
     assert (REPO/'deps/json/json.hpp').read_bytes() == header_raw, 'Vendored JSON drift'
@@ -211,18 +215,515 @@ def report_text(result):
         'Mixed endings preserved: 103 standalone LF; raw replacement adds two CRLF lines only.', '']
     return '\n'.join(lines)
 
+REFERENCE_POLICY = {
+    'mode': 'current-reference-copy', 'setBeforeMeasurement': True,
+    'campaigns': 2, 'pairsPerCampaign': 11, 'batchesPerArm': 16, 'eventsPerArm': 1024,
+    'payloadShapes': ['empty', 'full', 'deep', 'unicode'], 'gates': [False, True], 'targetCounts': [1, 4],
+    'affected': {'gate': True, 'minimumMedianPairedCycleReductionPercent': 5,
+                 'minimumFasterPairs': 10, 'allocationRequestsStrictlyDecrease': True, 'requestedBytesStrictlyDecrease': True},
+    'control': {'gate': False, 'sourceBranchByteIdentical': True,
+                'maximumMedianPairedCycleRegressionPercent': 5, 'allocationRequestsAndBytesEqual': True},
+    'everyScenarioInBothCampaignsMustPass': True, 'retryOnMeasuredFailure': False,
+    'metric': 'QueryThreadCycleTime deltas for full synchronous emitter; wall ns also retained',
+    'scope': 'Whole current emitter, original reference/parity dumps, shared snapshot broadcast, UTF16 conversion and destruction; inert renderer/log/cost dependencies',
+    'setupExcluded': 'Caller payload/event preparation and topology setup',
+    'productionEnvelopeConstruction': 'Original initializer retained byte-for-byte; it already moves the payload',
+    'diagnosticDumpAndGateCadenceUnchanged': True, 'productionWrites': [],
+    'processCpuAcceptance': False, 'costsRequireSeparateExplicitInvocation': True,
+}
+
+
+def reference_write(path, data):
+    with Path(path).open('xb') as stream:
+        stream.write(data.encode('utf-8') if isinstance(data, str) else data)
+
+
+def reference_json(path, value):
+    reference_write(path, json.dumps(value, ensure_ascii=False, indent=2) + '\n')
+
+
+def reference_identity(path):
+    path = Path(path).resolve()
+    raw = path.read_bytes()
+    return {'path': str(path), 'bytes': len(raw), 'sha256': sha(raw)}
+
+
+def reference_bind(raw):
+    # The current consumer calls a shared broadcaster; the historical post
+    # helper has a different signature and is outside this emitter's closure.
+    functions = {name: spec for name, spec in FUNCTIONS.items() if name != 'target-post'}
+    functions.update({
+        'lifecycle-logger': (rb'^static void appendNativeLifecycleLog\(const char\* event, const json& observed\) \{', False),
+        'snapshot-broadcast': (rb'^static void ipc_broadcast_controller_snapshot\(const json& message(?:, const std::string\* validatedUtf8 = nullptr)?\) \{', False),
+        'producer-callback': (rb'^static void inputCaptureOnGamepad\([^;{]*\{', False),
+        'producer-post': (rb'^static void gamepadSerialPostOwnedEvent\(std::string event, json data\) \{', False),
+        'serial-event-type': (rb'^struct GamepadSerialEvent \{', True),
+        'sensor-snapshot-gate': (rb'^static bool inputCaptureGyroPresentSnapshot\(\) \{', False),
+        'serial-dispatch': (rb'^    case WM_GAMEPAD_SERIAL_EVENT: \{', False),
+    })
+    bound = {name: extract(raw, pattern, structure) for name, (pattern, structure) in functions.items()}
+    declarations = dict(DECLARATIONS)
+    if b'g_gamepadSerialEventMailbox' in raw:
+        declarations.update({
+            'serial-mailbox-include': rb'^#include "ipc_result_mailbox.h"[^\n]*\n',
+            'serial-mailbox-root': rb'^static auto\* const g_gamepadSerialEventMailbox = new ymcc::ipc::ResultMailbox<GamepadSerialEvent>\(\);[^\n]*\n',
+        })
+        functions['producer-const-post'] = (rb'^static void gamepadSerialPostEvent\(const std::string& event, const json& data = \{\}\) \{', False)
+        bound['producer-const-post'] = extract(raw, *functions['producer-const-post'])
+    if b'g_gamepadSerialActionPower' in raw:
+        declarations['serial-action-power-tls'] = rb'^static thread_local unsigned long long g_gamepadSerialActionPower\s*=\s*0;[^\n]*\n'
+    for name, pattern in declarations.items():
+        hits = list(re.finditer(pattern, raw, re.M))
+        if len(hits) != 1:
+            raise ValueError('Current declaration requires unique binding: ' + name)
+        hit = hits[0]
+        bound[name] = {'bytes': hit.group(), 'start': hit.start(), 'end': hit.end(), 'line': raw[:hit.start()].count(b'\n')+1}
+    return bound
+
+
+def reference_candidate(raw, bound):
+    original = bound['owned-emitter']['bytes']
+    eol = b'\r\n' if b'\r\n' in original else b'\n'
+    old = b'        json reference = data;' + eol + b'        json oldEnvelope = {{"event", ev}, {"data", reference}};'
+    new = b'        json oldEnvelope = {{"event", ev}, {"data", data}};'
+    if original.count(old) != 1 or original.count(OLD) != 1:
+        raise ValueError('Expected current diagnostic copy and original production initializer exactly once')
+    if b'ipc_broadcast_controller_snapshot(m);' not in original:
+        raise ValueError('Current shared snapshot broadcaster required')
+    candidate = original.replace(old, new, 1)
+    if candidate.replace(new, old, 1) != original:
+        raise ValueError('Diagnostic-only reverse patch failed')
+    before = bound['owned-emitter']
+    full = raw[:before['start']] + candidate + raw[before['end']:]
+    # This equality protects every gate read, return, counter, log, exception
+    # boundary, production initializer and broadcast call outside the two lines.
+    if full.replace(new, old, 1) != raw or candidate.count(OLD) != 1:
+        raise ValueError('Unexpected change outside diagnostic reference construction')
+    callback = bound['producer-callback']['bytes']
+    if b'now - g_inputCaptureLastUi >= 80' not in callback:
+        raise ValueError('Expected unchanged 80ms telemetry producer gate')
+    if original.count(b'tickCostEnabled()') != 3:
+        raise ValueError('Emitter must preserve three direct reads plus scope constructor read')
+    return candidate, full, {'pass': True, 'diagnosticReferenceIntermediateOnly': True,
+        'fullReversePatchExact': True, 'productionInitializerByteIdentical': True,
+        'offBranchUnchangedByConstruction': True, 'directGateReads': 3, 'scopeGateReads': 1,
+        'diagnosticGateSource': bound['diagnostic-gate']['bytes'].decode('utf-8'),
+        'eightyMsProducerProtectedNotExecuted': True, 'addedCatchOrStateOrTimer': False,
+        'unmodifiedPrefixSha256': sha(raw[:before['start']]), 'unmodifiedSuffixSha256': sha(raw[before['end']:]),
+        'baselineLineEndings': line_endings(raw), 'candidateLineEndings': line_endings(full)}
+
+
+def reference_header(bound, candidate, baseline_broadcast=None):
+    shared = ['diagnostic-gate', 'cost-name-hash', 'ipc-cost-scope', 'utf8-to-utf16', 'target-resolver', 'snapshot-broadcast']
+    header = b'#ifndef YMCC_CURRENT_REFERENCE_COPY\n#error Current source requires explicit current mode\n#endif\n'
+    # An explicit paired consumer may compare the historical broadcaster with
+    # the validated-wire broadcaster. Historical reference-copy mode stays exact.
+    paired_broadcast = baseline_broadcast is not None
+    if paired_broadcast:
+        old_signature = b'static void ipc_broadcast_controller_snapshot(const json& message) {'
+        new_signature = b'static void ipc_broadcast_controller_snapshot(const json& message, const std::string* validatedUtf8 = nullptr) {'
+        old_call = b'ipc_broadcast_controller_snapshot(m);'
+        new_call = b'ipc_broadcast_controller_snapshot(m, validatedWire ? &*validatedWire : nullptr);'
+        if (not baseline_broadcast.startswith(old_signature) or
+                not bound['snapshot-broadcast']['bytes'].startswith(new_signature) or
+                bound['owned-emitter']['bytes'].count(old_call) != 1 or
+                candidate.count(new_call) != 1):
+            raise ValueError('Validated-wire pair requires both exact signatures and emitter calls')
+        header += b''.join(bound[name]['bytes'] for name in shared if name != 'snapshot-broadcast')
+        for name, body in [('baseline_broadcast', baseline_broadcast),
+                           ('candidate_broadcast', bound['snapshot-broadcast']['bytes'])]:
+            if body.count(b'ipc_broadcast_controller_snapshot(') != 1:
+                raise ValueError('Broadcaster definition must be uniquely bound')
+            header += body.replace(b'ipc_broadcast_controller_snapshot(', name.encode()+b'(', 1)
+    else:
+        header += b''.join(bound[name]['bytes'] for name in shared)
+    original = bound['owned-emitter']['bytes']
+    event_value = b'{"event", ev}, {"data", reference}' if paired_broadcast else b'{"event", ev}, {"data", data}'
+    mutated_value = event_value.replace(b'{"event", ev}', b'{"event", "mutated.reference.event"}')
+    event_negative = candidate.replace(event_value, mutated_value, 1)
+    gate_negative = candidate.replace(b'if (tickCostEnabled()) {', b'if (!tickCostEnabled()) {', 1)
+    if event_negative == candidate or gate_negative == candidate:
+        raise ValueError('Semantic negative mutation did not apply')
+    for name, observed in [('baseline_emit', False), ('candidate_emit', False),
+                            ('baseline_observed', True), ('candidate_observed', True)]:
+        variants = [original] if name.startswith('baseline') else [event_negative, gate_negative, candidate]
+        if len(variants) > 1:
+            header += b'#if defined(YMCC_REFERENCE_EVENT_NEGATIVE)\n'
+        for index, body in enumerate(variants):
+            if index == 1:
+                header += b'#elif defined(YMCC_REFERENCE_GATE_NEGATIVE)\n'
+            elif index == 2:
+                header += b'#else\n'
+            if observed:
+                eol = b'\r\n' if b'\r\n' in body else b'\n'
+                if body.count(OLD) != 1:
+                    raise ValueError('Original ownership observation anchor must remain')
+                body = body.replace(OLD, OLD + eol + b'    observeLocals(ev, data, m);', 1)
+            if paired_broadcast:
+                if body.count(b'ipc_broadcast_controller_snapshot(') != 1:
+                    raise ValueError('Each emitter must call its paired broadcaster once')
+                target = b'baseline_broadcast(' if name.startswith('baseline') else b'candidate_broadcast('
+                body = body.replace(b'ipc_broadcast_controller_snapshot(', target, 1)
+            header += body.replace(b'ipc_emit_owned_gyro_telemetry', name.encode(), 1)
+        if len(variants) > 1:
+            header += b'#endif\n'
+    return header
+
+
+def reference_process(command, output, name, env, cap, deadline, allowed=(0,)):
+    remaining = deadline-time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('Shared invocation budget exhausted before ' + name)
+    timeout = min(cap, remaining)
+    started = dt.datetime.now(dt.timezone.utc).isoformat()
+    tick = time.monotonic()
+    stdout = stderr = b''
+    code = pid = None
+    timed_out = False
+    spawn_error = cleanup = None
+    image_identity = reference_identity(command[0])
+    try:
+        process = subprocess.Popen(list(map(str, command)), cwd=output, env=env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        pid = process.pid
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            timed_out = True
+            stdout, stderr = error.output or b'', error.stderr or b''
+            # Exact owned PID, not a name-based product/tool sweep.
+            cleanup_process = subprocess.run([r'C:\Windows\System32\taskkill.exe', '/PID', str(pid), '/T', '/F'],
+                                             capture_output=True, timeout=15)
+            cleanup = {'exitCode': cleanup_process.returncode, 'stdout': cleanup_process.stdout.decode(errors='replace'),
+                       'stderr': cleanup_process.stderr.decode(errors='replace')}
+            stdout, stderr = process.communicate(timeout=15)
+        code = process.returncode
+    except OSError as error:
+        spawn_error = repr(error)
+    finally:
+        reference_write(output/(name+'.stdout.log'), stdout)
+        reference_write(output/(name+'.stderr.log'), stderr)
+        reference_json(output/(name+'.PROCESS.json'), {'command': list(map(str, command)), 'executableIdentityBeforeSpawn':image_identity, 'cwd': str(output), 'pid': pid,
+            'startedAtUtc': started, 'endedAtUtc': dt.datetime.now(dt.timezone.utc).isoformat(),
+            'wallMs': (time.monotonic()-tick)*1000, 'originalTimeoutSeconds': cap, 'effectiveTimeoutSeconds': timeout,
+            'exitCode': code, 'timedOut': timed_out, 'ETIMEDOUT': timed_out, 'spawnError': spawn_error, 'cleanup': cleanup})
+    if timed_out or spawn_error or code not in allowed:
+        raise RuntimeError(name + ' failed; original process/logs preserved')
+    return stdout, stderr, code
+
+
+def reference_environment(output, deadline):
+    env = os.environ.copy()
+    for name in list(env):
+        if name.upper() in {'PATH','INCLUDE','LIB','LIBPATH'} or name.upper().startswith(
+                ('VSCMD','__VSCMD','VCTOOLS','VCINSTALL','VSINSTALL','WINDOWSSDK','UNIVERSALCRT','UCRTVERSION')):
+            env.pop(name, None)
+    env['PATH'] = r'C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0'
+    env['VSLANG'] = '1033'
+    vc = Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
+    compiler_dir = Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64')
+    compiler = compiler_dir/'cl.exe'
+    sdk = Path(r'C:\Program Files (x86)\Windows Kits\10')
+    version = '10.0.26100.0'
+    setup = '@echo off\r\ncall "'+str(vc)+'" '+version+' -vcvars_ver=14.44 >nul\r\nif errorlevel 1 exit /b %errorlevel%\r\n'
+    setup += 'set "PATH='+str(compiler_dir)+';C:\\Windows\\System32;%PATH%"\r\n'
+    # Match the restored, verified SDK selection rather than ambient SDK paths.
+    setup += 'set "INCLUDE='+';'.join(str(sdk/'Include'/version/name) for name in ['ucrt','shared','um','winrt','cppwinrt'])+';%INCLUDE%"\r\n'
+    setup += 'set "LIB='+';'.join(str(sdk/'Lib'/version/name/'x64') for name in ['ucrt','um'])+';%LIB%"\r\n'
+    setup += 'set PATH\r\nset INCLUDE\r\nset LIB\r\nexit /b 0\r\n'
+    reference_write(output/'environment.cmd', setup)
+    raw, _, _ = reference_process([r'C:\Windows\System32\cmd.exe', '/d','/c',str(output/'environment.cmd')],
+                                  output,'environment',env,30,deadline)
+    for line in raw.decode('utf-8',errors='replace').splitlines():
+        if '=' in line:
+            key, value = line.split('=',1)
+            if key and not key.startswith('='):
+                existing = next((name for name in env if name.lower()==key.lower()), key)
+                env[existing] = value
+    if not compiler.is_file() or not compiler.with_name('link.exe').is_file():
+        raise FileNotFoundError('Exact restored x64 MSVC compiler/linker required')
+    files = [vc, compiler, compiler_dir/'link.exe', Path(sys.executable), Path(r'C:\Windows\System32\cmd.exe')]
+    files += [compiler_dir/name for name in ['c1xx.dll','c2.dll','mspdbcore.dll']]
+    vcroot = compiler_dir.parents[2]
+    files += [vcroot/'lib/x64'/name for name in ['libcpmt.lib','libcpmtd.lib','libcmt.lib','libcmtd.lib',
+                                               'libvcruntime.lib','libvcruntimed.lib','oldnames.lib']]
+    files += [sdk/'Lib'/version/family/'x64'/name for family,name in
+              [('ucrt','libucrt.lib'),('ucrt','libucrtd.lib'),('um','kernel32.lib')]]
+    toolchain = {'files': [reference_identity(path) for path in files], 'sdkVersion': version,
+                 'pathLength': len(next(value for key,value in env.items() if key.lower()=='path')),
+                 'compiler': str(compiler), 'childEnvironmentOnly': True,
+                 'environment': {key:value for key,value in env.items() if key.upper() in {'PATH','INCLUDE','LIB','VSLANG'}}}
+    reference_json(output/'TOOLCHAIN-IDENTITY.json',toolchain)
+    return compiler, env, toolchain
+
+
+def reference_verify_entries(entries):
+    for entry in entries:
+        if reference_identity(entry['path']) != entry:
+            raise ValueError('Prepared input/tool/artifact drift: '+entry['path'])
+
+
+def reference_correctness_result(result, corpus):
+    expected = {'pass':True,'cases':2828,'inputShapes':22,'topologies':8,'successiveGateScripts':16,
+                'strictUtf8ExceptionsCompared':312,'existingMismatchLogCallsCompared':0}
+    if any(result['correctness'].get(key)!=value for key,value in expected.items()) or result['assertions']!=89737:
+        raise ValueError('Original current-source case selection/semantic counts differ')
+    expected_matrix = {(entry['name'],topology,mask) for entry in corpus['inputs'] for topology in range(8) for mask in range(16)}
+    matrix = result['caseMatrix']
+    actual_matrix = {(entry['input'],entry['topology'],entry['scriptMask']) for entry in matrix}
+    # The original 12 constructor/slot/Post-failure controls increment the
+    # total but do not append matrix rows. Preserve that original producer.
+    if len(matrix)!=2816 or actual_matrix!=expected_matrix or not all(entry['baselineCandidateEquivalent'] for entry in matrix):
+        raise ValueError('Original 2816 matrix rows differ; 12 extra controls are counted separately')
+    if result['performance'] is not None or result['ownership']['nodesCompared']!=47:
+        raise ValueError('Original ownership or cost isolation failed')
+
+
+def reference_resume_release(previous, output, identities, toolchain, generated):
+    previous = Path(previous).resolve()
+    if not previous.is_relative_to((REPO.parents[2]/'Testing/YMCC/Evidence').resolve()):
+        raise ValueError('Resume must reference development Evidence')
+    binding = json.loads((previous/'SOURCE-BINDING.json').read_text(encoding='utf-8'))
+    prior_tools = json.loads((previous/'TOOLCHAIN-IDENTITY.json').read_text(encoding='utf-8'))
+    if binding['inputs'][:3] != identities[:3] or binding['inputs'][4:] != identities[4:] or prior_tools['files']!=toolchain['files']:
+        raise ValueError('Release source/fixture/JSON/tool identity differs; reuse rejected')
+    if (previous/'production-extracted.h').read_bytes()!=generated or (previous/'fixture.cpp').read_bytes()!=(output/'fixture.cpp').read_bytes():
+        raise ValueError('Release actual compiled input differs; reuse rejected')
+    if sha((previous/'runner.py').read_bytes())!=binding['inputs'][3]['sha256']:
+        raise ValueError('Original runner snapshot drift')
+    for name in ['Release-build','Release-run','InputCorpus']:
+        process = json.loads((previous/(name+'.PROCESS.json')).read_text(encoding='utf-8'))
+        if process['exitCode']!=0 or process['timedOut'] or process['spawnError']:
+            raise ValueError('Original completed Release producer required')
+    result = json.loads((previous/'Release-run.stdout.log').read_bytes())
+    corpus = json.loads((previous/'InputCorpus.stdout.log').read_bytes())
+    reference_correctness_result(result,corpus)
+    names = ['SOURCE-BINDING.json','TOOLCHAIN-IDENTITY.json','FAILURE.json','baseline-main.cpp','fixture.cpp','production-extracted.h','json.hpp','runner.py',
+             'Release.exe','Release.obj','Release-dependencies.json']
+    names += [name+suffix for name in ['Release-build','Release-run','InputCorpus'] for suffix in ['.PROCESS.json','.stdout.log','.stderr.log']]
+    references = [reference_identity(previous/name) for name in names]
+    reference_write(output/'Release.exe',(previous/'Release.exe').read_bytes())
+    reference_write(output/'Release.obj',(previous/'Release.obj').read_bytes())
+    reference_write(output/'Release-dependencies.json',(previous/'Release-dependencies.json').read_bytes())
+    reference_write(output/'InputCorpus.stdout.log',(previous/'InputCorpus.stdout.log').read_bytes())
+    reference_json(output/'RELEASE-SHARED-REFERENCE.json',{'status':'SHARED_REFERENCE','executedThisInvocation':False,
+        'actualCorrectnessWasExecutedInOriginalProducer':True,'references':references,
+        'originalRawUnchanged':True,'compiledSourceBytesExact':True,'runnerChangedForConsumerRepair':True,
+        'executableHashObservedAtIntake':reference_identity(previous/'Release.exe'),
+        'limitation':'Original process receipt bound executable path but did not record its hash before execution; artifact hash frozen at this continuation intake, not backdated'})
+    return result, corpus, references
+
+
+def run_reference_current(output, prepared=None, budget_seconds=900, release_from=None):
+    if output is None:
+        raise ValueError('Current mode requires explicit --out under Testing/YMCC/Evidence')
+    output = Path(output).resolve()
+    evidence = (REPO.parents[2]/'Testing/YMCC/Evidence').resolve()
+    if not output.is_relative_to(evidence) or output == evidence:
+        raise ValueError('Current mode output must stay inside development Evidence')
+    output.mkdir(parents=True, exist_ok=False)
+    began = time.monotonic()
+    deadline = began+budget_seconds
+    try:
+        if prepared:
+            return run_reference_prepared_costs(Path(prepared).resolve(), output, deadline)
+        reference_json(output/'ACCEPTANCE-POLICY.json',REFERENCE_POLICY)
+        source = SOURCE
+        raw = source.read_bytes()
+        reference_write(output/'baseline-main.cpp',raw)
+        bound = reference_bind(raw)
+        candidate, full, audit = reference_candidate(raw,bound)
+        generated = reference_header(bound,candidate)
+        cpp = Path(__file__).with_suffix('.cpp')
+        if not cpp.is_file():
+            cpp = REPO/'tools/virtual_gyro_envelope_perf_selftest.cpp'
+        inputs = [source, REPO/'deps/json/json.hpp', cpp, Path(__file__)]
+        mailbox_path = REPO/'native/ipc_result_mailbox.h'
+        if 'serial-mailbox-root' in bound:
+            inputs.append(mailbox_path)
+        identities = [reference_identity(path) for path in inputs]
+        if identities[0]['sha256'] != sha(raw):
+            raise ValueError('Current source changed during initial freeze')
+        patch = ''.join(difflib.unified_diff(raw.decode('utf-8').splitlines(True),full.decode('utf-8').splitlines(True),
+                            fromfile='a/native/main.cpp',tofile='b/native/main.cpp',n=3)).encode('utf-8')
+        for name, data in [('candidate-main.cpp',full),('baseline-function.cpp',bound['owned-emitter']['bytes']),
+                           ('candidate-function.cpp',candidate),('candidate-UNAPPLIED.patch',patch),('production-extracted.h',generated),
+                           ('fixture.cpp',cpp.read_bytes()),('runner.py',Path(__file__).read_bytes()),('json.hpp',inputs[1].read_bytes())]:
+            reference_write(output/name,data)
+        if 'serial-mailbox-root' in bound:
+            reference_write(output/'ipc_result_mailbox.h',mailbox_path.read_bytes())
+        fragments = output/'bound-fragments'
+        fragments.mkdir()
+        for name, part in bound.items():
+            reference_write(fragments/(name+'.cpp'),part['bytes'])
+        reference_json(output/'SOURCE-BINDING.json',{'inputs':identities,'bindings':{name:{'sha256':sha(part['bytes']),
+            'bytes':len(part['bytes']),'byteStart':part['start'],'byteEndExclusive':part['end'],'line':part['line']} for name,part in bound.items()},
+            'candidateMainSha256':sha(full),'candidateFunctionSha256':sha(candidate),'patchSha256':sha(patch),'patchAudit':audit,
+            'compiledExactProductionBodies':['owned-emitter','snapshot-broadcast','diagnostic-gate','cost-name-hash','ipc-cost-scope','utf8-to-utf16','target-resolver'],
+            'protectedNotExecuted':[name for name in ['producer-callback','producer-post','producer-const-post','serial-event-type','serial-action-power-tls','serial-mailbox-root','serial-mailbox-include','sensor-snapshot-gate','serial-dispatch'] if name in bound],
+            'inertSeams':'Original R15 target/log/UiCost helpers; real Windows conversion and atomics, scripted acquire loads; no app/device/Host/settings actions',
+            'productionWrites':[],'candidateApplied':False,'wholeProcessCpuAcceptance':False})
+        compiler, env, toolchain = reference_environment(output,deadline)
+        profiles = {}
+        dependencies = {}
+        recipes = {}
+        referenced_artifacts = []
+        for name, flags in [('Release',['/O2','/DNDEBUG','/MT']),
+                             ('Checked',['/Od','/RTC1','/D_DEBUG','/D_ITERATOR_DEBUG_LEVEL=2','/MTd']),
+                             ('EventNegative',['/O2','/DNDEBUG','/MT','/DYMCC_REFERENCE_EVENT_NEGATIVE']),
+                             ('GateNegative',['/O2','/DNDEBUG','/MT','/DYMCC_REFERENCE_GATE_NEGATIVE'])]:
+            reference_verify_entries(identities)
+            exe = output/(name+'.exe')
+            dep = output/(name+'-dependencies.json')
+            argv = ['/nologo','/std:c++20','/utf-8','/EHsc','/fp:precise','/DYMCC_CURRENT_REFERENCE_COPY',*flags,
+                    str(output/'fixture.cpp'),'/I'+str(output),'/Fo'+str(output/(name+'.obj')),'/Fe'+str(exe),
+                    '/sourceDependencies',str(dep),'/link','/INCREMENTAL:NO']
+            recipes[name] = [str(compiler),*argv]
+            if name=='Release' and release_from:
+                shared, corpus, referenced_artifacts = reference_resume_release(release_from,output,identities,toolchain,generated)
+                recipes[name] = json.loads((Path(release_from)/'Release-build.PROCESS.json').read_text(encoding='utf-8'))['command']
+            else:
+                reference_process(recipes[name],output,name+'-build',env,120,deadline)
+            dependency_data = json.loads(dep.read_text(encoding='utf-8-sig'))['Data']
+            for dependency in dependency_data['Includes']:
+                path = Path(dependency).resolve()
+                allowed = [output,compiler.parent.parents[2]/'include',Path(r'C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0')]
+                if name=='Release' and release_from:
+                    allowed.append(Path(release_from).resolve())
+                if not any(path.is_relative_to(root) for root in allowed):
+                    raise ValueError('Undeclared compiler include root: '+str(path))
+                dependencies[str(path)] = reference_identity(path)
+            if name in {'EventNegative','GateNegative'}:
+                stdout, stderr, code = reference_process([exe,'--reference-negative'],output,name+'-run',env,300,deadline,allowed=(2,))
+                expected = b'gate/counter/cost/log/target trace changed'
+                if stderr.strip() != expected or stdout:
+                    raise ValueError('Negative must fail original behavior assertion, not a generic exception: '+name)
+                profiles[name] = {'originalBehaviorAssertionCaught':True,'stderr':stderr.decode().strip(),'exitCode':code,
+                                  'directedScope':'one unicode payload, four renderer topology, all four gates on; original compareOutcomes'}
+            else:
+                if name=='Release' and release_from:
+                    result = shared
+                else:
+                    if name == 'Release':
+                        corpus_raw, _, _ = reference_process([exe,'--inputs'],output,'InputCorpus',env,30,deadline)
+                        corpus = json.loads(corpus_raw)
+                    stdout, _, _ = reference_process([exe,'0'],output,name+'-run',env,300,deadline)
+                    result = json.loads(stdout)
+                reference_correctness_result(result,corpus)
+                reference_json(output/(name+'-case-matrix.json'),result.pop('caseMatrix'))
+                reference_json(output/(name+'-trace-witnesses.json'),result.pop('traceWitnesses'))
+                profiles[name] = result
+        reference_verify_entries(identities+toolchain['files']+list(dependencies.values()))
+        command = [str(Path(sys.executable)),str(Path(__file__).resolve()),'--repo-root',str(REPO),'--source-main',str(SOURCE),'--current-reference-copy',
+                   '--run-prepared-costs',str(output),'--out',str(output.parent/'Costs')]
+        reference_json(output/'COST-PREPARED.json',{'status':'NOT_RUN_AWAITING_MAIN_AGENT_COORDINATION','command':command,
+            'policy':REFERENCE_POLICY,'campaignCommands':[[str(output/'Release.exe'),'--cost-only','16']]*2,
+            'onlyExplicitInvocationStartsCosts':True,'processCpuAcceptance':False})
+        reference_json(output/'RESULT.json',{'status':'CURRENT_REFERENCE_COPY_CORRECTNESS_PASS_COSTS_NOT_RUN',
+            'actualCorrectnessThisRun':True,'profiles':profiles,'inputs':identities,'policy':REFERENCE_POLICY,
+            'releaseCorrectnessExecutedThisInvocation':not bool(release_from),'releaseSharedReference':str(release_from) if release_from else None,
+            'costsExecuted':False,'productionWrites':[],'candidateApplied':False,'wholeProcessCpuAcceptance':False,
+            'wallMs':(time.monotonic()-began)*1000})
+        # Final immutable closure includes all raw/process logs and compiled
+        # executables. The manifest never references or overwrites itself.
+        artifacts = [reference_identity(path) for path in sorted(output.rglob('*')) if path.is_file()]
+        reference_json(output/'MANIFEST.json',{'inputs':identities,'tools':toolchain['files'],
+            'compilerIncludes':list(dependencies.values()),'recipes':recipes,'artifacts':artifacts,'referencedArtifacts':referenced_artifacts})
+        print(json.dumps({'status':'CORRECTNESS_PASS_COSTS_NOT_RUN','out':str(output),
+            'profiles':{name:result.get('assertions',result.get('originalBehaviorAssertionCaught')) for name,result in profiles.items()},
+            'costCommand':command},ensure_ascii=False,indent=2))
+    except Exception as error:
+        reference_json(output/'FAILURE.json',{'error':repr(error),'wallMs':(time.monotonic()-began)*1000,
+            'costsRequested':bool(prepared),'automaticRetry':False,'productionWrites':[]})
+        raise
+
+
+def run_reference_prepared_costs(prepared, output, deadline):
+    if not prepared.is_relative_to((REPO.parents[2]/'Testing/YMCC/Evidence').resolve()):
+        raise ValueError('Prepared correctness must be development Evidence')
+    manifest = json.loads((prepared/'MANIFEST.json').read_text(encoding='utf-8'))
+    for group in ['inputs','tools','compilerIncludes','artifacts','referencedArtifacts']:
+        reference_verify_entries(manifest[group])
+    result = json.loads((prepared/'RESULT.json').read_text(encoding='utf-8'))
+    plan = json.loads((prepared/'COST-PREPARED.json').read_text(encoding='utf-8'))
+    if result['status']!='CURRENT_REFERENCE_COPY_CORRECTNESS_PASS_COSTS_NOT_RUN' or plan['policy']!=REFERENCE_POLICY:
+        raise ValueError('Exact current correctness and predeclared policy required')
+    reference_json(output/'ACCEPTANCE-POLICY.json',REFERENCE_POLICY)
+    # This append-only claim also prevents retries into a differently named
+    # cost output after a measured failure. It is not part of any raw result.
+    reference_json(prepared/'COST-CLAIM.json',{'output':str(output),
+        'atUtc':dt.datetime.now(dt.timezone.utc).isoformat(),'campaigns':2,'retry':False})
+    env = os.environ.copy()
+    # Timing has no compiler/runtime discovery; reuse frozen Release.exe.
+    campaigns = []
+    expected = {(shape,gate,targets) for shape in REFERENCE_POLICY['payloadShapes'] for gate in [False,True] for targets in [1,4]}
+    for index in range(2):
+        for group in ['inputs','tools','compilerIncludes','artifacts','referencedArtifacts']:
+            reference_verify_entries(manifest[group])
+        stdout, _, _ = reference_process([prepared/'Release.exe','--cost-only','16'],output,'Campaign'+str(index+1),env,300,deadline)
+        report = json.loads(stdout)
+        perf = report['performance']
+        if report['correctness'] is not None or report['assertions']!=0 or perf['rounds']!=11 or perf['eventsPerTimedVariantPerRound']!=1024:
+            raise ValueError('Prepared cost scope or fixed campaign differs')
+        rows = perf['scenarios']
+        if len(rows)!=16 or {(row['shape'],row['gate'],row['targets']) for row in rows} != expected:
+            raise ValueError('Fixed affected and control scenario matrix differs')
+        for row in rows:
+            if len(row['baselineRoundsCycles'])!=11 or len(row['candidateRoundsCycles'])!=11:
+                raise ValueError('Incomplete paired campaign')
+            baseline, candidate = row['baselineRoundsCycles'], row['candidateRoundsCycles']
+            if any(not (0 < value < float('inf')) for value in baseline+candidate):
+                raise ValueError('Invalid cycle samples')
+            reductions = [100*(a-b)/a for a,b in zip(baseline,candidate)]
+            median_reduction = sorted(reductions)[5]
+            wins = sum(b<a for a,b in zip(baseline,candidate))
+            counts = row['candidateRequests'] < row['baselineRequests'] if row['gate'] else row['candidateRequests'] == row['baselineRequests']
+            sizes = row['candidateRequestedBytes'] < row['baselineRequestedBytes'] if row['gate'] else row['candidateRequestedBytes'] == row['baselineRequestedBytes']
+            passed = counts and sizes and (median_reduction>=5 and wins>=10 if row['gate'] else median_reduction>=-5)
+            if row['accepted']!=passed or row['fasterCyclePairs']!=wins or abs(row['medianPairedCycleReductionPercent']-median_reduction)>1e-9:
+                raise ValueError('Producer acceptance disagrees with original cycle/allocation samples')
+        all_rows = all(row['accepted'] for row in rows)
+        if perf['allScenariosAccepted']!=all_rows or perf['decision']!=('accept-local-candidate' if all_rows else 'reject') or len(perf['schedule'])!=176:
+            raise ValueError('Campaign decision or complete schedule differs')
+        campaigns.append(perf)
+    reference_verify_entries(manifest['inputs']+manifest['artifacts'])
+    accepted = all(campaign['allScenariosAccepted'] for campaign in campaigns)
+    reference_json(output/'RESULT.json',{'decision':'accept-local-candidate' if accepted else 'reject',
+        'campaigns':campaigns,'preparedManifest':reference_identity(prepared/'MANIFEST.json'),'costPolicy':REFERENCE_POLICY,
+        'productionWrites':[],'candidateApplied':False,'wholeProcessCpuAcceptance':False,'automaticRetry':False})
+    print(json.dumps({'decision':'accept-local-candidate' if accepted else 'reject','out':str(output)}))
+
+
 def main():
+    global REPO, SOURCE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--batches', type=int, default=12)
     parser.add_argument('--correctness-only', action='store_true')
+    parser.add_argument('--current-reference-copy', action='store_true', help='Current source diagnostic-reference-only private candidate; correctness by default, never implicit costs')
+    parser.add_argument('--out', type=Path)
+    parser.add_argument('--run-prepared-costs', type=Path, help='Explicitly coordinated two fixed campaigns using a completed current correctness output')
+    parser.add_argument('--reference-budget-seconds', type=float, default=900, help='Current invocation shared remaining budget, at most 900 seconds; prior failures are not refunded')
+    parser.add_argument('--resume-release-from', type=Path, help='Explicit source/tool/compiled-input checked reuse of a completed Release producer after consumer-only repair')
+    parser.add_argument('--repo-root', type=Path, default=REPO)
+    parser.add_argument('--source-main', type=Path, help='Explicit private main; source identity remains bound')
     args = parser.parse_args()
+    REPO = args.repo_root.resolve()
+    SOURCE = (args.source_main or REPO/'native/main.cpp').resolve()
+    if re.search(rb'^static void gamepadSerialPostOwnedGyroTelemetry\(', SOURCE.read_bytes(), re.M):
+        parser.error('This JSON-only gyro-envelope candidate does not apply to typed telemetry. Use virtual_telemetry_hostframe_current_perf_selftest.py --typed-telemetry-build --phase prepare; --source-main remains available for an explicit historical JSON source.')
+    if args.current_reference_copy:
+        if args.batches != 12 or (args.run_prepared_costs and (args.correctness_only or args.resume_release_from)) or not (0<args.reference_budget_seconds<=900):
+            parser.error('Current costs use the fixed plan; no custom batches or correctness/cost combination')
+        return run_reference_current(args.out,args.run_prepared_costs,args.reference_budget_seconds,args.resume_release_from)
+    if args.out or args.run_prepared_costs or args.resume_release_from or args.reference_budget_seconds!=900:
+        parser.error('--out/--run-prepared-costs require explicit --current-reference-copy')
     assert 1 <= args.batches <= 100
     OUTPUT.mkdir(parents=True, exist_ok=True)
     run = OUTPUT/('run-'+dt.datetime.now().strftime('%Y%m%d-%H%M%S'))
     run.mkdir()
     # Establish the contract on disk before any compile or measurement.
     save_json(run/'acceptance-policy.json', POLICY)
-    raw = (REPO/'native/main.cpp').read_bytes(); bound = bind(raw)
+    raw = SOURCE.read_bytes(); bound = bind(raw)
     before = bound['owned-emitter']['bytes']; assert before.count(OLD) == 1
     eol = b'\r\n' if before.split(OLD)[1].startswith(b'\r\n') else b'\n'
     candidate = before.replace(OLD, eol.join(NEW_LINES), 1)
@@ -243,7 +744,7 @@ def main():
     (run/'bound-fragments').mkdir()
     for name, part in bound.items(): (run/'bound-fragments'/(name+'.cpp')).write_bytes(part['bytes'])
     manifest = {'schemaVersion': 1, 'createdAtLocal': dt.datetime.now().astimezone().isoformat(),
-        'sourcePath': str(REPO/'native/main.cpp'), 'baselineMainSha256': sha(raw), 'expectedParentMainSha256': EXPECTED_MAIN,
+        'sourcePath': str(SOURCE), 'baselineMainSha256': sha(raw), 'expectedParentMainSha256': EXPECTED_MAIN,
         'matchesExpectedParentMain': sha(raw)==EXPECTED_MAIN, 'candidateMainSha256': sha(candidate_main),
         'baselineFunctionSha256': sha(before), 'candidateFunctionSha256': sha(candidate),
         'rawPatchSha256': sha(patch), 'jsonHeaderPath': str(header_path), 'jsonHeaderSha256': sha(header_raw),

@@ -57,7 +57,7 @@ try {
   const before=await snapshot();assert.equal(before.pressed,'true');assert.equal(before.writes,true);
   await page.evaluate(()=>window.__readFailure.reject());await page.waitForTimeout(150);
   const after=await snapshot();let ok=true,error='';
-  try {assert.equal(after.recoveryRequests,0,'obsolete GET error triggered a fresh recovery after later control committed');assert.equal(after.pressed,'true','obsolete GET error revoked confirmed UI');assert.equal(after.text,'风扇已开启');assert.equal(after.enableCount,before.enableCount,'obsolete GET error replayed the curve');assert.equal(after.writes,true);assert.equal(after.hasIntent,true);}
+  try {assert.equal(after.recoveryRequests,0,'obsolete GET error triggered a fresh recovery after later control committed');assert.equal(after.pressed,'true','obsolete GET error revoked confirmed UI');assert.equal(after.text,'点击关闭');assert.equal(after.enableCount,before.enableCount,'obsolete GET error replayed the curve');assert.equal(after.writes,true);assert.equal(after.hasIntent,true);}
   catch(e){ok=false;error=String(e);}
   cases.push({family,ok,error,before,after});
   if(ok){await page.locator('.fan-toggle').click();await page.waitForFunction(()=>!window.__chain.lifecycle.hasControlIntent);}

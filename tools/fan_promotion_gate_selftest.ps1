@@ -184,6 +184,7 @@ if ($Mode -eq 'PackageSource') {
       . (Get-PackageSourceBlock (Join-Path $ToolsRoot 'package-release.ps1') 'Copy-DirectoryContents')
       $branch = Get-PackageSourceBlock (Join-Path $ToolsRoot 'package-release.ps1') 'FanHostCopyBranch'
       $includeFanHostInFullTestPackage = $true
+      $packageProductTools = $ToolsRoot
       $sourcePowerControl = Join-Path $Root 'PowerControl'
       $StagingPowerControl = Assert-PackageSourceChild $Stage
       $lines = New-Object 'System.Collections.Generic.List[string]'
@@ -289,8 +290,8 @@ if ($Mode -eq 'PackageSource') {
         $compiledPins[$key.Value] = $value.Value.ToLowerInvariant()
       }
       if ($compiledPins.Count -lt 29) { throw "PackageSource readiness: compiled source pins are incomplete ($($compiledPins.Count), expected at least 29)." }
-      $componentBundleRelative = 'deps/fan-host-source/candidate-onex-fixed-speed-test-20261105'
-      $componentBundleManifestSha256 = '24fed2ccf5ab7dd899e0d32e2532eb0f9094c052ba11a0fd238ef2698bc79816'
+      $componentBundleRelative = 'deps/fan-host-source/candidate-fan-win5-resume-settlement-20261118'
+      $componentBundleManifestSha256 = 'f0c35d7d5ef2efcbd5b2fb1929502007fc8b1ef0ba5fe2b4f4cf36b3b6f67122'
       Copy-PackageSourceTree (Join-Path $ProjectRoot $componentBundleRelative) (Join-Path $baseline $componentBundleRelative)
       if ((Get-Sha256 (Join-Path $baseline ($componentBundleRelative + '/manifest.json'))).ToLowerInvariant() -cne $componentBundleManifestSha256) { throw 'PackageSource readiness: approved source bundle manifest differs.' }
       # Live-source controls are separate copies; the selected archive remains exact.

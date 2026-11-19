@@ -28,11 +28,38 @@ for _bad in ['static void target(){', 'static void target(){} static void target
     else: raise AssertionError('native extraction accepted incomplete/ambiguous definition')
 
 p=argparse.ArgumentParser();p.add_argument('--output',type=Path,default=Path('../../Build/Validation/SleepResumeRetry-20261003/Round7'))
-out=p.parse_args().output.resolve();out.mkdir(parents=True,exist_ok=True);root=Path.cwd()
-result=subprocess.run(['python','tools/sleep_wake_resume_selftest.py','--output',str(out)],capture_output=True)
-if result.returncode: print(result.stdout.decode(errors='replace'));raise SystemExit(result.returncode)
-cpp=(out/'sleep_wake_resume_native_selftest.cpp').read_text('utf-8')
-cpp=cpp.replace('void sleepRecoveryAutoArm(ULONGLONG){}','static void sleepRecoveryAutoArm(ULONGLONG);',1)
+p.add_argument('--wake-cpp-reference',type=Path)
+p.add_argument('--wake-cpp-sha256')
+p.add_argument('--api-only',action='store_true',help='Run original API groups from a pinned original wake CPP; default full chain is unchanged')
+p.add_argument('--identity-compatibility-only',action='store_true',help='Run only actual API shared-identity compatibility from a pinned wake CPP; no original groups')
+p.add_argument('--identity-compatibility-stage',choices=['all','export'],default='all',help='Continue only affected export compatibility; requires identity-compatibility-only')
+args=p.parse_args();out=args.output.resolve();out.mkdir(parents=True,exist_ok=True);root=Path.cwd()
+if bool(args.wake_cpp_reference)!=bool(args.wake_cpp_sha256) or ((args.api_only or args.identity_compatibility_only) and not args.wake_cpp_reference) or (args.api_only and args.identity_compatibility_only) or (args.identity_compatibility_stage!='all' and not args.identity_compatibility_only):
+    p.error('pinned wake CPP reference pair required for api-only')
+if args.wake_cpp_reference:
+    reference=args.wake_cpp_reference.resolve();raw=reference.read_bytes()
+    if reference.name!='sleep_wake_resume_native_selftest.cpp' or not re.fullmatch('[0-9a-f]{64}',args.wake_cpp_sha256) or hashlib.sha256(raw).hexdigest()!=args.wake_cpp_sha256:
+        raise RuntimeError('wake CPP reference identity mismatch')
+    (out/'api-wake-reference.json').write_text(json.dumps({'source':str(reference),'sha256':args.wake_cpp_sha256,'apiOnly':args.api_only,'upstreamExecutedThisRun':False})+'\n',encoding='utf-8')
+    cpp=raw.decode('utf-8')
+else:
+    result=subprocess.run(['python','tools/sleep_wake_resume_selftest.py','--output',str(out)],capture_output=True)
+    if result.returncode: print(result.stdout.decode(errors='replace'));raise SystemExit(result.returncode)
+    cpp=(out/'sleep_wake_resume_native_selftest.cpp').read_text('utf-8')
+cpp=cpp.replace('\r\n','\n')
+# The original wake wait closure and the API share one explicit UTC port.
+# Retain only its declaration here; the original API definition below owns it.
+queue_clock='ULONGLONG sgNowFileTime(){return 100000ULL;}\n'
+if queue_clock in cpp:
+    assert cpp.count(queue_clock)==1
+    cpp=cpp.replace(queue_clock,'ULONGLONG sgNowFileTime();\n',1)
+
+# The wake fixture has either the original empty port or the counted replay port.
+arm_ports=('void sleepRecoveryAutoArm(ULONGLONG){}',
+           'void sleepRecoveryAutoArm(ULONGLONG){++fixtureAutoArmCalls;}')
+assert sum(cpp.count(port) for port in arm_ports)==1
+for port in arm_ports:
+    cpp=cpp.replace(port,'static void sleepRecoveryAutoArm(ULONGLONG);',1)
 cpp=cpp.replace('#include <windows.h>','#include <windows.h>\n#include <shlobj.h>\n#include <sstream>\n#include <functional>\n#include "sleep_recovery_diagnostics.h"',1)
 
 # This also protects a direct original fixture run without the adapter's /FI guard.
@@ -76,11 +103,28 @@ std::vector<std::string> queuedInput;
 bool hardwareWriteAllowed(){return writesAllowed&&g_powerLifecycle==PowerLifecycle::Ready&&!g_aiFanMockSession.isolated;}
 bool inputHostProcessAliveLocked(){return hostAlive;}
 bool inputHostQueueLifecycleWork(const char* reason){queuedInput.push_back(reason);return true;}
+static bool inputHostQueueSleepRepair(const char* reason,
+ const std::shared_ptr<ymcc::inputHost::sharedPower::Scope>& admission){
+ return admission&&admission->current()&&inputHostQueueLifecycleWork(reason);
+}
 bool nativeValveReadCurrentTarget(NativeDetectedGame*){return false;}
 std::string W2U(const std::wstring& s){return std::string(s.begin(),s.end());}
 std::wstring sofRegSZ(HKEY,const wchar_t*,const wchar_t*){return {};}
 void sofRegDWORD(HKEY,const wchar_t*,const wchar_t*,DWORD* d){*d=0;}
 json steamLiveRequest(DWORD,json){return {{"ok",false},{"reason","steam-unavailable"},{"mutated",false}};}
+// Isolated memory-only shape mock, independent of the real Steam publisher.
+// Published receipts are immutable; views retain the publication cell, not an owner address.
+namespace SleepApiIdentityFixture {
+struct Session {std::wstring root;DWORD pid=0,account=0;ULONGLONG created=0;bool operator==(const Session&)const=default;};
+struct Snapshot {Session session;int presence=-1;LSTATUS accountReadError=ERROR_NOT_READY,rootReadError=ERROR_NOT_READY;
+ std::uint64_t processEpoch=0,accountEpoch=0;std::wstring registryRoot;};
+using Cell=std::atomic<std::shared_ptr<const Snapshot>>;
+struct ReadView {std::shared_ptr<const Cell> cell;std::shared_ptr<const Snapshot> identitySnapshot()const noexcept{return cell->load(std::memory_order_acquire);}};
+struct Publisher {std::shared_ptr<Cell> cell=std::make_shared<Cell>();
+ ReadView identityReadView()const noexcept{return {cell};}
+ void publish(std::shared_ptr<const Snapshot> value){cell->store(std::move(value),std::memory_order_release);}};
+}
+SleepApiIdentityFixture::Publisher g_steamSettingsObserver;
 static std::wstring getKnownFolder(REFKNOWNFOLDERID){return SG_DIR;}
 std::wstring yemancc_data_dir(){return SG_DIR;}
 std::wstring SG_FACT_LOG;
@@ -99,9 +143,12 @@ bool ymSettingsPatchSection(const char*,const json&){return preferenceSaveAllowe
 bool sleepSteamRecoveryAllows(ULONGLONG gen,ULONGLONG epoch){return g_sleepRecoveryAutoEnabled&&epoch!=0&&epoch==g_sleepRecoveryAutoConfigEpoch&&gen==currentPowerGeneration()&&!g_exitRequested;}
 bool sgModernStandbyRepairSupported(){return false;}
 ULONGLONG sgNowFileTime(){return 134362144573220276ULL+GetTickCount64()*10000;}
+#include "sleep_steam_command_attempt.h"
 namespace SleepSteamRecovery {
 bool sameClientEvidence(const json& a,const json& b){return a==b;}
-struct Captured {ULONGLONG generation=0,configEpoch=0,boundaryGeneration=0,powerBoundaryFileTime=0;};
+struct CaptureRequest {ULONGLONG serial=0;};
+struct Captured {ULONGLONG generation=0,configEpoch=0,boundaryGeneration=0,powerBoundaryFileTime=0;struct Game {DWORD pid=0;ULONGLONG created=0;}game;std::shared_ptr<CaptureRequest> request;};
+bool originalTargetCurrent(const Captured&){return false;} // Fixed inactive API port, never action authority.
 Captured capturedFor(ULONGLONG){return {};}
 Captured wakeBoundaryFor(ULONGLONG){return {};}
 void prepareSuspend(){}
@@ -114,19 +161,25 @@ json inspect(ULONGLONG,const char* = "observation"){return {{"scope","steam"},{"
 // by sleep_steam_only_selftest.py against the production headers, not this stub.
 void captureSuspend(ULONGLONG){}
 json capturedPauseState(ULONGLONG){return {{"available",false}};}
-json reconcile(const json&,ULONGLONG,ULONGLONG,const std::function<bool()>& gate={}){return {{"accepted",false}};}
-json resumeInputContext(const json&,ULONGLONG,ULONGLONG,const std::function<bool()>& gate={}){return {{"accepted",false}};}
+json reconcile(const json&,ULONGLONG,ULONGLONG,const std::function<bool()>& gate={},ymcc::sleepsteam::CommandAttempt* = nullptr){return {{"accepted",false}};}
+json resumeInputContext(const json&,ULONGLONG,ULONGLONG,const std::function<bool()>& gate={},ymcc::sleepsteam::CommandAttempt* = nullptr){return {{"accepted",false}};}
 }
 // Compatibility boundaries only; the original Steam owner is not executed here.
 bool steamOriginalRecoveryOwnsRunning(DWORD,ULONGLONG){return false;}
 void steamOriginalRecoverySuspend(ULONGLONG){}
 void steamOriginalRecoveryWake(ULONGLONG){}
 void steamOriginalRecoveryPowerReady(ULONGLONG){}
+// Fixed inactive fixture inputs only; no real classification or Steam owner execution.
+bool sharedSleepWakeClassified(ULONGLONG gen) noexcept{return gen==currentPowerGeneration();}
+void steamOriginalRecoveryBusinessCommit(bool,const std::function<void()>& publication){publication();}
+void postSleepRecoveryAutoStatus(){}
 #include "sleep_recovery_auto.h"
 std::atomic<bool> g_xinputDiscoveryDirty{false};int sensorRefreshCalls=0;
-void inputCaptureResumeSensorsForPower(){++sensorRefreshCalls;}
+void inputCaptureResumeSensorsForPower(bool,const std::shared_ptr<ymcc::inputHost::sharedPower::Scope>& admission){
+ if(admission&&admission->current())++sensorRefreshCalls;
+}
 
-void resetApi(){reset();SleepRecoveryAuto::state={};SleepRecoveryAuto::kernelWake={};autoJobs.clear();autoQueueAllowed=preferenceSaveAllowed=true;fspath::remove(SleepRecoveryAuto::reportPath());SleepRecoveryApi::latest={};SleepRecoveryApi::serial=0;writesAllowed=true;
+void resetApi(){reset();SleepRecoveryAuto::state={};ymcc::sleeppower::nativeWakeFacts.resetLocked();autoJobs.clear();autoQueueAllowed=preferenceSaveAllowed=true;fspath::remove(SleepRecoveryAuto::reportPath());SleepRecoveryApi::latest={};SleepRecoveryApi::serial=0;writesAllowed=true;
  g_aiFanMockSession.isolated=false;g_wakeKeptTargetGeneration=0;g_inputHostEpochMirror=99;g_inputHostBoundPowerGeneration=7;hostAlive=true;
  g_inputHostPrepared=true;g_inputHostReleaseQuarantined=g_inputHostTransportFault=false;
  g_inputHostFaultHoldsStart=g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
@@ -156,7 +209,12 @@ assert '!g_inputHostFaultHoldsStart.load()' in worker and 'sleepRecoveryAutoAllo
     'memoryDependencies':['native/input_host_transaction_mutex.h','native/input_host_lifecycle_claim.h'],
     'steamEpisodeClose':{'source':'native/sleep_steam_recovery.h','sourceSha256':hashlib.sha256((root/'native/sleep_steam_recovery.h').read_bytes()).hexdigest(),'exactFunctionText':episode_close,'functionSha256':hashlib.sha256(episode_close.encode('utf-8')).hexdigest(),'memoryContextOnly':True,'realSteamExecuted':False}
 },indent=2)+'\n',encoding='utf-8')
-cpp=cpp.replace('int passed=0;','void reset();\n'+mocks+'\n'+worker+'\nint passed=0;',1)
+assert 'static auto fixtureSleepRepairAdmission()' in cpp, 'wake CPP reference predates public admission'
+cpp=cpp.replace('int passed=0;','void reset();\n'+mocks+'\n'+worker+r'''
+static void inputHostPerformSleepRepair(const std::string& reason){
+ inputHostPerformSleepRepair(reason,fixtureSleepRepairAdmission());
+}
+int passed=0;''',1)
 anchor=' std::cout<<"sleep wake recovery production-header selftest:'
 tests=r'''
  SG_FACT_LOG=SG_DIR+L"\\sleep-facts.log";
@@ -191,6 +249,10 @@ tests=r'''
  assert(!sleepRecoveryRepair({{"inspectionToken",token},{"confirmed",true}})["accepted"]);window();assert(procs[100].calls==1&&focusCalls==0&&!exists(100));pass("single-use user ticket queues bounded original-game recovery without focus/automatic wake dedupe changes");
  resetApi();marker(100);report=sleepRecoveryInspect({});tick=30001;assert(!sleepRecoveryRepair({{"inspectionToken",report["inspectionToken"]},{"confirmed",true}})["accepted"]);assert(procs[100].calls==0);pass("30s expired inspection cannot resume");
  resetApi();marker(100);report=sleepRecoveryInspect({});generation=8;assert(!sleepRecoveryRepair({{"inspectionToken",report["inspectionToken"]},{"confirmed",true}})["accepted"]);pass("new power generation rejects old ticket");
+ resetApi();marker(100);report=sleepRecoveryInspect({});g_sharedPowerRevocations.revoke();
+ receipt=sleepRecoveryRepair({{"inspectionToken",report["inspectionToken"]},{"confirmed",true}});
+ assert(receipt["reason"]=="power-admission-revoked"&&!receipt["accepted"]&&queuedInput.empty()&&procs[100].calls==0&&exists(100));
+ pass("same-generation public revocation refuses the old inspection ticket on both repair paths");
  resetApi();marker(100);report=sleepRecoveryInspect({});g_inputHostEpochMirror=100;assert(!sleepRecoveryRepair({{"inspectionToken",report["inspectionToken"]},{"confirmed",true}})["accepted"]);pass("new input Host epoch rejects old ticket");
  resetApi();marker(100);report=sleepRecoveryInspect({});marker(101);assert(!sleepRecoveryRepair({{"inspectionToken",report["inspectionToken"]},{"confirmed",true}})["accepted"]);assert(procs[101].calls==0);pass("new marker cannot be silently added to an inspected repair");
  resetApi();marker(100);report=sleepRecoveryInspect({});sgWriteFileAtomic(SG_SLEEP_LEASE_DIR+L"\\100.txt",sgReadFile(SG_SLEEP_LEASE_DIR+L"\\100.txt")+"|replacement=yes");assert(!sleepRecoveryRepair({{"inspectionToken",report["inspectionToken"]},{"confirmed",true}})["accepted"]);pass("changed marker content is fail-closed");
@@ -205,10 +267,19 @@ tests=r'''
  resetApi();procs[100]={};sgWriteFileAtomic(SG_SLEEP_LEASE_DIR+L"\\100.txt","pid=100|created=1234|created=5678|state=suspended|generation=7");report=sleepRecoveryInspect({});assert(!report["repair"]["allowed"]);pass("ambiguous persisted marker is retained and reported, never recovered");
  resetApi();std::string big(2*1024*1024+100,'x');sgWriteFileAtomic(SG_FACT_LOG,big);auto tail=SleepRecoveryApi::readTail(SG_FACT_LOG);assert(tail.bytes.size()==2*1024*1024&&tail.meta["truncated"]);pass("feedback log tails are byte bounded with explicit truncation evidence");
  resetApi();marker(100);report=sleepRecoveryInspect({});json fb={{"gameInput","broken"},{"guide","unknown"},{"bigPicture","start"},{"overlay","enabled"},{"note","owned fixture, no live devices"}};
+ const std::string feedbackCurrent="CURRENT-FACT-EXPORT\n",feedbackPrevious="CANONICAL-PREVIOUS-FACT-EXPORT\n",feedbackLegacy="LEGACY-DOT-ONE-DISTINCT-FACT-EXPORT\n";
+ sgWriteFileAtomic(SG_FACT_LOG,feedbackCurrent);sgWriteFileAtomic(SG_FACT_LOG+L".previous",feedbackPrevious);sgWriteFileAtomic(SG_FACT_LOG+L".1",feedbackLegacy);
  auto bundle=sleepRecoveryExport(fb);assert(bundle["ok"]&&!bundle["uploaded"]);auto dir=fspath::path(std::wstring(bundle["path"].get<std::string>().begin(),bundle["path"].get<std::string>().end()));
  // Use one stable string for iterators (separate get() temporaries would be undefined behavior).
  const auto pathText=bundle["path"].get<std::string>();dir=std::wstring(pathText.begin(),pathText.end());
  auto manifest=json::parse(sgReadFile((dir/L"manifest.json").wstring()));assert(!manifest["uploaded"]&&!manifest["healthVerified"]);
+ assert(sgReadFile((dir/L"sleep-facts.log").wstring())==feedbackCurrent);
+ assert(sgReadFile((dir/L"sleep-facts.log.previous").wstring())==feedbackPrevious);
+ assert(sgReadFile((dir/L"sleep-facts.log.1").wstring())==feedbackLegacy);
+ for(const char* file:{"sleep-facts.log","sleep-facts.log.previous","sleep-facts.log.1"}){
+  const auto count=std::count_if(manifest["files"].begin(),manifest["files"].end(),[file](const json& row){return row.value("file","")==file;});assert(count==1);
+  const auto row=std::find_if(manifest["files"].begin(),manifest["files"].end(),[file](const json& value){return value.value("file","")==file;});assert(row!=manifest["files"].end()&&row->value("available",false)&&row->value("saved",false));
+ }
  auto diag=json::parse(sgReadFile((dir/L"diagnosis.json").wstring()));assert(diag["inspectionToken"].is_null());
  auto human=json::parse(sgReadFile((dir/L"operator-feedback.json").wstring()));assert(human["source"]=="operator-reported-not-automatic-verification");
  assert(procs[100].calls==0&&queuedInput.empty());auto another=sleepRecoveryExport(fb);assert(another["path"]!=bundle["path"]);pass("feedback uses unique local folder, no upload/credentials and separates manual claims from diagnostics");
@@ -258,12 +329,55 @@ tests=r'''
 
 # Correct stable-path construction before compiling.
 tests=tests.replace('auto dir=fspath::path(std::wstring(bundle["path"].get<std::string>().begin(),bundle["path"].get<std::string>().end()));','fspath::path dir;')
+if args.identity_compatibility_only:
+    tests=r'''
+ SG_FACT_LOG=SG_DIR+L"\\sleep-facts.log";
+ resetApi();g_steamSettingsObserver.publish(nullptr);
+ const auto view=g_steamSettingsObserver.identityReadView();assert(!view.identitySnapshot());
+ if(IDENTITY_COMPATIBILITY_INSPECT){
+ auto report=sleepRecoveryInspect({});assert(report["ok"]&&!report["steam"]["ok"]&&report["steam"]["requestDispatched"]==false);
+ assert(queuedInput.empty()&&procs.empty());
+ pass("identity-compatibility actual inspect accepts an unknown immutable publication without Steam dispatch");
+ }
+ json fb={{"gameInput","unknown"},{"guide","unknown"},{"bigPicture","unknown"},{"overlay","unknown"},{"note","isolated identity compatibility"}};
+ auto exported=sleepRecoveryExport(fb);auto pathText=exported["path"].get<std::string>();
+ auto dir=fspath::path(std::wstring(pathText.begin(),pathText.end()));
+ auto manifest=json::parse(sgReadFile((dir/L"manifest.json").wstring()));
+ unsigned missing=0;for(const auto& row:manifest["files"])if(row.value("file","")=="steam-gameprocess.log"||row.value("file","")=="steam-controller.log"){
+  assert(!row["available"]&&row["reason"]=="steam-root-unavailable");++missing;}
+ assert(missing==2&&!manifest["uploaded"]&&!manifest["healthVerified"]);
+ pass("identity-compatibility actual export lists unknown Steam root unavailable");
+ auto receipt=std::make_shared<SleepApiIdentityFixture::Snapshot>();receipt->presence=0;receipt->rootReadError=ERROR_SUCCESS;
+ receipt->registryRoot=SG_DIR+L"\\owned-steam-installation";receipt->accountReadError=ERROR_ACCESS_DENIED;
+ fspath::create_directories(fspath::path(receipt->registryRoot)/L"logs");
+ assert(sgWriteFileAtomic(receipt->registryRoot+L"\\logs\\gameprocess_log.txt","OWNED-GAMEPROCESS\n"));
+ assert(sgWriteFileAtomic(receipt->registryRoot+L"\\logs\\controller.txt","OWNED-CONTROLLER\n"));
+ g_steamSettingsObserver.publish(receipt);assert(view.identitySnapshot()==receipt);
+ exported=sleepRecoveryExport(fb);pathText=exported["path"].get<std::string>();dir=std::wstring(pathText.begin(),pathText.end());
+ assert(sgReadFile((dir/L"steam-gameprocess.log").wstring())=="OWNED-GAMEPROCESS\n");
+ assert(sgReadFile((dir/L"steam-controller.log").wstring())=="OWNED-CONTROLLER\n");
+ assert(receipt->session.root.empty()&&receipt->presence==0&&queuedInput.empty()&&procs.empty()&&apiFileHandles.empty());
+ pass("identity-compatibility actual export copies owned logs from readable installation root with no Steam process");
+ g_steamSettingsObserver.publish(nullptr);assert(!view.identitySnapshot());
+ std::cout<<"SLEEP_API_IDENTITY_COMPATIBILITY "<<json({{"groups",passed},{"stage",IDENTITY_COMPATIBILITY_STAGE},{"actualApiHeader",true},{"isolatedPublisherMock",true},{"realPublisherExecuted",false},{"oldApiGroupsExecuted",0},{"oldWakeGroupsExecuted",0},{"realSteam",false},{"fullNative",false}}).dump()<<"\n";
+ return 0;
+'''
+    tests=tests.replace('IDENTITY_COMPATIBILITY_INSPECT','true' if args.identity_compatibility_stage=='all' else 'false').replace('IDENTITY_COMPATIBILITY_STAGE',json.dumps(args.identity_compatibility_stage))
+    tests=' try{\n'+tests+'\n}catch(const std::exception& e){std::cerr<<"IDENTITY_COMPATIBILITY_EXCEPTION "<<e.what()<<"\\n";return 2;}\n'
+if args.api_only or args.identity_compatibility_only:
+    start=' reset();marker(100);procs[100].threadTotal=54;'
+    assert cpp.count(start)==1 and cpp.count(anchor)==1
+    cpp=cpp.replace(start,' if(false){\n'+start,1).replace(anchor,' }\n'+anchor,1)
 assert cpp.count(anchor)==1;cpp=cpp.replace(anchor,tests+'\n'+anchor,1)
 cpp=cpp.replace('int wmain(int argc,wchar_t** argv){','int wmain(int argc,wchar_t** argv){std::cout<<std::unitbuf;')
 source=out/'sleep_recovery_api_selftest.cpp';source.write_text(cpp,'utf-8')
 vs=Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat');exe=out/'sleep_recovery_api_selftest.exe';cmd=out/'run-sleep-recovery-api.cmd'
 toolchain_js='import {calibrationToolchainPreamble} from "./tools/fixtures/hc_reviewed_calibration/toolchain.mjs";process.stdout.write(calibrationToolchainPreamble(process.argv[1]));'
 toolchain_prefix=subprocess.check_output(['node','--input-type=module','-e',toolchain_js,str(vs)],text=True,encoding='utf-8')
-cmd.write_text(toolchain_prefix+f'cl /nologo /std:c++20 /utf-8 /EHsc /MT /W3 "{source}" /I"{root / "native"}" /I"{root / "deps/json"}" /Fo"{out / "sleep_recovery_api_selftest.obj"}" /Fe"{exe}" /link advapi32.lib ole32.lib shell32.lib\r\nif errorlevel 1 exit /b 1\r\n"{exe}" "{out / "owned-api-fixture-state"}"\r\n',encoding='ascii')
+runtime_state=str(out/'owned-api-fixture-state')
+if args.identity_compatibility_only:
+    runtime_state='\\\\?\\'+runtime_state
+journal_lib=' crypt32.lib' if '#include "sleep_legacy_resume_journal.h"' in cpp else ''
+cmd.write_text(toolchain_prefix+f'cl /nologo /std:c++20 /utf-8 /EHsc /MT /W3 "{source}" /I"{root / "native"}" /I"{root / "deps/json"}" /Fo"{out / "sleep_recovery_api_selftest.obj"}" /Fe"{exe}" /link advapi32.lib ole32.lib shell32.lib{journal_lib}\r\nif errorlevel 1 exit /b 1\r\n"{exe}" "{runtime_state}"\r\n',encoding='ascii')
 res=subprocess.run(['cmd.exe','/d','/c',str(cmd)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
 (out/'sleep-recovery-api-selftest.log').write_bytes(res.stdout);print(res.stdout.decode('utf-8',errors='replace'));print('Native fixture return:',res.returncode);raise SystemExit(res.returncode)

@@ -124,6 +124,22 @@ const msiNative = {
 };
 const msiSnapshot = normalizeOemKeysSnapshot(msiNative);
 if (msiSnapshot.keys[0].triggerCapability !== 'click-only' || msiSnapshot.keys[2].triggerCapability !== 'full') throw new Error('msi click-only mapping failed');
+// Saved/migrated click-only records must obey the same capability as the editor.
+// Full rear-key sources, disabled records and unknown catalogs keep their contract.
+for (const [familyId, keyId] of [['msi-claw', 'claw'], ['asus-rog-ally-x', 'cc'], ['onexplayer', 'home']]) {
+  const catalog = normalizeOemKeysSnapshot({ familyId, supported: true, keys: [
+    { keyId, label: keyId, backIndex: 0, triggerCapability: 'click-only' },
+    { keyId: 'rear', label: 'Rear', backIndex: 1, triggerCapability: 'full' },
+  ] });
+  for (const trigger of ['press', 'double', 'hold', 'release', 'repeat'] as const) {
+    const saved = { ...newControllerShortcutRule(`${familyId}-${trigger}`), inputs: [{ source: 'oem' as const, code: keyId }], trigger };
+    const allowed = trigger === 'press' || trigger === 'double';
+    if ((validateControllerShortcutRules([saved], catalog).length === 0) !== allowed) throw new Error(`${familyId} click-only ${trigger} capability ignored`);
+    if (validateControllerShortcutRules([{ ...saved, enabled: false }], catalog).length) throw new Error('disabled legacy click rule cannot be retained');
+    if (validateControllerShortcutRules([{ ...saved, inputs: [{ source: 'oem', code: 'rear' }] }], catalog).length) throw new Error('full rear-key trigger was restricted');
+    if (validateControllerShortcutRules([saved]).length) throw new Error('unknown catalog cannot invent a click-only restriction');
+  }
+}
 // 反推演：损坏/未知字段 fail-closed
 const broken = normalizeOemKeysSnapshot({ familyId: 42, supported: true, keys: [{ keyId: '', label: '' }, { label: 'X' }, null] });
 if (broken.supported || broken.familyId !== 'unknown' || broken.keys.length !== 0) throw new Error('broken catalog was not fail-closed');

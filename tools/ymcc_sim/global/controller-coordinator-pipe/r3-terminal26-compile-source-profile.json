@@ -1,0 +1,260 @@
+{
+  "schemaVersion": 1,
+  "kind": "CURRENT105_TERMINAL26_COMPILE_SOURCE_GUARD_V1",
+  "managedInputContract": "current105-terminal26-sdk-lifetime-compact-v1",
+  "sourceApproval": false,
+  "publicRuntime": false,
+  "baselineCompileProfile": {
+    "relative": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal23-compile-source-profile.json",
+    "bytes": 7540,
+    "sha256": "0fdd87e8578789f1235c7b13b1e63d50f38592af2c582474393a9ad40ac953f4"
+  },
+  "baselineNativeSpecSha256": "f6916a908291a9246d3638278fa6579e173330a4a1a4b1278ecff1a491ac8107",
+  "baselineSourceProfileSha256": "8c8a5803990da252418f91be0dc5df13b89efd589b14a197f962e12ba9943674",
+  "baselineProfiles": [
+    {
+      "relative": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-native-source-profile.json",
+      "bytes": 1347,
+      "sha256": "f6916a908291a9246d3638278fa6579e173330a4a1a4b1278ecff1a491ac8107"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-current105-source-adapter-profile.json",
+      "bytes": 13253,
+      "sha256": "8c8a5803990da252418f91be0dc5df13b89efd589b14a197f962e12ba9943674"
+    }
+  ],
+  "sourceCapture": {
+    "root": "G:/YeManCC-Work/Testing/YMCC/Workspace/R105T26-20261114162102/Mainline/YeManCC-source/YeManCC",
+    "binding": "EXISTING_COMPLETE_CAPTURE_ONLY",
+    "newFullSourceCaptureAuthorized": false,
+    "otherMainlineDriftAuthorized": false,
+    "fullSourceExpectationApproved": false
+  },
+  "runtimeHeader": {
+    "relative": "native/steam_original_recovery_runtime.h",
+    "bytes": 84563,
+    "sha256": "343d0e89076967c88ebcd17d9c92526cce89ced27d5c15ea248349d1886113a2"
+  },
+  "extraCompileHeaders": [
+    {
+      "relative": "native/steam_original_recovery_policy.h",
+      "bytes": 6844,
+      "sha256": "0cdfc39c376dbe7d2805f0a554b286f300e040e4d927e93aaff5201bc3385587"
+    },
+    {
+      "relative": "native/steam_original_recovery_dual_route.h",
+      "bytes": 1435,
+      "sha256": "4e8fca5da0859521ff02c328a867d4167164ddbb39e0425320728468f57c5fd0"
+    },
+    {
+      "relative": "native/steam_original_recovery_config.h",
+      "bytes": 3022,
+      "sha256": "ddd746052f886f15cdf44352a320ff19a5c7147e96ecb4a665a204be8212ebd0"
+    },
+    {
+      "relative": "native/steam_original_recovery_wake_watch.h",
+      "bytes": 8803,
+      "sha256": "c3675a51d2805596e5b886704da2affafa3b5e6a7fb905d5b3f6471d1879bf08"
+    },
+    {
+      "relative": "native/steam_original_recovery_storage.h",
+      "bytes": 14682,
+      "sha256": "169b2f51778909e4e8f115e3af3753666551dec6b9f1e24f5ac83f61b64b0c1c"
+    },
+    {
+      "relative": "native/steam_original_recovery_worker.h",
+      "bytes": 5024,
+      "sha256": "4ad4fa640321b42ed3d45f708d574ff9e98b745142fb13019773e044604ff69c"
+    }
+  ],
+  "extraCompileSources": [
+    {
+      "relative": "native/steam_original_recovery_engine.cpp",
+      "bytes": 231940,
+      "sha256": "29b8af7bd714d238be1a44e5234052dbe22e02d65dca04bf1ba18bb3a48cddda"
+    },
+    {
+      "relative": "native/steam_original_recovery_engine.h",
+      "bytes": 5020,
+      "sha256": "3c175db0e44731133c0744dc9e89d03732454f5551396f147c3dde57e166b74c"
+    }
+  ],
+  "startSha256": "1ecc2924740231d168096fd1e0ffafbf5d74d071b122b37f16e81e21e3333bc4",
+  "exportSnapshotSha256": "9b469a75e62f6227c5b8d0a177fad66aba012a1293b7b0e7b2024f3f561ed1a8",
+  "bridgeSha256": "5da713b62ce1418824f5c2a2c4bbda7dbef1c0f5cff50a7f89211daeaa00234d",
+  "bridgeSource": {
+    "relative": "native/main.cpp",
+    "bytes": 6316544,
+    "sha256": "5a37ebe4b2e66902ab6101e3d9c01967beb9a44f3f4b37ebf4412a10c0d5c349"
+  },
+  "entryShapes": {
+    "start": {
+      "symbol": "steamOriginalRecoveryStart",
+      "returnType": "void",
+      "parameters": [],
+      "nameOccurrencesInRuntime": 1
+    },
+    "exportSnapshot": {
+      "symbol": "steamOriginalRecoveryExportSnapshot",
+      "returnType": "std::wstring",
+      "parameters": [],
+      "nameOccurrencesInRuntime": 1
+    },
+    "bridge": {
+      "symbol": "steamOriginalRecoveryEngineHandle",
+      "returnType": "json",
+      "parameters": [
+        "const json& request",
+        "const std::function<bool()>& stillCurrent",
+        "const std::function<void(const json&)>& emit",
+        "const std::function<bool()>& observationCurrent",
+        "std::uintptr_t wakeSignal",
+        "std::uintptr_t cancelSignal",
+        "std::uintptr_t identityCancelSignal",
+        "std::shared_ptr<ymcc::steamnative::ReadScope> publicationScope",
+        "std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> processGroup",
+        "std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> businessRequestCancellation"
+      ],
+      "hashNormalization": "CRLF to LF, same as original consumer"
+    }
+  },
+  "fixture": {
+    "relative": "tools/fixtures/input_coordinator_lifecycle/fixture.cpp",
+    "bytes": 359777,
+    "sha256": "fb6f424c409e2476895b65122a579b8ca3cb2c3e30f30bdfc5a3994ebf03d4f7"
+  },
+  "fixtureObservationChanges": [
+    {
+      "label": "annotate existing check/failure without changing bool or assertion",
+      "before": "static void check(bool good,const char* name){++checks;const auto owner=cases.empty()?\"bootstrap\":cases.back().value(\"name\",\"\");assertionTrace.push_back({{\"case\",owner},{\"assertion\",name},{\"passed\",good},{\"checkIndex\",checks}});if(!good)failures.push_back({{\"case\",owner},{\"assertion\",name}});fixtureOffCheckpoint(\"assertion\",name,good?1:0);}",
+      "after": "static void check(bool good,const char* name){++checks;const auto owner=cases.empty()?\"bootstrap\":cases.back().value(\"name\",\"\");\n const auto ordinal=cases.size();unsigned occurrence=0;for(const auto& item:cases)if(item.value(\"name\",\"\")==owner)++occurrence;\n if(!cases.empty()){cases.back()[\"sourceOrdinal\"]=ordinal;cases.back()[\"nameOccurrence\"]=occurrence;}\n assertionTrace.push_back({{\"case\",owner},{\"assertion\",name},{\"passed\",good},{\"checkIndex\",checks},{\"sourceOrdinal\",ordinal},{\"nameOccurrence\",occurrence}});\n if(!good)failures.push_back({{\"case\",owner},{\"assertion\",name},{\"sourceOrdinal\",ordinal},{\"nameOccurrence\",occurrence},{\"checkIndex\",checks}});fixtureOffCheckpoint(\"assertion\",name,good?1:0);}",
+      "count": 1
+    },
+    {
+      "label": "read-only boundary snapshots",
+      "before": "int wmain(",
+      "after": "// Read-only observations at the old95 boundary and after the B49 tail.\n// Same resource fields/lock as the original grouped witness; no new check,\n// seed, Stop, debt assignment, process query or file/device operation.\nstatic json fixtureCurrentOrderedReturn=json::object();\nstatic json fixtureCurrentOrderedBoundary(){\n std::lock_guard<std::mutex> work(g_inputHostLifecycleWorkMx);\n return json{{\"afterSourceOrdinal\",cases.size()},{\"lastCaseName\",cases.empty()?\"\":cases.back().value(\"name\",\"\")},{\"checks\",checks},{\"nativeEvents\",fixtureEvents},{\"resources\",json{{\"hostHandle\",g_inputHostProcess!=nullptr},{\"pipeHandle\",g_inputHostServerPipe!=nullptr},{\"pipeConnected\",g_inputHostPipeConnected},{\"prepared\",g_inputHostPrepared},{\"quarantined\",g_inputHostReleaseQuarantined},{\"visibility\",g_hidHideVisibilityJournal.active},{\"childObservers\",fullPipeChildObservers.size()},{\"workQueue\",g_inputHostLifecycleWorkQueue.size()},{\"workRequested\",g_inputHostLifecycleWorkRequested.load()},{\"workInFlight\",g_inputHostLifecycleWorkInFlight.load()},{\"psRetirement\",g_psEndpointOwnership.retirementRequired()},{\"msiSdDebt\",g_msiSteamDeckReleaseDebt.required()},{\"msiModeDebt\",g_msiDinputReturnOwed.load()},{\"msiModeDebtEpisode\",g_msiDinputReturnDebtEpisode.load()},{\"startBlocked\",g_inputHostStartBlocked},{\"spawnCount\",fullPipeSpawnCount},{\"receiptPaths\",fullPipeReceipts.size()}}}};\n}\nint wmain(",
+      "count": 1
+    },
+    {
+      "label": "preserve both calls and record separate boundaries",
+      "before": "else if(mode==L\"full-pipe\"){fullPipeCases();fixtureTargetReturnFullPipeCases();ok=failures.empty();}",
+      "after": "else if(mode==L\"full-pipe\"){fullPipeCases();fixtureCurrentOrderedReturn[\"preTargetReturnBody\"]=fixtureCurrentOrderedBoundary();fixtureTargetReturnFullPipeCases();fixtureCurrentOrderedReturn[\"postTargetReturnTail\"]=fixtureCurrentOrderedBoundary();ok=failures.empty();}",
+      "count": 1
+    },
+    {
+      "label": "retain raw report and exception with extra boundary field",
+      "before": "{\"assertionTrace\",assertionTrace},{\"cases\",cases}",
+      "after": "{\"assertionTrace\",assertionTrace},{\"orderedReturn\",fixtureCurrentOrderedReturn},{\"cases\",cases}",
+      "count": 2
+    }
+  ],
+  "producerData": {
+    "schemaVersion": 2,
+    "relative": "tools/input_coordinator_lifecycle_selftest.mjs",
+    "key": "appendNativeLifecycleLog",
+    "bytes": 230081,
+    "sha256": "06a6d95b360545b390522edc53875bf40cca98544cc33ff8004d9413e3d13d5c",
+    "selectionContract": "default-core-no-directed-sd-v1",
+    "expectedLiteralRows": 2,
+    "selectedLiteral": 0,
+    "decodedUtf8Bytes": 1390,
+    "decodedUtf8Sha256": "22a134d8c573e44c07c4f9e866d84abfdb4ba7dc2518072790a8d93056473f4f",
+    "literals": [
+      {
+        "sourceLine": 606,
+        "sourceUtf8Byte": 93692,
+        "sourceUtf8Bytes": 1421,
+        "rowSha256": "890312506e82ff561535f9ddc35b35c9349848474b70205c999964f31c8ec6e8",
+        "decodedUtf8Bytes": 1390,
+        "decodedUtf8Sha256": "22a134d8c573e44c07c4f9e866d84abfdb4ba7dc2518072790a8d93056473f4f",
+        "expected905Error": "CURRENT_LOG_DATA_VALUE_CHANGED",
+        "producerExecuted": false,
+        "role": "base-default"
+      },
+      {
+        "sourceLine": 688,
+        "sourceUtf8Byte": 107396,
+        "sourceUtf8Bytes": 111,
+        "rowSha256": "ebf87f8b46589d25e64f0970cf3b43402dd2768936eef307126265692382856c",
+        "decodedUtf8Bytes": 80,
+        "decodedUtf8Sha256": "805e025dca44d1d66f8d82121539abb6865795ee64702c2bccd88bbdfb2d0555",
+        "expected905Error": "CURRENT_LOG_DATA_VALUE_CHANGED",
+        "producerExecuted": false,
+        "role": "sd-off-source-lost-only"
+      }
+    ],
+    "previousVersion1Expected": {
+      "schemaVersion": 1,
+      "decodedUtf8Bytes": 905,
+      "decodedUtf8Sha256": "0d1ce123abecf8e263d1157b0daa5bd64bbfd93139ae5bd884677385adb02e12"
+    }
+  },
+  "adapterDependencies": [
+    {
+      "relative": "tools/fixtures/input_coordinator_lifecycle/lifecycle-log-data.mjs",
+      "bytes": 5551,
+      "sha256": "ff610c22e6b484d5bd833e440c70adf64ac02cf7d24bdde79de4fc0f26a35452"
+    }
+  ],
+  "review": {
+    "status": "CLOSED",
+    "profileUsable": true,
+    "compileOnly": true,
+    "sourceApprovalGranted": false,
+    "publicRuntimeAccepted": false,
+    "normalProductMainMayExecute": false,
+    "vendorRuntimeClosureAccepted": false,
+    "actualCompilerLedgerStillRequired": true,
+    "scope": "Bounded static throw-only entry and unchanged observation-transform review, followed by explicit version2 default logger selection. Source/runtime approval remains false; actual compiler ledger still required.",
+    "publicEntriesDenied": [
+      "steamOriginalRecoveryStart",
+      "steamOriginalRecoveryExportSnapshot",
+      "steamOriginalRecoveryEngineHandle"
+    ],
+    "startNameOccurrencesInReviewedHeader": 1,
+    "exportNameOccurrencesInReviewedHeader": 1,
+    "globalWorkerDefaultStartsThread": false,
+    "controlCreationOnlyInRenamedStart": true,
+    "originalObservationTransformsReused": true,
+    "observationAnchorCounts": [
+      1,
+      1,
+      1,
+      2
+    ],
+    "observationInverseExact": true,
+    "originalBusinessChecksChanged": false,
+    "guardInverseExact": true,
+    "old21And22And23Unchanged": true,
+    "engineBodySemanticApproval": false,
+    "blockers": [],
+    "previousBlockers": [
+      {
+        "code": "PRODUCER_DATA_AMBIGUOUS_AND_CHANGED",
+        "originalParserError": "CURRENT_LOG_EXACTLY_ONE_LITERAL_ROW_REQUIRED",
+        "expectedDecodedUtf8Bytes": 905,
+        "expectedDecodedUtf8Sha256": "0d1ce123abecf8e263d1157b0daa5bd64bbfd93139ae5bd884677385adb02e12",
+        "actualDecodedUtf8Bytes": [
+          1390,
+          80
+        ],
+        "resolution": "Separate reviewed producer data/consumer contract work is required. Do not select, truncate or repin these rows into the old 905-byte contract."
+      }
+    ]
+  },
+  "sourceReviewProvenance": {
+    "reviewPath": "Testing/YMCC/Evidence/BacklogAssist-20261102/Runtime105CurrentMembership-20261114/native26-profile/REVIEW.json",
+    "inspection": {
+      "relative": "inspection.json",
+      "bytes": 12804,
+      "sha256": "b327e5f970f788efcf072ee555135087827b47dd150be3662280f0dc64d52f69"
+    },
+    "fullSourceExpectationApproved": false,
+    "producerDataSuccessor": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\DATA-SELECTION-REVIEW.json",
+      "bytes": 5638,
+      "sha256": "ab28910c244a3e918b56f38896b6b4f6c130b005984d72c2db019fd81e2f4441"
+    }
+  }
+}

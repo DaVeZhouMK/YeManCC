@@ -870,6 +870,29 @@
     "min": 60
   },
   {
+    "route": "oxp-x2-mini-pro-direct-ec",
+    "family": "OneXPlayer X2 Mini Pro",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ONE-NETBOOK",
+        "ONE-NETBOOK TECHNOLOGY CO., LTD."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "ONEXPLAYER X2Mini PRO"
+      ],
+      "deviceClass": "OneXPlayerX2MiniPro"
+    },
+    "firmwareGate": {
+      "kind": "oxp-x2-mini-pro-field-firmware",
+      "bios": "0.22",
+      "ecMajor": 0,
+      "ecMinor": 12
+    },
+    "min": 50
+  },
+  {
     "route": "oxp3-wmi-ec",
     "family": "OneXPlayer 3",
     "kind": "firmware-percent",

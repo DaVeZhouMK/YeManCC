@@ -9,6 +9,16 @@ struct Capabilities { bool known=false, modern=false, sleep=false, hibernate=fal
 struct Reply { Outcome outcome=Outcome::Failed; std::uint32_t error=0; };
 struct Attempt { Mode mode=Mode::None; bool invoked=false; Reply reply{}; };
 struct Result { Mode target=Mode::None; Reply reply{}; std::array<Attempt,3> attempts{}; unsigned count=0; };
+// A request remembers the public Windows completion evidence seen at admission.
+// This value only revokes a pending request; it does not confirm its outcome.
+struct CompletionWitness {
+    std::uint64_t systemExit=0;
+    bool originalCycleCompleted=false;
+    bool operator==(const CompletionWitness&) const = default;
+    bool superseded(std::uint64_t currentSystemExit, bool currentCycleCompleted) const noexcept {
+        return systemExit!=currentSystemExit || (!originalCycleCompleted && currentCycleCompleted);
+    }
+};
 inline const char* name(Mode mode) {
     switch (mode) { case Mode::ModernStandby:return "modern-standby";case Mode::Sleep:return "sleep";
         case Mode::Hibernate:return "hibernate";default:return "none"; }

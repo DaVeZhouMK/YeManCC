@@ -2,11 +2,11 @@
 import type { MirrorPeer, MirrorRequest } from './deckyMirrorRelay';
 import { HUD_PROTOCOL, HUD_LEASE_MS, validHudStatus, type HudClientStatus, type HudFrame, type HudReady } from './monitorHudProtocol';
 import { hudFromUniformSnapshot, normalizeMonitorOutput, type HudData, type MonitorOutputPreferences } from './monitorHudModel';
-import type { OutputAck } from './monitorOutputCoordinator';
+import type { OutputAck, MonitorOutputCurrent } from './monitorOutputCoordinator';
 import { hudWirePreferences, hudWireData } from './monitorHudWire';
 export interface SteamHudRelayDeps {
   now():number;session():string;
-  reply(connection:string,message:HudFrame|HudReady):Promise<boolean>;
+  reply(connection:string,message:HudFrame|HudReady,current?:MonitorOutputCurrent):Promise<boolean>;
   sample():HudData;acquire():()=>void;
   setTimer(fn:()=>void,ms:number):unknown;clearTimer(id:unknown):void;
   statusChanged?():void;
@@ -19,7 +19,9 @@ export function createSteamHudRelay(deps:SteamHudRelayDeps) {
   let wanted=false,confirmed=false,uncertain=false,disposed=false,prefs=normalizeMonitorOutput();
   let lastExternalPublish=-Infinity;
   let tick:unknown=null,releaseSample:(()=>void)|null=null;
-  let pending:{operation:number;session:string;show:boolean;gameKey:string;timer:unknown;deadline:number;releaseClock:()=>void;resolve:(ack:OutputAck)=>void}|null=null;
+  let pending:{operation:number;session:string;show:boolean;gameKey:string;timer:unknown;deadline:number;current?:MonitorOutputCurrent;checking?:boolean;releaseClock:()=>void;resolve:(ack:OutputAck)=>void}|null=null;
+  const expired='MONITOR_OUTPUT_REQUEST_EXPIRED';
+  const currentNow=async(current?:MonitorOutputCurrent)=>{try{return !current||await current();}catch{return false;}};
   const key=(s:HudClientStatus|null)=>s?.game?JSON.stringify(s.game):'';
   const notify=()=>{try{deps.statusChanged?.();}catch{}};
   const hello=()=>{if(peer&&!disposed)void deps.reply(peer.connection,{type:'hud-ready',protocol:HUD_PROTOCOL,runId:peer.runId}).catch(()=>false);};
@@ -34,18 +36,35 @@ export function createSteamHudRelay(deps:SteamHudRelayDeps) {
     // Revocation is best effort; never promote it to a confirmed hide.
     void publish().catch(()=>false);notify();
   }
-  async function publish() {
+  async function publish(cleanup=false) {
     const own=peer;if(!own||disposed)return false;
+    const attempt=pending,at=operation,ownSession=session,show=wanted,current=cleanup?undefined:attempt?.current;
+    if(current){
+      const valid=await currentNow(current);
+      if(disposed||peer!==own||pending!==attempt||operation!==at||session!==ownSession||wanted!==show)return false;
+      if(!valid){expire(expired);return false;}
+    }
     const data=wanted?deps.sample():hudFromUniformSnapshot(null,deps.now(),null,false);
     const frame:HudFrame={type:'hud',protocol:HUD_PROTOCOL,runId:own.runId,session,seq:++seq,operation,show:wanted,
       expiresAt:deps.now()+HUD_LEASE_MS,game:status?.game??null,preferences:hudWirePreferences(prefs),data:hudWireData(data,prefs)};
     if(frame.data.source!=='ymcc-uniform')throw Error('Fixture is forbidden in product HUD relay');
-    lastExternalPublish=deps.now();return deps.reply(own.connection,frame);
+    lastExternalPublish=deps.now();const accepted=await deps.reply(own.connection,frame,current);
+    if(current){
+      const valid=await currentNow(current);
+      if(disposed||peer!==own||operation!==at||session!==ownSession)return false;
+      if(!valid){if(pending===attempt)expire(expired);return false;}
+    }
+    return accepted;
   }
   function pulse(){
     cancelTick();if(!peer||disposed||!wanted&&!pending)return;
     void publish().catch(()=>false);
     if(!deps.externalClock)tick=deps.setTimer(pulse,1000); // one lease/transport tick, NEVER a hardware read
+  }
+  function checkPending(){
+    const attempt=pending;if(!attempt?.current||attempt.checking)return;
+    attempt.checking=true;
+    void currentNow(attempt.current).then(valid=>{if(pending===attempt&&!valid)expire(expired);}).finally(()=>{attempt.checking=false;});
   }
   const api={
     connected(value:MirrorPeer){
@@ -57,6 +76,53 @@ export function createSteamHudRelay(deps:SteamHudRelayDeps) {
       peer={...value};absent=false;hiddenKnown=false;status=null;confirmed=false;wanted=false;session='';seq=0;hello();notify();
     },
     request(event:MirrorRequest){
+      const attempt=pending,own=peer,current=attempt?.current;
+      if(!current){acceptRequest(event);return;}
+      if(!own||event.connection!==own.connection||event.runId!==own.runId)return;
+      const snapshot=structuredClone(event);
+      void currentNow(current).then(valid=>{
+        if(disposed||pending!==attempt||peer!==own)return;
+        if(!valid){expire(expired);return;}
+        acceptRequest(snapshot);
+      });
+    },
+    advance(){
+      checkPending();
+      if(pending&&deps.now()>=pending.deadline)expire();
+      if(deps.externalClock&&deps.now()-lastExternalPublish>=(prefs.ymcc.fields.frametimeGraph?200:1000))pulse();
+    },
+    clockUnavailable(reason:string){
+      if(pending){expire(reason);return;}
+      if(!wanted)return;
+      uncertain=uncertain||confirmed;confirmed=false;wanted=false;stopSample();
+      void publish().catch(()=>false);notify();
+    },
+    noteSteamPresence(value:boolean|null){
+      const wasAbsent=absent;absent=value===false;
+      if(absent){
+        hiddenKnown=true;confirmed=false;uncertain=false;wanted=false;stopSample();status=null;
+        const attempt=pending;
+        if(attempt?.current){void currentNow(attempt.current).then(valid=>{if(pending===attempt)settle({confirmed:valid&&!attempt.show,reason:!valid?expired:attempt.show?'Steam 已退出，未完成显示。':undefined});});}
+        else settle({confirmed:pending?.show!==true,reason:pending?.show?'Steam 已退出，未完成显示。':undefined});
+      }
+      else if(wasAbsent){hiddenKnown=false;}
+      notify();
+    },
+    hello,available,visible:()=>confirmed||uncertain||!hiddenKnown,
+    state:():'shown'|'hidden'|'unknown'=>confirmed?'shown':uncertain||!hiddenKnown?'unknown':'hidden',
+    async setVisible(show:boolean,preferences:MonitorOutputPreferences,current?:MonitorOutputCurrent):Promise<OutputAck>{
+      if(current&&!await currentNow(current))return {confirmed:false,reason:expired};
+      return beginVisible(show,preferences,current);
+    },
+    updateAppearance(value:MonitorOutputPreferences){
+      if(!wanted||disposed)return;
+      // Selection/master are drafts until the exclusive coordinator applies.
+      prefs={...prefs,ymcc:normalizeMonitorOutput(value).ymcc};
+    },
+    dispose(){if(disposed)return;wanted=false;void publish(true).catch(()=>false);disposed=true;stopSample();settle({confirmed:false,reason:'YMCC HUD 所有者已关闭。'});peer=null;status=null;},
+    inspect(){return {connected:!!peer,available:available(),wanted,confirmed,uncertain,hiddenKnown,absent,operation,session,pending:!!pending,tick:tick!==null,sampleOwned:!!releaseSample,status:status?structuredClone(status):null};},
+  };
+  function acceptRequest(event:MirrorRequest){
       if(disposed||!peer||event.connection!==peer.connection||event.runId!==peer.runId||event.request.runId!==peer.runId)return;
       if(event.request.command!=='hud.status'&&event.request.command!=='hud.ack'||!validHudStatus(event.request.status))return;
       const next=event.request.status;
@@ -76,26 +142,8 @@ export function createSteamHudRelay(deps:SteamHudRelayDeps) {
       hiddenKnown=good&&!next.shown;confirmed=good&&next.shown;uncertain=!good&&!next.hiddenConfirmed;
       settle({confirmed:good,reason:good?undefined:next.reason||'Steam 原生 HUD 窗口未确认。'});
       if(!good||!wanted){wanted=false;stopSample();}notify();
-    },
-    advance(){
-      if(pending&&deps.now()>=pending.deadline)expire();
-      if(deps.externalClock&&deps.now()-lastExternalPublish>=(prefs.ymcc.fields.frametimeGraph?200:1000))pulse();
-    },
-    clockUnavailable(reason:string){
-      if(pending){expire(reason);return;}
-      if(!wanted)return;
-      uncertain=uncertain||confirmed;confirmed=false;wanted=false;stopSample();
-      void publish().catch(()=>false);notify();
-    },
-    noteSteamPresence(value:boolean|null){
-      const wasAbsent=absent;absent=value===false;
-      if(absent){hiddenKnown=true;confirmed=false;uncertain=false;wanted=false;stopSample();status=null;settle({confirmed:pending?.show!==true,reason:pending?.show?'Steam 已退出，未完成显示。':undefined});}
-      else if(wasAbsent){hiddenKnown=false;}
-      notify();
-    },
-    hello,available,visible:()=>confirmed||uncertain||!hiddenKnown,
-    state:():'shown'|'hidden'|'unknown'=>confirmed?'shown':uncertain||!hiddenKnown?'unknown':'hidden',
-    setVisible(show:boolean,preferences:MonitorOutputPreferences):Promise<OutputAck>{
+  }
+  function beginVisible(show:boolean,preferences:MonitorOutputPreferences,current?:MonitorOutputCurrent):Promise<OutputAck>{
       if(!disposed&&!show&&absent){wanted=false;stopSample();confirmed=false;uncertain=false;hiddenKnown=true;return Promise.resolve({confirmed:true});}
       if(disposed||pending)return Promise.resolve({confirmed:false,reason:'Steam HUD 正在切换或已释放。'});
       if(!peer)return Promise.resolve({confirmed:!show&&(absent||hiddenKnown&&!confirmed&&!uncertain),reason:show?'Steam 插件尚未连接。':uncertain?'旧 Steam HUD 隐藏状态不确定。':undefined});
@@ -111,16 +159,8 @@ export function createSteamHudRelay(deps:SteamHudRelayDeps) {
       return new Promise(resolve=>{
         const deadline=deps.now()+12000;
         const timer=deps.setTimer(()=>{if(pending?.operation===ownOperation)expire();},12000);
-        pending={operation:ownOperation,session,show,gameKey:key(status),timer,deadline,releaseClock,resolve};pulse();
+        pending={operation:ownOperation,session,show,gameKey:key(status),timer,deadline,current,releaseClock,resolve};pulse();
       });
-    },
-    updateAppearance(value:MonitorOutputPreferences){
-      if(!wanted||disposed)return;
-      // Selection/master are drafts until the exclusive coordinator applies.
-      prefs={...prefs,ymcc:normalizeMonitorOutput(value).ymcc};
-    },
-    dispose(){if(disposed)return;wanted=false;void publish().catch(()=>false);disposed=true;stopSample();settle({confirmed:false,reason:'YMCC HUD 所有者已关闭。'});peer=null;status=null;},
-    inspect(){return {connected:!!peer,available:available(),wanted,confirmed,uncertain,hiddenKnown,absent,operation,session,pending:!!pending,tick:tick!==null,sampleOwned:!!releaseSample,status:status?structuredClone(status):null};},
-  };
+  }
   return api;
 }

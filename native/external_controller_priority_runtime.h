@@ -25,18 +25,41 @@ struct ExternalPriorityRuntime {
     bool cycleRestoring=false, cycleReturnVerified=false;
     unsigned returnCycleAttempts=0;
     uint64_t lastEnabledRevision=0;
+    bool disabledPolicyKnown=false;
+    std::string disabledPolicyStamp;
+    ULONGLONG disabledPolicyReadAt=0;
+    uint64_t disabledPolicyEpoch=0;
 };
 static void gamepadResetNativeState(bool requireRelease);
 static std::mutex g_externalPriorityMx;
 static ExternalPriorityRuntime g_externalPriority;
 static std::atomic<bool> g_externalPriorityPolicyEnabled{false};
+static std::atomic<uint64_t> g_externalPrioritySettingsEpoch{0};
+static void externalPrioritySettingsChanged() noexcept {
+    g_externalPrioritySettingsEpoch.fetch_add(1,std::memory_order_release);
+}
 static std::wstring externalPriorityDebtPath(){return app_data_dir()+L"\\external-controller-priority-return-v1.json";}
 static bool externalPriorityHasDebt(const ymcc::externalpad::VisibilityDebt& d){return !d.hiddenPaths.empty() || !d.applications.empty() || d.cloakChanged || d.refreshPending;}
-static bool externalPriorityDesired(){
-    const auto ownership=ymSettingsField("input","ownership");
-    if(!ownership.is_object())return false;
-    const auto flag=ownership.find("externalControllerPriority");
-    return flag!=ownership.end() && flag->is_boolean() && flag->get<bool>();
+static bool externalPriorityDesired(bool quietInactive=false){
+    auto& r=g_externalPriority;
+    const auto now=GetTickCount64();
+    const auto epoch=g_externalPrioritySettingsEpoch.load(std::memory_order_acquire);
+    std::string stamp;
+    const bool reuseFalse=quietInactive && r.disabledPolicyKnown && r.disabledPolicyEpoch==epoch &&
+        now>=r.disabledPolicyReadAt && now-r.disabledPolicyReadAt<30000;
+    bool unchanged=false;
+    const auto ownership=quietInactive
+        ? ymSettingsInactiveField("input","ownership",reuseFalse?r.disabledPolicyStamp:std::string{},stamp,unchanged)
+        : ymSettingsField("input","ownership");
+    if(unchanged)return false;
+    r.disabledPolicyKnown=false;
+    const auto flag=ownership.is_object()?ownership.find("externalControllerPriority"):ownership.end();
+    const bool enabled=flag!=ownership.end() && flag->is_boolean() && flag->get<bool>();
+    if(!enabled && !stamp.empty()){
+        r.disabledPolicyStamp=std::move(stamp);r.disabledPolicyReadAt=now;
+        r.disabledPolicyEpoch=epoch;r.disabledPolicyKnown=true;
+    }
+    return enabled;
 }
 static void externalPriorityStatus(const char* state,const std::string& reason){
     auto& r=g_externalPriority;
@@ -152,6 +175,18 @@ static bool externalPriorityKnownHandheld(){
 static bool externalPriorityMsiBuiltin(const HidHidePhysicalIdentity& c){
     return msiClawKnownBoardAuthority() && c.vendorId==0x0DB0 && (c.productId==0x1901 || c.productId==0x1902) &&
         hidHideUpper(c.baseContainerDeviceInstanceId).rfind("USB\\VID_0DB0&PID_",0)==0;
+}
+static bool externalPriorityRogXboxBuiltin(const HidHidePhysicalIdentity& c){
+    if(!g_machineIdentity.resolved || !c.resolved || c.vendorId!=0x0B05)return false;
+    // The same DMI -> model -> PID binding used by native ROG input discovery.
+    // Neither an Xbox-compatible ID, controller activity nor slot zero is authority.
+    const bool ally=g_machineIdentity.deviceClass=="HandheldCompanion.Devices.XboxROGAlly" &&
+        g_machineIdentity.inputHidKey=="rog-xbox:0x1B4C" && c.productId==0x1B4C;
+    const bool allyX=g_machineIdentity.deviceClass=="HandheldCompanion.Devices.XboxROGAllyX" &&
+        g_machineIdentity.inputHidKey=="rog-xbox:0x1ABE" && c.productId==0x1ABE;
+    if(!ally && !allyX)return false;
+    const auto root=hidHideUpper(c.baseContainerDeviceInstanceId);
+    return root.rfind(ally?"USB\\VID_0B05&PID_1B4C\\":"USB\\VID_0B05&PID_1ABE\\",0)==0;
 }
 static bool externalPrioritySlot(const HidHidePhysicalIdentity& c,unsigned& slot,unsigned* topologyOut=nullptr,uint64_t* powerOut=nullptr){
     const auto sampledTopology=g_xinputTopologyEpoch.load(std::memory_order_acquire);
@@ -287,7 +322,15 @@ static bool externalPriorityHide(const HidHidePhysicalIdentity& builtin){
 static void externalControllerPriorityMaintenanceImpl(){
     std::unique_lock<std::mutex> lock(g_externalPriorityMx,std::try_to_lock);if(!lock.owns_lock())return;
     auto& r=g_externalPriority;const auto now=GetTickCount64();if(now<r.nextTick)return;r.nextTick=now+500;
-    const bool enabledNow=externalPriorityDesired();
+    const bool quietInactive=r.loaded && !r.storeInvalid && !r.enabled && !r.active &&
+        !r.returning && !r.takingOver && !r.releasePending && !r.builtinHidden &&
+        !r.cycleProcess && !externalPriorityHasDebt(r.debt) &&
+        !g_externalPriorityVirtualSuspended.load(std::memory_order_acquire) &&
+        !g_externalPrioritySourceMask.load(std::memory_order_acquire) &&
+        !inputHostExitFenceRaised() && g_inputReady.load(std::memory_order_acquire) &&
+        g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready &&
+        r.power==currentPowerGeneration();
+    const bool enabledNow=externalPriorityDesired(quietInactive);
     g_externalPriorityPolicyEnabled.store(enabledNow,std::memory_order_release);
     if(r.enabled!=enabledNow){r.enabled=enabledNow;r.returnCycleAttempts=0;r.lastAttemptRoot.clear();r.lastAttemptLocation.clear();r.arbitration.reset();g_externalPriorityRevision.fetch_add(1,std::memory_order_release);}
     if(r.power!=currentPowerGeneration()){r.power=currentPowerGeneration();r.returnCycleAttempts=0;r.auditAt=0;r.discoveryAt=0;r.lastAttemptRoot.clear();r.lastAttemptLocation.clear();}
@@ -385,8 +428,10 @@ static void externalControllerPriorityMaintenanceImpl(){
             const auto root=hidHideUpper(c.baseContainerDeviceInstanceId);
             const auto locations=msiForegroundIsolationLocations(c.baseContainerDeviceInstanceId);
             if(locations.empty())continue;
-            const int port=root.rfind("USB\\",0)==0?externalPriorityUsbPortKind(c.baseContainerDeviceInstanceId):-1;
-            const bool internal=externalPriorityMsiBuiltin(c) || port==0;
+            // This owner only reads connector properties. Keep the legacy
+            // helper contract intact for its other consumers.
+            const int port=root.rfind("USB\\",0)==0?externalPriorityUsbPortKindWithEvidence(c.baseContainerDeviceInstanceId,nullptr,0):-1;
+            const bool internal=externalPriorityMsiBuiltin(c) || externalPriorityRogXboxBuiltin(c) || port==0;
             r.discovered.push_back({c,hidHideUpper(W2U(locations.front())),internal,!internal && (port==1 || root.rfind("BTH",0)==0)});
         }
     }
@@ -398,7 +443,7 @@ static void externalControllerPriorityMaintenanceImpl(){
     if(signature!=r.lastDiscoverySignature){
         r.lastDiscoverySignature=signature;
         appendNativeLifecycleLog("external-controller-priority-topology",{{"devices",observed},
-            {"deviceClass",g_machineIdentity.deviceClass},{"builtinAuthority","known-board-plus-exact-MSI-family-or-entire-internal-USB-port-chain"},
+            {"deviceClass",g_machineIdentity.deviceClass},{"builtinAuthority","known-board-plus-exact-MSI-or-ROG-Xbox-model-or-entire-internal-USB-port-chain"},
             {"slotAndBrandAloneAccepted",false},{"powerGeneration",currentPowerGeneration()}});
     }
     std::vector<HidHidePhysicalIdentity> builtins;std::vector<ymcc::externalpad::Candidate> externals;

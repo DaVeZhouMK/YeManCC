@@ -2,12 +2,14 @@
 // One-shot, read-only collection for a user-requested export. Never starts Steam,
 // scans libraries/drives, changes a log gate, or follows directory reparse points.
 #include <windows.h>
-#include <tlhelp32.h>
+#include "steam_installation_facts.h"
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace ymcc::logexport {
 namespace fs = std::filesystem;
@@ -30,71 +32,7 @@ inline bool reparsePoint(const fs::path& path) {
     const DWORD attributes = GetFileAttributesW(winPath(path).c_str());
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT);
 }
-inline fs::path registryString(HKEY hive, const wchar_t* key, const wchar_t* name, DWORD view = 0) {
-    std::array<wchar_t, 32768> value{};
-    DWORD bytes = static_cast<DWORD>(value.size() * sizeof(wchar_t));
-    if (RegGetValueW(hive, key, name, RRF_RT_REG_SZ | view, nullptr, value.data(), &bytes) != ERROR_SUCCESS) return {};
-    std::wstring text(value.data());
-    if (text.size() >= 2 && text.front() == L'"' && text.back() == L'"') text = text.substr(1, text.size() - 2);
-    std::replace(text.begin(), text.end(), L'/', L'\\');
-    return fs::path(text);
-}
-inline fs::path processSteamRoot(DWORD pid) {
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
-    if (!process) return {};
-    std::array<wchar_t, 32768> value{};
-    DWORD length = static_cast<DWORD>(value.size());
-    const bool ok = QueryFullProcessImageNameW(process, 0, value.data(), &length) &&
-        WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
-    CloseHandle(process);
-    if (!ok) return {};
-    const fs::path image(std::wstring(value.data(), length));
-    return _wcsicmp(image.filename().c_str(), L"steam.exe") == 0 ? image.parent_path() : fs::path{};
-}
-inline std::vector<SteamRootCandidate> discoverSteamRoots(DWORD observedPid = 0) {
-    std::vector<SteamRootCandidate> roots;
-    DWORD activePid = 0, bytes = sizeof(activePid);
-    RegGetValueW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"pid", RRF_RT_REG_DWORD,
-        nullptr, &activePid, &bytes);
-    const auto addProcess = [&](DWORD pid, const char* source) {
-        if (!pid) return;
-        auto root = processSteamRoot(pid);
-        if (!root.empty()) roots.push_back({std::move(root), source, pid});
-    };
-    addProcess(activePid, "running-active-process");
-    addProcess(observedPid, "running-session-observer");
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot != INVALID_HANDLE_VALUE) {
-        PROCESSENTRY32W entry{}; entry.dwSize = sizeof(entry);
-        for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry)) {
-            if (_wcsicmp(entry.szExeFile, L"steam.exe") == 0 && entry.th32ProcessID != activePid && entry.th32ProcessID != observedPid)
-                addProcess(entry.th32ProcessID, "running-process-image");
-        }
-        CloseHandle(snapshot);
-    }
-    // Running images precede installation evidence; Steam need not be open.
-    roots.push_back({registryString(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamPath"), "hkcu-steam-path"});
-    const auto exe = registryString(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamExe");
-    if (!exe.empty()) roots.push_back({exe.parent_path(), "hkcu-steam-exe"});
-    for (DWORD view : {RRF_SUBKEY_WOW6432KEY, RRF_SUBKEY_WOW6464KEY})
-        roots.push_back({registryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Valve\\Steam", L"InstallPath", view),
-            view == RRF_SUBKEY_WOW6432KEY ? "hklm-install-32" : "hklm-install-64"});
-    for (const auto* variable : {L"ProgramFiles(x86)", L"ProgramFiles"}) {
-        std::array<wchar_t, 32768> value{};
-        const DWORD length = GetEnvironmentVariableW(variable, value.data(), static_cast<DWORD>(value.size()));
-        if (length && length < value.size()) roots.push_back({fs::path(value.data()) / L"Steam", "default-install-directory"});
-    }
-    return roots;
-}
-inline SteamLogs collectSteamLogs(const std::vector<SteamRootCandidate>& candidates) {
-    SteamLogs result;
-    for (const auto& candidate : candidates) {
-        if (candidate.root.empty() || !candidate.root.is_absolute()) continue;
-        std::error_code ec;
-        if (!fs::is_regular_file(candidate.root / L"steam.exe", ec) || ec) continue;
-        result.root = candidate.root.lexically_normal(); result.source = candidate.source;
-        break; // Do not fall back to a stale installation just because its logs exist.
-    }
+inline SteamLogs collectSelectedSteamRootLogs(SteamLogs result) {
     if (result.root.empty()) return result;
     const auto logs = result.root / L"logs";
     if (reparsePoint(logs)) {
@@ -134,40 +72,159 @@ inline SteamLogs collectSteamLogs(const std::vector<SteamRootCandidate>& candida
     else if (result.files.empty()) result.status = "logs-directory-empty";
     return result;
 }
-inline SteamLogs collectSteamLogs(DWORD observedPid = 0) { return collectSteamLogs(discoverSteamRoots(observedPid)); }
+inline SteamLogs collectSteamLogs(const std::vector<SteamRootCandidate>& candidates) {
+    SteamLogs result;
+    for (const auto& candidate : candidates) {
+        if (candidate.root.empty() || !candidate.root.is_absolute()) continue;
+        std::error_code ec;
+        if (!fs::is_regular_file(candidate.root / L"steam.exe", ec) || ec) continue;
+        result.root = candidate.root.lexically_normal(); result.source = candidate.source;
+        break; // Do not fall back to a stale installation just because its logs exist.
+    }
+    return collectSelectedSteamRootLogs(std::move(result));
+}
+// This projection consumes public read-only facts. It performs no independent
+// registry/process discovery and never grants an operation or source lease.
+inline SteamLogs collectSteamLogs(const steaminfo::Facts& facts) {
+    SteamLogs invalid;
+    if(!facts.available||(facts.requested&(steaminfo::Installations|steaminfo::Presence))!=(steaminfo::Installations|steaminfo::Presence)){
+        invalid.status="steam-information-unavailable";return invalid;
+    }
+    invalid.status="steam-information-invalid";
+    try{
+        if(!steaminfo::decode(steaminfo::encode(facts),facts.requested))return invalid;
+        const auto wide=[](const std::string& text)->std::wstring{
+            if(text.empty())return {};
+            const int size=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),static_cast<int>(text.size()),nullptr,0);
+            if(!size)throw 0;
+            std::wstring value(size,L'\0');
+            if(MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),static_cast<int>(text.size()),value.data(),size)!=size)throw 0;
+            return value;
+        };
+        std::vector<SteamRootCandidate> candidates;
+        if(facts.presence==1){
+            const fs::path image(wide(facts.processPath));
+            if(!facts.processPid||!facts.processBirth||!image.is_absolute()||_wcsicmp(image.filename().c_str(),L"steam.exe"))return invalid;
+            // Shared process identity selects this diagnostic root. Steam may
+            // rename/update its image while running; image-file availability
+            // cannot redirect the export to another installation's old logs.
+            SteamLogs current;
+            current.root=image.parent_path().lexically_normal();
+            current.source="running-shared-process-image";
+            return collectSelectedSteamRootLogs(std::move(current));
+        }
+        for(const auto& candidate:facts.installations){
+            if(candidate.error==ERROR_SUCCESS&&!candidate.path.empty())candidates.push_back({fs::path(wide(candidate.path)),candidate.source});
+        }
+        return collectSteamLogs(candidates);
+    }catch(...){return invalid;}
+}
 
 // Snapshot exactly the length observed at open, not an indefinitely growing log.
 // FILE_SHARE_DELETE permits Steam rotation; failures never modify the source.
-inline bool snapshotSharedLog(const fs::path& source, const fs::path& destination, DWORD& error, unsigned long long maxBytes = 0) {
-    error = ERROR_SUCCESS;
-    HANDLE input = CreateFileW(winPath(source).c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    if (input == INVALID_HANDLE_VALUE) { error = GetLastError(); return false; }
-    LARGE_INTEGER size{};
-    if (!GetFileSizeEx(input, &size) || size.QuadPart < 0) {
-        error = GetLastError(); if (!error) error = ERROR_INVALID_DATA; CloseHandle(input); return false;
+struct SnapshotCopyEvidence {
+    const char* stage = "not-started";
+    bool sourceSizeKnown = false, destinationCreated = false, copyComplete = false;
+    unsigned long long sourceBytesAtOpen = 0, successfulReadBytes = 0, successfulWriteBytes = 0;
+    unsigned long long readCalls = 0, writeCalls = 0;
+    const char* writerBoundaryField = nullptr;
+    const char* writerBoundaryState = nullptr;
+};
+using SnapshotSourceSync = std::function<bool(const std::function<void()>&)>;
+inline bool disappearedRotatedSnapshot(const std::wstring& source,
+        const std::vector<std::wstring>& discovered,DWORD error,const SnapshotCopyEvidence& observation) {
+    if((error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)||
+            std::string(observation.stage)!="source-open"||observation.sourceSizeKnown||observation.destinationCreated)return false;
+    // An alias is optional only when its exact same-directory base was also
+    // discovered. Arbitrary missing files and mandatory current logs still fail.
+    for(const wchar_t* suffix:{L".1",L".prev",L".previous"}) {
+        const auto count=std::char_traits<wchar_t>::length(suffix);
+        if(source.size()>count&&source.compare(source.size()-count,count,suffix)==0) {
+            const auto base=source.substr(0,source.size()-count);
+            return std::find(discovered.begin(),discovered.end(),base)!=discovered.end();
+        }
     }
-    if (maxBytes && static_cast<unsigned long long>(size.QuadPart) > maxBytes) { error = ERROR_FILE_TOO_LARGE; CloseHandle(input); return false; }
+    return false;
+}
+inline bool snapshotSharedLog(const fs::path& source, const fs::path& destination, DWORD& error,
+        unsigned long long maxBytes = 0, SnapshotCopyEvidence* evidence = nullptr,
+        const SnapshotSourceSync* writerSync = nullptr,
+        const char* writerBoundaryField = "monitorWriterBoundary") {
+    if (evidence) *evidence = {};
+    error = ERROR_SUCCESS;
+    struct SourceHandle {
+        HANDLE value = INVALID_HANDLE_VALUE;
+        void close() { if (value != INVALID_HANDLE_VALUE) CloseHandle(std::exchange(value, INVALID_HANDLE_VALUE)); }
+        ~SourceHandle() { close(); }
+    } sourceHandle;
+    const auto sourcePath = winPath(source);
+    LARGE_INTEGER size{};
+    const char* boundary = "source-open-failed";
+    const auto capture = [&] {
+        if (evidence) evidence->stage = "source-open";
+        sourceHandle.value = CreateFileW(sourcePath.c_str(), GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+        if (sourceHandle.value == INVALID_HANDLE_VALUE) { error = GetLastError(); return; }
+        boundary = "source-size-failed";
+        if (evidence) evidence->stage = "source-size";
+        const BOOL sizeRead = GetFileSizeEx(sourceHandle.value, &size);
+        if (!sizeRead || size.QuadPart < 0) {
+            error = sizeRead ? ERROR_INVALID_DATA : GetLastError();
+            if (!error) error = ERROR_INVALID_DATA;
+            return;
+        }
+        boundary = "captured-under-writer-lock";
+        if (evidence) { evidence->sourceSizeKnown = true; evidence->sourceBytesAtOpen = static_cast<unsigned long long>(size.QuadPart); }
+    };
+    if (writerSync) {
+        const bool flushed = (*writerSync)(capture);
+        // Keep the raw-byte copy attempt even if the writer cannot flush.
+        if (evidence) {
+            evidence->writerBoundaryField = writerBoundaryField;
+            evidence->writerBoundaryState = flushed ? boundary : "flush-failed";
+        }
+    } else {
+        capture();
+    }
+    if (sourceHandle.value == INVALID_HANDLE_VALUE || error) return false;
+    const HANDLE input = sourceHandle.value;
+    if (maxBytes && static_cast<unsigned long long>(size.QuadPart) > maxBytes) {
+        if (evidence) evidence->stage = "size-limit";
+        error = ERROR_FILE_TOO_LARGE; return false;
+    }
+    if (evidence) evidence->stage = "destination-open";
     HANDLE output = CreateFileW(winPath(destination).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (output == INVALID_HANDLE_VALUE) { error = GetLastError(); CloseHandle(input); return false; }
+    if (output == INVALID_HANDLE_VALUE) { error = GetLastError(); return false; }
+    if (evidence) evidence->destinationCreated = true;
     std::array<char, 65536> buffer{};
     LONGLONG remaining = size.QuadPart;
     bool ok = true;
     while (remaining > 0) {
         DWORD read = 0;
         const DWORD requested = static_cast<DWORD>((std::min)(remaining, static_cast<LONGLONG>(buffer.size())));
-        if (!ReadFile(input, buffer.data(), requested, &read, nullptr) || !read) {
-            error = GetLastError(); if (!error) error = ERROR_HANDLE_EOF; ok = false; break;
+        if (evidence) { evidence->stage = "source-read"; ++evidence->readCalls; }
+        const BOOL readOk = ReadFile(input, buffer.data(), requested, &read, nullptr);
+        if (evidence && readOk) evidence->successfulReadBytes += read;
+        if (!readOk || !read) {
+            error = readOk ? ERROR_HANDLE_EOF : GetLastError();
+            if (!error) error = ERROR_HANDLE_EOF; ok = false; break;
         }
         DWORD written = 0;
-        if (!WriteFile(output, buffer.data(), read, &written, nullptr) || written != read) {
-            error = GetLastError(); if (!error) error = ERROR_WRITE_FAULT; ok = false; break;
+        if (evidence) { evidence->stage = "destination-write"; ++evidence->writeCalls; }
+        const BOOL writeOk = WriteFile(output, buffer.data(), read, &written, nullptr);
+        if (evidence && writeOk) evidence->successfulWriteBytes += written;
+        if (!writeOk || written != read) {
+            error = writeOk ? ERROR_WRITE_FAULT : GetLastError();
+            if (!error) error = ERROR_WRITE_FAULT; ok = false; break;
         }
         remaining -= read;
     }
+    if (evidence && ok) evidence->stage = "destination-close";
     if (!CloseHandle(output) && ok) { error = GetLastError(); ok = false; }
-    CloseHandle(input);
+    sourceHandle.close();
     if (!ok) DeleteFileW(winPath(destination).c_str()); // only this CREATE_NEW fixture/staging file
+    if (evidence && ok) { evidence->stage = "copied"; evidence->copyComplete = true; }
     return ok;
 }
 } // namespace ymcc::logexport

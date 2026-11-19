@@ -5,6 +5,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import {originalAssertions, validate} from './typed-legacy-health-close-regression.mjs';
+import {originalCommittedReadyConsumer} from './owned-run.mjs';
+import {steamSessionObserverPublication,OBSERVER_PUBLICATION_SOURCE,OBSERVER_PUBLICATION_GENERATOR} from '../../../fixtures/steam_session_observer_publication.mjs';
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const digest = file => hash(fs.readFileSync(file));
 const key = file => path.resolve(file).toLowerCase();
@@ -39,22 +41,40 @@ export function validateTypedHealthCloseParentReceipt(value,{repo,evidenceRoot,w
   const verify=(row,root)=>{assert(row&&/^[a-f0-9]{64}$/.test(row.sha256),'TYPED_HEALTH_FILE_PIN');
     if(root)assert(inside(root,row.path)&&key(fs.realpathSync(row.path))===key(row.path),'TYPED_HEALTH_OWNED_PATH');
     assert.equal(digest(row.path),row.sha256,'TYPED_HEALTH_FILE_CHANGED:'+row.path);return row;};
+  // Rebuild this sole declared derivative from the independently pinned product.
+  const observerPath=path.join(workRoot,'s',OBSERVER_PUBLICATION_SOURCE),publication=steamSessionObserverPublication(fs.readFileSync(path.join(repo,OBSERVER_PUBLICATION_SOURCE)));
+  const observerPort={path:path.resolve(observerPath),sha256:publication.derived.sha256,bytes:publication.derived.bytes,generator:publication.generator,transformation:publication.transformation,original:publication.original,derived:publication.derived};
+  assert.equal(sourcePins.get(OBSERVER_PUBLICATION_SOURCE),publication.original.sha256,'TYPED_HEALTH_PUBLICATION_PREIMAGE');
+  assert.deepEqual(value.fixturePorts,[observerPort],'TYPED_HEALTH_PUBLICATION_DECLARATION');
+  verify(observerPort,workRoot);
+  assert(fs.readFileSync(observerPath).equals(publication.bytes),'TYPED_HEALTH_PUBLICATION_EXACT_OUTPUT');
   const compilePins=new Map(),seen=new Set();
   for(const row of value.sourceInputs) {
     assert(!seen.has(row.path),'TYPED_HEALTH_DUPLICATE_SOURCE');seen.add(row.path);
     assert.equal(sourcePins.get(row.path),row.sha256,'TYPED_HEALTH_SOURCE_NOT_PREBOUND:'+row.path);
     assert.equal(digest(path.join(repo,row.path)),row.sha256,'TYPED_HEALTH_CURRENT_SOURCE_CHANGED:'+row.path);
     const frozen=path.join(workRoot,'s',row.path);
-    if(fs.existsSync(frozen)){verify({path:frozen,sha256:row.sha256},workRoot);compilePins.set(key(frozen),row);}
+    if(fs.existsSync(frozen)){const compiled=row.path===OBSERVER_PUBLICATION_SOURCE?observerPort:row;verify({path:frozen,sha256:compiled.sha256},workRoot);compilePins.set(key(frozen),compiled);}
   }
   for(const file of ['typed-legacy-health-close-regression.mjs','typed-legacy-health-close-regression.cpp','typed-legacy-health-close-regression.test.mjs'])
     assert(seen.has('tools/ymcc_sim/global/decky-persistent-lifecycle/'+file),'TYPED_HEALTH_REQUIRED_SOURCE');
   assert(seen.has('native/main.cpp'),'TYPED_HEALTH_MAIN_SOURCE_REQUIRED');
+  for(const file of [OBSERVER_PUBLICATION_SOURCE,OBSERVER_PUBLICATION_GENERATOR])assert(seen.has(file),'TYPED_HEALTH_PUBLICATION_SOURCE_REQUIRED:'+file);
   const toolSeen=new Set();assert(value.toolArtifacts.length>0&&value.toolArtifacts.length<=3072);
   for(const row of value.toolArtifacts){assert(!toolSeen.has(key(row.path)),'TYPED_HEALTH_DUPLICATE_TOOL');toolSeen.add(key(row.path));
     assert.equal(toolPins.get(key(row.path))?.sha256,row.sha256,'TYPED_HEALTH_TOOL_NOT_PREBOUND');verify(row);compilePins.set(key(row.path),row);}
-  assert.equal(value.generated.length,5,'TYPED_HEALTH_EXTRACTION_MEMBERSHIP');
-  for(const row of value.generated){assert.equal(row.bytePreserved,true);assert.equal(sourcePins.get(row.origin),row.originSha256,'TYPED_HEALTH_GENERATED_ORIGIN');
+  assert.equal(value.generated.length,6,'TYPED_HEALTH_EXTRACTION_MEMBERSHIP');
+  assert.deepEqual(value.generated.map(row=>key(row.path)), [
+    's/tools/typed-legacy-health-close-helpers.inc','s/native/decky_wake_ready_consumer.inc',
+    's/tools/typed-legacy-health-close-worker.inc','s/tools/typed-legacy-health-close-main-consumers.inc',
+    's/tools/typed-legacy-health-close-ui-case.inc','s/native/decky_wake_committed_consumer.inc'
+  ].map(relative=>key(path.join(workRoot,relative))), 'TYPED_HEALTH_EXTRACTION_PATHS');
+  const committedConsumer=originalCommittedReadyConsumer(path.join(workRoot,'s'));
+  assert.equal(committedConsumer.originSha256,sourcePins.get('native/main.cpp'),'TYPED_HEALTH_COMMITTED_SOURCE');
+  assert.deepEqual(value.generated[5],committedConsumer,'TYPED_HEALTH_COMMITTED_EXTRACTION');
+  verify(committedConsumer,workRoot);compilePins.set(key(committedConsumer.path),committedConsumer);
+  assert.deepEqual(read(path.join(evidenceRoot,'GENERATED.json')),value.generated,'TYPED_HEALTH_EXTRACTION_FILE');
+  for(const row of value.generated.slice(0,5)){assert.equal(row.bytePreserved,true);assert.equal(sourcePins.get(row.origin),row.originSha256,'TYPED_HEALTH_GENERATED_ORIGIN');
     const source=fs.readFileSync(path.join(repo,row.origin),'utf8');
     const extract=slice=>{assert(Number.isSafeInteger(slice.begin)&&Number.isSafeInteger(slice.end)&&slice.begin>=0&&slice.end>slice.begin&&slice.end<=source.length,'TYPED_HEALTH_SLICE_RANGE');return source.slice(slice.begin,slice.end);};
     const expected=Array.isArray(row.slice)?row.slice.map(extract).join('\n\n')+'\n':extract(row.slice)+(row.slice.appendNewline?'\n':'');

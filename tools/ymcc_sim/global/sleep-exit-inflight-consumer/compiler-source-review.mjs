@@ -5,7 +5,7 @@ const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hash=file=>digest(fs.readFileSync(file));
 const need=(ok,code)=>{if(!ok)throw Error(code);};
 const reviewPath='tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json';
-const reviewSha256='3b5b94a78e34ec77faae67bb8fca8c25bc4e8dc4bbfb48a02fd5643cd6bbb3ae';
+const reviewSha256='59fe824f254e4e9ec2114338edbc7b061a81ffe0cda14bcca0f6dec86de69199';
 const canonical=bytes=>bytes.toString('utf8').replace(/\r\n/g,'\n');
 function exportedFunction(bytes,name){const source=canonical(bytes),start=source.indexOf('export function '+name+'('),end=source.indexOf('\n}',start);need(start>=0&&end>start,'COMPILER_REVIEW_EXPORT_MISSING:'+name);return source.slice(start,end+2);}
 export function verifyCompilerSourceReview(repo){

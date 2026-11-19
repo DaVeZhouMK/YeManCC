@@ -1,4 +1,47 @@
 ﻿Add-Type -AssemblyName System.IO.Compression
+function Select-YmccInputBootstrapFunctions([string]$ScriptText) {
+  # The file-only bootstrap used to ship the entire updater libraries, including
+  # unrelated process termination and Decky port listeners. Emit only the exact
+  # transitive function dependencies of its entry body. Function bodies remain
+  # canonical source bytes; no runtime rewriting, generated code or new authority.
+  $tokens=$null;$errors=$null
+  $ast=[Management.Automation.Language.Parser]::ParseInput($ScriptText,[ref]$tokens,[ref]$errors)
+  if($errors.Count){throw 'INPUT_BOOTSTRAP_SOURCE_PARSE_FAILED'}
+  $functions=@{};$ordered=New-Object 'System.Collections.Generic.List[object]'
+  $body=New-Object 'System.Collections.Generic.List[object]'
+  foreach($statement in $ast.EndBlock.Statements){
+    if($statement -is [Management.Automation.Language.FunctionDefinitionAst]){
+      if($functions.ContainsKey($statement.Name)){throw ('INPUT_BOOTSTRAP_DUPLICATE_FUNCTION: '+$statement.Name)}
+      $functions[$statement.Name]=$statement;$ordered.Add($statement)
+    }else{$body.Add($statement)}
+  }
+  $pending=New-Object 'System.Collections.Generic.Queue[object]'
+  foreach($statement in $body){$pending.Enqueue($statement)}
+  $selected=@{}
+  while($pending.Count){
+    $node=$pending.Dequeue()
+    foreach($command in $node.FindAll({param($item)$item -is [Management.Automation.Language.CommandAst]},$true)){
+      $name=$command.GetCommandName()
+      if(!$name){throw 'INPUT_BOOTSTRAP_DYNAMIC_COMMAND_REFUSED'}
+      if($functions.ContainsKey($name)){
+        if(!$selected.ContainsKey($name)){$selected[$name]=$true;$pending.Enqueue($functions[$name])}
+      }elseif($name -like '*-Ymcc*'){throw ('INPUT_BOOTSTRAP_FUNCTION_MISSING: '+$name)}
+    }
+  }
+  foreach($forbidden in @('Stop-YmccUpdaterParent','Open-YmccDeckyBackendLease','Install-YmccDeckyPackage','Restore-YmccDeckyPackage')){
+    if($selected.ContainsKey($forbidden)){throw ('INPUT_BOOTSTRAP_NON_FILE_CAPABILITY_REFUSED: '+$forbidden)}
+  }
+  $output=New-Object Text.StringBuilder
+  if($ast.ParamBlock){[void]$output.AppendLine($ast.ParamBlock.Extent.Text)}
+  foreach($function in $ordered){if($selected.ContainsKey($function.Name)){[void]$output.AppendLine($function.Extent.Text)}}
+  foreach($statement in $body){
+    if($statement.Extent.Text.StartsWith('$bootstrapLease=')){
+      [void]$output.AppendLine('# This body is appended after the embedded maintenance functions by packaging.')
+    }
+    [void]$output.AppendLine($statement.Extent.Text)
+  }
+  return $output.ToString()
+}
 function Write-YmccInputCompatibilityPayload([string]$CompleteRoot, [string]$Version) {
   $pc=Join-Path $CompleteRoot 'PowerControl'
   # Public 035 backs up this user file only when a template entry is shipped.
@@ -24,6 +67,7 @@ function Write-YmccInputCompatibilityPayload([string]$CompleteRoot, [string]$Ver
   foreach ($name in @('decky_package_maintenance.ps1','module_package_maintenance.ps1','module_bootstrap_recovery.ps1','module_payload_bootstrap.ps1')) {
     $text += [IO.File]::ReadAllText((Join-Path $PSScriptRoot ('..\native\'+$name))).TrimStart([char]0xfeff) + "`n"
   }
+  $text=Select-YmccInputBootstrapFunctions $text
   [IO.File]::WriteAllText($script,$text,[Text.UTF8Encoding]::new($true))
   # Module bytes occur only once in the complete package. The existing
   # bootstrap reuses that full package after035 commits its update.

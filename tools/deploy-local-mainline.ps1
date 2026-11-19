@@ -18,12 +18,16 @@ param(
   [Parameter(Mandatory=$true)][string]$EvidenceDir,
   [string]$WorkspaceRoot=$env:YEMAN_WORKSPACE_ROOT,
   [string]$InstallRoot='C:\SOFT\YeMan\YeManCC',
+  [Alias('ProductRoot')][string]$SourceProjectRoot='',
+  [string]$SteamGuardSuccessorReceipt='',
   [string]$CompletedLocalRepairReceipt='',
   [string]$CompletedLocalRepairSha256='',
   [switch]$Apply
 )
 $ErrorActionPreference='Stop'
-$localProject=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
+if($SteamGuardSuccessorReceipt -and -not $SourceProjectRoot){throw 'EXPORT_GUARD_SUCCESSOR_EXPLICIT_PRODUCT_REQUIRED'}
+$localProject=if($SourceProjectRoot){[IO.Path]::GetFullPath($SourceProjectRoot).TrimEnd('\')}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')}
+$localDependencyRoot=Join-Path $localProject 'tools'
 if(!$WorkspaceRoot){$WorkspaceRoot=Join-Path $localProject '..\..'}
 $WorkspaceRoot=[IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
 $InstallRoot=[IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
@@ -33,12 +37,21 @@ $localInstallParent=Split-Path -Parent $InstallRoot
 $localEvidence=[IO.Path]::GetFullPath($EvidenceDir).TrimEnd('\')
 if($localEvidence -ieq $localInstallParent -or $localEvidence.StartsWith($localInstallParent+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'LOCAL_DEPLOY_EVIDENCE_INSIDE_INSTALL'}
 $localEvidenceRoot=Join-Path (Split-Path -Parent $WorkspaceRoot) 'Testing\YMCC\Evidence'
+if($SteamGuardSuccessorReceipt){
+  . (Join-Path $PSScriptRoot 'export-steam-guard-successor.ps1')
+  $localSuccessorScope=New-YmccSteamGuardSuccessorContext $SteamGuardSuccessorReceipt $localProject $WorkspaceRoot
+  $localEvidenceRoot=$localSuccessorScope.binding.evidenceRoot
+}
 if(!$localEvidence.StartsWith($localEvidenceRoot+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'LOCAL_DEPLOY_EVIDENCE_OUTSIDE_CORE'}
-. (Join-Path $PSScriptRoot 'release-export-identity.ps1')
+if($SteamGuardSuccessorReceipt){
+  . (Join-Path $PSScriptRoot 'release-export-identity.ps1') -SteamGuardSuccessorReceipt $SteamGuardSuccessorReceipt -GuardProductRoot $localProject -GuardWorkspaceRoot $WorkspaceRoot
+}else{
+  . (Join-Path $localDependencyRoot 'release-export-identity.ps1')
+}
 . (Join-Path $localProject 'native\decky_package_maintenance.ps1')
-. (Join-Path $PSScriptRoot 'fan-host-layout.ps1')
-. (Join-Path $PSScriptRoot 'local-fan-transition.ps1')
-. (Join-Path $PSScriptRoot 'settings-baseline-contract.ps1')
+. (Join-Path $localDependencyRoot 'fan-host-layout.ps1')
+. (Join-Path $localDependencyRoot 'local-fan-transition.ps1')
+. (Join-Path $localDependencyRoot 'settings-baseline-contract.ps1')
 function New-LocalDeploymentReceipt($Value){
   $path=Join-Path $localEvidence 'LOCAL-DEPLOYMENT.json'
   $stream=[IO.File]::Open($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
@@ -237,7 +250,7 @@ try{
   $localReceipt.buildId=$build.buildId;$localReceipt.sourceTreeSha256=$build.sourceTreeSha256
   $localReceipt.canonicalArchive=$proof;$localReceipt.priorInstalled=$priorInstalled
   if($CompletedLocalRepairReceipt){$localReceipt.completedLocalRepair=@{path=[IO.Path]::GetFullPath($CompletedLocalRepairReceipt);sha256=$CompletedLocalRepairSha256}}
-  $localReceipt.tools=@(foreach($relative in @('tools/deploy-local-mainline.ps1','tools/local-fan-transition.ps1','tools/deploy-installed.ps1','native/updater_hc_runtime.ps1','native/decky_package_maintenance.ps1')){$file=Join-Path $localProject $relative;@{path=$relative;bytes=(Get-Item -LiteralPath $file).Length;sha256=(Get-ExportFileHash $file)}})
+  $localReceipt.tools=@(foreach($relative in @('tools/deploy-local-mainline.ps1','tools/local-fan-transition.ps1','tools/deploy-installed.ps1','native/updater_hc_runtime.ps1','native/decky_package_maintenance.ps1')){$file=if($relative -in @('tools/deploy-local-mainline.ps1','tools/deploy-installed.ps1')){Join-Path $PSScriptRoot (Split-Path -Leaf $relative)}else{Join-Path $localProject $relative};@{path=$relative;fullPath=[IO.Path]::GetFullPath($file);bytes=(Get-Item -LiteralPath $file).Length;sha256=(Get-ExportFileHash $file)}})
   $derivedPlan=Get-LocalDeploymentDerivedDeckyPlan -SourceDecky (Join-Path $WorkspaceRoot 'Release\PowerControl\decky') -LoaderLock (Join-Path $localProject 'decky-plugin\vendor\decky-loader.lock.json') -InstalledDecky (Join-Path $localInstallParent 'PowerControl\decky')
   $localAllIncoming=@($localNew.entries)
   foreach($entry in $derivedPlan.entries){
@@ -264,7 +277,13 @@ try{
   # Original deploy copies this source default; the complete ZIP instead ships a
   # public-updater compatibility template. Both are known writer outputs. User
   # contents must be restored from the preimage, never accepted as a template.
-  $canonicalMutableWrites=@([pscustomobject]@{path='PowerControl/Sleep/player-blacklist.txt';sha256=(Get-ExportFileHash (Join-Path $localProject 'PowerControl/Sleep/player-blacklist.txt'))})
+  # The original installer also writes this exact ASCII+CRLF test flag.
+  # Admit only its known bytes so the mutable restore can keep the user's
+  # preimage (including absence); different/later content remains rejected.
+  $canonicalMutableWrites=@(
+    [pscustomobject]@{path='PowerControl/Sleep/player-blacklist.txt';sha256=(Get-ExportFileHash (Join-Path $localProject 'PowerControl/Sleep/player-blacklist.txt'))},
+    [pscustomobject]@{path='PowerControl/feature-assets/virtual-gamepad/test-auto-install.flag';sha256=(Get-ExportTextHash "HIDMAESTRO-TEST-AUTO-INSTALL-v1`r`n")}
+  )
   $localReceipt.canonicalMutableWrites=$canonicalMutableWrites
   [IO.Directory]::CreateDirectory($localBackup)|Out-Null
   Save-LocalDeploymentPreimage $localBefore $localBackup
@@ -276,7 +295,7 @@ try{
   Assert-LocalDeploymentStopped
   $localReceipt.stageRoot=$localStage;$localReceipt.backupRoot=$localBackup;$localReceipt.incomingTuple=$incomingTuple;$localReceipt.mutableState=$mutableState
   $localReceipt.canonicalChildBehavior='Original prerequisite preparation and native/InputHost/TDP helper smoke remain; no main app lifecycle or driver/device-setting operation requested'
-  foreach($tool in $localReceipt.tools){if((Get-ExportFileHash (Join-Path $localProject $tool.path)) -cne $tool.sha256){throw ('LOCAL_DEPLOY_TOOL_CHANGED: '+$tool.path)}}
+  foreach($tool in $localReceipt.tools){if((Get-ExportFileHash $tool.fullPath) -cne $tool.sha256){throw ('LOCAL_DEPLOY_TOOL_CHANGED: '+$tool.path)}}
   Assert-LocalDeploymentDerivedPreimage $derivedPlan
   $localReceipt.status='APPLYING_VERIFIED_IMMUTABLE_TUPLE';Write-LocalDeploymentReceipt $localReceipt
   $localImmutableStarted=$true
@@ -287,7 +306,9 @@ try{
   $null=Assert-FanHostExistingExport (Join-Path $localProject 'PowerControl\fan-host') (Join-Path $localInstallParent 'PowerControl\fan-host-v2')
   $localReceipt.status='RUNNING_ORIGINAL_CANONICAL_DEPLOY';Write-LocalDeploymentReceipt $localReceipt
   $shell=Join-Path $PSHOME 'pwsh.exe';if(!(Test-Path -LiteralPath $shell)){$shell=Join-Path $PSHOME 'powershell.exe'}
-  & $shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'deploy-installed.ps1') -WorkspaceRoot $WorkspaceRoot -InstallRoot $InstallRoot 1> (Join-Path $localEvidence 'CANONICAL-DEPLOY.stdout.log') 2> (Join-Path $localEvidence 'CANONICAL-DEPLOY.stderr.log')
+  $canonicalDeployArgs=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'deploy-installed.ps1'),'-SourceProjectRoot',$localProject,'-WorkspaceRoot',$WorkspaceRoot,'-InstallRoot',$InstallRoot)
+  if($SteamGuardSuccessorReceipt){$canonicalDeployArgs+=@('-SteamGuardSuccessorReceipt',$SteamGuardSuccessorReceipt)}
+  & $shell @canonicalDeployArgs 1> (Join-Path $localEvidence 'CANONICAL-DEPLOY.stdout.log') 2> (Join-Path $localEvidence 'CANONICAL-DEPLOY.stderr.log')
   $localReceipt.canonicalDeployExitCode=$LASTEXITCODE
   if($LASTEXITCODE -ne 0){throw 'LOCAL_DEPLOY_ORIGINAL_CANONICAL_FAILED'}
   Restore-LocalDeploymentMutable $mutableState $localNew.entries $localBackup $canonicalMutableWrites

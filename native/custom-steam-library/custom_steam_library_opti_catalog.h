@@ -155,8 +155,19 @@ inline Json merge(Json games, const std::vector<Candidate>& candidates, Ports& p
         if (!valid(item)) { ++result.skipped; continue; }
         const auto exe = pathKey(item.executablePath), dir = pathKey(item.installPath);
         std::set<size_t> matches;
+        // A shared launcher or folder cannot override a different native Steam
+        // identity. Keep that row intact and resolve this candidate separately.
+        auto compatible = [&](size_t i) {
+            const auto& row = games[i];
+            if (item.steamAppId <= 0 || !row.contains("Platform") || row["Platform"] != 0) return true;
+            const auto appId = text(row, "AppId");
+            if (appId.empty() || !std::all_of(appId.begin(), appId.end(), [](char c) { return c >= '0' && c <= '9'; })) return true;
+            const auto first = appId.find_first_not_of('0');
+            return first == std::string::npos || appId.substr(first) == std::to_string(item.steamAppId);
+        };
         auto include = [&](const Index& values, const std::string& key) {
-            if (const auto found = values.find(key); found != values.end()) matches.insert(found->second.begin(), found->second.end());
+            if (const auto found = values.find(key); found != values.end())
+                for (const auto i : found->second) if (compatible(i)) matches.insert(i);
         };
         if (!exe.empty()) include(byExe, exe);
         if (item.steamAppId > 0) include(bySteamId, std::to_string(item.steamAppId));

@@ -46,12 +46,13 @@ export function createIoBoundary(scratch) {
   }
   return { observation, requireReviewed, guard, safeFs };
 }
-export async function executeOriginalBundle(bundlePath, scratch, { timeoutMs = 15000 } = {}) {
+export async function executeOriginalBundle(bundlePath, scratch, { timeoutMs = 15000, testArgs = [] } = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 50 || timeoutMs > 30000) throw Error('TDP_VM_TIMEOUT_INVALID');
+  if (!Array.isArray(testArgs) || testArgs.length > 1 || testArgs.some(arg => arg !== '--shared-sleep-only')) throw Error('TDP_VM_SELECTION_INVALID');
   if (fs.existsSync(scratch)) throw Error('TDP_FIXTURE_FRESH_SCRATCH_REQUIRED');
   fs.mkdirSync(scratch, { recursive: true });
   const boundary = createIoBoundary(scratch), logs = [], handles = new Map();
-  const fakeProcess = { argv: [process.execPath, bundlePath, scratch], env: { NODE_ENV: 'production' },
+  const fakeProcess = { argv: [process.execPath, bundlePath, scratch, ...testArgs], env: { NODE_ENV: 'production' },
     versions: { node: process.versions.node }, version: process.version, platform: process.platform,
     cwd: () => scratch, pid: process.pid, exitCode: 0, nextTick: queueMicrotask };
   const clear = handle => {

@@ -1,0 +1,16 @@
+{
+  "origin": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VirtualControllerStability-20261108\\win5-persistent-20261110\\field-130556-r1\\candidate-r2\\native\\msi_native_foreground_isolation_runtime.h",
+    "bytes": 142698,
+    "sha256": "f982c0a4c36e95f27c1a03cded46a81eb8d8d5d5a07c055b77d57a450ebc8d57"
+  },
+  "byteStart": 85283,
+  "byteEndExclusive": 93653,
+  "spanSha256": "2bcbb58a034d87a3ddd4500d43169e67c78f46b307e5d22e1734d284fd8b94ac",
+  "generated": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VirtualControllerStability-20261108\\win5-persistent-20261110\\field-130556-r1\\source-r3\\tools\\gpd_native_handoff_cycle_partial_before.h",
+    "bytes": 8384,
+    "sha256": "aabfdd61e8accc2ec1d11bbb63240b0c242f3f7ad4995d7b1b19623d7cc2cb71"
+  },
+  "transform": "sole function identifier rename; complete R2 body retained"
+}

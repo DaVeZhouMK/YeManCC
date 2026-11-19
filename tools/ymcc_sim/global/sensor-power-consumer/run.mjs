@@ -7,22 +7,38 @@ import {spawnSync} from 'node:child_process';
 import {extract} from '../../../fixtures/legion_motion_consumer/extract_main.mjs';
 import {calibrationToolchainPreamble} from '../../../fixtures/hc_reviewed_calibration/toolchain.mjs';
 const moduleDir=path.dirname(fileURLToPath(import.meta.url)),repo=path.resolve(moduleDir,'../../../..');
-const args=process.argv.slice(2),outputArgument=args.shift();let selectedVariants=null;
-if(args.length){if(args.length!==2||args[0]!=='--variants')throw Error('Expected evidence directory and optional --variants name[,name]');selectedVariants=args[1].split(',');if(selectedVariants.some(v=>!v)||new Set(selectedVariants).size!==selectedVariants.length)throw Error('Empty or duplicate variant selection');}
+const args=process.argv.slice(2),outputArgument=args.shift();let selectedVariants=null,selectedCase=null;
+for(let i=0;i<args.length;i++){
+ const flag=args[i],value=args[++i];if(!value||value.startsWith('--'))throw Error('Missing sensor selection value');
+ if(flag==='--variants'&&!selectedVariants){selectedVariants=value.split(',');if(selectedVariants.some(v=>!v)||new Set(selectedVariants).size!==selectedVariants.length)throw Error('Empty or duplicate variant selection');}
+ else if(flag==='--case'&&selectedCase===null)selectedCase=value;
+ else throw Error('Unknown or repeated sensor selection flag: '+flag);
+}
+if(selectedCase!==null&&!(selectedVariants?.length===1&&['power-wake','provider-stop','current','gyro-cadence'].includes(selectedVariants[0])))throw Error('Sensor case requires exactly current,power-wake or provider-stop');
 const out=path.resolve(outputArgument||path.join(repo,'../../../Testing/YMCC/Evidence/SensorPowerConsumer',new Date().toISOString().replace(/[:.]/g,'-')+'-'+process.pid));
+if(selectedVariants?.includes('power-wake')){
+ if(selectedVariants.length!==1||!outputArgument)throw Error('power-wake requires explicit output and an exclusive variant');
+ const {runSensorPowerFixture}=await import('./power-wake.mjs');runSensorPowerFixture({repo,out,selectedCase});process.exit(process.exitCode??0);
+}
+if(selectedVariants?.includes('provider-stop')){
+ if(selectedVariants.length!==1||!outputArgument)throw Error('provider-stop requires explicit output and an exclusive variant');
+ const {runProviderStopFixture}=await import('./provider-stop.mjs');runProviderStopFixture({repo,out,selectedCase});process.exit(process.exitCode??0);
+}
 fs.mkdirSync(out,{recursive:true});
 if(selectedVariants?.includes('gyro-cadence')) {
  if(selectedVariants.length!==1)throw Error('gyro-cadence is an independent targeted consumer selection');
- const {runCadenceConsumer}=await import('./cadence.mjs');runCadenceConsumer({repo,out});process.exit(0);
+ const {runCadenceConsumer}=await import('./cadence.mjs');runCadenceConsumer({repo,out,selectedCase});process.exit(0);
 }
 
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const sourceBytes=fs.readFileSync(path.join(repo,'native/main.cpp')),source=sourceBytes.toString('utf8');
-const symbols=['inputCaptureSensorPowerMayRun','inputCaptureSensorStopRequested','inputCaptureConfigureVirtualGyroWake','inputCaptureVirtualGyroHostMayWake','inputCaptureUnsubscribeWinRtSensorsImpl','inputCaptureStopWinRtSensorsImpl','inputCaptureResubscribeWinRtSensorsImpl','inputCaptureNoteVirtualGyroReady','inputCaptureVirtualGyroWakeBusy','inputCaptureVirtualGyroWakeStep','inputCaptureSignalSensorPowerPause','inputCaptureRediscoverMissingWindowsSensors','inputCaptureSensorThreadProc','inputCaptureSensorThreadPostPower','inputCaptureSuspendSensorsForPower','inputCaptureResumeSensorsForPower','inputCaptureSessionDisplayPowerChanged','suspendResumeSubscriptionCallback','inputHostNoteVirtualGyroAcceptedLocked'];
+const symbols=['sgNowFileTime','inputCaptureSensorCaptureGeneration','inputCaptureSensorThreadRecoveryLog','inputCaptureSensorResumeScopeCurrent','inputCaptureSensorThreadNoteFailure','inputCaptureSensorThreadResourcesRetained','inputCaptureSensorPowerWorkWanted','inputCaptureSensorPowerAdmitted','inputCaptureSensorPowerMayRun','inputCaptureSensorStopRequested','inputCaptureConfigureVirtualGyroWake','inputCaptureVirtualGyroHostMayWake','logSensorRetirementFailure','inputCaptureUnsubscribeWinRtSensorsImpl','inputCaptureStopWinRtSensorsImpl','inputCaptureResubscribeWinRtSensorsImpl','inputCaptureNoteVirtualGyroReady','inputCaptureVirtualGyroWakeBusy','inputCaptureVirtualGyroWakeStep','inputCaptureSignalSensorPowerPause','inputCaptureRediscoverMissingWindowsSensors','inputCaptureSensorThreadProc','inputCaptureSensorThreadEnsure','inputCaptureSensorThreadPostPower','inputCaptureSuspendSensorsForPower','inputCaptureResumeSensorsForPower','inputCaptureSessionDisplayPowerChanged','suspendResumeSubscriptionCallback','inputHostNoteVirtualGyroAcceptedLocked'];
 const bindings=symbols.map(s=>extract(source,s));
 const fixture=fs.readFileSync(path.join(moduleDir,'fixture.cpp.in'),'utf8').replace(/^\uFEFF/,'');
 function once(text,before,after,label){assert.equal(text.split(before).length,2,'Unique source anchor: '+label);return text.replace(before,()=>after);}
 let template=once(fixture,'// PRODUCTION_FUNCTIONS',bindings.map(x=>x.code).join('\n\n'),'production functions');
+const powerForward=source.match(/^static constexpr UINT kSleepPowerForwardMessage=[^\n]+/m);assert(powerForward,'Original power forward message declaration');
+template=once(template,'// PRODUCTION_POWER_DECLARATIONS',powerForward[0],'actual forward message declaration');
 const frameBinding=extract(source,'InputFrameSubmission','struct');
 const readCurrentSource=fs.readFileSync(path.join(repo,'native/virtual_switch_verification_runtime.h'),'utf8');
 const readCurrentBinding=extract(readCurrentSource,'readCurrent');
@@ -34,11 +50,12 @@ const powerNames=[...originalPower.matchAll(/check\("([^"]+)"/g)].map(m=>m[1]);
 assert.equal(powerNames.length,31,'Retain all 31 original assertions');assert.equal(new Set(powerNames).size,31);
 const virtualScenarios=[...fixture.matchAll(/beginVirtualCase\("([^"]+)",selected\)/g)].map(m=>m[1]);
 assert(virtualScenarios.length>0&&new Set(virtualScenarios).size===virtualScenarios.length,'Unique explicit virtual scenarios');
+assert(selectedCase===null||virtualScenarios.includes(selectedCase),'Unknown or empty current virtual scenario');
 const actor=bindings.find(b=>b.symbol==='inputCaptureSensorThreadProc').code;
 assert(actor.includes('g_virtualGyroWake.waitMs(')&&actor.includes('inputCaptureVirtualGyroWakeStep();'),'Actual STA wait and idle step required');
 assert(bindings.find(b=>b.symbol==='inputCaptureUnsubscribeWinRtSensorsImpl').code.includes('g_virtualGyroWake.cancelPending();'),'Actual unsubscribe cancellation required');
 fs.writeFileSync(path.join(out,'main.snapshot.cpp'),sourceBytes);fs.writeFileSync(path.join(out,'sensor_virtual_link_wake.source.h'),header);fs.writeFileSync(path.join(out,'virtual_switch_verification_runtime.source.h'),readCurrentSource);
-const files=['native/main.cpp','native/sensor_virtual_link_wake.h','native/input_frame_submission.h','native/input_host_recovery_health.h','native/virtual_output_status.h','native/virtual_switch_verification_runtime.h','native/sensor_thread_mailbox.h','native/sensor_device_change.h','native/sensor_inventory_cache.h','native/sensor_inventory.h','native/windows_motion_submission.h','native/sleep_notification_evidence.h','deps/json/json.hpp','tools/ymcc_sim/global/sensor-power-consumer/fixture.cpp.in','tools/ymcc_sim/global/sensor-power-consumer/run.mjs','tools/fixtures/legion_motion_consumer/extract_main.mjs','tools/lib/hc_controller_motion_fixture.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
+const files=['native/main.cpp','native/sensor_virtual_link_wake.h','native/input_frame_submission.h','native/input_host_recovery_health.h','native/virtual_output_status.h','native/virtual_switch_verification_runtime.h','native/sensor_thread_mailbox.h','native/log_snapshot_state.h','native/input_host_shared_power.h','native/sleep_power_observation.h','native/sleep_power_state.h','native/sleep_power_revocation.h','native/sensor_device_change.h','native/sensor_inventory_cache.h','native/sensor_inventory.h','native/windows_motion_submission.h','native/sleep_notification_evidence.h','native/sleep_power_dispatch.h','deps/json/json.hpp','tools/ymcc_sim/global/sensor-power-consumer/fixture.cpp.in','tools/ymcc_sim/global/sensor-power-consumer/run.mjs','tools/fixtures/legion_motion_consumer/extract_main.mjs','tools/lib/hc_controller_motion_fixture.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
 const frozenRaw=new Map([['native/main.cpp',sourceBytes],['native/sensor_virtual_link_wake.h',Buffer.from(header)],['native/virtual_switch_verification_runtime.h',Buffer.from(readCurrentSource)]]);
 const sourceHashes=files.map(p=>({path:p,sha256:sha(frozenRaw.get(p)||fs.readFileSync(path.join(repo,p)))}));
 const result={schemaVersion:1,ok:false,status:'RUNNING',sourceHashes,bindings:[...bindings.map(b=>({...b,file:'native/main.cpp'})),{...frameBinding,file:'native/main.cpp'},{...readCurrentBinding,file:'native/virtual_switch_verification_runtime.h'}].map(({code,...b})=>b),runs:[],hardwareIo:false,normalYmccStarted:false,
@@ -49,10 +66,10 @@ try {
  // Existing faults keep exactly the original 31 assertions. New mutations run
  // only their named virtual case, without repeating the real-time STA case.
  const modes=[
-  {name:'current',expectedPass:true,scenarios:[...virtualScenarios,'power']},
+  {name:'current',expectedPass:true,scenarios:selectedCase?[selectedCase]:[...virtualScenarios,'power'],args:selectedCase?['--case',selectedCase]:undefined},
   {name:'missing-early-power-pause',args:['--power-only'],scenarios:['power'],requiredFailure:'OS callback revokes admission before GUI exists',code:s=>once(s,'if (type == PBT_APMSUSPEND) inputCaptureSignalSensorPowerPause();','if (type == PBT_APMSUSPEND) {}','early power pause')},
   {name:'missing-display-off-pause',args:['--power-only'],scenarios:['power'],requiredFailure:'display OFF immediately revokes binding',code:s=>once(s,'if (state == 0) inputCaptureSuspendSensorsForPower();','if (state == 0) {}','display OFF pause')},
-  {name:'resume-while-off',args:['--power-only'],scenarios:['power'],requiredFailure:'automatic resume while display OFF stays paused',code:s=>once(s,'display != 0 && (phase == PowerLifecycle::Ready','true && (phase == PowerLifecycle::Ready','resume admission')},
+  {name:'resume-while-off',args:['--power-only'],scenarios:['power'],requiredFailure:'automatic resume while display OFF stays paused',code:s=>once(s,'display != 0;','true;','resume admission')},
   {name:'virtual-ignore-link-switch',args:['--case','disabled'],scenarios:['disabled'],assertions:3,requiredFailure:'virtual link OFF rejects the ready notification',header:s=>once(s,'enabled_.store(enabled,std::memory_order_release);','enabled_.store(true,std::memory_order_release);','ignore effective link switch')},
   {name:'virtual-ignore-old-configuration',args:['--case','reconfigured'],scenarios:['reconfigured'],assertions:3,requiredFailure:'virtual link reconfiguration invalidates the pending old configuration',header:s=>once(s,'if(context_==context && enabled_.load(std::memory_order_relaxed)==enabled)return;','if(pending_ && context_!=context)return;\n        if(context_==context && enabled_.load(std::memory_order_relaxed)==enabled)return;','ignore configuration replacement')},
   {name:'virtual-refresh-healthy',args:['--case','healthy'],scenarios:['healthy'],assertions:4,requiredFailure:'virtual link healthy pair never resubscribes',code:s=>once(s,'if(fresh){log(ticket->verification?"samples-resumed":"already-streaming",true);return;}','if(false && fresh){log(ticket->verification?"samples-resumed":"already-streaming",true);return;}','refresh an already healthy source')},
@@ -65,7 +82,7 @@ try {
   if(name!=='current')assert(code!==template||compiledHeader!==header,'Fault must change a real compiled production input: '+name);
   fs.writeFileSync(path.join(dir,'fixture.cpp'),code);fs.writeFileSync(path.join(dir,'sensor_virtual_link_wake.h'),compiledHeader);
   const row={name,expectedPass:mode.expectedPass===true,args:mode.args||[],expectedScenarios:mode.scenarios,requiredFailure:mode.requiredFailure,compiledSourceSha256:sha(code),compiledHeaderSha256:sha(compiledHeader),passed:false};result.runs.push(row);save();
-  const batch=calibrationToolchainPreamble(vcvars)+`cd /d "${dir}"\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /O1 /DUNICODE /D_UNICODE fixture.cpp /I"${path.join(repo,'deps/json')}" /I"${path.join(repo,'native')}" /Fe:fixture.exe /link user32.lib ole32.lib >compile.log 2>&1\r\nexit /b %errorlevel%\r\n`;
+  const batch=calibrationToolchainPreamble(vcvars)+`cd /d "${dir}"\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /O1 /DUNICODE /D_UNICODE /showIncludes /sourceDependencies dependencies.json fixture.cpp /I"${path.join(repo,'deps/json')}" /I"${path.join(repo,'native')}" /Fe:fixture.exe /link /VERBOSE:LIB user32.lib ole32.lib >compile.log 2>&1\r\nexit /b %errorlevel%\r\n`;
   fs.writeFileSync(path.join(dir,'compile.cmd'),batch);
   let started=Date.now();const c=spawnSync('cmd.exe',['/d','/c',path.join(dir,'compile.cmd')],{encoding:'utf8',windowsHide:true,timeout:120000});
   row.build={elapsedMs:Date.now()-started,timeoutMs:120000,exitCode:c.status,signal:c.signal,spawnError:c.error?String(c.error):null};save();

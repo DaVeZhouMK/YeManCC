@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {matrixToolchainInputs,MATRIX_TOOL_MANIFESTS} from '../motion-consumer-signals/matrix-evidence.mjs';
@@ -25,8 +24,7 @@ const fixed=[
 export function sourceFiles(){return [...new Set(fixed)];}
 export function inputs(repo=REPO){
  const tools=matrixToolchainInputs(repo);
- const base=JSON.parse(fs.readFileSync(path.join(repo,MATRIX_TOOL_MANIFESTS.at(-1)),'utf8'));
  need(MATRIX_TOOL_MANIFESTS.length===6&&tools.files.length===582,'APPROVED_TOOL_CLOSURE');
- need(typeof base.powershellExecutable==='string','POWERSHELL_DECLARATION_REQUIRED');
- return {repo:path.resolve(repo),sources:sourceFiles(),tools,powershellExecutable:base.powershellExecutable,manifests:[...MATRIX_TOOL_MANIFESTS]};
+ need(typeof tools.powershellExecutable==='string','POWERSHELL_DECLARATION_REQUIRED');
+ return {repo:path.resolve(repo),sources:sourceFiles(),tools,powershellExecutable:tools.powershellExecutable,manifests:[...MATRIX_TOOL_MANIFESTS]};
 }

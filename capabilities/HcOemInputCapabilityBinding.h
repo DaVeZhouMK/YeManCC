@@ -4,11 +4,34 @@
 #pragma once
 #include "hc-device-catalog.generated.h"
 #include "HcOneXVendorInputContract.h"
+#include <array>
 #include <string>
 #include <string_view>
 #include <utility>
 
 namespace ymcc::capabilities::oem {
+namespace aokzoe {
+// AOKZOEA1.cs OEMChords; A1Pro -> A1, A1X/A2 -> A1Pro.
+// These six operations describe three controls, not six independent buttons.
+// No rear-button protocol, EC unlock, or new model is inferred by this metadata.
+inline constexpr bool hasA1KeyboardOperations(std::string_view deviceClass) noexcept {
+    return deviceClass == "HandheldCompanion.Devices.AOKZOEA1" ||
+        deviceClass == "HandheldCompanion.Devices.AOKZOEA1Pro" ||
+        deviceClass == "HandheldCompanion.Devices.AOKZOEA1X" ||
+        deviceClass == "HandheldCompanion.Devices.AOKZOEA2";
+}
+inline constexpr std::array<std::string_view, 2> physicalKeyIds(
+        std::string_view deviceClass, std::string_view key) noexcept {
+    if (!hasA1KeyboardOperations(deviceClass)) return {};
+    if (key == "home" || key == "homelp") return {"home", {}};
+    if (key == "keyboard") return {"keyboard", {}};
+    if (key == "turbo") return {"turbo", {}};
+    if (key == "homekb") return {"home", "keyboard"};
+    if (key == "hometb") return {"home", "turbo"};
+    return {};
+}
+} // namespace aokzoe
+
 // Exact ONEX identity input to the existing shared OEM/motion/lighting consumers.
 // Fixed HC f2e58468 IDevice factory: two manufacturers, 21 product labels.
 // Source SHA256 f608b6f5a165e8b74a48d09d81fa5316c72273c0efd721327b1d2deccf1d5a47.

@@ -7,16 +7,16 @@ import {verifySavedExecutionCompletion,completionProofMatchesContract,completion
 import fs from 'node:fs';
 import {isSleepEngineDllCase,auditSleepEngineDllPayload} from './consumer/sleep-engine/dll-payload-audit.mjs';
 import path from 'node:path';
-import {sourcePath,sha256File,checkStructuredEvidence,evaluateResult,MAX_ARTIFACT_INPUTS} from './runner.mjs';
+import {sourcePath,sha256File,checkStructuredEvidence,evaluateResult,MAX_ARTIFACT_INPUTS,artifactInputLimit} from './runner.mjs';
 const validId=value=>typeof value==='string'&&/^[a-z0-9][a-z0-9.-]{0,99}$/.test(value);
 const validHash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/i.test(value);
 const validSource=value=>value&&typeof value==='object'&&typeof value.path==='string'&&validHash(value.sha256);
 const inside=(root,target)=>{const rel=path.relative(root,target);return rel===''||(!rel.startsWith(`..${path.sep}`)&&rel!=='..'&&!path.isAbsolute(rel));};
 /** Compare explicit path membership, preserving duplicate and provenance differences. */
-function registeredArtifactMismatch(executed,declared,code){
+function registeredArtifactMismatch(executed,declared,code,limit=MAX_ARTIFACT_INPUTS){
  const scan=(rows,objects)=>{
   const paths=new Map(),duplicates=[],invalid=[];
-  if(!Array.isArray(rows)||rows.length>MAX_ARTIFACT_INPUTS)return {paths,duplicates,invalid,schemaInvalid:true,count:Array.isArray(rows)?rows.length:null};
+  if(!Array.isArray(rows)||rows.length>limit)return {paths,duplicates,invalid,schemaInvalid:true,count:Array.isArray(rows)?rows.length:null};
   rows.forEach((row,index)=>{
    const file=objects?row?.path:row;
    if(typeof file!=='string'||!path.isAbsolute(file)||/[\0\r\n]/.test(file)){invalid.push({index,path:typeof file==='string'?file:null});return;}
@@ -71,7 +71,7 @@ export function auditReceipts(receiptFiles,{repoRoot,maxTotalReceiptBytes=RECEIP
  for(const {item,root,runId,hostPayload,candidateInputs,executionRepoRoot}of latest.values()){
   const row={id:item.id,originalStatus:item.status,status:'BLOCKED',sourceRunId:runId,sourceMismatches:[],diagnostics:[],
    referenceClosure:item.referenceClosure??null,referenceInputs:item.referenceInputs??[],caseDir:path.join(root,'cases',item.id),
-   execution:{source:item.source??null,scope:item.scope??null,completionProof:item.completionProof??null,sourceInputs:[...(Array.isArray(item.sourceInputs)?item.sourceInputs:[]),...(Array.isArray(item.dependencyInputs)?item.dependencyInputs:[])].map(row=>row?.path)}};
+   execution:{domain:item.domain,kind:item.kind,source:item.source??null,scope:item.scope??null,completionProof:item.completionProof??null,sourceInputs:[...(Array.isArray(item.sourceInputs)?item.sourceInputs:[]),...(Array.isArray(item.dependencyInputs)?item.dependencyInputs:[])].map(row=>row?.path)}};
   report.cases.push(row);
   if(item.status!=='PASS'){row.status=item.status==='FAIL'||item.status==='TIMEOUT'?'FAIL':'BLOCKED';row.diagnostics.push({code:'PRIOR_CASE_NOT_PASS'});continue;}
   if(evaluateResult(item)!=='PASS'){row.status='FAIL';row.diagnostics.push({code:'CONTRADICTORY_PASS_RECEIPT'});continue;}
@@ -84,7 +84,7 @@ export function auditReceipts(receiptFiles,{repoRoot,maxTotalReceiptBytes=RECEIP
    if(!/^[a-f0-9]{64}$/i.test(input.sha256??'')||actual!==input.sha256.toLowerCase())row.sourceMismatches.push({path:input.path,expected:input.sha256??null,actual});
   }
   if(item.candidateArtifacts!==undefined){
-    if(!Array.isArray(item.candidateArtifacts)||item.candidateArtifacts.length>MAX_ARTIFACT_INPUTS){row.diagnostics.push({code:'CANDIDATE_ARTIFACT_SCHEMA_INVALID'});continue;}
+    if(!Array.isArray(item.candidateArtifacts)||item.candidateArtifacts.length>artifactInputLimit(item)){row.diagnostics.push({code:'CANDIDATE_ARTIFACT_SCHEMA_INVALID'});continue;}
     for(const binary of item.candidateArtifacts){
       if(!binary||typeof binary.path!=='string'||!path.isAbsolute(binary.path)||/[\0\r\n]/.test(binary.path)||!/^[a-f0-9]{64}$/i.test(binary.sha256??'')){row.sourceMismatches.push({role:'explicit-candidate-artifact',path:binary?.path??null,expected:binary?.sha256??null,actual:null});continue;}
       let actual=null;try{actual=sha256File(binary.path);}catch{}
@@ -92,7 +92,7 @@ export function auditReceipts(receiptFiles,{repoRoot,maxTotalReceiptBytes=RECEIP
     }
   }
   if(item.bundle!==undefined||item.bundledToolAuthority!==undefined||item.compilerKind==='typescript-esbuild-bundle'||/\.(?:[cm]?ts|tsx)$/.test(item.source??'')) {
-    try {row.execution.bundledToolProof=verifyBundledNodeReceipt(item,repoRoot,row.caseDir,{limit:MAX_ARTIFACT_INPUTS});row.execution.explicitAdapterArtifacts=item.explicitAdapterArtifacts;}
+    try {row.execution.bundledToolProof=verifyBundledNodeReceipt(item,repoRoot,row.caseDir,{limit:artifactInputLimit(item)});row.execution.explicitAdapterArtifacts=item.explicitAdapterArtifacts;}
     catch(error) {row.diagnostics.push({code:'BUNDLED_NODE_TOOL_AUTHORITY_INVALID',reason:String(error.message)});continue;}
   }
   if(isSleepEngineDllCase(item.id)) {
@@ -175,7 +175,7 @@ export function auditRegisteredScope(report, adapters, {profile='full', domains=
 
   }
   // Verified automatic TS tools and entry/map are not explicit registration members.
-  const artifactMismatch=registeredArtifactMismatch(adapter.kind==='typescript'?row.execution?.explicitAdapterArtifacts:row.execution?.candidateArtifacts,adapter.artifactInputs,adapter.kind==='typescript'?'REGISTERED_EXPLICIT_ARTIFACTS_CHANGED':'REGISTERED_ARTIFACTS_CHANGED');
+  const artifactMismatch=registeredArtifactMismatch(adapter.kind==='typescript'?row.execution?.explicitAdapterArtifacts:row.execution?.candidateArtifacts,adapter.artifactInputs,adapter.kind==='typescript'?'REGISTERED_EXPLICIT_ARTIFACTS_CHANGED':'REGISTERED_ARTIFACTS_CHANGED',Math.min(artifactInputLimit(adapter),artifactInputLimit({id:row.id,...row.execution})));
   if(artifactMismatch)differences.push(artifactMismatch);
    if(adapter.completionContract!==undefined&&!completionProofMatchesContract(row.execution?.completionProof,adapter.completionContract))differences.push({code:'REGISTERED_COMPLETION_CONTRACT_NOT_EXECUTED',expected:completionContractFingerprint(adapter.completionContract),executed:row.execution?.completionProof?.contractFingerprint??null});
   if(row.execution?.source!==adapter.path)differences.push({code:'REGISTERED_ENTRY_CHANGED',expected:adapter.path,executed:row.execution?.source??null});

@@ -22,7 +22,20 @@
 using json=nlohmann::json;
 static bool countAllocations=false;
 static unsigned long long allocations=0;
-void* operator new(std::size_t n){if(countAllocations)++allocations;if(auto p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
+#if defined(YMCC_NATIVE_CONTROL_DRAIN_ONLY)
+static bool controlArmForeground=false;
+static bool controlAllocationProbe=false;
+static std::size_t controlAllocationSequence=0,controlAllocationFailAt=0;
+#endif
+void* operator new(std::size_t n){
+#if defined(YMCC_NATIVE_CONTROL_DRAIN_ONLY)
+if(controlAllocationProbe
+#if defined(_DEBUG)
+ && n>=64 // Checked STL default-string proxy allocation has a separate noexcept boundary.
+#endif
+ && ++controlAllocationSequence==controlAllocationFailAt){controlAllocationProbe=false;throw std::bad_alloc();}
+#endif
+if(countAllocations)++allocations;if(auto p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
 void operator delete(void* p)noexcept{std::free(p);}
 void operator delete(void* p,std::size_t)noexcept{std::free(p);}
 #include "actual-serializer.inc"
@@ -35,6 +48,7 @@ static struct FixtureAxisSettings {
 #include "actual-blend.inc"
 #include "actual-frame-consumer.inc"
 #include "touch_haptic_dispatch.h"
+#include "sleep_power_state.h"
 #include "actual-source-snapshot.inc"
 using Sample=InputCaptureGamepadSnapshot;
 static Sample physical=[] {Sample s;s.inputSource="msi-dinput";s.live=s.readContextStable=true;
@@ -51,7 +65,11 @@ static std::vector<json> rows;
 static void appendNativeLifecycleLog(const char* event,json row){++logAttempts;if(loggerThrows)throw std::runtime_error("logger-fault");row["event"]=event;rows.push_back(std::move(row));}
 static unsigned foregroundCalls=0;
 static bool foregroundChanged=false,foregroundClassFail=false,foregroundNull=false;
-static HWND fixtureForeground(){++foregroundCalls;return foregroundNull?nullptr:reinterpret_cast<HWND>(static_cast<std::uintptr_t>(foregroundChanged && foregroundCalls%2==0?202:101));}
+static HWND fixtureForeground(){
+#if defined(YMCC_NATIVE_CONTROL_DRAIN_ONLY)
+if(controlArmForeground){controlArmForeground=false;controlAllocationFailAt=controlAllocationSequence+1;controlAllocationProbe=true;}
+#endif
+++foregroundCalls;return foregroundNull?nullptr:reinterpret_cast<HWND>(static_cast<std::uintptr_t>(foregroundChanged && foregroundCalls%2==0?202:101));}
 static DWORD fixtureForegroundThread(HWND,DWORD* pid){*pid=77;return 88;}
 static int fixtureForegroundClass(HWND,char* value,int size){
     if(foregroundClassFail){SetLastError(ERROR_ACCESS_DENIED);return 0;}
@@ -66,6 +84,18 @@ static int fixtureForegroundClass(HWND,char* value,int size){
 #undef GetForegroundWindow
 #undef GetWindowThreadProcessId
 #undef GetClassNameA
+#if defined(YMCC_NATIVE_CONTROL_DRAIN_ONLY)
+#include "actual-exit-receipt.inc"
+static unsigned controlExitEdgeCalls=0,controlExitFlushCalls=0;
+static void inputEdgeFlushEvidence(const json&,ULONGLONG,bool,InputEdgeDrainReceipt* receipt) noexcept {
+    ++controlExitEdgeCalls;*receipt={};receipt->attempted=receipt->drained=true;
+}
+static void appendDomainLog(const char*,const char* event,const json& row){
+    ++logAttempts;if(loggerThrows)throw std::runtime_error("logger-fault");auto copy=row;copy["event"]=event;rows.push_back(std::move(copy));
+}
+static void flushNativeLifecycleLogs(){++controlExitFlushCalls;}
+#include "actual-exit-consumer.inc"
+#endif
 static std::atomic<unsigned long long> g_powerGeneration{1};
 #include "actual-classifier.inc"
 static unsigned checks=0;
@@ -112,7 +142,13 @@ static json compositionCase(const char* name,const XINPUT_GAMEPAD& sourcePad,
         "observer leaves source, input/output pad, motion, blend, frame and receipt unchanged");
     auto witness=rows.back();witness["fixtureCase"]=name;return witness;
 }
+#if defined(YMCC_NATIVE_CONTROL_DRAIN_ONLY)
+#include "control_drain_cases.inc"
+#endif
 int main(){try{
+#if defined(YMCC_NATIVE_CONTROL_DRAIN_ONLY)
+    return fixtureNativeControlDrainCases();
+#else
     check(nativeLifecycleRecordIsStreaming("input-native-signal-window",json::object()),"native sustained rows stay in gated detailed lane");
     check(nativeLifecycleRecordIsStreaming("msi-dinput-trigger-evidence",{{"legacyRecordSelected",false}}),"post-cap source witnesses cannot bypass detailed gate");
     check(!nativeLifecycleRecordIsStreaming("msi-dinput-trigger-evidence",{{"legacyRecordSelected",true}}),"original first64 resident evidence remains available");
@@ -125,6 +161,8 @@ int main(){try{
     check(rows.size()==1,"first actual runtime witness");const auto& first=rows.back();
     check(first["source"]["pad"]["buttons"]==4096,"physical source pad retained");
     check(first["nativeFinalFrame"]["raw"]["buttons"]==0,"expected focus neutral is actual final frame");
+    check(!frameBefore.contains("screenButtons")&&first["nativeFinalFrame"]["screenButtons"]==0,
+        "selected witness records an explicit zero without changing the transport frame");
     check(first["semanticNeutral"]==true&&first["focusReleaseBarrierMask"]==4,"neutral and release barrier explicit");
     check(first["request"]["sampleSequence"]==11&&first["request"]["receiptCapturedSampleSequence"]==10,"legacy actual serialized sample wins only in witness");
     check(request["sampleSequence"]==10,"existing receipt unchanged");
@@ -239,7 +277,9 @@ int main(){try{
     check(nc["blend"]["useMotion"]==true&&nc["blend"]["lxShort"]==6000&&nc["blend"]["outY"]==-3000&&
         nc["finalOverride"]=="semantic-neutral"&&nc["finalUseMotion"]==false,
         "pre-neutral blend facts survive while final semantic override is explicit");
-    check(neutralRow["nativeFinalFrame"]==focusIsolationAssembleFrame(focusIsolationNeutralContent()),
+    auto expectedNeutralFrame=focusIsolationAssembleFrame(focusIsolationNeutralContent());
+    expectedNeutralFrame["screenButtons"]=0;
+    check(neutralRow["nativeFinalFrame"]==expectedNeutralFrame,
         "semantic neutral covers the actual serialized final frame");cases.push_back(neutralRow);
 
     auto deniedRow=compositionCase("analog-not-admitted",source,input,output,motion,false,"left",0.5,false,10000);
@@ -286,14 +326,19 @@ int main(){try{
     const auto guideNeutral=fixtureGuidePad(zero,true);
     const auto neutralGuideRow=compositionCase("pure-Guide-semantic-neutral-keeps-source-fact",zero,zero,guideNeutral,unmapped,true,"left",0.0,true,16000);
     check(neutralGuideRow["window"]["selectedSourceNonzeroReads"]==1&&
-        neutralGuideRow["nativeFinalFrame"]==focusIsolationAssembleFrame(focusIsolationNeutralContent()),
+        neutralGuideRow["nativeFinalFrame"]==expectedNeutralFrame,
         "source activity remains true while actual semantic-neutral output stays completely neutral");cases.push_back(neutralGuideRow);
     physical.specialXbox=false;
+    FocusFrameContent screenButtons;screenButtons.screenButtons=0x21;
+    fixtureTick=17001;record(screenButtons,17000);
+    check(rows.back()["wireMonotonicTick"]==17000&&rows.back()["nativeFinalFrame"]==focusIsolationAssembleFrame(screenButtons),
+        "nonzero screen button mask is retained exactly in the selected witness");
     std::cout<<json({{"pass",true},{"checks",checks},{"witnessRows",rows.size()},{"longRunRows",longRunRows},{"realDevicesUsed",false},{"driverOrGameConsumptionProven",false},{"compositionWitnesses",std::move(cases)},
         {"compositionNonselectedCalls",10000},{"compositionNonselectedAllocations",nonselectedAllocations},
         {"closedGateAllocations",closedGateAllocations},
         {"actualProductionBlend",true},{"actualProductionAxisModifiers",true},
         {"unknowns",{"hardware-packet-freshness","physical-suppression","driver-delivery","game-consumption","parent-persistent-lifecycle"}}}).dump()<<'\n';return 0;
+#endif
 }catch(const std::exception& e){std::cout<<json({{"pass",false},{"checks",checks},{"error",e.what()},{"lastWitness",rows.empty()?json(nullptr):rows.back()}}).dump()<<'\n';return 1;}}
 
 

@@ -1,6 +1,7 @@
 #pragma once
 #include "json.hpp"
 #include "custom_steam_library_exclusions.h"
+#include "../game_rule_literal.h"
 #include <algorithm>
 #include <cstdint>
 #include <limits>
@@ -34,6 +35,7 @@ inline std::string executableKey(std::string value) {
     return value;
 }
 inline bool validRule(const std::string& rule) {
+    if (ymcc::gameruleliteral::reserved<char>(rule)) return ymcc::gameruleliteral::valid<char>(rule);
     if (rule.empty() || rule == "." || rule == ".." || rule.front() == '#' || rule.front() == ';' ||
         rule.front() == ' ' || rule.back() == ' ' || rule.ends_with(".exe") ||
         rule.find_first_of("\\/:*?[]<>|#\"\r\n\t") != std::string::npos) return false;
@@ -186,9 +188,10 @@ inline std::set<std::string> unionRules(const Json& state) {
 // Only exact complete marker pairs grant deletion authority. Text outside the
 // block is byte-preserved. If a manual UI rewrite removed both markers, all
 // naked rules are manual for this purpose; never infer ownership from history.
-inline std::string renderManagedBlock(const std::string& original, const std::set<std::string>& rules) {
+inline std::string renderManagedBlock(const std::string& original, const std::set<std::string>& rules, bool preserveExisting = false) {
     for (const auto& rule : rules) if (!validRule(rule)) throw std::runtime_error("Invalid managed rule");
-    std::size_t begin = std::string::npos, end = std::string::npos;
+    std::size_t begin = std::string::npos, end = std::string::npos, endLine = std::string::npos;
+    std::set<std::string> additions = rules;
     for (std::size_t offset = 0; offset < original.size();) {
         const auto newline = original.find('\n', offset);
         const auto next = newline == std::string::npos ? original.size() : newline + 1;
@@ -200,11 +203,21 @@ inline std::string renderManagedBlock(const std::string& original, const std::se
         } else if (line == endMarker) {
             if (begin == std::string::npos || end != std::string::npos) throw std::runtime_error("Unpaired managed whitelist markers; preserved file");
             end = next;
+            endLine = offset;
+        } else if (begin != std::string::npos && end == std::string::npos) {
+            additions.erase(line);
         }
         offset = next;
     }
     if ((begin == std::string::npos) != (end == std::string::npos)) throw std::runtime_error("Incomplete managed whitelist block; preserved file");
     const std::string newline = original.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+    // Unknown ownership may preserve an already published block, but never
+    // create a rule from unconfirmed metadata. Add only freshly proven rules.
+    if (preserveExisting && begin != std::string::npos) {
+        std::string extra;
+        for (const auto& rule : additions) extra += rule + newline;
+        return original.substr(0, endLine) + extra + original.substr(endLine);
+    }
     std::string block;
     if (!rules.empty()) {
         block = beginMarker + newline;

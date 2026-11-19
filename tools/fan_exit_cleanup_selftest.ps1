@@ -131,7 +131,7 @@ Require-Contains $native 'static bool joinThreadBoundedForExit' 'bounded native 
 Require-Contains $exitBody 'sgStopWorkThread(1000);' 'sleep worker exit wait is bounded'
 Require-Contains $exitBody 'poolStop(1000);' 'IPC worker exit wait is bounded'
 Require-Contains $exitBody 'stopTopMonitorForExit(1000);' 'monitor exit wait is bounded'
-Require-Contains $native 'static bool sgCleanupBeforeExit(bool nonBlocking)' 'sleep exit cleanup has an explicit non-blocking mode'
+Require-Contains $native 'static bool sgCleanupBeforeExit(bool nonBlocking, bool finalizeSession)' 'sleep exit cleanup has an explicit non-blocking mode'
 Require-Contains $native 'if (!opLock.try_lock()) {' 'sleep cleanup does not wait behind an active sleep worker'
 Require-Contains $native '"sleep-exit-cleanup-deferred"' 'deferred sleep recovery is diagnosable'
 Require-Contains $exitBody 'sgCleanupBeforeExit(true)' 'exit uses non-blocking sleep cleanup'

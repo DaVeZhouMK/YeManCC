@@ -1,0 +1,2348 @@
+// PREPARED ONLY. Original runtime bodies + public Windows owner composition.
+// This executable, if explicitly built/run by the parent, touches only its own
+// inert images/logs/registry namespace. Engine/ReadScope/power remain leaf ports.
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#define _WIN32_WINNT 0x0A00
+#define steamrecordwin OriginalRuntimeRecordProvider
+#include <windows.h>
+#include <atomic>
+static std::atomic<unsigned> registryReads{0};
+static LSTATUS WINAPI countedRegGetValueW(HKEY key,LPCWSTR sub,LPCWSTR value,DWORD flags,LPDWORD type,PVOID data,LPDWORD size) {
+    ++registryReads; return RegGetValueW(key,sub,value,flags,type,data,size);
+}
+#define RegGetValueW countedRegGetValueW
+#include "steam_session_observer.h"
+#undef RegGetValueW
+
+#include <shellapi.h>
+// Instrument actual pin acquisition; every wrapper calls its original Win32 API.
+static std::atomic<unsigned> nativeReadProcessQueries{0};
+static HANDLE WINAPI nativeReadCountedOpenProcess(DWORD a,BOOL i,DWORD p){
+    ++nativeReadProcessQueries;return ::OpenProcess(a,i,p);
+}
+static BOOL WINAPI nativeReadCountedProcessTimes(HANDLE h,LPFILETIME b,LPFILETIME e,LPFILETIME k,LPFILETIME u){
+    ++nativeReadProcessQueries;return ::GetProcessTimes(h,b,e,k,u);
+}
+static BOOL WINAPI nativeReadCountedQueryImage(HANDLE h,DWORD f,LPWSTR n,PDWORD s){
+    ++nativeReadProcessQueries;return ::QueryFullProcessImageNameW(h,f,n,s);
+}
+static BOOL WINAPI nativeReadCountedProcessSession(DWORD p,DWORD* s){
+    ++nativeReadProcessQueries;return ::ProcessIdToSessionId(p,s);
+}
+#define OpenProcess nativeReadCountedOpenProcess
+#define GetProcessTimes nativeReadCountedProcessTimes
+#define QueryFullProcessImageNameW nativeReadCountedQueryImage
+#define ProcessIdToSessionId nativeReadCountedProcessSession
+#include "steam_native_read_scope.h"
+#undef ProcessIdToSessionId
+#undef QueryFullProcessImageNameW
+#undef GetProcessTimes
+#undef OpenProcess
+#include <filesystem>
+#include <iostream>
+#include <future>
+#include <thread>
+#include "steam_tracker_completion_dispatch.h"
+#include <stdexcept>
+using namespace ymcc::steamsession;
+static int tests = 0;
+static void expect(bool value, const char* label) {
+    if (!value) throw std::runtime_error(label);
+    ++tests; std::cout << "PASS " << label << '\n';
+}
+template<class F> static bool until(F f, DWORD timeoutMs = 3000) {
+    const auto end = GetTickCount64() + timeoutMs;
+    while (!f()) { if (GetTickCount64() >= end) return false; Sleep(5); }
+    return true;
+}
+struct Registry {
+    std::wstring path;
+    bool ownsCleanup;
+    explicit Registry(std::wstring p, bool owns = true) : path(std::move(p)), ownsCleanup(owns) {}
+    ~Registry() { if (ownsCleanup) RegDeleteTreeW(HKEY_CURRENT_USER, path.c_str()); }
+    void number(const wchar_t* name, DWORD value, bool active = true) {
+        HKEY key = nullptr; const auto p = path + (active ? L"\\ActiveProcess" : L"");
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, p.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr)) throw std::runtime_error("test registry create");
+        const auto r = RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
+        RegCloseKey(key); if (r) throw std::runtime_error("test registry value");
+    }
+    void root(const std::wstring& value) {
+        HKEY key = nullptr;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr)) throw std::runtime_error("test registry root");
+        const auto r = RegSetValueExW(key, L"SteamPath", 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size()+1)*sizeof(wchar_t)));
+        RegCloseKey(key); if (r) throw std::runtime_error("test root value");
+    }
+};
+struct Child {
+    HANDLE stop = nullptr; PROCESS_INFORMATION pi{};
+    explicit Child(const std::wstring& exe) {
+        const auto name = L"Local\\YMCCSteamObserverTest-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
+        stop = CreateEventW(nullptr, TRUE, FALSE, name.c_str());
+        STARTUPINFOW si{sizeof(si)};
+        std::wstring command = L"\"" + exe + L"\" --child \"" + name + L"\"";
+        if (!stop || !CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) throw std::runtime_error("isolated child start");
+        CloseHandle(pi.hThread); pi.hThread = nullptr;
+    }
+    void finish() { if (stop) SetEvent(stop); if (pi.hProcess) WaitForSingleObject(pi.hProcess, 3000); }
+    ~Child() { finish(); if (pi.hProcess) CloseHandle(pi.hProcess); if (stop) CloseHandle(stop); }
+};
+static ULONGLONG cpuTime() {
+    FILETIME b{},e{},k{},u{};
+    GetProcessTimes(GetCurrentProcess(), &b,&e,&k,&u);
+    return ((static_cast<ULONGLONG>(k.dwHighDateTime)<<32)|k.dwLowDateTime) + ((static_cast<ULONGLONG>(u.dwHighDateTime)<<32)|u.dwLowDateTime);
+}
+#include <functional>
+#include <fstream>
+#include <limits>
+#include <mutex>
+#include "json.hpp"
+using json=nlohmann::json;
+
+static const auto contextRegistryPath=L"Software\\YeManCC-TrackerProjectionSelftest\\"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64());
+static Observer g_steamSettingsObserver(contextRegistryPath);
+static std::atomic<bool> g_exitRequested{false};
+enum class PowerLifecycle {Ready,Suspending,Suspended,Resuming};
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<unsigned long long> g_gameRulesEpoch{8},fixturePowerGeneration{3};
+static unsigned long long currentPowerGeneration(){return fixturePowerGeneration.load();}
+struct NativeDetectedGame {
+    DWORD pid = 0;
+    std::wstring name;
+    std::wstring title;
+    std::wstring path;
+    SIZE_T workingSet = 0;
+    ULONGLONG processCreated = 0;
+    bool whitelisted = false;
+    bool customConfigured = false;
+    std::wstring whitelistRule;
+};
+#include "game_steam_scope.h"
+static std::string W2U(const wchar_t* w, int len = -1) {
+    if (!w || !*w) return {};
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, len, nullptr, 0, nullptr, nullptr);
+    std::string s(n, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w, len, s.data(), n, nullptr, nullptr);
+    if (len == -1 && !s.empty() && s.back() == '\0') s.pop_back();
+    return s;
+}
+static std::string W2U(const std::wstring& w) { return W2U(w.c_str(), (int)w.size()); }
+
+static std::wstring U2W(const std::string& s) {
+    if (s.empty()) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+    std::wstring w(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), w.data(), n);
+    return w;
+}
+
+
+
+namespace SleepRecoveryApi {struct Tail {std::string bytes;json meta;};
+static Tail readTail(const std::wstring& path,DWORD cap=2*1024*1024) {
+    Tail t;t.meta={{"available",false},{"truncated",false},{"limitBytes",cap}};
+    const DWORD attr=GetFileAttributesW(path.c_str());
+    if(attr==INVALID_FILE_ATTRIBUTES || (attr&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))) {
+        t.meta["reason"]="missing-or-not-regular-file";return t;
+    }
+    HANDLE h=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+        nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(h==INVALID_HANDLE_VALUE){t.meta["reason"]="read-denied";t.meta["win32Error"]=GetLastError();return t;}
+    LARGE_INTEGER size{};
+    if(!GetFileSizeEx(h,&size)||size.QuadPart<0){CloseHandle(h);t.meta["reason"]="size-unavailable";return t;}
+    const auto take=static_cast<DWORD>(std::min<LONGLONG>(size.QuadPart,cap));
+    LARGE_INTEGER offset{};offset.QuadPart=size.QuadPart-take;
+    DWORD got=0;t.bytes.resize(take);
+    const bool ok=SetFilePointerEx(h,offset,nullptr,FILE_BEGIN)&&ReadFile(h,t.bytes.data(),take,&got,nullptr);
+    const DWORD error=ok?0:GetLastError();CloseHandle(h);
+    if(!ok){t.bytes.clear();t.meta["reason"]="read-failed";t.meta["win32Error"]=error;return t;}
+    t.bytes.resize(got);t.meta["available"]=true;t.meta["originalBytes"]=size.QuadPart;
+    t.meta["copiedBytes"]=got;t.meta["truncated"]=offset.QuadPart>0;
+    return t;
+}
+}
+#include "sleep_steam_capture.h"
+namespace SleepSteamRecovery {
+using namespace ymcc::sleepsteam;
+struct Game {DWORD pid=0;ULONGLONG created=0;std::wstring path;};
+struct Session {
+    DWORD account=0,pid=0,registeredPid=0;ULONGLONG created=0;std::wstring root;
+    std::string source="unverified",reason="steam-process-unverified",accountSource="unverified";
+    bool accountPinned=false,liveAccountPinned=false,foreignRegistryAccountIgnored=false;
+};
+struct NativePrimaryRead {NativePrimaryProcessInventory inventory;json log;};
+static json nativePrimaryJoin(const NativePrimaryRead& primary,const TrackedProcessInventory& tracker,std::uint32_t app,DWORD pid) {
+    json result={{"source","steam-local-native-procid-diagnostic"},{"status","unknown"},{"originalAllowed",false},{"nativePrimaryVerified",false},{"expectedPid",pid},{"appid",app},{"log",primary.log}};
+    unsigned members=0;bool originalTracked=false;for(const auto& row:tracker.rows)if(row.appid==app){++members;if(row.pid==pid)originalTracked=true;}
+    result["trackedMemberCount"]=members;
+    if(!tracker.complete||!primary.inventory.complete){result["status"]="unverifiable";result["reason"]=primary.inventory.reason;return result;}
+    const auto found=primary.inventory.rows.find(app);
+    if(found==primary.inventory.rows.end()){
+        // Existing exact single-member authority is retained, explicitly without
+        // claiming native-primary proof. Multiple members never use this fallback.
+        result["status"]=members==1&&originalTracked?"unique-tracker-native-primary-unobserved":"unknown";
+        result["reason"]=primary.inventory.reason.empty()?"steam-native-primary-not-observed":primary.inventory.reason;
+        result["originalAllowed"]=members==1&&originalTracked;return result;
+    }
+    const auto& row=found->second;result["nativePrimaryPid"]=row.pid;result["at"]=row.at;result["lineInTail"]=row.line;result["label"]=row.label;
+    if(row.removed){result["status"]="removed";return result;}
+    if(!row.local){result["status"]="non-local-record";return result;}
+    result["nativePrimaryVerified"]=true;result["status"]=row.pid==pid?"matched":"different-instance";result["originalAllowed"]=row.pid==pid&&originalTracked;return result;
+}
+static std::string localSecond(ULONGLONG created) {
+    ULARGE_INTEGER raw{};raw.QuadPart=created;FILETIME utc{raw.LowPart,raw.HighPart},local{};SYSTEMTIME at{};
+    if(!FileTimeToLocalFileTime(&utc,&local)||!FileTimeToSystemTime(&local,&at))return {};
+    char value[32]{};snprintf(value,sizeof(value),"%04u-%02u-%02u %02u:%02u:%02u",at.wYear,at.wMonth,at.wDay,at.wHour,at.wMinute,at.wSecond);return value;
+}
+}
+static std::atomic<unsigned> fixtureProjectionSourceReads{0},fixtureProjectionClockReads{0};
+static std::atomic<unsigned> fixtureFreshGameReads{0},fixtureFreshConsoleReads{0};
+static std::function<void(const std::wstring&)> fixtureFreshReadHook;
+static json sourceChecks=json::array();
+static void sourceCheck(const char* name,bool pass){sourceChecks.push_back({{"name",name},{"pass",pass}});}
+static json freshChecks=json::array();
+static void freshCheck(const char* name,bool pass){freshChecks.push_back({{"name",name},{"pass",pass}});}
+static std::atomic<bool> g_sleepRecoveryAutoEnabled{true};
+static std::atomic<unsigned long long> g_sleepRecoveryAutoConfigEpoch{1};
+static ULONGLONG sgNowFileTime() {
+    FILETIME ft; GetSystemTimeAsFileTime(&ft);
+    ULARGE_INTEGER ul; ul.LowPart = ft.dwLowDateTime; ul.HighPart = ft.dwHighDateTime;
+    return ul.QuadPart;
+}
+static std::function<void()> fixtureProjectionAfterRead;
+#include "steam_game_tracker_facts.h"
+namespace ymcc::steamgamefacts {
+SteamLogSourceIdentity MainTrackerFactsAdapter::sourceKey(const SteamLogIdentity& expected){
+    const auto actual=trackerSteamReceipt(g_steamSettingsObserver.identitySnapshot());
+    if(!actual.present||!actual.rootKnown||!actual.windowsSessionKnown||!actual.pid||!actual.birth||!actual.processEpoch||
+        actual.pid!=expected.pid||actual.birth!=expected.birth||
+        ymcc::sleepsteam::pathKey(W2U(actual.root))!=ymcc::sleepsteam::pathKey(W2U(expected.root)))return {};
+    return SteamLogSourceIdentity(new SteamLogSourceKey(actual));
+}
+bool MainTrackerFactsAdapter::sourceCurrent(const SteamLogSourceKey& key)noexcept{
+    try{const auto now=trackerSteamReceipt(g_steamSettingsObserver.identitySnapshot());const auto& expected=key.facts();
+        return now.present&&now.rootKnown&&now.windowsSessionKnown&&now.pid==expected.pid&&now.birth==expected.birth&&
+            now.processEpoch==expected.processEpoch&&now.windowsSession==expected.windowsSession&&now.root==expected.root;
+    }catch(...){return false;}
+}
+TrackerTailRead MainReadTailPort::readTail(const std::wstring& sourceKey) const {
+    ++fixtureProjectionSourceReads;
+    if(sourceKey.ends_with(L"gameprocess_log.txt"))++fixtureFreshGameReads;
+    if(sourceKey.ends_with(L"console_log.txt"))++fixtureFreshConsoleReads;
+    // The ONLY file-reading implementation for the public tracker producer.
+    // Preserve the original shared bounded reader, fixed cap and exact source.
+    auto tail = SleepRecoveryApi::readTail(sourceKey,static_cast<DWORD>(ymcc::sleepsteam::trackerMaximumBytes));
+    TrackerTailRead out;
+    out.bytes = std::move(tail.bytes);
+    const auto field = [&](const char* key) -> const json* {
+        if (!tail.meta.is_object()) return nullptr;
+        const auto value = tail.meta.find(key);
+        return value == tail.meta.end() ? nullptr : &*value;
+    };
+    const auto flag = [&](const char* key, bool& known) {
+        const auto* value = field(key); known = value && value->is_boolean();
+        return known ? value->get<bool>() : false;
+    };
+    const auto number = [&](const char* key, bool& known) -> std::uint64_t {
+        const auto* value = field(key); known = false;
+        if (!value || !value->is_number_integer()) return 0;
+        if (value->is_number_unsigned()) { known = true; return value->get<std::uint64_t>(); }
+        const auto result = value->get<std::int64_t>();
+        if (result < 0) return 0;
+        known = true; return static_cast<std::uint64_t>(result);
+    };
+    out.available = flag("available",out.availableKnown);
+    out.truncated = flag("truncated",out.truncatedKnown);
+    out.originalBytes = number("originalBytes",out.originalBytesKnown);
+    out.copiedBytes = number("copiedBytes",out.copiedBytesKnown);
+    out.limitBytes = number("limitBytes",out.limitBytesKnown);
+    const auto error = number("win32Error",out.win32ErrorKnown);
+    if (error > (std::numeric_limits<std::uint32_t>::max)()) out.win32ErrorKnown = false;
+    if (out.win32ErrorKnown) out.win32Error = static_cast<std::uint32_t>(error);
+    const auto* reason = field("reason");
+    using Reason = TrackerSourceObservation::ReadReason;
+    if (!reason && out.availableKnown && out.available) out.reason = Reason::None;
+    else if (reason && reason->is_string()) {
+        const auto& value = reason->get_ref<const std::string&>();
+        if (value == "missing-or-not-regular-file") out.reason = Reason::MissingOrNotRegular;
+        else if (value == "read-denied") out.reason = Reason::ReadDenied;
+        else if (value == "size-unavailable") out.reason = Reason::SizeUnavailable;
+        else if (value == "read-failed") out.reason = Reason::ReadFailed;
+    }
+    if(fixtureProjectionAfterRead)fixtureProjectionAfterRead();
+    if(fixtureFreshReadHook)fixtureFreshReadHook(sourceKey);
+    return out;
+}
+std::string MainReadTailPort::selectedPathUtf8(const std::wstring& path) const {
+    return W2U(path);
+}
+std::string MainReadTailPort::localSecond(std::uint64_t birth) const {
+    return SleepSteamRecovery::localSecond(birth);
+}
+std::uint64_t MainReadTailPort::nowTick() const noexcept {
+    ++fixtureProjectionClockReads;
+    return GetTickCount64();
+}
+std::uint64_t MainReadTailPort::nowFileTime() const noexcept {
+    return sgNowFileTime();
+}
+std::shared_ptr<const IdentitySnapshot> MainReadTailPort::identitySnapshot() const {
+    // Memory-only shared producer. No registry read and no UI/CM account inference.
+    return g_steamSettingsObserver.identitySnapshot();
+}
+TrackerObservationKey MainTrackerFactsAdapter::factKey(const ::NativeGameFactScope& selected,
+    TrackerObservationPolicy policy, TrackerAccountDomain account) {
+    // Unsupported until there is a real typed UI/CM proof source. Raw account
+    // provenance enums and document strings cannot mint AccountBound facts.
+    if (policy != TrackerObservationPolicy::ProcessOnlyObservation) return {};
+    // Both global A and explicitly qualified foreground B use THEIR OWN closed
+    // game scope. Do not read/replace global selection or use its generation.
+    if (!nativeGameFactScopeCurrent(selected)) return {};
+    const auto published = g_steamSettingsObserver.identitySnapshot();
+    TrackerFactTuple fact;
+    fact.policy = policy; fact.account = account;
+    fact.selectedGame = {selected.pid,selected.birth,selected.path};
+    fact.canonicalGamePath = ymcc::sleepsteam::pathKey(W2U(selected.path));
+    fact.steam = trackerSteamReceipt(published);
+    fact.canonicalSteamRoot = ymcc::sleepsteam::pathKey(W2U(fact.steam.root));
+    fact.rulesEpoch = selected.rulesEpoch; fact.powerGeneration = selected.powerGeneration;
+    if (!tracker_detail::validFact(fact)) return {};
+    auto closed = TrackerObservationKey(new TrackerFactKey(std::move(fact),
+        std::make_shared<const ::NativeGameFactScope>(selected)));
+    auto shared = trackerOwner().adoptFact(std::move(closed));
+    return shared && current(*shared) ? shared : TrackerObservationKey{};
+}
+bool MainTrackerFactsAdapter::current(const TrackerFactKey& key) noexcept {
+    // Pure memory only. NEVER menu actionCurrent/allowed/foreground/OS/CDP.
+    try {
+    if (key.facts().policy != TrackerObservationPolicy::ProcessOnlyObservation) return false;
+    if (!key.gameScope_ || !nativeGameFactScopeCurrent(*key.gameScope_)) return false;
+    const auto now = trackerSteamReceipt(g_steamSettingsObserver.identitySnapshot());
+    const auto& fact = key.facts();
+    return now.present && now.rootKnown && now.windowsSessionKnown &&
+        now.pid == fact.steam.pid && now.birth == fact.steam.birth &&
+        now.processEpoch == fact.steam.processEpoch && now.accountEpoch == fact.steam.accountEpoch &&
+        now.windowsSession == fact.steam.windowsSession &&
+        now.root == fact.steam.root; // Same publisher receipt; no Win32 conversion in peek/current.
+    } catch (...) { return false; }
+}
+}
+
+#include <climits>
+#include <condition_variable>
+#include <deque>
+#include <map>
+#include <memory>
+#include <vector>
+#include "steam_original_recovery_policy.h"
+#include "steam_original_recovery_dual_route.h"
+#include "steam_original_recovery_wake_watch.h"
+#include "steam_original_recovery_trace.h"
+#include "sleep_recovery_diagnostics.h"
+#include "sleep_steam_settle.h"
+#include "steam_native_record_identity.h"
+#include "steam_native_app_state_win32.h"
+#include "steam_shortcut_metadata_win32.h"
+using U64=std::uint64_t;
+namespace InertRoles {
+using namespace ymcc::steamgamefacts;
+struct OwnedHandle {
+    HANDLE value=nullptr;
+    OwnedHandle()=default;
+    explicit OwnedHandle(HANDLE h):value(h){}
+    OwnedHandle(const OwnedHandle&)=delete;
+    OwnedHandle& operator=(const OwnedHandle&)=delete;
+    ~OwnedHandle(){if(value&&value!=INVALID_HANDLE_VALUE)CloseHandle(value);}
+    bool close()noexcept {
+        if(!value||value==INVALID_HANDLE_VALUE){value=nullptr;return true;}
+        if(!CloseHandle(value))return false;value=nullptr;return true;
+    }
+};
+static std::uint64_t birth(HANDLE process) {
+    FILETIME b{},e{},k{},u{};
+    if(!GetProcessTimes(process,&b,&e,&k,&u))throw std::runtime_error("group-role actual process birth");
+    return (std::uint64_t(b.dwHighDateTime)<<32)|b.dwLowDateTime;
+}
+struct ChildManifest {DWORD magic=0,pid=0;std::uint64_t created=0;};
+static_assert(sizeof(ChildManifest)==16);
+static std::optional<int> childMain(int argc,wchar_t** argv) {
+    if(argc>=2&&std::wstring_view(argv[1])==L"--group-role-leaf") {
+        if(argc!=3)return 20;
+        OwnedHandle stop(OpenEventW(SYNCHRONIZE,FALSE,argv[2]));
+        if(!stop.value)return 21;
+        return WaitForSingleObject(stop.value,30000)==WAIT_OBJECT_0?0:22;
+    }
+    if(argc<2||std::wstring_view(argv[1])!=L"--group-role-root")return {};
+    if(argc!=7)return 23;
+    OwnedHandle rootStop(OpenEventW(SYNCHRONIZE,FALSE,argv[2]));
+    OwnedHandle leafStop(OpenEventW(SYNCHRONIZE|EVENT_MODIFY_STATE,FALSE,argv[3]));
+    OwnedHandle ready(OpenEventW(EVENT_MODIFY_STATE,FALSE,argv[4]));
+    if(!rootStop.value||!leafStop.value||!ready.value)return 24;
+    // The real parent must have a strictly earlier creation stamp.
+    Sleep(15);
+    std::wstring command=L"\""+std::wstring(argv[6])+L"\" --group-role-leaf \""+argv[3]+L"\"";
+    STARTUPINFOW si{sizeof(si)};PROCESS_INFORMATION pi{};
+    if(!CreateProcessW(argv[6],command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi))return 25;
+    OwnedHandle thread(pi.hThread),process(pi.hProcess);thread.close();
+    const auto fail=[&](int code){SetEvent(leafStop.value);WaitForSingleObject(process.value,3000);return std::optional<int>(code);};
+    ChildManifest manifest{0x47524f4cU,pi.dwProcessId,0};
+    try{manifest.created=birth(process.value);}catch(...){return fail(26);}
+    OwnedHandle file(CreateFileW(argv[5],GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr));
+    if(file.value==INVALID_HANDLE_VALUE)return fail(27);
+    DWORD written=0;
+    if(!WriteFile(file.value,&manifest,sizeof(manifest),&written,nullptr)||written!=sizeof(manifest)||!file.close())return fail(28);
+    if(!SetEvent(ready.value))return fail(29);
+    const HANDLE waits[]={rootStop.value,process.value};
+    const auto ended=WaitForMultipleObjects(2,waits,FALSE,30000);
+    // Deliberate root-only normal exit leaves shipping for its original owner.
+    if(ended==WAIT_OBJECT_0||ended==WAIT_OBJECT_0+1)return 0;
+    return fail(30);
+}
+struct InertTree {
+    OwnedHandle job,rootProcess,shippingProcess,rootStop,shippingStop,ready;
+    DWORD rootPid=0,shippingPid=0;
+    std::uint64_t rootCreated=0,shippingCreated=0;
+    bool forced=false,zero=false,closed=false;
+    std::wstring marker;
+    inline static std::atomic<unsigned> sequence{0};
+    static HANDLE event(const std::wstring& name) {
+        HANDLE h=CreateEventW(nullptr,TRUE,FALSE,name.c_str());
+        const auto error=GetLastError();
+        if(!h||error==ERROR_ALREADY_EXISTS){if(h)CloseHandle(h);throw std::runtime_error("group-role exclusive event");}
+        return h;
+    }
+    InertTree(const std::wstring& root,const std::wstring& rootExe,const std::wstring& shippingExe) {
+        const auto unique=std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64())+L"-"+std::to_wstring(++sequence);
+        marker=root+L"\\group-role-child-"+unique+L".bin";
+        const auto prefix=L"Local\\YMCCSteamObserverTest-GroupRoles-"+unique;
+        const auto rootName=prefix+L"-root",shipName=prefix+L"-shipping",readyName=prefix+L"-ready";
+        try {
+            rootStop.value=event(rootName);shippingStop.value=event(shipName);ready.value=event(readyName);
+            job.value=CreateJobObjectW(nullptr,nullptr);
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit{};limit.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if(!job.value||!SetInformationJobObject(job.value,JobObjectExtendedLimitInformation,&limit,sizeof(limit)))throw std::runtime_error("group-role local Job");
+            STARTUPINFOW si{sizeof(si)};PROCESS_INFORMATION pi{};
+            std::wstring command=L"\""+rootExe+L"\" --group-role-root \""+rootName+L"\" \""+shipName+L"\" \""+readyName+L"\" \""+marker+L"\" \""+shippingExe+L"\"";
+            if(!CreateProcessW(rootExe.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW|CREATE_SUSPENDED,nullptr,nullptr,&si,&pi))throw std::runtime_error("group-role actual root start");
+            rootProcess.value=pi.hProcess;OwnedHandle thread(pi.hThread);rootPid=pi.dwProcessId;
+            if(!AssignProcessToJobObject(job.value,rootProcess.value)) {
+                forced=true;TerminateProcess(rootProcess.value,31);WaitForSingleObject(rootProcess.value,3000);
+                throw std::runtime_error("group-role root Job assign");
+            }
+            if(ResumeThread(thread.value)==static_cast<DWORD>(-1))throw std::runtime_error("group-role root resume");
+            if(!thread.close())throw std::runtime_error("group-role root thread close");
+            if(WaitForSingleObject(ready.value,3000)!=WAIT_OBJECT_0)throw std::runtime_error("group-role root child ready");
+            OwnedHandle file(CreateFileW(marker.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr));
+            ChildManifest manifest{};DWORD read=0;LARGE_INTEGER size{};
+            if(file.value==INVALID_HANDLE_VALUE||!GetFileSizeEx(file.value,&size)||size.QuadPart!=sizeof(manifest)||
+                !ReadFile(file.value,&manifest,sizeof(manifest),&read,nullptr)||read!=sizeof(manifest)||manifest.magic!=0x47524f4cU||!manifest.pid||!manifest.created)
+                throw std::runtime_error("group-role child manifest");
+            shippingProcess.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,manifest.pid);
+            if(!shippingProcess.value||GetProcessId(shippingProcess.value)!=manifest.pid||birth(shippingProcess.value)!=manifest.created)
+                throw std::runtime_error("group-role actual shipping identity");
+            shippingPid=manifest.pid;shippingCreated=manifest.created;rootCreated=birth(rootProcess.value);
+        }catch(...){finish();throw;}
+    }
+    bool finishRoot() {
+        return rootStop.value&&SetEvent(rootStop.value)&&WaitForSingleObject(rootProcess.value,3000)==WAIT_OBJECT_0;
+    }
+    bool finishShipping() {
+        return shippingStop.value&&SetEvent(shippingStop.value)&&WaitForSingleObject(shippingProcess.value,3000)==WAIT_OBJECT_0;
+    }
+    bool finish()noexcept {
+        if(closed)return zero&&!forced;
+        if(rootStop.value)SetEvent(rootStop.value);
+        if(shippingStop.value)SetEvent(shippingStop.value);
+        bool ended=(!rootProcess.value||WaitForSingleObject(rootProcess.value,3000)==WAIT_OBJECT_0)&&
+            (!shippingProcess.value||WaitForSingleObject(shippingProcess.value,3000)==WAIT_OBJECT_0);
+        if(job.value) {
+            const auto end=GetTickCount64()+3000;
+            do {
+                JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info{};
+                if(QueryInformationJobObject(job.value,JobObjectBasicAccountingInformation,&info,sizeof(info),nullptr)&&!info.ActiveProcesses){zero=true;break;}
+                Sleep(5);
+            }while(GetTickCount64()<end);
+            if(!zero){forced=true;TerminateJobObject(job.value,32);ended=false;}
+        }
+        bool handles=true;
+        handles=shippingProcess.close()&&handles;handles=rootProcess.close()&&handles;
+        handles=ready.close()&&handles;handles=shippingStop.close()&&handles;
+        handles=rootStop.close()&&handles;handles=job.close()&&handles;
+        closed=handles;return ended&&zero&&handles&&!forced;
+    }
+    ~InertTree(){finish();}
+};
+
+
+}
+std::atomic<bool> g_sleepRecoveryAutoPending{true};
+auto& g_powerGeneration=fixturePowerGeneration;
+bool sgSleepRetryActive(){return false;}
+bool sharedSleepWakeClassified(U64 value){return value&&value==currentPowerGeneration()&&!g_exitRequested.load();}
+bool sleepSteamRecoveryAllows(U64 value,U64 epoch){return value==currentPowerGeneration()&&epoch==g_sleepRecoveryAutoConfigEpoch.load()&&g_sleepRecoveryAutoEnabled.load()&&!g_exitRequested.load();}
+const std::wstring MONITOR_GAME_TARGET_JSON=L"fixture-target.json";
+std::wstring yemancc_data_dir(){return L"fixture-in-memory-evidence";}
+std::string nativeLifecycleTimestamp(){return "2026-11-13T00:00:00Z";}
+bool focusQueryProcessIdentity(DWORD pid,std::wstring* path,ULONGLONG* created){
+    ymcc::steamgamefacts::detail::Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,pid));
+    *path=ymcc::steamgamefacts::detail::image(process.value);*created=ymcc::steamgamefacts::detail::birth(process.value);
+    return !path->empty()&&*created&&ymcc::steamgamefacts::detail::alive(process.value);
+}
+enum class NativeGameDiscoveryState {Complete};
+struct NativeGameValveSnapshot {
+    NativeDetectedGame game;U64 rulesEpoch=9,generation=1,identityGeneration=1;
+    NativeGameDiscoveryState discoveryState=NativeGameDiscoveryState::Complete;
+};
+std::mutex g_gameValveMx;NativeGameValveSnapshot g_gameValveTarget;
+struct NativeGameSelectionReceipt {
+    NativeGameValveSnapshot target;
+    unsigned long long powerGeneration = 0;
+    // Observation metadata only. Cached selection never proves OS liveness.
+    bool processValidated = false;
+};
+static std::function<void()> fixtureBeforeCurrentSelection;
+static bool nativeValveSelectionCurrent(const NativeGameSelectionReceipt& receipt) {
+    const auto& selection = receipt.target;
+    std::lock_guard<std::mutex> lock(g_gameValveMx);
+    return selection.game.pid && selection.game.processCreated && !selection.game.path.empty() &&
+        selection.discoveryState == NativeGameDiscoveryState::Complete && selection.identityGeneration &&
+        selection.rulesEpoch && selection.rulesEpoch == g_gameRulesEpoch.load(std::memory_order_acquire) &&
+        receipt.powerGeneration && receipt.powerGeneration == currentPowerGeneration() &&
+        g_gameValveTarget.discoveryState == NativeGameDiscoveryState::Complete &&
+        g_gameValveTarget.identityGeneration == selection.identityGeneration &&
+        g_gameValveTarget.rulesEpoch == selection.rulesEpoch &&
+        g_gameValveTarget.game.pid == selection.game.pid &&
+        g_gameValveTarget.game.processCreated == selection.game.processCreated &&
+        _wcsicmp(g_gameValveTarget.game.path.c_str(), selection.game.path.c_str()) == 0;
+}
+bool nativeValveReadCurrentTarget(NativeDetectedGame* game,unsigned long long* touch=nullptr){
+    std::lock_guard<std::mutex> lock(g_gameValveMx);*game=g_gameValveTarget.game;if(touch)*touch=1;return game->pid!=0;
+}
+static bool nativeValveReadCurrentSelection(NativeGameSelectionReceipt* receipt) {
+    if (!receipt) return false;
+    if(fixtureBeforeCurrentSelection)fixtureBeforeCurrentSelection();
+    *receipt = {};
+    NativeGameSelectionReceipt before;
+    before.powerGeneration = currentPowerGeneration();
+    { std::lock_guard<std::mutex> lock(g_gameValveMx); before.target = g_gameValveTarget; }
+    NativeDetectedGame checked;
+    // Reuse the existing fresh rule/process/session validation, once. A->B->A
+    // or a complete sleep/resume during this read revokes the captured receipt.
+    // The owner's qualificationPower is for no-game proof, not positive targets.
+    if (!nativeValveReadCurrentTarget(&checked) || !nativeValveSelectionCurrent(before) ||
+        checked.pid != before.target.game.pid || checked.processCreated != before.target.game.processCreated ||
+        _wcsicmp(checked.path.c_str(), before.target.game.path.c_str()) != 0) return false;
+    before.processValidated = true;
+    *receipt = before;
+    return true;
+}
+static bool nativeValveReadCachedSelection(NativeGameSelectionReceipt* receipt) {
+    if (!receipt) return false;
+    *receipt = {};
+    NativeGameSelectionReceipt before;
+    before.powerGeneration = currentPowerGeneration();
+    { std::lock_guard<std::mutex> lock(g_gameValveMx); before.target = g_gameValveTarget; }
+    if (g_exitRequested.load(std::memory_order_acquire) ||
+        g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready ||
+        !nativeValveSelectionCurrent(before)) return false;
+    *receipt = before;
+    return true;
+}
+namespace SleepRecoveryAuto {
+std::mutex mx;
+struct State {ULONGLONG generation=7,configEpoch=5,armed=100000;json wakeAdmission;} state;
+struct KernelWake {ULONGLONG generation=7,configEpoch=5,boundaryFileTime=0,eventFileTime=0;int eventId=507;bool uiWakeRequested=true;ULONGLONG requestGeneration=7;} kernelWake;
+struct KernelSleepEntry {ULONGLONG configEpoch=5,generation=7,eventFileTime=0;} kernelSleepEntry;
+struct InteractiveResume {unsigned long long generation=0,configEpoch=0;ULONGLONG boundaryFileTime=0,eventFileTime=0,receiptTick=0;};
+struct CompletedResume {unsigned long long generation=0,configEpoch=0;ULONGLONG boundaryFileTime=0,eventFileTime=0;int eventId=0,reason=0;};
+struct ReadyCommit {unsigned long long generation=0,configEpoch=0;ULONGLONG boundaryFileTime=0;};
+struct WakeOperationObservation {
+    const char* rejectedGuard=nullptr;
+    unsigned long long generation=0,configEpoch=0;
+    ULONGLONG proofNowFileTime=0,interactiveFileTime=0,exitFileTime=0,proofLimitMs=0;
+    ULONGLONG nowTick=0,armedTick=0,kernelEventFileTime=0,kernelProofNowFileTime=0;
+    int sharedPhase=0;
+    bool interactiveProofEvaluated=false,kernelProofEvaluated=false,sharedPhaseEvaluated=false;
+};
+InteractiveResume interactiveResume;CompletedResume completedResume;ReadyCommit readyCommit;
+static bool followsWakeBoundary(unsigned long long observed,unsigned long long gen,unsigned long long boundaryGeneration) {
+    return observed==gen||(observed&&observed!=ULLONG_MAX&&observed+1==gen&&boundaryGeneration==observed);
+}
+static bool completedInteractiveResumeLocked(unsigned long long gen,unsigned long long epoch,ULONGLONG boundary,unsigned long long boundaryGeneration,WakeOperationObservation* observation=nullptr) {
+    if(observation){observation->generation=gen;observation->configEpoch=epoch;observation->rejectedGuard="interactive-identity-ready-or-retry";}
+    if(!boundary||!sleepSteamRecoveryAllows(gen,epoch)||sgSleepRetryActive()||g_powerLifecycle.load()!=PowerLifecycle::Ready||
+        readyCommit.generation!=gen||readyCommit.configEpoch!=epoch||readyCommit.boundaryFileTime!=boundary||
+        interactiveResume.configEpoch!=epoch||completedResume.configEpoch!=epoch||
+        !followsWakeBoundary(interactiveResume.generation,gen,boundaryGeneration)||
+        !followsWakeBoundary(completedResume.generation,gen,boundaryGeneration)||
+        interactiveResume.boundaryFileTime!=boundary||completedResume.boundaryFileTime!=boundary)return false;
+    const auto proofNowFileTime=sgNowFileTime(),interactive=interactiveResume.eventFileTime,exit=completedResume.eventFileTime;
+    const auto entry=kernelSleepEntry.configEpoch==epoch?kernelSleepEntry.eventFileTime:0;
+    if(observation){observation->interactiveProofEvaluated=true;observation->proofNowFileTime=proofNowFileTime;
+        observation->interactiveFileTime=interactive;observation->exitFileTime=exit;
+        observation->proofLimitMs=ymcc::sleepsteam::kWakeObserveLimitMs;observation->rejectedGuard="interactive-proof-window";}
+    if(interactive<=boundary||exit<=boundary||interactive<=entry||exit<=entry||interactive>proofNowFileTime||exit>proofNowFileTime||
+        proofNowFileTime-interactive>=ymcc::sleepsteam::kWakeObserveLimitMs*10000ULL)return false;
+    if(completedResume.eventId==107){if(observation)observation->rejectedGuard=nullptr;return true;} // S4 event time may predate actual hiberfile return.
+    if(observation)observation->rejectedGuard="completed-exit-kind-or-window";
+    if(completedResume.eventId!=507||proofNowFileTime-exit>=ymcc::sleepsteam::kWakeObserveLimitMs*10000ULL)return false;
+    // Callback receive time can precede session accounting (Win5:170ms).
+    // An entry-time intermediate PBT must not stand in for a much later exit.
+    const bool allowed=interactive>=exit||exit-interactive<=5000ULL*10000ULL;
+    if(observation)observation->rejectedGuard=allowed?nullptr:"interactive-exit-gap";
+    return allowed;
+}
+using ymcc::sleeprecovery::flag;using ymcc::sleeprecovery::number;
+static bool proofSupersededLocked() {
+    const auto event=state.wakeAdmission.value("eventFileTime",json());std::uint64_t at=0;
+    return (flag(state.wakeAdmission,"kernelWakeConfirmed")||flag(state.wakeAdmission,"interactiveWakeConfirmed"))&&event.is_string()&&ymcc::sleepsteam::unsignedDecimal(event.get<std::string>(),at)&&
+        kernelSleepEntry.configEpoch==state.configEpoch&&kernelSleepEntry.eventFileTime&&at<=kernelSleepEntry.eventFileTime;
+}
+static bool wakeOperationAllowedLocked(unsigned long long gen,unsigned long long epoch,WakeOperationObservation* observation=nullptr) {
+    if(observation){*observation=WakeOperationObservation{};observation->generation=gen;observation->configEpoch=epoch;
+        observation->rejectedGuard="wake-classification-consumer-or-retry";}
+    if(!sharedSleepWakeClassified(gen)||!sleepSteamRecoveryAllows(gen,epoch)||sgSleepRetryActive())return false;
+    if(state.wakeAdmission.is_object()&&state.wakeAdmission.value("source",std::string())=="interactive-resume-committed-ready"){
+        std::uint64_t boundary=0;const auto value=state.wakeAdmission.value("boundaryFileTime",json());
+        if(observation)observation->rejectedGuard="interactive-admission-identity-or-boundary";
+        if(state.generation!=gen||state.configEpoch!=epoch||proofSupersededLocked()||!value.is_string()||
+            !ymcc::sleepsteam::unsignedDecimal(value.get<std::string>(),boundary)||
+            !completedInteractiveResumeLocked(gen,epoch,boundary,number(state.wakeAdmission,"boundaryGeneration"),observation))return false;
+    }
+    const auto phase=g_powerLifecycle.load();
+    if(observation){observation->sharedPhaseEvaluated=true;observation->sharedPhase=static_cast<int>(phase);}
+    if(phase==PowerLifecycle::Ready){if(observation)observation->rejectedGuard=nullptr;return true;} // unchanged S3 / direct prechecks
+    if(observation)observation->rejectedGuard="resuming-admission-or-superseded";
+    if(phase!=PowerLifecycle::Resuming||!g_sleepRecoveryAutoPending.load()||state.generation!=gen||state.configEpoch!=epoch||
+        !flag(state.wakeAdmission,"kernelWakeConfirmed")||!flag(state.wakeAdmission,"proofFresh")||
+        state.wakeAdmission.value("status",std::string())!="admitted"||proofSupersededLocked())return false;
+    const auto source=state.wakeAdmission.value("source",std::string());
+    if(observation)observation->rejectedGuard="kernel-source";
+    if(source!="kernel-power-507-reason-1"&&source!="kernel-power-107-target-5")return false;
+    std::uint64_t event=0,boundary=0;const auto at=state.wakeAdmission.value("eventFileTime",json()),sleep=state.wakeAdmission.value("boundaryFileTime",json());
+    if(observation)observation->rejectedGuard="kernel-admission-boundary";
+    if(!at.is_string()||!sleep.is_string()||!ymcc::sleepsteam::unsignedDecimal(at.get<std::string>(),event)||
+        !ymcc::sleepsteam::unsignedDecimal(sleep.get<std::string>(),boundary)||!boundary||event<=boundary)return false;
+    // Keep the native witness in the join, not only exported admission JSON.
+    if(observation)observation->rejectedGuard="kernel-native-witness";
+    if(kernelWake.configEpoch!=epoch||kernelWake.eventFileTime!=event||!kernelWake.uiWakeRequested||kernelWake.requestGeneration!=gen||
+        kernelWake.generation!=number(state.wakeAdmission,"proofObservedGeneration")||
+        (kernelWake.boundaryFileTime&&kernelWake.boundaryFileTime!=boundary)||
+        (source=="kernel-power-507-reason-1"?kernelWake.eventId!=507:kernelWake.eventId!=107))return false;
+    const auto now=GetTickCount64(),utc=sgNowFileTime();
+    if(observation){observation->kernelProofEvaluated=true;observation->nowTick=now;observation->armedTick=state.armed;
+        observation->kernelProofNowFileTime=utc;observation->kernelEventFileTime=event;observation->proofLimitMs=ymcc::sleepsteam::kWakeObserveLimitMs;}
+    const bool allowed=now>=state.armed&&now-state.armed<ymcc::sleepsteam::kWakeObserveLimitMs&&event<=utc&&
+        utc-event<=ymcc::sleepsteam::kWakeObserveLimitMs*10000ULL;
+    if(observation)observation->rejectedGuard=allowed?nullptr:"kernel-operation-or-proof-window";
+    return allowed;
+}
+static bool wakeOperationAllows(unsigned long long gen,unsigned long long epoch) {
+    std::lock_guard<std::mutex> lock(mx);return wakeOperationAllowedLocked(gen,epoch);
+}
+}
+constexpr std::uint32_t fixtureApp=2399932135U;
+constexpr U64 fixtureFull=(U64(fixtureApp)<<32)|0x02000000ULL;
+static std::function<void()> fixtureBeforeCompletionWatch,fixtureBeforeSubscriptionInstall,fixtureBeforeBindingRegister;
+static HWND g_hwnd=nullptr;
+#define WM_GAMEPAD_SERIAL_EVENT (WM_USER + 16)
+static constexpr WPARAM kSteamTrackerCompletionMessageTag=0x535443;
+static std::unique_ptr<ymcc::steamcompletion::Dispatcher> fixtureDispatcher=std::make_unique<ymcc::steamcompletion::Dispatcher>();
+static auto* g_steamTrackerCompletionDispatcher=fixtureDispatcher.get();
+static bool postSteamTrackerCompletionDispatch(std::function<void()> consume) {
+    try {
+        if(!consume||!g_hwnd||g_exitRequested.load(std::memory_order_acquire))return false;
+        return g_steamTrackerCompletionDispatcher->post(std::move(consume),[](std::uintptr_t token){
+            if(!g_hwnd||g_exitRequested.load(std::memory_order_acquire))return false;
+            return PostMessageW(g_hwnd,WM_GAMEPAD_SERIAL_EVENT,kSteamTrackerCompletionMessageTag,static_cast<LPARAM>(token))!=FALSE;
+        });
+    }catch(...){return false;}
+}
+static LRESULT CALLBACK completionWindow(HWND window,UINT msg,WPARAM w,LPARAM l){
+    if(msg==WM_GAMEPAD_SERIAL_EVENT){
+        if(w==kSteamTrackerCompletionMessageTag){
+            if(g_exitRequested.load(std::memory_order_acquire))g_steamTrackerCompletionDispatcher->retire();
+            else (void)g_steamTrackerCompletionDispatcher->drain(static_cast<std::uintptr_t>(l));
+        }
+        return 0;
+    }
+    return DefWindowProcW(window,msg,w,l);
+}
+static unsigned pumpCompletion(){
+    MSG msg{};unsigned count=0;
+    while(PeekMessageW(&msg,nullptr,WM_GAMEPAD_SERIAL_EVENT,WM_GAMEPAD_SERIAL_EVENT,PM_REMOVE)){
+        TranslateMessage(&msg);DispatchMessageW(&msg);++count;
+    }
+    return count;
+}
+struct CompletionWindow {
+    std::wstring name=L"YMCCStartupCompletionFixture-"+std::to_wstring(GetCurrentProcessId());
+    CompletionWindow(){
+        WNDCLASSW wc{};wc.lpfnWndProc=completionWindow;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=name.c_str();
+        if(!RegisterClassW(&wc))throw std::runtime_error("fixture window registration");
+        g_hwnd=CreateWindowExW(0,name.c_str(),L"",0,0,0,0,0,HWND_MESSAGE,nullptr,wc.hInstance,nullptr);
+        if(!g_hwnd)throw std::runtime_error("fixture message-only window");
+    }
+    ~CompletionWindow(){
+        pumpCompletion();if(g_hwnd)DestroyWindow(g_hwnd);g_hwnd=nullptr;
+        UnregisterClassW(name.c_str(),GetModuleHandleW(nullptr));
+    }
+};
+
+static unsigned preparationPrivateReads=0;
+namespace SleepSteamRecovery {
+Session session(){
+    const auto actual=g_steamSettingsObserver.sessionSnapshot();Session out;
+    out.pid=actual.pid;out.created=actual.created;out.root=actual.root;out.account=actual.account;return out;
+}
+struct NativeRecordBinding {
+    std::uint64_t account64=0,gameId64=0;std::uint32_t appid=0;DWORD windowsSession=0;
+    bool bound=false;std::string reason="native-record-pre-capture-identity-unavailable";
+    ymcc::shortcutmetadatawin::Witness shortcutMetadata; // private only; never JSON/logged
+};
+struct CaptureRequest {
+    const unsigned long long serial,configEpoch,rulesEpoch;
+    const std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> cancellation;
+    std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> activeAction;
+    unsigned long long boundaryGeneration=0,pendingCaptureGeneration=0;
+    CaptureRequest(unsigned long long s,unsigned long long e,unsigned long long r,
+        std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> c):serial(s),configEpoch(e),rulesEpoch(r),cancellation(std::move(c)){}
+};
+struct Captured {
+    unsigned long long generation=0,configEpoch=0,boundaryGeneration=0;
+    ULONGLONG at=0,powerBoundaryFileTime=0;Game game;Session client;json inputBefore,targetSelection;
+    std::shared_ptr<CaptureRequest> request;
+    std::shared_ptr<ymcc::steamgamefacts::ProcessLease> selectedProcess;
+    std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> identitySnapshot;
+    NativeRecordBinding nativeRecord; // private in-memory identity, never serialized
+    std::string boundary="queued-suspend";
+};
+std::mutex captureMx;Captured captured,prepared;bool preparedPending=false,capturePreparing=false;
+unsigned long long captureRequestSerial=0;std::shared_ptr<CaptureRequest> captureRequest;
+static void cancelCaptureRequestLocked(){
+    if(captureRequest){captureRequest->cancellation->cancel();
+        if(captureRequest->activeAction)captureRequest->activeAction->cancel();}
+    captureRequest.reset();capturePreparing=false;
+}
+static std::shared_ptr<CaptureRequest> beginCaptureRequestLocked(unsigned long long epoch){
+    cancelCaptureRequestLocked();
+    if(captureRequestSerial==ULLONG_MAX)return {};
+    const auto signal=ymcc::steamgamefacts::RequestCancellation::create();if(!signal)return {};
+    captureRequest=std::make_shared<CaptureRequest>(++captureRequestSerial,epoch,
+        g_gameRulesEpoch.load(std::memory_order_acquire),signal);
+    captureRequest->boundaryGeneration=currentPowerGeneration();
+    return captureRequest;
+}
+static bool captureRequestCurrentLocked(const std::shared_ptr<CaptureRequest>& request){
+    return request&&captureRequest==request&&request->serial==captureRequestSerial&&request->cancellation->current()&&
+        request->configEpoch==g_sleepRecoveryAutoConfigEpoch.load(std::memory_order_acquire)&&
+        request->rulesEpoch==g_gameRulesEpoch.load(std::memory_order_acquire)&&
+        g_sleepRecoveryAutoEnabled.load(std::memory_order_acquire)&&!g_exitRequested.load(std::memory_order_acquire);
+}
+static bool captureRequestCurrent(const std::shared_ptr<CaptureRequest>& request){
+    std::lock_guard<std::mutex> lock(captureMx);return captureRequestCurrentLocked(request);
+}
+static bool originalTargetCurrent(const Captured& value){
+    {std::lock_guard<std::mutex> lock(captureMx);
+        if(!captureRequestCurrentLocked(value.request)||
+            !((captured.request==value.request&&captured.generation==value.generation)||
+              (preparedPending&&prepared.request==value.request&&prepared.generation==value.generation)))return false;}
+    return value.selectedProcess&&value.selectedProcess->processCurrent()&&value.identitySnapshot&&
+        g_steamSettingsObserver.sameIdentityEpoch(value.identitySnapshot)&&value.request->cancellation->current();
+}
+static void originalTargetCommit(bool globalSelectionOnly,const std::function<void()>& publication){
+    if(globalSelectionOnly){publication();return;}
+    std::lock_guard<std::mutex> lock(captureMx);cancelCaptureRequestLocked();publication();
+}
+static bool withOriginalTarget(const Captured& value,
+    const std::shared_ptr<ymcc::steamgamefacts::RequestCancellation>& action,const std::function<void()>& publication){
+    std::lock_guard<std::mutex> lock(captureMx);
+    if(!captureRequestCurrentLocked(value.request)||!action||!action->current())return false;
+    if(value.request->activeAction&&value.request->activeAction!=action)value.request->activeAction->cancel();
+    value.request->activeAction=action;publication();return true;
+}
+static Captured capturedFor(unsigned long long generation) {
+    std::lock_guard<std::mutex> lock(captureMx);
+    return captured.generation==generation&&captured.configEpoch==g_sleepRecoveryAutoConfigEpoch.load()&&captureRequestCurrentLocked(captured.request)?captured:Captured{};
+}
+// Controlled native identity leaf. This is not an actual Steam native reader.
+json liveRequest(Session&,const json&,const std::function<bool()>& allowed,ymcc::steamrecordidentity::Read* result){
+    ++preparationPrivateReads;
+    result->available=allowed&&allowed();result->account64=76561197960265728ULL+42;
+    result->gameId64=fixtureFull;result->appid=fixtureApp;
+    return {{"ok",true},{"mutated",false},{"observedAccount",42}};
+}
+}
+
+// Controlled 48-byte power fact source; formal public scope, delegates,
+// process pins and RevocationMirrors are actual public implementations.
+static ymcc::sleeppower::RevocationMirrors actualPowerMirrors;
+int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t bytes){
+    if(!out||bytes!=sizeof(*out))return 0;*out={};out->generation=currentPowerGeneration();out->publicationRevision=1;
+    out->flags=ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed;return 1;
+}
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out)noexcept{return ymcc::sleeppower::capturePower(&readSharedSystemPower,out);}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& value)noexcept{return ymcc::sleeppower::powerCurrent(&readSharedSystemPower,value);}
+static ymcc::sleeppower::RevocationMirrors::Registration observeSharedPowerRevocation(const ymcc::sleeppower::SharedPowerV1& value)noexcept{return actualPowerMirrors.observe(&readSharedSystemPower,value);}
+static ymcc::sleeppower::RevocationMirrors::Registration observeSharedNativeReadPower(const ymcc::sleeppower::SharedPowerV1& value)noexcept{return actualPowerMirrors.observeRead(&readSharedSystemPower,value);}
+static std::shared_ptr<ymcc::steamnative::ReadScope> nativeSteamNativeReadScope(const SleepSteamRecovery::Session& client,ymcc::steamnative::ReadPurpose purpose){
+    const auto expected=g_steamSettingsObserver.identitySnapshot();
+    if(!expected||expected->session.pid!=client.pid||expected->session.created!=client.created||
+        !ymcc::steamgamefacts::samePath(expected->session.root,client.root))return {};
+    return ymcc::steamnative::acquireReadScope(g_steamSettingsObserver,expected,
+        {&captureSharedPowerLifecycle,&sharedPowerLifecycleCurrent,&observeSharedPowerRevocation},purpose,
+        {&readSharedSystemPower,&observeSharedNativeReadPower});
+}
+static ymcc::steamgamefacts::TrackerObservationKey nativeSteamGameTrackerFactKey(const NativeGameFactScope& scope){return ymcc::steamgamefacts::MainTrackerFactsAdapter::factKey(scope);}
+static ymcc::steamrecordwin::ProfilePreparationStatus nativeSteamPrepareModuleProfile(
+    const SleepSteamRecovery::Session& client,
+    const std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease>& group,
+    const std::shared_ptr<ymcc::steamnative::ReadScope>& readScope,
+    const std::shared_ptr<ymcc::steamnative::ReadScope>& operationReadScope,
+    const ymcc::steamgamefacts::TrackerOwnerCurrent& requestCurrent) noexcept {
+    using Status=ymcc::steamrecordwin::ProfilePreparationStatus;
+    try {
+        if(!group||group->graph().count!=2||!readScope||!operationReadScope)return Status::BindingUnavailable;
+        const auto current=[&]{return ymcc::steamgamefacts::tracker_detail::ownerCurrent(requestCurrent)&&
+            readScope->current()&&operationReadScope->current()&&group->processCurrent()&&
+            readScope->current()&&operationReadScope->current()&&
+            ymcc::steamgamefacts::tracker_detail::ownerCurrent(requestCurrent);};
+        if(!current())return Status::CurrentRejected;
+        const auto& expected=readScope->expected();
+        const auto& operation=operationReadScope->expected();
+        const auto& steam=group->steam();const auto& selected=group->selectedGame();
+        if(steam.pid!=client.pid||steam.created!=client.created||expected.session.pid!=client.pid||
+            expected.session.created!=client.created||operation.session.pid!=client.pid||
+            operation.session.created!=client.created||expected.windowsSession!=operation.windowsSession||
+            !ymcc::steamgamefacts::samePath(expected.session.root,client.root)||
+            !ymcc::steamgamefacts::samePath(operation.session.root,client.root)||
+            !ymcc::steamgamefacts::samePath(steam.image,client.root+L"\\steam.exe")||
+            group->source().selectedPid!=selected.pid||group->graph().selectedPid!=selected.pid)
+            return Status::BindingUnavailable;
+        const auto* held=group->witness(selected.pid);
+        if(!held||held->created!=selected.created||!ymcc::steamgamefacts::samePath(held->image,selected.image))
+            return Status::BindingUnavailable;
+        ymcc::steamrecordwin::Context context;
+        context.steamPid=client.pid;context.steamBirth=client.created;context.steamRoot=client.root;
+        context.windowsSession=expected.windowsSession;context.sessionBound=true;
+        const auto result=ymcc::steamrecordwin::prepareModuleProfile(context,current);
+        return current()?result:Status::CurrentRejected;
+    }catch(...){return Status::Exception;}
+}
+static std::optional<ymcc::steamgamefacts::SteamProcessGroupObservation> nativeSteamOriginalProcessGroup(
+    const ymcc::steamgamefacts::SteamLogIdentity& client,
+    const std::shared_ptr<ymcc::steamgamefacts::ProcessLease>& selected,
+    const ymcc::steamgamefacts::TrackerOwnerCurrent& requestCurrent){
+    using namespace ymcc::steamgamefacts;
+    ymcc::sleeppower::SharedPowerV1 power;
+    if(!ymcc::sleeppower::capturePowerObservation(&readSharedSystemPower,power)||
+        (power.phase!=0&&power.phase!=1))return {}; // original Ready or Suspending read scope only
+    const auto current=[&]{return tracker_detail::ownerCurrent(requestCurrent)&&selected&&selected->processCurrent()&&
+        ymcc::sleeppower::powerObservationCurrent(&readSharedSystemPower,power);};
+    if(!current())return {};
+    const auto key=MainTrackerFactsAdapter::sourceKey(client);if(!key||!current())return {};
+    auto observed=trackerOwner().observeProcessGroup(key,selected,current);
+    if(!current()){
+        const auto& capture=observed.processCapture();if(capture&&capture->lease)capture->lease->cancel();return {};
+    }
+    return observed;
+}
+struct NativeSteamTrackerFreshCompletion {
+    bool freshSourceBusy=false;
+    ymcc::steamgamefacts::TrackerCompletionWitness witness;
+};
+static ymcc::steamgamefacts::TrackerFreshObservation nativeSteamGameTrackerReadFresh(
+    const SleepSteamRecovery::Session& client,const SleepSteamRecovery::Game& game,
+    ymcc::steamgamefacts::TrackerLogScope requiredScope,json* diagnostic=nullptr,
+    ymcc::steamgamefacts::TrackerGroupCapturePolicy groupPolicy=ymcc::steamgamefacts::TrackerGroupCapturePolicy::None,
+    const ymcc::steamgamefacts::TrackerOwnerCurrent& requestCurrent={},NativeSteamTrackerFreshCompletion* completion=nullptr){
+    using namespace ymcc::steamgamefacts;
+    if(completion)*completion={}; // Never reconstruct a witness from a numeric receipt.
+    // Diagnostic only: no discovery/current callback and no exception may
+    // affect the original read or its denial. Fixed keys/strings stay bounded.
+    const auto note=[&](const char* stage,const char* reason,int claimStatus=-1)noexcept{
+        if(!diagnostic)return;
+        try{*diagnostic={{"stage",stage},{"reason",reason},{"claimStatus",claimStatus}};}catch(...){}
+    };
+    note("admission","not-completed");
+    if(requiredScope!=TrackerLogScope::ProcessLifetime&&requiredScope!=TrackerLogScope::RunningListAndProcess){note("admission","unsupported-log-scope");return {};}
+    const auto rules=g_gameRulesEpoch.load(std::memory_order_acquire),power=currentPowerGeneration();
+    const auto config=g_sleepRecoveryAutoConfigEpoch.load(std::memory_order_acquire);
+    // Optional original request guard. It never elects a global target.
+    const auto current=[&](){return (!requestCurrent||tracker_detail::ownerCurrent(requestCurrent))&&
+        !g_exitRequested.load(std::memory_order_acquire)&&
+        g_sleepRecoveryAutoEnabled.load(std::memory_order_acquire)&&g_sleepRecoveryAutoConfigEpoch.load(std::memory_order_acquire)==config&&
+        g_gameRulesEpoch.load(std::memory_order_acquire)==rules&&currentPowerGeneration()==power&&
+        g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready;};
+    if(!current()){note("admission","owner-not-current");return {};}
+    NativeDetectedGame selected;selected.pid=game.pid;selected.processCreated=game.created;selected.path=game.path;
+    const auto scope=nativeGameFactScope(selected,rules,power);if(!scope){note("game-scope","game-fact-scope-unavailable");return {};}
+    const auto key=nativeSteamGameTrackerFactKey(*scope);if(!key){note("fact-key","tracker-fact-key-unavailable");return {};}
+    const auto& steam=key->facts().steam;
+    if(steam.pid!=client.pid||steam.birth!=client.created||ymcc::sleepsteam::pathKey(W2U(steam.root))!=ymcc::sleepsteam::pathKey(W2U(client.root))){note("steam-scope","steam-instance-mismatch");return {};}
+    auto& owner=trackerOwner();auto demand=owner.beginDemand(key,{},current);
+    auto claim=owner.claim(std::move(demand.demand),current,TrackerReadMode::RequireNewSource);
+    if(claim.status!=TrackerClaimStatus::Claimed||!owner.executionEligible(claim.token)||!current()){
+        if(completion&&claim.status==TrackerClaimStatus::FreshSourceBusy&&claim.completion&&current()){
+            completion->witness=claim.completion;completion->freshSourceBusy=true;
+        }
+        note("claim",claim.status==TrackerClaimStatus::FreshSourceBusy?"fresh-source-busy":"claim-not-executable-or-owner-retired",static_cast<int>(claim.status));return {};
+    }
+    auto lease=processOwner().acquire(g_steamSettingsObserver,g_steamSettingsObserver.identitySnapshot(),
+        {game.pid,game.created,game.path});
+    if(!lease||!current()){note("process-lease",lease?"owner-retired-after-pin":"process-lease-unavailable");return {};}
+    auto result=owner.observeFresh(std::move(claim.token),std::move(lease),current,groupPolicy);
+    if(!current())result.complete=false;
+    note("observe-fresh",result.complete?"fresh-read-complete":"fresh-read-incomplete");
+    return result;
+}
+namespace SteamGameLink {
+using namespace ymcc::sleepsteam;
+using Client=SleepSteamRecovery::Session;using Game=SleepSteamRecovery::Game;
+struct TrackerRead {std::string gameId;Binding binding;json primary=json::object(),log=json::object();bool complete=false;
+    // Process/topology evidence only. Never serialized or reconstructed from JSON.
+    std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> processGroup;
+    // No public issuer in this fixture: empty by default, never a new proof.
+    std::shared_ptr<const ymcc::steamgamefacts::StartupHandoffEvidence> startupHandoff{};
+    ymcc::steamgamefacts::TrackerOwnerCurrent startupHandoffCurrent{};
+    std::shared_ptr<const ymcc::steamgamefacts::HistoricalStartupHandoffEvidence> historicalStartupHandoff{};
+    ymcc::steamgamefacts::TrackerOwnerCurrent historicalStartupHandoffCurrent{};
+};
+static TrackerRead tracking(const Client& client,const Game& game,TrackingScope scope=TrackingScope::ProcessLifetime,
+    ymcc::steamgamefacts::TrackerGroupCapturePolicy groupPolicy=ymcc::steamgamefacts::TrackerGroupCapturePolicy::None,
+    const ymcc::steamgamefacts::TrackerOwnerCurrent& requestCurrent={},NativeSteamTrackerFreshCompletion* completion=nullptr) {
+    TrackerRead result;
+    const auto logScope=scope==TrackingScope::RunningListAndProcess
+        ?ymcc::steamgamefacts::TrackerLogScope::RunningListAndProcess
+        :ymcc::steamgamefacts::TrackerLogScope::ProcessLifetime;
+    json freshDiagnostic;
+    const auto fresh=nativeSteamGameTrackerReadFresh(client,game,logScope,&freshDiagnostic,groupPolicy,requestCurrent,completion);
+
+    // Keep the original gameprocess tail metadata, including rejected reads.
+    if(fresh.tracker)
+        result.log=ymcc::steamgamefacts::trackerSourceMetadata(fresh.tracker->observation);
+    try{if(freshDiagnostic.is_object())result.log["sharedFresh"]=std::move(freshDiagnostic);}catch(...){}
+    if(!fresh.tracker||!fresh.tracker->parsedSource)return result;
+
+    const auto& parsed=*fresh.tracker->parsedSource;
+    const auto& selected=logScope==ymcc::steamgamefacts::TrackerLogScope::RunningListAndProcess
+        ?parsed.runningList:parsed.processLifetime;
+    if(!selected.inventory.complete)return result;
+
+    // Preserve every member: unique-primary depends on the full AppID/PID set.
+    // nativePrimaryJoin does not consume the inventory's path or timestamp.
+    ymcc::sleepsteam::TrackedProcessInventory inventory;
+    inventory.complete=selected.inventory.complete;
+    inventory.reason=selected.inventory.reason;
+    inventory.rows.reserve(selected.inventory.members.size());
+    for(const auto& member:selected.inventory.members)
+        inventory.rows.push_back({member.appid,member.pid,{},{}});
+
+    result.binding.status=selected.binding.status;
+    result.binding.at=selected.binding.at;
+    result.binding.appid=selected.binding.appid;
+    result.binding.line=selected.binding.sourceLine;
+    result.binding.exactPath=selected.binding.exactPath;
+    if(result.binding.status=="tracked")result.gameId=selected.binding.gameIdRaw;
+
+    // Parsed binding is an observation even when the shared transaction did
+    // not finish. All consumers retain complete before any association/action.
+    if(!fresh.complete||!fresh.nativePrimary)return result;
+
+    // Reuse the original unique-tracker fallback and native verified verdicts.
+    // Freshness and the console boundary belong to the shared facade.
+    result.primary=SleepSteamRecovery::nativePrimaryJoin(
+        {*fresh.nativePrimary,ymcc::steamgamefacts::trackerSourceMetadata(fresh.consoleObservation)},
+        inventory,result.binding.appid,game.pid);
+    result.complete=fresh.complete&&inventory.complete&&static_cast<bool>(fresh.nativePrimary);
+    // Keep the original primary booleans untouched. Only explicitly demanded
+    // two-object process evidence is forwarded to the future native-role reader.
+    const auto group=fresh.processGroupCapture?fresh.processGroupCapture->lease:nullptr;
+    if(result.complete&&group&&group->graph().count==2&&group->source().appid==result.binding.appid&&
+        std::to_string(group->source().fullGameId)==result.gameId&&
+        group->selectedGame().pid==game.pid&&group->selectedGame().created==game.created&&
+        ymcc::steamgamefacts::samePath(group->selectedGame().image,game.path)&&
+        group->steam().pid==client.pid&&group->steam().created==client.created&&
+        ymcc::steamgamefacts::samePath(group->steam().image,client.root+L"\\steam.exe")&&group->processCurrent())
+        result.processGroup=group;
+    return result;
+}
+static TrackerRead trackingOriginal(const Client& client,const Game& game,
+    const std::shared_ptr<ymcc::steamgamefacts::ProcessLease>& selected,
+    const ymcc::steamgamefacts::TrackerOwnerCurrent& requestCurrent){
+    TrackerRead result;
+    const auto observed=nativeSteamOriginalProcessGroup({client.pid,client.created,client.root},selected,requestCurrent);
+    if(!observed||!observed->sourcesComplete()||!observed->parsedSource()||!observed->nativePrimary()||
+        !observed->gameSource()||!observed->consoleSource()||!ymcc::steamgamefacts::tracker_detail::ownerCurrent(requestCurrent))return result;
+    const auto& facts=observed->parsedSource()->processLifetime;
+    result.log=observed->gameSource()->meta();
+    result.binding={facts.binding.status,facts.binding.at,facts.binding.appid,facts.binding.sourceLine,facts.binding.exactPath};
+    if(result.binding.status=="tracked")result.gameId=facts.binding.gameIdRaw;
+    ymcc::sleepsteam::TrackedProcessInventory inventory;inventory.complete=facts.inventory.complete;inventory.reason=facts.inventory.reason;
+    for(const auto& member:facts.inventory.members)inventory.rows.push_back({member.appid,member.pid,{},{}});
+    result.primary=SleepSteamRecovery::nativePrimaryJoin({*observed->nativePrimary(),observed->consoleSource()->meta()},inventory,result.binding.appid,game.pid);
+    result.complete=facts.inventory.complete&&result.binding.status=="tracked"&&facts.binding.fullGameIdKnown;
+    const auto capture=observed->processCapture();
+    const auto group=capture?capture->lease:nullptr;
+    // Never downgrade a multi-member group to empty merely because it is not count2.
+    // The final engine keeps its original strict path outside the new count2 route.
+    if(group&&group->graph().count>=2&&group->source().appid==result.binding.appid&&
+        std::to_string(group->source().fullGameId)==result.gameId&&group->selectedGame().pid==game.pid&&
+        group->selectedGame().created==game.created&&ymcc::steamgamefacts::samePath(group->selectedGame().image,game.path)&&
+        group->steam().pid==client.pid&&group->steam().created==client.created&&group->processCurrent())result.processGroup=group;
+    if(!ymcc::steamgamefacts::tracker_detail::ownerCurrent(requestCurrent)){
+        if(result.processGroup)result.processGroup->cancel();result.complete=false;
+    }
+    return result;
+}
+}
+// Observation facade leaf only; the full formal native observation wrapper is
+// owned by the parent. It still uses the public real tracker, with no group opt-in.
+static SteamGameLink::TrackerRead nativeSteamNativeObservationTracking(
+    const SleepSteamRecovery::Session& client,const SleepSteamRecovery::Game& game,const std::function<bool()>& active){
+    const auto allowed=[&](){try{return active&&active();}catch(...){return false;}};
+    if(!allowed())return {};
+    auto held=ymcc::steamgamefacts::processOwner().acquire(
+        g_steamSettingsObserver,g_steamSettingsObserver.identitySnapshot(),{game.pid,game.created,game.path});
+    if(!held||!held->processCurrent()||!allowed())return {};
+    return SteamGameLink::trackingOriginal(client,game,held,allowed);
+}
+static json steamOriginalRecoveryEngineHandle(const json&,const std::function<bool()>&,const std::function<void(const json&)>&,
+    const std::function<bool()>&,std::uintptr_t,std::uintptr_t,std::uintptr_t,std::shared_ptr<ymcc::steamnative::ReadScope>,
+    std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease>,std::shared_ptr<ymcc::steamgamefacts::RequestCancellation>);
+namespace SteamOriginalRecovery {
+using RecoveryRoute=ymcc::steamOriginal::RecoveryRoute;using Trigger=ymcc::steamOriginal::Trigger;
+using Identity=ymcc::steamOriginal::Identity;using Scope=ymcc::steamOriginal::Scope;
+enum class GroupRequestTarget { GlobalSelection, SleepOriginal };
+struct StartupFreshRequest;
+struct StartupFreshWait;
+struct Pending {
+    Trigger kind;unsigned long long generation=0,sequence=0;
+    // Only a drained exact-flight hint can populate this request-local suffix.
+    // Original enqueues keep the same three-field aggregate and a null suffix.
+    std::shared_ptr<StartupFreshWait> startupFresh;
+};
+struct StartupFreshRequest final {
+    const unsigned long long sequence,configEpoch,rulesEpoch,powerGeneration;
+    const DWORD accountCandidate;
+    const NativeGameSelectionReceipt selection;
+    const std::shared_ptr<ymcc::steamnative::ReadScope> operationReadScope;
+    std::atomic<bool> cancelled{false},terminal{false};
+    // Only the existing recovery worker reads/writes these route snapshots.
+    // They are diagnostic observations, never facts or admission authority.
+    std::array<json,2> routeObservations;
+    std::array<bool,2> routeOwns{};
+    std::array<bool,2> routeArmed{}; // Protected by original Control::mx.
+    StartupFreshRequest(unsigned long long serial,unsigned long long config,unsigned long long rules,
+        DWORD account,NativeGameSelectionReceipt selected,std::shared_ptr<ymcc::steamnative::ReadScope> scope)
+        :sequence(serial),configEpoch(config),rulesEpoch(rules),powerGeneration(selected.powerGeneration),
+         accountCandidate(account),selection(std::move(selected)),operationReadScope(std::move(scope)){}
+};
+enum class StartupFreshPhase { Arming, Watching, Queued, Running, Finished, Cancelled };
+struct StartupFreshWait final {
+    const std::shared_ptr<StartupFreshRequest> request;
+    const Pending original;
+    const RecoveryRoute route;
+    const Scope scope;
+    const bool mayMutate;
+    const std::shared_ptr<ymcc::steamnative::ReadScope> nativeReadScope;
+    const ymcc::steamgamefacts::TrackerCompletionWitness witness;
+    // Access below is serialized by original Control::mx, never by the sink.
+    StartupFreshPhase phase=StartupFreshPhase::Arming;
+    ymcc::steamgamefacts::TrackerCompletionSubscription subscription;
+    std::optional<ymcc::steamgamefacts::TrackerCompletionHint> earlyHint;
+    bool reReadNow=false;
+    std::uint64_t consumedReceiptRevision=0;
+    StartupFreshWait(std::shared_ptr<StartupFreshRequest> owner,Pending pending,RecoveryRoute selectedRoute,
+        Scope originalScope,bool mutate,std::shared_ptr<ymcc::steamnative::ReadScope> native,
+        ymcc::steamgamefacts::TrackerCompletionWitness blocked)
+        :request(std::move(owner)),original(std::move(pending)),route(selectedRoute),scope(std::move(originalScope)),
+         mayMutate(mutate),nativeReadScope(std::move(native)),witness(std::move(blocked)){}
+};
+
+struct ActiveGroupRequest {
+    std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> cancellation;
+    unsigned long long sequence=0,bindingSerial=0,configEpoch=0,rulesEpoch=0;
+    unsigned long long selectionGeneration=0,powerGeneration=0;
+    RecoveryRoute route=RecoveryRoute::LegacyDynamic;
+    GroupRequestTarget targetDomain=GroupRequestTarget::GlobalSelection;
+    Identity game{},steam{};
+};
+struct Control {
+    std::mutex mx,snapshotMx,logMx;std::condition_variable cv;
+    bool stop=false;std::atomic<bool> startupPending{true};std::deque<Pending> pending;
+    std::shared_ptr<void> observationEvent;
+    std::shared_ptr<ActiveGroupRequest> activeGroupRequest;
+    std::shared_ptr<StartupFreshRequest> startupFreshRequest;
+    std::array<std::shared_ptr<StartupFreshWait>,2> startupFreshWaits;
+    unsigned long long sequence=0,observationSequence=0;std::uint64_t latestPower=0,deferredWake=0;
+    Identity observedTarget{},observedSteam{};unsigned long long observedRules=0;
+    bool targetObserved=false,steamObserved=false,bindingQualified=false;
+    std::shared_ptr<SleepSteamRecovery::CaptureRequest> boundSleepRequest;
+    unsigned long long bindingSerial=0;Identity boundGame{},boundSteam{};std::string boundGameId;std::uint32_t boundAppId=0;
+    std::atomic<bool> active{false},ownsRunning{false},enabled{false};
+    std::atomic<DWORD> ownedPid{0};std::atomic<ULONGLONG> ownedBirth{0};
+    ymcc::steamOriginal::Admission admission,legacyAdmission;
+    json snapshot={{"schema","ymcc.steam-original-recovery.v1"},{"phase","not-started"},
+        {"owner","ymcc-native"},{"extraExecutables",0},{"periodicPolling",false},
+        {"gamePidSource","ymcc-unique-game-valve"},{"controllerVerified",false},{"continueClickVerified",false}};
+};
+static void cancelGroupRequestLocked(const std::shared_ptr<Control>& c,bool globalSelectionOnly=false) noexcept {
+    const auto& request=c->activeGroupRequest;
+    if(request&&request->cancellation&&(!globalSelectionOnly||request->targetDomain==GroupRequestTarget::GlobalSelection))
+        request->cancellation->cancel();
+}
+struct GroupRequestRegistration {
+    std::shared_ptr<Control> owner;
+    std::shared_ptr<ActiveGroupRequest> request;
+    GroupRequestRegistration(std::shared_ptr<Control> c,std::shared_ptr<ActiveGroupRequest> r):owner(std::move(c)),request(std::move(r)){}
+    GroupRequestRegistration(const GroupRequestRegistration&)=delete;
+    GroupRequestRegistration& operator=(const GroupRequestRegistration&)=delete;
+    ~GroupRequestRegistration(){
+        if(!request)return;
+        std::lock_guard<std::mutex> lock(owner->mx);
+        // The engine has returned; retained engine/remote owners keep their shared_ptr.
+        request->cancellation->cancel();
+        if(owner->activeGroupRequest==request)owner->activeGroupRequest.reset();
+    }
+};
+std::shared_ptr<Control> callbackControl;
+std::shared_ptr<Control> current(){return callbackControl;}
+std::wstring root(){return L"fixture-evidence";}
+std::wstring runtimeRoot(){return L"fixture-runtime";}
+std::map<std::wstring,json> saved;
+void publish(const std::shared_ptr<Control>& c,json value,bool=true){std::lock_guard<std::mutex> lock(c->snapshotMx);c->snapshot.update(value);}
+void saveJson(const std::wstring& path,const json& value){saved[path]=value;}
+void log(const std::shared_ptr<Control>&,const char*,const json&){}
+static Identity identity(DWORD pid,ULONGLONG birth,const std::wstring& path){
+    DWORD session=MAXDWORD;if(!pid||!birth||path.empty()||!ProcessIdToSessionId(pid,&session))return {};
+    auto canonical=path;std::replace(canonical.begin(),canonical.end(),L'/',L'\\');
+    std::transform(canonical.begin(),canonical.end(),canonical.begin(),[](wchar_t ch){return std::towlower(ch);});
+    return {pid,session,birth,std::move(canonical)};
+}
+static json asJson(const Identity& p){return {{"pid",p.pid},{"birth",std::to_string(p.birth)},
+    {"birthFileTime",std::to_string(p.birth)},{"path",W2U(p.path)},{"session",p.session}};}
+static ymcc::steamOriginal::WakeProof wakeProof(unsigned long long generation,unsigned long long epoch){
+    ymcc::steamOriginal::WakeProof proof;
+    std::lock_guard<std::mutex> lock(SleepRecoveryAuto::mx);
+    const auto& state=SleepRecoveryAuto::state;const auto& observed=SleepRecoveryAuto::kernelWake;
+    const auto& admission=state.wakeAdmission;
+    if(!admission.is_object())return proof;
+    proof.generation=state.generation;proof.epoch=state.configEpoch;
+    proof.observedGeneration=observed.generation;proof.observedEpoch=observed.configEpoch;
+    proof.requestedGeneration=observed.requestGeneration;proof.requested=observed.uiWakeRequested;
+    proof.eventFileTime=observed.eventFileTime;proof.observedBoundaryFileTime=observed.boundaryFileTime;
+    proof.eventId=observed.eventId;proof.latestEntryEpoch=SleepRecoveryAuto::kernelSleepEntry.configEpoch;
+    proof.latestEntryFileTime=SleepRecoveryAuto::kernelSleepEntry.eventFileTime;
+    proof.admitted=admission.value("status",std::string{})=="admitted";
+    proof.confirmed=ymcc::sleeprecovery::flag(admission,"kernelWakeConfirmed");
+    proof.fresh=ymcc::sleeprecovery::flag(admission,"proofFresh");
+    proof.transferred=ymcc::sleeprecovery::flag(admission,"proofFollowedPreparedBoundary");
+    proof.boundaryGeneration=ymcc::sleeprecovery::number(admission,"boundaryGeneration");
+    proof.admissionObservedGeneration=ymcc::sleeprecovery::number(admission,"proofObservedGeneration");
+    const auto decimalField=[&](const char* key,std::uint64_t& value){const auto it=admission.find(key);
+        return it!=admission.end()&&it->is_string()&&ymcc::sleepsteam::unsignedDecimal(it->get<std::string>(),value);};
+    if(!decimalField("eventFileTime",proof.admissionFileTime)||!decimalField("boundaryFileTime",proof.boundaryFileTime))return {};
+    const auto source=admission.value("source",std::string{});
+    proof.sourceMatched=(proof.eventId==507&&source=="kernel-power-507-reason-1")||
+        (proof.eventId==107&&source=="kernel-power-107-target-5");
+    return g_sleepRecoveryAutoConfigEpoch.load()==epoch&&proof.valid(generation,epoch,sgNowFileTime())?
+        proof:ymcc::steamOriginal::WakeProof{};
+}
+static ymcc::steamOriginal::LegacyWakeProof legacyWakeProof(unsigned long long generation,unsigned long long epoch){
+    ymcc::steamOriginal::LegacyWakeProof proof;
+    std::lock_guard<std::mutex> lock(SleepRecoveryAuto::mx);
+    const auto& state=SleepRecoveryAuto::state;const auto& admission=state.wakeAdmission;
+    if(!admission.is_object()||g_powerLifecycle.load()!=PowerLifecycle::Ready||
+        g_sleepRecoveryAutoConfigEpoch.load()!=epoch)return proof;
+    proof.generation=state.generation;proof.epoch=state.configEpoch;proof.armedTick=state.armed;
+    proof.admitted=admission.value("status",std::string{})=="admitted";
+    proof.operationAllowed=SleepRecoveryAuto::wakeOperationAllowedLocked(generation,epoch);
+    proof.boundaryGeneration=ymcc::sleeprecovery::number(admission,"boundaryGeneration");
+    const auto decimalField=[&](const char* key,std::uint64_t& value){const auto it=admission.find(key);
+        return it!=admission.end()&&it->is_string()&&ymcc::sleepsteam::unsignedDecimal(it->get<std::string>(),value);};
+    if(!decimalField("boundaryFileTime",proof.boundaryFileTime))return {};
+    const auto source=admission.value("source",std::string{});
+    if(source=="pbt-resume-suspend-s3"&&!ymcc::sleeprecovery::flag(admission,"modernStandby")){
+        proof.sourceMatched=decimalField("pbtObservedFileTime",proof.eventFileTime);
+    }else if(source=="interactive-resume-committed-ready"&&ymcc::sleeprecovery::flag(admission,"interactiveWakeConfirmed")){
+        // Dynamic evidence is independent of the strict kernel/profile route.
+        // Re-read the native join at every preflight, never trust exported JSON.
+        proof.sourceMatched=decimalField("eventFileTime",proof.eventFileTime)&&
+            proof.eventFileTime==SleepRecoveryAuto::interactiveResume.eventFileTime&&
+            SleepRecoveryAuto::completedInteractiveResumeLocked(generation,epoch,proof.boundaryFileTime,proof.boundaryGeneration);
+    }else if(ymcc::sleeprecovery::flag(admission,"kernelWakeConfirmed")&&ymcc::sleeprecovery::flag(admission,"proofFresh")){
+        const auto& observed=SleepRecoveryAuto::kernelWake;
+        proof.sourceMatched=decimalField("eventFileTime",proof.eventFileTime)&&observed.configEpoch==epoch&&
+            observed.eventFileTime==proof.eventFileTime&&observed.requestGeneration==generation&&observed.uiWakeRequested&&
+            ((observed.eventId==507&&source=="kernel-power-507-reason-1")||
+             (observed.eventId==107&&source=="kernel-power-107-target-5"));
+    }
+    if(SleepRecoveryAuto::kernelSleepEntry.configEpoch==epoch)
+        proof.latestEntryFileTime=SleepRecoveryAuto::kernelSleepEntry.eventFileTime;
+    return proof.valid(generation,epoch,sgNowFileTime(),GetTickCount64())?proof:ymcc::steamOriginal::LegacyWakeProof{};
+}
+static bool sameScopeNow(const std::shared_ptr<Control>& c,const Scope& scope,unsigned long long generation,bool recovery,
+    unsigned long long configEpoch=0,unsigned long long bindingSerial=ULLONG_MAX,
+    const SleepSteamRecovery::Captured& original={}){
+    {std::lock_guard<std::mutex> lock(c->mx);if(c->stop||
+        (generation&&c->latestPower>generation)||(bindingSerial!=ULLONG_MAX&&
+            (!c->bindingQualified||c->bindingSerial!=bindingSerial)))return false;}
+    if(configEpoch&&g_sleepRecoveryAutoConfigEpoch.load()!=configEpoch)return false;
+    if(g_exitRequested.load()||g_gameRulesEpoch.load()!=scope.rulesEpoch)return false;
+    if(!sharedSleepWakeClassified(generation?generation:currentPowerGeneration())||
+        (recovery&&(!g_sleepRecoveryAutoEnabled.load()||g_powerLifecycle.load()!=PowerLifecycle::Ready)))return false;
+    if(recovery&&generation&&!SleepRecoveryAuto::wakeOperationAllows(generation,g_sleepRecoveryAutoConfigEpoch.load()))return false;
+    if(original.request){
+        if(!SleepSteamRecovery::originalTargetCurrent(original)||
+            !(identity(original.game.pid,original.game.created,original.game.path)==scope.game))return false;
+    }else{
+        NativeDetectedGame target;unsigned long long touch=0;
+        if(!nativeValveReadCurrentTarget(&target,&touch)||!(identity(target.pid,target.processCreated,target.path)==scope.game))return false;
+    }
+    const auto steam=SleepSteamRecovery::session();
+    return identity(steam.pid,steam.created,steam.root+L"\\steam.exe")==scope.steam;
+}
+static bool sameObservationScopeNow(const std::shared_ptr<Control>& c,const Scope& scope,
+    unsigned long long generation,unsigned long long configEpoch,unsigned long long bindingSerial,std::uint32_t expectedAccount,
+    const SleepSteamRecovery::Captured& original={}){
+    {std::lock_guard<std::mutex> lock(c->mx);if(c->stop||!c->bindingQualified||
+        c->bindingSerial!=bindingSerial||(generation&&c->latestPower>generation))return false;}
+    if(g_exitRequested.load()||g_gameRulesEpoch.load()!=scope.rulesEpoch||
+        g_sleepRecoveryAutoConfigEpoch.load()!=configEpoch||!g_sleepRecoveryAutoEnabled.load()||
+        g_powerLifecycle.load()!=PowerLifecycle::Ready||!sharedSleepWakeClassified(generation?generation:currentPowerGeneration()))return false;
+    if(original.request){
+        if(!SleepSteamRecovery::originalTargetCurrent(original)||
+            !(identity(original.game.pid,original.game.created,original.game.path)==scope.game))return false;
+    }else{
+        NativeGameValveSnapshot selected;
+        {std::lock_guard<std::mutex> lock(g_gameValveMx);selected=g_gameValveTarget;}
+        if(!selected.generation||selected.rulesEpoch!=scope.rulesEpoch||selected.game.pid!=scope.game.pid||
+            selected.game.processCreated!=scope.game.birth||_wcsicmp(selected.game.path.c_str(),scope.game.path.c_str())!=0)return false;
+    }
+    const auto steam=g_steamSettingsObserver.sessionSnapshot();
+    return expectedAccount&&steam.account==expectedAccount&&steam.pid==scope.steam.pid&&steam.created==scope.steam.birth&&
+        _wcsicmp((steam.root+L"\\steam.exe").c_str(),scope.steam.path.c_str())==0;
+}
+static std::size_t startupFreshRouteIndex(RecoveryRoute route) noexcept {
+    return route==RecoveryRoute::LegacyDynamic?0u:1u;
+}
+// Caller holds only original c->mx. Cancellation is atomic-only; keep scopes
+// and RAII handles until the existing worker/ordinary event retires the objects.
+static void cancelStartupFreshLocked(const std::shared_ptr<Control>& c) noexcept {
+    if(c->startupFreshRequest)c->startupFreshRequest->cancelled.store(true,std::memory_order_release);
+    for(const auto& wait:c->startupFreshWaits)if(wait){
+        wait->phase=StartupFreshPhase::Cancelled;wait->subscription.cancel();
+    }
+}
+struct RetiredStartupFresh {
+    std::shared_ptr<StartupFreshRequest> request;
+    std::array<std::shared_ptr<StartupFreshWait>,2> waits;
+};
+static RetiredStartupFresh retireStartupFreshLocked(const std::shared_ptr<Control>& c) noexcept {
+    cancelStartupFreshLocked(c);
+    RetiredStartupFresh old;old.request=std::move(c->startupFreshRequest);old.waits=std::move(c->startupFreshWaits);
+    return old; // Caller destroys outside c->mx; no lock-dependent sink captures.
+}
+struct StartupFreshRunReturn final {
+    std::shared_ptr<Control> owner;
+    std::shared_ptr<StartupFreshRequest> request;
+    std::shared_ptr<StartupFreshWait> resumed;
+    ~StartupFreshRunReturn(){
+        if(!request)return;
+        RetiredStartupFresh retired;
+        try{
+            std::lock_guard<std::mutex> lock(owner->mx);
+            bool retained=false;
+            for(std::size_t i=0;i<owner->startupFreshWaits.size();++i){
+                auto& wait=owner->startupFreshWaits[i];if(!wait||wait->request!=request)continue;
+                if(wait==resumed)wait->phase=StartupFreshPhase::Finished;
+                if(request->cancelled.load()||request->terminal.load()||
+                    wait->phase==StartupFreshPhase::Finished||wait->phase==StartupFreshPhase::Cancelled){
+                    wait->subscription.cancel();retired.waits[i]=std::move(wait);
+                }else retained=true;
+            }
+            if(!retained&&owner->startupFreshRequest==request){
+                request->cancelled.store(true,std::memory_order_release);retired.request=std::move(owner->startupFreshRequest);
+            }
+        }catch(...){request->cancelled.store(true,std::memory_order_release);}
+    }
+};
+static bool startupFreshScopeCurrent(const std::shared_ptr<Control>& c,const std::shared_ptr<StartupFreshRequest>& request,
+    const std::shared_ptr<StartupFreshWait>& wait={}) noexcept {
+    try{
+        if(!c||!request||request->cancelled.load(std::memory_order_acquire))return false;
+        {
+            std::lock_guard<std::mutex> lock(c->mx);
+            if(c->stop||c->startupFreshRequest!=request||c->sequence!=request->sequence)return false;
+            if(wait&&(c->startupFreshWaits[startupFreshRouteIndex(wait->route)]!=wait||wait->phase==StartupFreshPhase::Cancelled))return false;
+        }
+        if(g_exitRequested.load()||!g_sleepRecoveryAutoEnabled.load()||g_powerLifecycle.load()!=PowerLifecycle::Ready||
+            g_sleepRecoveryAutoConfigEpoch.load()!=request->configEpoch||g_gameRulesEpoch.load()!=request->rulesEpoch||
+            currentPowerGeneration()!=request->powerGeneration||!nativeValveSelectionCurrent(request->selection)||
+            !request->operationReadScope||!request->operationReadScope->current())return false;
+        // The opaque witness was matched to this exact held ReadScope below.
+        // Its public delegation cancels on Steam process/account epoch changes;
+        // selection/rules/power are checked above. Do not call a private adapter.
+        if(wait&&(!wait->nativeReadScope||!wait->nativeReadScope->current()||!wait->witness))return false;
+        return !request->cancelled.load(std::memory_order_acquire);
+    }catch(...){return false;}
+}
+// A terminal budget prevents another continuation, but is not scope loss for
+// the original successful ownsRunning projection.
+static bool startupFreshCurrent(const std::shared_ptr<Control>& c,const std::shared_ptr<StartupFreshRequest>& request,
+    const std::shared_ptr<StartupFreshWait>& wait={}) noexcept {
+    return startupFreshScopeCurrent(c,request,wait)&&!request->terminal.load(std::memory_order_acquire);
+}
+static std::shared_ptr<StartupFreshRequest> beginStartupFreshRequest(const std::shared_ptr<Control>& c,Pending pending,
+    unsigned long long configEpoch,unsigned long long rulesEpoch,DWORD account,
+    const std::shared_ptr<ymcc::steamnative::ReadScope>& operation) noexcept {
+    try{
+        if(pending.startupFresh||pending.kind==Trigger::Wake||pending.kind==Trigger::SuspendCapture||!operation)return {};
+        NativeGameSelectionReceipt selected;
+        // Sole game owner's memory-only generation receipt; no new detector,
+        // process query, current-target refresh or account authority.
+        if(!nativeValveReadCachedSelection(&selected)||selected.target.rulesEpoch!=rulesEpoch)return {};
+        auto request=std::make_shared<StartupFreshRequest>(pending.sequence,configEpoch,rulesEpoch,account,selected,operation);
+        RetiredStartupFresh retired;
+        {
+            std::lock_guard<std::mutex> lock(c->mx);
+            if(c->stop||c->sequence!=pending.sequence)return {};
+            retired=retireStartupFreshLocked(c);c->startupFreshRequest=request;
+        }
+        if(startupFreshCurrent(c,request))return request;
+        RetiredStartupFresh rejected;
+        {std::lock_guard<std::mutex> lock(c->mx);if(c->startupFreshRequest==request)rejected=retireStartupFreshLocked(c);}
+        return {};
+    }catch(...){return {};}
+}
+static void drainStartupFreshCompletion(std::weak_ptr<Control> owner,std::weak_ptr<StartupFreshWait> pending,
+    std::optional<ymcc::steamgamefacts::TrackerCompletionHint> hint) noexcept {
+    const auto c=owner.lock();const auto wait=pending.lock();if(!c||!wait)return;
+    bool queued=false;
+    try{
+        // Runs only after the shared main-window transport released its mutex.
+        // This is still metadata handling; the original worker rechecks again.
+        if(!startupFreshCurrent(c,wait->request,wait))return;
+        {
+            std::lock_guard<std::mutex> lock(c->mx);
+            if(c->stop||c->startupFreshRequest!=wait->request||wait->request->cancelled.load()||wait->request->terminal.load()||
+                c->startupFreshWaits[startupFreshRouteIndex(wait->route)]!=wait)return;
+            if(wait->phase!=StartupFreshPhase::Arming&&wait->phase!=StartupFreshPhase::Watching)return;
+            if(hint){
+                const auto& receipt=hint->receipt();
+                if(!hint->subscribed()||hint->key()!=wait->witness.key()||!receipt.terminal()||!receipt.revision||
+                    receipt.flightSequence!=wait->witness.sequence()||receipt.factVersion!=wait->witness.factVersion())return;
+            }else if(!wait->reReadNow)return;
+            if(wait->phase==StartupFreshPhase::Arming){
+                // Owner may post before watchCompletion returns. Retain the
+                // early value; never consume until its RAII handle is installed.
+                if(hint)wait->earlyHint=std::move(hint);
+                return;
+            }
+            if(c->pending.size()>=16){wait->phase=StartupFreshPhase::Cancelled;wait->subscription.cancel();return;}
+            // Preserve the exact effective original Pending. Do not call enqueue,
+            // increment sequence, publish IdentityReady, or refund any ledger.
+            c->pending.push_back({wait->original.kind,wait->original.generation,wait->original.sequence,wait});
+            wait->consumedReceiptRevision=hint?hint->receipt().revision:0;
+            wait->phase=StartupFreshPhase::Queued;queued=true;
+        }
+        if(queued)c->cv.notify_all();
+    }catch(...){
+        try{std::lock_guard<std::mutex> lock(c->mx);wait->phase=StartupFreshPhase::Cancelled;wait->subscription.cancel();}catch(...){}
+    }
+}
+static void armStartupFreshCompletion(const std::shared_ptr<Control>& c,const std::shared_ptr<StartupFreshRequest>& request,
+    Pending pending,RecoveryRoute route,const Scope& scope,bool mayMutate,
+    const std::shared_ptr<ymcc::steamnative::ReadScope>& nativeReadScope,
+    const ymcc::steamgamefacts::TrackerCompletionWitness& witness) noexcept {
+    using namespace ymcc::steamgamefacts;
+    std::shared_ptr<StartupFreshWait> wait;
+    try{
+        if(!request||pending.startupFresh||pending.kind!=Trigger::Startup||!mayMutate||!witness||!nativeReadScope||
+            !startupFreshCurrent(c,request))return;
+        const auto& selected=request->selection.target.game;const auto& facts=witness.key()->facts();
+        if(scope.game.pid!=selected.pid||scope.game.birth!=selected.processCreated||
+            !samePath(scope.game.path,selected.path)||facts.selectedGame.pid!=scope.game.pid||facts.selectedGame.birth!=scope.game.birth||
+            !samePath(facts.selectedGame.exactPath,scope.game.path)||
+            facts.steam.pid!=scope.steam.pid||facts.steam.birth!=scope.steam.birth||facts.steam.windowsSession!=scope.steam.session||
+            !samePath(facts.steam.root,nativeReadScope->expected().session.root)||
+            facts.steam.processEpoch!=nativeReadScope->expected().processEpoch||
+            facts.steam.accountEpoch!=nativeReadScope->expected().accountEpoch||facts.rulesEpoch!=request->rulesEpoch||
+            facts.powerGeneration!=request->powerGeneration)return;
+        const auto index=startupFreshRouteIndex(route);
+        wait=std::make_shared<StartupFreshWait>(request,pending,route,scope,mayMutate,nativeReadScope,witness);
+        std::shared_ptr<StartupFreshWait> retired;
+        {
+            std::lock_guard<std::mutex> lock(c->mx);
+            if(c->stop||c->startupFreshRequest!=request||request->cancelled.load()||request->terminal.load()||request->routeArmed[index])return;
+            request->routeArmed[index]=true;retired=std::move(c->startupFreshWaits[index]);c->startupFreshWaits[index]=wait;
+        }
+        const std::weak_ptr<Control> weakOwner=c;const std::weak_ptr<StartupFreshWait> weakWait=wait;
+        if(fixtureBeforeCompletionWatch)fixtureBeforeCompletionWatch();
+        auto issue=trackerOwner().watchCompletion(witness,[weakOwner,weakWait](const TrackerCompletionHint& hint){
+            // The source caller may hold refreshMx. Sink/destructor capture only
+            // weak tickets and the hint value; no consumer lock or callback here.
+            return postSteamTrackerCompletionDispatch([weakOwner,weakWait,hint]{drainStartupFreshCompletion(weakOwner,weakWait,hint);});
+        });
+        if(fixtureBeforeSubscriptionInstall)fixtureBeforeSubscriptionInstall();
+        std::optional<TrackerCompletionHint> early;bool postReRead=false;
+        {
+            std::lock_guard<std::mutex> lock(c->mx);
+            if(c->startupFreshRequest!=request||c->startupFreshWaits[index]!=wait||request->cancelled.load()||
+                request->terminal.load()||wait->phase!=StartupFreshPhase::Arming)return;
+            if(issue.status==TrackerCompletionWatchStatus::Watching){
+                wait->subscription=std::move(issue.subscription);wait->phase=StartupFreshPhase::Watching;
+                early=std::move(wait->earlyHint);
+            }else if(issue.status==TrackerCompletionWatchStatus::ReReadNow){
+                wait->reReadNow=true;wait->phase=StartupFreshPhase::Watching;postReRead=true;
+            }else wait->phase=StartupFreshPhase::Cancelled;
+        }
+        if(early||postReRead){
+            // The same shared bounded transport handles registration races too;
+            // a rejection has no automatic retry or eventual-delivery promise.
+            if(!postSteamTrackerCompletionDispatch([weakOwner,weakWait,early]{drainStartupFreshCompletion(weakOwner,weakWait,early);})){
+                std::lock_guard<std::mutex> lock(c->mx);wait->phase=StartupFreshPhase::Cancelled;wait->subscription.cancel();
+            }
+        }
+    }catch(...){
+        // An optional allocation/registration/post failure must leave a terminal
+        // marker so original worker RAII can return retained request resources.
+        if(wait)try{
+            std::lock_guard<std::mutex> lock(c->mx);
+            if(c->startupFreshWaits[startupFreshRouteIndex(route)]==wait){
+                wait->phase=StartupFreshPhase::Cancelled;wait->subscription.cancel();
+            }
+        }catch(...){}
+    }
+}
+
+
+static void enqueue(const std::shared_ptr<Control>& c,Trigger kind,unsigned long long generation=0){
+    if(!c)return;
+    {std::lock_guard<std::mutex> lock(c->mx);if(c->stop)return;
+        if(kind==Trigger::Wake||kind==Trigger::SuspendCapture){
+            if(!generation||generation<c->latestPower)return;
+            c->latestPower=generation;
+        }
+        for(const auto& item:c->pending)if(item.kind==kind&&item.generation==generation)return;
+        if(c->pending.size()>=16)return; // bounded; never spawn a second worker
+        cancelStartupFreshLocked(c); // Only cancel here; existing worker retires scopes outside consumer locks.
+        c->pending.push_back({kind,generation,++c->sequence});
+        if(c->observationSequence!=ULLONG_MAX)++c->observationSequence;
+    }c->cv.notify_all();if(c->observationEvent)SetEvent(c->observationEvent.get());
+}
+static DWORD accountCandidate(DWORD verifiedAccount){
+    if(verifiedAccount)return verifiedAccount;
+    const auto facts=g_steamSettingsObserver.identitySnapshot();
+    return facts&&facts->registryAccountCandidateKnown()?facts->session.account:0;
+}
+static json retainedRouteTerminal(const std::shared_ptr<Control>& c,RecoveryRoute route) {
+    try{std::lock_guard<std::mutex> lock(c->snapshotMx);
+        const auto slots=c->snapshot.find("routeTerminals");
+        if(slots!=c->snapshot.end()&&slots->is_object()){
+            const auto found=slots->find(ymcc::steamOriginal::routeName(route));
+            if(found!=slots->end()&&found->is_object())return *found;
+        }
+    }catch(...){}return nullptr;
+}
+static void recordRouteTerminal(const std::shared_ptr<Control>& c,RecoveryRoute route,
+    const std::string& eventId,const json& receipt,bool engineObserved,bool summaryPersisted) {
+    try{
+        if(!receipt.is_object())return;
+        const auto name=ymcc::steamOriginal::routeName(route);
+        std::lock_guard<std::mutex> lock(c->snapshotMx);
+        auto& slots=c->snapshot["routeTerminals"];if(!slots.is_object())slots=json::object();
+        const auto prior=slots.value(name,json());
+        const bool same=prior.is_object()&&prior.value("eventId",std::string{})==eventId;
+        json terminal={{"schema",1},{"route",name},{"eventId",eventId},
+            {"resultId",receipt.value("id",std::string{}).substr(0,256)},
+            {"status",receipt.value("status",std::string("unknown")).substr(0,128)},
+            {"reason",receipt.value("reason",std::string{}).substr(0,256)},
+            {"engineTerminalObserved",engineObserved||(same&&prior.value("engineTerminalObserved",false))},
+            {"summaryPersisted",summaryPersisted||(same&&prior.value("summaryPersisted",false))},
+            {"summaryFile",std::string("last-")+name+"-summary.json"},
+            {"logStream","steam-original-recovery.jsonl (including retained rotation)"},
+            {"logEvent","engine"},{"engineEvent","job-finished"},
+            {"publisherCallsKnown",receipt.value("publisherCallsKnown",false)},
+            {"publisherCalls",receipt.value("publisherCallsKnown",false)?receipt.value("publisherCalls",json()):json()},
+            {"diagnosticOnly",true},{"actionAuthority",false}};
+        slots[name]=terminal;
+        if(c->snapshot.value("recoveryRoute",std::string{})==name&&
+           c->snapshot.value("eventId",json())==eventId){
+            c->snapshot["terminalEvidence"]=terminal;c->snapshot["terminalEvidenceHistorical"]=false;
+        }
+    }catch(...){} // Evidence projection must not change a route outcome.
+}
+static void runRoute(const std::shared_ptr<Control>& c,Pending pending,const json& config,RecoveryRoute route,bool mayMutate,
+    const std::shared_ptr<ymcc::steamnative::ReadScope>& operationReadScope=nullptr,
+    const std::shared_ptr<StartupFreshRequest>& startupRequest={}){
+    const bool legacy=route==RecoveryRoute::LegacyDynamic;
+    const auto continuation=pending.startupFresh;
+    if(continuation&&(!startupRequest||continuation->request!=startupRequest||continuation->route!=route||
+        continuation->original.sequence!=pending.sequence||!startupFreshCurrent(c,startupRequest,continuation)))return;
+    auto& routeAdmission=legacy?c->legacyAdmission:c->admission;
+    const auto retainedTerminal=retainedRouteTerminal(c,route);
+    publish(c,{{"recoveryRoute",ymcc::steamOriginal::routeName(route)},{"phase","route-started"},{"reason","independent-route-admission"},
+        {"engineDispatched",false},{"eventId",nullptr},{"trigger",nullptr},{"lastResult",nullptr},{"lastResultHistorical",true},
+        {"attemptSequence",std::to_string(pending.sequence)},{"terminalEvidence",retainedTerminal},
+        {"terminalEvidenceHistorical",retainedTerminal.is_object()},
+        {"lastResultState",retainedTerminal.is_object()?"no-current-result-retained-terminal":"no-current-result"}});
+    const auto configEpoch=g_sleepRecoveryAutoConfigEpoch.load();
+    const bool enabled=config.is_object()&&config.value("enabled",false)&&g_sleepRecoveryAutoEnabled.load();
+    if(!enabled){c->ownsRunning=false;publish(c,{{"phase","disabled"},{"reason","automatic-recovery-disabled"},{"target",nullptr},{"steam",nullptr},{"currentBindingValid",false},{"nativeRunning",nullptr},{"lastResultHistorical",true}});return;}
+    const bool sleepOriginal=pending.kind==Trigger::Wake||pending.kind==Trigger::SuspendCapture;
+    const auto original=sleepOriginal?SleepSteamRecovery::capturedFor(pending.generation):SleepSteamRecovery::Captured{};
+    if(sleepOriginal&&(!SleepSteamRecovery::originalTargetCurrent(original)||
+        (pending.kind==Trigger::SuspendCapture&&(g_powerLifecycle.load()!=PowerLifecycle::Suspending||
+            currentPowerGeneration()!=pending.generation)))){
+        c->ownsRunning=false;publish(c,{{"phase","waiting"},{"reason","original-sleep-request-unavailable"}});return;
+    }
+    NativeDetectedGame game;unsigned long long touch=0;
+    if(sleepOriginal){game.pid=original.game.pid;game.processCreated=original.game.created;game.path=original.game.path;}
+    if(!sleepOriginal&&!nativeValveReadCurrentTarget(&game,&touch)){
+        const auto session=SleepSteamRecovery::session();
+        c->ownsRunning=false;publish(c,{{"phase","waiting"},{"reason","ymcc-unique-game-unavailable"},
+            {"target",nullptr},{"steam",asJson(identity(session.pid,session.created,session.root+L"\\steam.exe"))},
+            {"currentBindingValid",false},{"nativeRunning",nullptr},{"lastResultHistorical",true}});return;
+    }
+    const auto client=sleepOriginal?original.client:SleepSteamRecovery::session();
+    std::wstring parentPath;ULONGLONG parentBirth=0;
+    if(!focusQueryProcessIdentity(GetCurrentProcessId(),&parentPath,&parentBirth))throw std::runtime_error("ymcc-process-identity-unavailable");
+    const Scope scope{identity(GetCurrentProcessId(),parentBirth,parentPath),
+        identity(game.pid,game.processCreated,game.path),identity(client.pid,client.created,client.root+L"\\steam.exe"),
+        g_gameRulesEpoch.load()};
+    if(continuation&&!(scope==continuation->scope))return;
+    if(!scope.valid()){c->ownsRunning=false;publish(c,{{"phase","waiting"},{"reason","unique-game-or-steam-unavailable"},{"currentBindingValid",false},
+        {"nativeRunning",nullptr},{"lastResultHistorical",true},{"target",asJson(scope.game)},{"steam",asJson(scope.steam)}});return;}
+    // A route owns only its own dispatch. Keep the original Wake available
+    // while the other route has not qualified yet; no consumed job is refunded.
+    const auto retireDeferredWakeLocked=[&]{
+        const ymcc::steamOriginal::Event event{pending.kind,pending.generation,pending.sequence};
+        if(pending.kind==Trigger::Wake&&c->deferredWake==pending.generation&&
+            !c->legacyAdmission.preview(scope,event,enabled).accepted&&!c->admission.preview(scope,event,enabled).accepted)
+            c->deferredWake=0;
+    };
+    // Reject already consumed notifications before any log parsing or CDP read.
+    {std::lock_guard<std::mutex> lock(c->mx);
+        // A terminal receipt for the preceding pair cannot consume a new pair.
+        // Its already queued identity event performs its own original admission.
+        if(!mayMutate&&(!(c->boundGame==scope.game)||!(c->boundSteam==scope.steam)))return;
+        // Startup belongs to the exact Steam/game pair in each original ledger.
+        // Ordinary events may discover a new pair after the first YMCC startup.
+        if(pending.kind!=Trigger::Wake&&pending.kind!=Trigger::SuspendCapture){
+            const bool startupCovered=c->legacyAdmission.observedPair(scope,Trigger::Wake)||
+                c->admission.observedPair(scope,Trigger::Wake);
+            const ymcc::steamOriginal::Event startup{Trigger::Startup,0,pending.sequence};
+            if(startupCovered&&pending.kind==Trigger::Startup)pending.kind=Trigger::TargetChanged;
+            if(!startupCovered&&routeAdmission.preview(scope,startup,enabled).accepted)pending.kind=Trigger::Startup;
+            c->startupPending=!startupCovered&&(c->legacyAdmission.preview(scope,startup,enabled).accepted||
+                c->admission.preview(scope,startup,enabled).accepted);
+        }
+        const auto preview=routeAdmission.preview(scope,{pending.kind,pending.generation,pending.sequence},enabled);
+        if(!preview.accepted){retireDeferredWakeLocked();return;}}
+    publish(c,{{"phase","qualifying"},{"reason","binding-current-original-instance"},
+        {"target",asJson(scope.game)},{"steam",asJson(scope.steam)},
+        {"currentBindingValid",false},{"nativeRunning",nullptr},{"lastResultHistorical",true}});
+    // This log lookup maps only the valve's already admitted PID. It cannot
+    // pick a game from the Steam library or enumerate an executable name.
+    const auto purpose=mayMutate&&(pending.kind==Trigger::Startup||pending.kind==Trigger::Wake)
+        ?ymcc::steamnative::ReadPurpose::PrepareMutation:ymcc::steamnative::ReadPurpose::ObserveOriginal;
+    const auto nativeReadScope=continuation?continuation->nativeReadScope:nativeSteamNativeReadScope(client,purpose);
+    if(!nativeReadScope||!nativeReadScope->current()||(operationReadScope&&!operationReadScope->current())){
+        if(pending.kind!=Trigger::Wake&&pending.kind!=Trigger::SuspendCapture){
+            std::lock_guard<std::mutex> lock(c->mx);if(!c->stop)c->startupPending=true;
+        }
+        c->ownsRunning=false;publish(c,{{"phase","waiting"},{"reason","native-read-scope-unavailable"}});return;
+    }
+    const auto trackerAllowed=[&]{return (!startupRequest||startupFreshScopeCurrent(c,startupRequest,continuation))&&
+        nativeReadScope->current()&&(!operationReadScope||operationReadScope->current())&&
+        sameScopeNow(c,scope,pending.generation,false,configEpoch,ULLONG_MAX,original)&&nativeReadScope->current();};
+    unsigned long long bindingBefore=0;{std::lock_guard<std::mutex> lock(c->mx);bindingBefore=c->bindingSerial;}
+    NativeSteamTrackerFreshCompletion freshCompletion;
+    const bool mayWatchStartup=startupRequest&&!continuation&&!sleepOriginal&&pending.kind==Trigger::Startup&&mayMutate&&
+        startupFreshCurrent(c,startupRequest);
+    const auto tracked=sleepOriginal
+        ?SteamGameLink::trackingOriginal(client,{game.pid,game.processCreated,game.path},original.selectedProcess,trackerAllowed)
+        :purpose==ymcc::steamnative::ReadPurpose::ObserveOriginal
+        ?nativeSteamNativeObservationTracking(client,{game.pid,game.processCreated,game.path},trackerAllowed)
+        :SteamGameLink::tracking(client,{game.pid,game.processCreated,game.path},
+            ymcc::sleepsteam::TrackingScope::ProcessLifetime,
+            ymcc::steamgamefacts::TrackerGroupCapturePolicy::Capture,trackerAllowed,mayWatchStartup?&freshCompletion:nullptr);
+    // This reference belongs to this route/request and is held through Engine return.
+    // Scope selection below is unchanged until the original sleep-target binding
+    // and final native/reference/Packet contracts are delivered together.
+    const auto processGroup=tracked.processGroup;
+    const auto expected=tracked.gameId;
+    const auto expectedApp=tracked.binding.appid;
+    const bool fixedTarget=config.value("targetMode",std::string("generic"))=="fixed";
+    if(!tracked.complete||tracked.binding.status!="tracked"||tracked.gameId.empty()||!expectedApp||
+        (fixedTarget&&(tracked.gameId!=config.value("targetGameId",std::string{})||
+            expectedApp!=config.value("targetAppId",std::uint32_t{})))){
+        if(mayWatchStartup&&freshCompletion.freshSourceBusy&&freshCompletion.witness)
+            armStartupFreshCompletion(c,startupRequest,pending,route,scope,mayMutate,nativeReadScope,freshCompletion.witness);
+        c->ownsRunning=false;json refusal={{"phase","unqualified"},{"reason",tracked.complete?"exact-type2-gameid-not-bound":"shared-tracker-read-unavailable"},
+            {"target",asJson(scope.game)},{"trackerGameId",tracked.gameId}};
+        try{refusal["trackerRead"]={{"complete",tracked.complete},{"bindingStatus",tracked.binding.status},{"appid",tracked.binding.appid},
+            {"log",tracked.log},{"nativePrimary",tracked.primary}};}catch(...){}
+        publish(c,std::move(refusal));return;
+    }
+    if(!ymcc::steamappstatewin::gameIdMatches(std::stoull(tracked.gameId),expectedApp)||
+        ((std::stoull(tracked.gameId)>>24)&255)!=2){
+        c->ownsRunning=false;publish(c,{{"phase","unqualified"},{"reason","non-type2-gameid"}});return;
+    }
+    if(pending.kind==Trigger::Wake&&(g_powerLifecycle.load()!=PowerLifecycle::Ready||!sharedSleepWakeClassified(pending.generation))){
+        {std::lock_guard<std::mutex> lock(c->mx);c->deferredWake=pending.generation;}
+        publish(c,{{"phase","waiting-power-ready"},{"reason","wake-observed-before-power-commit"}});return;
+    }
+    const auto proof=pending.kind==Trigger::Wake&&!legacy?wakeProof(pending.generation,configEpoch):ymcc::steamOriginal::WakeProof{};
+    const bool powerOwnerWitness=legacy||!proof.eventFileTime;
+    const auto legacyProof=pending.kind==Trigger::Wake&&powerOwnerWitness?legacyWakeProof(pending.generation,configEpoch):ymcc::steamOriginal::LegacyWakeProof{};
+    const ULONGLONG powerEventFileTime=powerOwnerWitness?legacyProof.eventFileTime:proof.eventFileTime;
+    if(pending.kind==Trigger::Wake&&!powerEventFileTime){
+        publish(c,{{"phase","waiting-confirmed-wake"},{"reason",legacy?"legacy-admitted-resume-not-current":"kernel-wake-witness-or-config-not-current"}});return;
+    }
+    // Existing route currently depends on the global selection. SleepOriginal
+    // needs its own capture/target contract before it can register here.
+    NativeGameSelectionReceipt requestSelection;
+    if(processGroup&&!sleepOriginal&&(!nativeValveReadCurrentSelection(&requestSelection)||
+        !(identity(requestSelection.target.game.pid,requestSelection.target.game.processCreated,
+            requestSelection.target.game.path)==scope.game)||requestSelection.target.rulesEpoch!=scope.rulesEpoch))return;
+    if(startupRequest&&processGroup&&
+        (requestSelection.target.identityGeneration!=startupRequest->selection.target.identityGeneration||
+         requestSelection.powerGeneration!=startupRequest->powerGeneration||
+         !startupFreshScopeCurrent(c,startupRequest,continuation)))return;
+    const auto businessRequestCancellation=processGroup?ymcc::steamgamefacts::RequestCancellation::create():nullptr;
+    if(processGroup&&!businessRequestCancellation)return;
+    auto activeGroupRequest=processGroup?std::make_shared<ActiveGroupRequest>():nullptr;
+    if(activeGroupRequest){
+        activeGroupRequest->cancellation=businessRequestCancellation;
+        activeGroupRequest->sequence=pending.sequence;activeGroupRequest->configEpoch=configEpoch;
+        activeGroupRequest->rulesEpoch=scope.rulesEpoch;activeGroupRequest->route=route;
+        activeGroupRequest->game=scope.game;activeGroupRequest->steam=scope.steam;
+        activeGroupRequest->targetDomain=sleepOriginal?GroupRequestTarget::SleepOriginal:GroupRequestTarget::GlobalSelection;
+        activeGroupRequest->selectionGeneration=requestSelection.target.identityGeneration;
+        activeGroupRequest->powerGeneration=sleepOriginal?pending.generation:requestSelection.powerGeneration;
+    }
+    GroupRequestRegistration requestRegistration(c,activeGroupRequest);
+    unsigned long long bindingSerial=0;
+    const auto registerBinding=[&]{if(fixtureBeforeBindingRegister)fixtureBeforeBindingRegister();std::lock_guard<std::mutex> lock(c->mx);
+        if(c->stop||c->bindingSerial!=bindingBefore||c->bindingSerial==ULLONG_MAX||
+            (pending.generation&&c->latestPower>pending.generation))return;
+        if(startupRequest&&(c->startupFreshRequest!=startupRequest||c->sequence!=startupRequest->sequence||
+            startupRequest->cancelled.load(std::memory_order_acquire)))return;
+        if(activeGroupRequest){
+            cancelGroupRequestLocked(c);
+            activeGroupRequest->bindingSerial=c->bindingSerial+1;
+            c->activeGroupRequest=activeGroupRequest;
+        }
+        bindingSerial=++c->bindingSerial;c->bindingQualified=true;c->boundSleepRequest=original.request;c->boundGame=scope.game;c->boundSteam=scope.steam;
+        c->boundGameId=tracked.gameId;c->boundAppId=expectedApp;
+    };
+    if(sleepOriginal&&businessRequestCancellation){
+        if(!SleepSteamRecovery::withOriginalTarget(original,businessRequestCancellation,registerBinding))return;
+    }else registerBinding();
+    if(!bindingSerial)return;
+    const auto businessCurrent=[c,activeGroupRequest,businessRequestCancellation,requestSelection,original,startupRequest,continuation]{
+        if(startupRequest&&!startupFreshScopeCurrent(c,startupRequest,continuation))return false;
+        if(!activeGroupRequest)return true;
+        if(!businessRequestCancellation->current())return false;
+        {std::lock_guard<std::mutex> lock(c->mx);if(c->stop||c->activeGroupRequest!=activeGroupRequest||
+            !c->bindingQualified||c->bindingSerial!=activeGroupRequest->bindingSerial)return false;}
+        return (original.request?SleepSteamRecovery::originalTargetCurrent(original):nativeValveSelectionCurrent(requestSelection))&&businessRequestCancellation->current();
+    };
+    const auto scopeNow=[c,scope,pending,configEpoch,bindingSerial,proof,legacyProof,powerOwnerWitness,nativeReadScope,operationReadScope,businessCurrent,original](bool recovery){
+        return businessCurrent()&&(!operationReadScope||operationReadScope->current())&&nativeReadScope->current()&&sameScopeNow(c,scope,pending.generation,recovery,configEpoch,bindingSerial,original)&&
+            (pending.kind!=Trigger::Wake||(powerOwnerWitness?legacyWakeProof(pending.generation,configEpoch)==legacyProof:
+                wakeProof(pending.generation,configEpoch)==proof))&&nativeReadScope->current()&&(!operationReadScope||operationReadScope->current())&&
+            businessCurrent();
+    };
+    // Registration precedes this check; writer commits use the same mx.
+    if(!scopeNow(false)){if(businessRequestCancellation)businessRequestCancellation->cancel();return;}
+    // Prepare the same module-fact cache before private account/role reads.
+    // Result never changes admission; sleep capture remains CacheOnlyTryLock.
+    auto profilePreparation=ymcc::steamrecordwin::ProfilePreparationStatus::NotAttempted;
+    if(!sleepOriginal&&purpose==ymcc::steamnative::ReadPurpose::PrepareMutation&&
+        processGroup&&processGroup->graph().count==2){
+        try {
+            profilePreparation=nativeSteamPrepareModuleProfile(client,processGroup,nativeReadScope,
+                operationReadScope,[scopeNow]{return scopeNow(false);});
+        }catch(...){profilePreparation=ymcc::steamrecordwin::ProfilePreparationStatus::Exception;}
+        if(profilePreparation==ymcc::steamrecordwin::ProfilePreparationStatus::CurrentRejected||
+            !scopeNow(false)||!processGroup->processCurrent()){
+            if(businessRequestCancellation)businessRequestCancellation->cancel();return;
+        }
+    }
+    ymcc::steamrecordidentity::Read privateIdentity;
+    auto accountClient=client;
+    const auto candidateAccount=accountCandidate(client.account);
+    accountClient.account=candidateAccount; // Still untrusted until the route native identity checks.
+    const auto readAllowed=[scopeNow]{return scopeNow(false);};
+    if(legacy){
+        // The old route qualifies its account candidate with its own typed native
+        // snapshot, complete GameID, record, primary and saved healthy pins.
+        // A rejected CDP/UI compatibility reader cannot suppress this route.
+        if(!candidateAccount||!readAllowed()){
+            publish(c,{{"phase","waiting"},{"reason","legacy-active-account-unavailable"},{"moduleProfilePreparation",ymcc::steamrecordwin::profilePreparationLabel(profilePreparation)}});return;
+        }
+        privateIdentity.account64=76561197960265728ULL+candidateAccount;
+    }else{
+    auto sessionRead=SleepSteamRecovery::liveRequest(accountClient,
+        {{"operation","sleep.session.inspect"},{"runningLinkRead",true},{"appids",json::array({expectedApp})}},readAllowed,&privateIdentity);
+    if(!privateIdentity.available&&sessionRead.is_object()&&sessionRead.value("ok",false)&&
+        sessionRead.value("mutated",json())==json(false)&&!accountClient.account){
+        const auto observed=sessionRead.value("observedAccount",std::uint64_t{});
+        if(observed&&observed<=MAXDWORD&&readAllowed()){
+            accountClient.account=static_cast<DWORD>(observed);
+            sessionRead=SleepSteamRecovery::liveRequest(accountClient,
+                {{"operation","sleep.session.inspect"},{"runningLinkRead",true},{"appids",json::array({expectedApp})}},readAllowed,&privateIdentity);
+        }
+    }
+    if(!privateIdentity.available||privateIdentity.gameId64!=std::stoull(tracked.gameId)||privateIdentity.appid!=expectedApp||
+        !sessionRead.is_object()||!sessionRead.value("ok",false)||sessionRead.value("mutated",json())!=json(false)||!readAllowed()){
+        publish(c,{{"phase","waiting"},{"reason",privateIdentity.reason},{"moduleProfilePreparation",ymcc::steamrecordwin::profilePreparationLabel(profilePreparation)}});return;
+    }
+    }
+    ymcc::steamOriginal::Decision decision;
+    {std::lock_guard<std::mutex> lock(c->mx);decision=routeAdmission.admit(scope,{pending.kind,pending.generation,pending.sequence},enabled);
+        if(decision.accepted&&pending.kind==Trigger::Wake)c->startupPending=false;
+        if(pending.kind!=Trigger::Wake&&pending.kind!=Trigger::SuspendCapture){
+            const bool startupCovered=c->legacyAdmission.observedPair(scope,Trigger::Wake)||
+                c->admission.observedPair(scope,Trigger::Wake);
+            const ymcc::steamOriginal::Event startup{Trigger::Startup,0,pending.sequence};
+            c->startupPending=!startupCovered&&(c->legacyAdmission.preview(scope,startup,enabled).accepted||
+                c->admission.preview(scope,startup,enabled).accepted);
+        }}
+    {std::lock_guard<std::mutex> lock(c->mx);retireDeferredWakeLocked();}
+    if(!decision.accepted)return;
+    c->ownedPid=scope.game.pid;c->ownedBirth=scope.game.birth;c->ownsRunning=true;
+    const auto stillCurrent=[scopeNow,mayRecover=decision.recoveryAllowed&&mayMutate]{return scopeNow(mayRecover);};
+    const auto eventId=std::to_string(scope.parent.pid)+"-"+std::to_string(scope.parent.birth)+"-"+std::to_string(pending.sequence);
+    json request={{"schema","ymcc.steam-original-recovery-event.v1"},{"parent",asJson(scope.parent)},
+        {"target",asJson(scope.game)},{"steam",asJson(scope.steam)},
+        {"trigger",{{"kind",ymcc::steamOriginal::name(pending.kind)},{"generation",std::to_string(pending.generation)},
+            {"id",eventId},{"eventId",eventId},{"rulesEpoch",std::to_string(scope.rulesEpoch)},{"timestamp",nativeLifecycleTimestamp()}}},
+        {"rulesEpoch",std::to_string(scope.rulesEpoch)},{"configEpoch",std::to_string(configEpoch)},
+        {"bindingSerial",std::to_string(bindingSerial)},{"recoveryAllowed",decision.recoveryAllowed&&mayMutate},
+        {"recoveryRoute",ymcc::steamOriginal::routeName(route)},
+        {"moduleProfilePreparation",ymcc::steamrecordwin::profilePreparationLabel(profilePreparation)},
+        {"accountSelection",client.account?"verified-session":"candidate-requires-original-native-reference"},
+        {"targetStatePath",W2U(MONITOR_GAME_TARGET_JSON)},{"dataRoot",W2U(runtimeRoot())},{"evidenceRoot",W2U(root())},{"logRoot",W2U(yemancc_data_dir())},
+        {"config",config},{"extraExecutables",0}};
+    request["target"]["gameId"]=tracked.gameId;request["target"]["appid"]=expectedApp;
+    request["game"]=request["target"];
+    if(powerEventFileTime){
+        request["trigger"]["powerEventFileTime"]=std::to_string(powerEventFileTime);
+        request["trigger"]["wakeWitness"]={{"source",powerOwnerWitness?"admitted-power-owner":"kernel-witness"},{"configEpoch",std::to_string(configEpoch)},
+            {"observedGeneration",std::to_string(powerOwnerWitness?legacyProof.generation:proof.observedGeneration)},
+            {"boundaryFileTime",std::to_string(powerOwnerWitness?legacyProof.boundaryFileTime:proof.boundaryFileTime)},{"eventId",powerOwnerWitness?0:proof.eventId}};
+    }
+    if(!scopeNow(false)){publish(c,{{"phase","cancelled"},{"reason","scope-changed-before-observation"}});return;}
+    saveJson(root()+L"\\last-event.json",request);
+    saveJson(root()+L"\\last-"+U2W(ymcc::steamOriginal::routeName(route))+L"-event.json",request);
+    publish(c,{{"phase","checking"},{"engineDispatched",true},{"reason",decision.reason},{"eventId",eventId},
+        {"trigger",request["trigger"]},{"target",request["target"]},{"steam",request["steam"]},
+        {"moduleProfilePreparation",ymcc::steamrecordwin::profilePreparationLabel(profilePreparation)},
+        {"targetMode",fixedTarget?"fixed":"generic"},{"currentBindingValid",true},{"nativeRunning",nullptr},{"lastResultHistorical",true}});
+    request["account64"]=std::to_string(privateIdentity.account64); // private; added AFTER durable public event
+    const auto emit=[c,eventId,route,captureBinding=ymcc::steamOriginalTrace::CaptureBinding{}](const json& row) mutable {
+        if(ymcc::steamOriginalTrace::CaptureBinding::isBegin(row))captureBinding.begin(row,currentPowerGeneration());
+        if(row.value("event",std::string{})=="job-finished"&&row.contains("result"))
+            recordRouteTerminal(c,route,eventId,row["result"],true,false);
+        auto tagged=captureBinding.tag(row);tagged["engineEvent"]=row.value("event",std::string("unknown"));tagged["eventId"]=eventId;log(c,"engine",std::move(tagged));
+    };
+    const auto observationGuard=[c,scope,pending,configEpoch,bindingSerial,proof,legacyProof,powerOwnerWitness,nativeReadScope,operationReadScope,scopeNow,businessCurrent,original,expectedAccount=static_cast<std::uint32_t>(privateIdentity.account64)]{
+        if(!businessCurrent())return false;
+        // The cached observer can lag behind the already-qualified UI account
+        // or process after wake/FSE. A cache miss cannot cancel this read-only
+        // watch while the full original-instance scope is still current.
+        // Both observer paths share the sticky process/account/power lifetime.
+        // Mutation still requires stillCurrent plus a fresh native snapshot,
+        // original reference/pins and the unchanged durable consume budget.
+        if(!nativeReadScope->current()||(operationReadScope&&!operationReadScope->current()))return false;
+        if(pending.kind==Trigger::Wake&&(powerOwnerWitness?legacyWakeProof(pending.generation,configEpoch)!=legacyProof:
+            wakeProof(pending.generation,configEpoch)!=proof))return false;
+        return (sameObservationScopeNow(c,scope,pending.generation,configEpoch,bindingSerial,expectedAccount,original)||
+            scopeNow(false))&&nativeReadScope->current()&&(!operationReadScope||operationReadScope->current());
+    };
+    auto receipt=steamOriginalRecoveryEngineHandle(request,stillCurrent,emit,observationGuard,
+        reinterpret_cast<std::uintptr_t>(c->observationEvent.get()),
+        nativeReadScope?reinterpret_cast<std::uintptr_t>(nativeReadScope->powerCancellationEvent()):0,
+        nativeReadScope?reinterpret_cast<std::uintptr_t>(nativeReadScope->identityCancellationEvent()):0,nativeReadScope,processGroup,businessRequestCancellation);
+    const auto receiptStatus=receipt.value("status",std::string{});
+    const bool scopeCurrent=scopeNow(false);
+    const bool observationCurrent=scopeCurrent&&(receiptStatus=="healthy"||receiptStatus=="recovered-native");
+    if(!observationCurrent)c->ownsRunning=false;
+    saveJson(root()+L"\\last-recovery-summary.json",receipt);
+    saveJson(root()+L"\\last-"+U2W(ymcc::steamOriginal::routeName(route))+L"-summary.json",receipt);
+    recordRouteTerminal(c,route,eventId,receipt,false,true);
+    publish(c,{{"phase",receipt.value("phase",receipt.value("status",std::string("unqualified")))},
+        {"reason",receipt.value("reason",std::string{})},{"eventId",eventId},{"lastResult",receipt},{"lastResultState","returned-terminal"},
+        {"currentBindingValid",scopeCurrent},
+        {"nativeRunning",observationCurrent?receipt.value("after",receipt.value("before",json::object())).value("running",json()):json()},
+        {"lastResultHistorical",!observationCurrent}});
+}
+#define runRoute runRouteBefore
+static void runRoute(const std::shared_ptr<Control>& c,Pending pending,const json& config,RecoveryRoute route,bool mayMutate,
+    const std::shared_ptr<ymcc::steamnative::ReadScope>& operationReadScope=nullptr,
+    const std::shared_ptr<StartupFreshRequest>& startupRequest={}){
+    const bool legacy=route==RecoveryRoute::LegacyDynamic;
+    const auto continuation=pending.startupFresh;
+    if(continuation&&(!startupRequest||continuation->request!=startupRequest||continuation->route!=route||
+        continuation->original.sequence!=pending.sequence||!startupFreshCurrent(c,startupRequest,continuation)))return;
+    auto& routeAdmission=legacy?c->legacyAdmission:c->admission;
+    const auto retainedTerminal=retainedRouteTerminal(c,route);
+    publish(c,{{"recoveryRoute",ymcc::steamOriginal::routeName(route)},{"phase","route-started"},{"reason","independent-route-admission"},
+        {"engineDispatched",false},{"eventId",nullptr},{"trigger",nullptr},{"lastResult",nullptr},{"lastResultHistorical",true},
+        {"attemptSequence",std::to_string(pending.sequence)},{"terminalEvidence",retainedTerminal},
+        {"terminalEvidenceHistorical",retainedTerminal.is_object()},
+        {"lastResultState",retainedTerminal.is_object()?"no-current-result-retained-terminal":"no-current-result"}});
+    const auto configEpoch=g_sleepRecoveryAutoConfigEpoch.load();
+    const bool enabled=config.is_object()&&config.value("enabled",false)&&g_sleepRecoveryAutoEnabled.load();
+    if(!enabled){c->ownsRunning=false;publish(c,{{"phase","disabled"},{"reason","automatic-recovery-disabled"},{"target",nullptr},{"steam",nullptr},{"currentBindingValid",false},{"nativeRunning",nullptr},{"lastResultHistorical",true}});return;}
+    const bool sleepOriginal=pending.kind==Trigger::Wake||pending.kind==Trigger::SuspendCapture;
+    const auto original=sleepOriginal?SleepSteamRecovery::capturedFor(pending.generation):SleepSteamRecovery::Captured{};
+    if(sleepOriginal&&(!SleepSteamRecovery::originalTargetCurrent(original)||
+        (pending.kind==Trigger::SuspendCapture&&(g_powerLifecycle.load()!=PowerLifecycle::Suspending||
+            currentPowerGeneration()!=pending.generation)))){
+        c->ownsRunning=false;publish(c,{{"phase","waiting"},{"reason","original-sleep-request-unavailable"}});return;
+    }
+    NativeDetectedGame game;unsigned long long touch=0;
+    if(sleepOriginal){game.pid=original.game.pid;game.processCreated=original.game.created;game.path=original.game.path;}
+    if(!sleepOriginal&&!nativeValveReadCurrentTarget(&game,&touch)){
+        const auto session=SleepSteamRecovery::session();
+        c->ownsRunning=false;publish(c,{{"phase","waiting"},{"reason","ymcc-unique-game-unavailable"},
+            {"target",nullptr},{"steam",asJson(identity(session.pid,session.created,session.root+L"\\steam.exe"))},
+            {"currentBindingValid",false},{"nativeRunning",nullptr},{"lastResultHistorical",true}});return;
+    }
+    const auto client=sleepOriginal?original.client:SleepSteamRecovery::session();
+    std::wstring parentPath;ULONGLONG parentBirth=0;
+    if(!focusQueryProcessIdentity(GetCurrentProcessId(),&parentPath,&parentBirth))throw std::runtime_error("ymcc-process-identity-unavailable");
+    const Scope scope{identity(GetCurrentProcessId(),parentBirth,parentPath),
+        identity(game.pid,game.processCreated,game.path),identity(client.pid,client.created,client.root+L"\\steam.exe"),
+        g_gameRulesEpoch.load()};
+    if(continuation&&!(scope==continuation->scope))return;
+    if(!scope.valid()){c->ownsRunning=false;publish(c,{{"phase","waiting"},{"reason","unique-game-or-steam-unavailable"},{"currentBindingValid",false},
+        {"nativeRunning",nullptr},{"lastResultHistorical",true},{"target",asJson(scope.game)},{"steam",asJson(scope.steam)}});return;}
+    // A route owns only its own dispatch. Keep the original Wake available
+    // while the other route has not qualified yet; no consumed job is refunded.
+    const auto retireDeferredWakeLocked=[&]{
+        const ymcc::steamOriginal::Event event{pending.kind,pending.generation,pending.sequence};
+        if(pending.kind==Trigger::Wake&&c->deferredWake==pending.generation&&
+            !c->legacyAdmission.preview(scope,event,enabled).accepted&&!c->admission.preview(scope,event,enabled).accepted)
+            c->deferredWake=0;
+    };
+    // Reject already consumed notifications before any log parsing or CDP read.
+    {std::lock_guard<std::mutex> lock(c->mx);
+        // A terminal receipt for the preceding pair cannot consume a new pair.
+        // Its already queued identity event performs its own original admission.
+        if(!mayMutate&&(!(c->boundGame==scope.game)||!(c->boundSteam==scope.steam)))return;
+        // Startup belongs to the exact Steam/game pair in each original ledger.
+        // Ordinary events may discover a new pair after the first YMCC startup.
+        if(pending.kind!=Trigger::Wake&&pending.kind!=Trigger::SuspendCapture){
+            const bool startupCovered=c->legacyAdmission.observedPair(scope,Trigger::Wake)||
+                c->admission.observedPair(scope,Trigger::Wake);
+            const ymcc::steamOriginal::Event startup{Trigger::Startup,0,pending.sequence};
+            if(startupCovered&&pending.kind==Trigger::Startup)pending.kind=Trigger::TargetChanged;
+            if(!startupCovered&&routeAdmission.preview(scope,startup,enabled).accepted)pending.kind=Trigger::Startup;
+            c->startupPending=!startupCovered&&(c->legacyAdmission.preview(scope,startup,enabled).accepted||
+                c->admission.preview(scope,startup,enabled).accepted);
+        }
+        const auto preview=routeAdmission.preview(scope,{pending.kind,pending.generation,pending.sequence},enabled);
+        if(!preview.accepted){retireDeferredWakeLocked();return;}}
+    publish(c,{{"phase","qualifying"},{"reason","binding-current-original-instance"},
+        {"target",asJson(scope.game)},{"steam",asJson(scope.steam)},
+        {"currentBindingValid",false},{"nativeRunning",nullptr},{"lastResultHistorical",true}});
+    // This log lookup maps only the valve's already admitted PID. It cannot
+    // pick a game from the Steam library or enumerate an executable name.
+    const auto purpose=mayMutate&&(pending.kind==Trigger::Startup||pending.kind==Trigger::Wake)
+        ?ymcc::steamnative::ReadPurpose::PrepareMutation:ymcc::steamnative::ReadPurpose::ObserveOriginal;
+    const auto nativeReadScope=continuation?continuation->nativeReadScope:nativeSteamNativeReadScope(client,purpose);
+    if(!nativeReadScope||!nativeReadScope->current()||(operationReadScope&&!operationReadScope->current())){
+        if(pending.kind!=Trigger::Wake&&pending.kind!=Trigger::SuspendCapture){
+            std::lock_guard<std::mutex> lock(c->mx);if(!c->stop)c->startupPending=true;
+        }
+        c->ownsRunning=false;publish(c,{{"phase","waiting"},{"reason","native-read-scope-unavailable"}});return;
+    }
+    const auto trackerAllowed=[&]{return nativeReadScope->current()&&(!operationReadScope||operationReadScope->current())&&
+        sameScopeNow(c,scope,pending.generation,false,configEpoch,ULLONG_MAX,original)&&nativeReadScope->current();};
+    unsigned long long bindingBefore=0;{std::lock_guard<std::mutex> lock(c->mx);bindingBefore=c->bindingSerial;}
+    NativeSteamTrackerFreshCompletion freshCompletion;
+    const bool mayWatchStartup=startupRequest&&!continuation&&!sleepOriginal&&pending.kind==Trigger::Startup&&mayMutate&&
+        startupFreshCurrent(c,startupRequest);
+    const auto tracked=sleepOriginal
+        ?SteamGameLink::trackingOriginal(client,{game.pid,game.processCreated,game.path},original.selectedProcess,trackerAllowed)
+        :purpose==ymcc::steamnative::ReadPurpose::ObserveOriginal
+        ?nativeSteamNativeObservationTracking(client,{game.pid,game.processCreated,game.path},trackerAllowed)
+        :SteamGameLink::tracking(client,{game.pid,game.processCreated,game.path},
+            ymcc::sleepsteam::TrackingScope::ProcessLifetime,
+            ymcc::steamgamefacts::TrackerGroupCapturePolicy::Capture,trackerAllowed,mayWatchStartup?&freshCompletion:nullptr);
+    // This reference belongs to this route/request and is held through Engine return.
+    // Scope selection below is unchanged until the original sleep-target binding
+    // and final native/reference/Packet contracts are delivered together.
+    const auto processGroup=tracked.processGroup;
+    const auto expected=tracked.gameId;
+    const auto expectedApp=tracked.binding.appid;
+    const bool fixedTarget=config.value("targetMode",std::string("generic"))=="fixed";
+    if(!tracked.complete||tracked.binding.status!="tracked"||tracked.gameId.empty()||!expectedApp||
+        (fixedTarget&&(tracked.gameId!=config.value("targetGameId",std::string{})||
+            expectedApp!=config.value("targetAppId",std::uint32_t{})))){
+        if(mayWatchStartup&&freshCompletion.freshSourceBusy&&freshCompletion.witness)
+            armStartupFreshCompletion(c,startupRequest,pending,route,scope,mayMutate,nativeReadScope,freshCompletion.witness);
+        c->ownsRunning=false;json refusal={{"phase","unqualified"},{"reason",tracked.complete?"exact-type2-gameid-not-bound":"shared-tracker-read-unavailable"},
+            {"target",asJson(scope.game)},{"trackerGameId",tracked.gameId}};
+        try{refusal["trackerRead"]={{"complete",tracked.complete},{"bindingStatus",tracked.binding.status},{"appid",tracked.binding.appid},
+            {"log",tracked.log},{"nativePrimary",tracked.primary}};}catch(...){}
+        publish(c,std::move(refusal));return;
+    }
+    if(!ymcc::steamappstatewin::gameIdMatches(std::stoull(tracked.gameId),expectedApp)||
+        ((std::stoull(tracked.gameId)>>24)&255)!=2){
+        c->ownsRunning=false;publish(c,{{"phase","unqualified"},{"reason","non-type2-gameid"}});return;
+    }
+    if(pending.kind==Trigger::Wake&&(g_powerLifecycle.load()!=PowerLifecycle::Ready||!sharedSleepWakeClassified(pending.generation))){
+        {std::lock_guard<std::mutex> lock(c->mx);c->deferredWake=pending.generation;}
+        publish(c,{{"phase","waiting-power-ready"},{"reason","wake-observed-before-power-commit"}});return;
+    }
+    const auto proof=pending.kind==Trigger::Wake&&!legacy?wakeProof(pending.generation,configEpoch):ymcc::steamOriginal::WakeProof{};
+    const bool powerOwnerWitness=legacy||!proof.eventFileTime;
+    const auto legacyProof=pending.kind==Trigger::Wake&&powerOwnerWitness?legacyWakeProof(pending.generation,configEpoch):ymcc::steamOriginal::LegacyWakeProof{};
+    const ULONGLONG powerEventFileTime=powerOwnerWitness?legacyProof.eventFileTime:proof.eventFileTime;
+    if(pending.kind==Trigger::Wake&&!powerEventFileTime){
+        publish(c,{{"phase","waiting-confirmed-wake"},{"reason",legacy?"legacy-admitted-resume-not-current":"kernel-wake-witness-or-config-not-current"}});return;
+    }
+    // Existing route currently depends on the global selection. SleepOriginal
+    // needs its own capture/target contract before it can register here.
+    NativeGameSelectionReceipt requestSelection;
+    if(processGroup&&!sleepOriginal&&(!nativeValveReadCurrentSelection(&requestSelection)||
+        !(identity(requestSelection.target.game.pid,requestSelection.target.game.processCreated,
+            requestSelection.target.game.path)==scope.game)||requestSelection.target.rulesEpoch!=scope.rulesEpoch))return;
+    const auto businessRequestCancellation=processGroup?ymcc::steamgamefacts::RequestCancellation::create():nullptr;
+    if(processGroup&&!businessRequestCancellation)return;
+    auto activeGroupRequest=processGroup?std::make_shared<ActiveGroupRequest>():nullptr;
+    if(activeGroupRequest){
+        activeGroupRequest->cancellation=businessRequestCancellation;
+        activeGroupRequest->sequence=pending.sequence;activeGroupRequest->configEpoch=configEpoch;
+        activeGroupRequest->rulesEpoch=scope.rulesEpoch;activeGroupRequest->route=route;
+        activeGroupRequest->game=scope.game;activeGroupRequest->steam=scope.steam;
+        activeGroupRequest->targetDomain=sleepOriginal?GroupRequestTarget::SleepOriginal:GroupRequestTarget::GlobalSelection;
+        activeGroupRequest->selectionGeneration=requestSelection.target.identityGeneration;
+        activeGroupRequest->powerGeneration=sleepOriginal?pending.generation:requestSelection.powerGeneration;
+    }
+    GroupRequestRegistration requestRegistration(c,activeGroupRequest);
+    unsigned long long bindingSerial=0;
+    const auto registerBinding=[&]{if(fixtureBeforeBindingRegister)fixtureBeforeBindingRegister();std::lock_guard<std::mutex> lock(c->mx);
+        if(c->stop||c->bindingSerial!=bindingBefore||c->bindingSerial==ULLONG_MAX||
+            (pending.generation&&c->latestPower>pending.generation))return;
+        if(activeGroupRequest){
+            cancelGroupRequestLocked(c);
+            activeGroupRequest->bindingSerial=c->bindingSerial+1;
+            c->activeGroupRequest=activeGroupRequest;
+        }
+        bindingSerial=++c->bindingSerial;c->bindingQualified=true;c->boundSleepRequest=original.request;c->boundGame=scope.game;c->boundSteam=scope.steam;
+        c->boundGameId=tracked.gameId;c->boundAppId=expectedApp;
+    };
+    if(sleepOriginal&&businessRequestCancellation){
+        if(!SleepSteamRecovery::withOriginalTarget(original,businessRequestCancellation,registerBinding))return;
+    }else registerBinding();
+    if(!bindingSerial)return;
+    const auto businessCurrent=[c,activeGroupRequest,businessRequestCancellation,requestSelection,original]{
+        if(!activeGroupRequest)return true;
+        if(!businessRequestCancellation->current())return false;
+        {std::lock_guard<std::mutex> lock(c->mx);if(c->stop||c->activeGroupRequest!=activeGroupRequest||
+            !c->bindingQualified||c->bindingSerial!=activeGroupRequest->bindingSerial)return false;}
+        return (original.request?SleepSteamRecovery::originalTargetCurrent(original):nativeValveSelectionCurrent(requestSelection))&&businessRequestCancellation->current();
+    };
+    const auto scopeNow=[c,scope,pending,configEpoch,bindingSerial,proof,legacyProof,powerOwnerWitness,nativeReadScope,operationReadScope,businessCurrent,original](bool recovery){
+        return businessCurrent()&&(!operationReadScope||operationReadScope->current())&&nativeReadScope->current()&&sameScopeNow(c,scope,pending.generation,recovery,configEpoch,bindingSerial,original)&&
+            (pending.kind!=Trigger::Wake||(powerOwnerWitness?legacyWakeProof(pending.generation,configEpoch)==legacyProof:
+                wakeProof(pending.generation,configEpoch)==proof))&&nativeReadScope->current()&&(!operationReadScope||operationReadScope->current())&&
+            businessCurrent();
+    };
+    // Registration precedes this check; writer commits use the same mx.
+    if(!scopeNow(false)){if(businessRequestCancellation)businessRequestCancellation->cancel();return;}
+    // Prepare the same module-fact cache before private account/role reads.
+    // Result never changes admission; sleep capture remains CacheOnlyTryLock.
+    auto profilePreparation=ymcc::steamrecordwin::ProfilePreparationStatus::NotAttempted;
+    if(!sleepOriginal&&purpose==ymcc::steamnative::ReadPurpose::PrepareMutation&&
+        processGroup&&processGroup->graph().count==2){
+        try {
+            profilePreparation=nativeSteamPrepareModuleProfile(client,processGroup,nativeReadScope,
+                operationReadScope,[scopeNow]{return scopeNow(false);});
+        }catch(...){profilePreparation=ymcc::steamrecordwin::ProfilePreparationStatus::Exception;}
+        if(profilePreparation==ymcc::steamrecordwin::ProfilePreparationStatus::CurrentRejected||
+            !scopeNow(false)||!processGroup->processCurrent()){
+            if(businessRequestCancellation)businessRequestCancellation->cancel();return;
+        }
+    }
+    ymcc::steamrecordidentity::Read privateIdentity;
+    auto accountClient=client;
+    const auto candidateAccount=accountCandidate(client.account);
+    accountClient.account=candidateAccount; // Still untrusted until the route native identity checks.
+    const auto readAllowed=[scopeNow]{return scopeNow(false);};
+    if(legacy){
+        // The old route qualifies its account candidate with its own typed native
+        // snapshot, complete GameID, record, primary and saved healthy pins.
+        // A rejected CDP/UI compatibility reader cannot suppress this route.
+        if(!candidateAccount||!readAllowed()){
+            publish(c,{{"phase","waiting"},{"reason","legacy-active-account-unavailable"},{"moduleProfilePreparation",ymcc::steamrecordwin::profilePreparationLabel(profilePreparation)}});return;
+        }
+        privateIdentity.account64=76561197960265728ULL+candidateAccount;
+    }else{
+    auto sessionRead=SleepSteamRecovery::liveRequest(accountClient,
+        {{"operation","sleep.session.inspect"},{"runningLinkRead",true},{"appids",json::array({expectedApp})}},readAllowed,&privateIdentity);
+    if(!privateIdentity.available&&sessionRead.is_object()&&sessionRead.value("ok",false)&&
+        sessionRead.value("mutated",json())==json(false)&&!accountClient.account){
+        const auto observed=sessionRead.value("observedAccount",std::uint64_t{});
+        if(observed&&observed<=MAXDWORD&&readAllowed()){
+            accountClient.account=static_cast<DWORD>(observed);
+            sessionRead=SleepSteamRecovery::liveRequest(accountClient,
+                {{"operation","sleep.session.inspect"},{"runningLinkRead",true},{"appids",json::array({expectedApp})}},readAllowed,&privateIdentity);
+        }
+    }
+    if(!privateIdentity.available||privateIdentity.gameId64!=std::stoull(tracked.gameId)||privateIdentity.appid!=expectedApp||
+        !sessionRead.is_object()||!sessionRead.value("ok",false)||sessionRead.value("mutated",json())!=json(false)||!readAllowed()){
+        publish(c,{{"phase","waiting"},{"reason",privateIdentity.reason},{"moduleProfilePreparation",ymcc::steamrecordwin::profilePreparationLabel(profilePreparation)}});return;
+    }
+    }
+    ymcc::steamOriginal::Decision decision;
+    {std::lock_guard<std::mutex> lock(c->mx);decision=routeAdmission.admit(scope,{pending.kind,pending.generation,pending.sequence},enabled);
+        if(decision.accepted&&pending.kind==Trigger::Wake)c->startupPending=false;
+        if(pending.kind!=Trigger::Wake&&pending.kind!=Trigger::SuspendCapture){
+            const bool startupCovered=c->legacyAdmission.observedPair(scope,Trigger::Wake)||
+                c->admission.observedPair(scope,Trigger::Wake);
+            const ymcc::steamOriginal::Event startup{Trigger::Startup,0,pending.sequence};
+            c->startupPending=!startupCovered&&(c->legacyAdmission.preview(scope,startup,enabled).accepted||
+                c->admission.preview(scope,startup,enabled).accepted);
+        }}
+    {std::lock_guard<std::mutex> lock(c->mx);retireDeferredWakeLocked();}
+    if(!decision.accepted)return;
+    c->ownedPid=scope.game.pid;c->ownedBirth=scope.game.birth;c->ownsRunning=true;
+    const auto stillCurrent=[scopeNow,mayRecover=decision.recoveryAllowed&&mayMutate]{return scopeNow(mayRecover);};
+    const auto eventId=std::to_string(scope.parent.pid)+"-"+std::to_string(scope.parent.birth)+"-"+std::to_string(pending.sequence);
+    json request={{"schema","ymcc.steam-original-recovery-event.v1"},{"parent",asJson(scope.parent)},
+        {"target",asJson(scope.game)},{"steam",asJson(scope.steam)},
+        {"trigger",{{"kind",ymcc::steamOriginal::name(pending.kind)},{"generation",std::to_string(pending.generation)},
+            {"id",eventId},{"eventId",eventId},{"rulesEpoch",std::to_string(scope.rulesEpoch)},{"timestamp",nativeLifecycleTimestamp()}}},
+        {"rulesEpoch",std::to_string(scope.rulesEpoch)},{"configEpoch",std::to_string(configEpoch)},
+        {"bindingSerial",std::to_string(bindingSerial)},{"recoveryAllowed",decision.recoveryAllowed&&mayMutate},
+        {"recoveryRoute",ymcc::steamOriginal::routeName(route)},
+        {"moduleProfilePreparation",ymcc::steamrecordwin::profilePreparationLabel(profilePreparation)},
+        {"accountSelection",client.account?"verified-session":"candidate-requires-original-native-reference"},
+        {"targetStatePath",W2U(MONITOR_GAME_TARGET_JSON)},{"dataRoot",W2U(runtimeRoot())},{"evidenceRoot",W2U(root())},{"logRoot",W2U(yemancc_data_dir())},
+        {"config",config},{"extraExecutables",0}};
+    request["target"]["gameId"]=tracked.gameId;request["target"]["appid"]=expectedApp;
+    request["game"]=request["target"];
+    if(powerEventFileTime){
+        request["trigger"]["powerEventFileTime"]=std::to_string(powerEventFileTime);
+        request["trigger"]["wakeWitness"]={{"source",powerOwnerWitness?"admitted-power-owner":"kernel-witness"},{"configEpoch",std::to_string(configEpoch)},
+            {"observedGeneration",std::to_string(powerOwnerWitness?legacyProof.generation:proof.observedGeneration)},
+            {"boundaryFileTime",std::to_string(powerOwnerWitness?legacyProof.boundaryFileTime:proof.boundaryFileTime)},{"eventId",powerOwnerWitness?0:proof.eventId}};
+    }
+    if(!scopeNow(false)){publish(c,{{"phase","cancelled"},{"reason","scope-changed-before-observation"}});return;}
+    saveJson(root()+L"\\last-event.json",request);
+    saveJson(root()+L"\\last-"+U2W(ymcc::steamOriginal::routeName(route))+L"-event.json",request);
+    publish(c,{{"phase","checking"},{"engineDispatched",true},{"reason",decision.reason},{"eventId",eventId},
+        {"trigger",request["trigger"]},{"target",request["target"]},{"steam",request["steam"]},
+        {"moduleProfilePreparation",ymcc::steamrecordwin::profilePreparationLabel(profilePreparation)},
+        {"targetMode",fixedTarget?"fixed":"generic"},{"currentBindingValid",true},{"nativeRunning",nullptr},{"lastResultHistorical",true}});
+    request["account64"]=std::to_string(privateIdentity.account64); // private; added AFTER durable public event
+    const auto emit=[c,eventId,route,captureBinding=ymcc::steamOriginalTrace::CaptureBinding{}](const json& row) mutable {
+        if(ymcc::steamOriginalTrace::CaptureBinding::isBegin(row))captureBinding.begin(row,currentPowerGeneration());
+        if(row.value("event",std::string{})=="job-finished"&&row.contains("result"))
+            recordRouteTerminal(c,route,eventId,row["result"],true,false);
+        auto tagged=captureBinding.tag(row);tagged["engineEvent"]=row.value("event",std::string("unknown"));tagged["eventId"]=eventId;log(c,"engine",std::move(tagged));
+    };
+    const auto observationGuard=[c,scope,pending,configEpoch,bindingSerial,proof,legacyProof,powerOwnerWitness,nativeReadScope,operationReadScope,scopeNow,businessCurrent,original,expectedAccount=static_cast<std::uint32_t>(privateIdentity.account64)]{
+        if(!businessCurrent())return false;
+        // The cached observer can lag behind the already-qualified UI account
+        // or process after wake/FSE. A cache miss cannot cancel this read-only
+        // watch while the full original-instance scope is still current.
+        // Both observer paths share the sticky process/account/power lifetime.
+        // Mutation still requires stillCurrent plus a fresh native snapshot,
+        // original reference/pins and the unchanged durable consume budget.
+        if(!nativeReadScope->current()||(operationReadScope&&!operationReadScope->current()))return false;
+        if(pending.kind==Trigger::Wake&&(powerOwnerWitness?legacyWakeProof(pending.generation,configEpoch)!=legacyProof:
+            wakeProof(pending.generation,configEpoch)!=proof))return false;
+        return (sameObservationScopeNow(c,scope,pending.generation,configEpoch,bindingSerial,expectedAccount,original)||
+            scopeNow(false))&&nativeReadScope->current()&&(!operationReadScope||operationReadScope->current());
+    };
+    auto receipt=steamOriginalRecoveryEngineHandle(request,stillCurrent,emit,observationGuard,
+        reinterpret_cast<std::uintptr_t>(c->observationEvent.get()),
+        nativeReadScope?reinterpret_cast<std::uintptr_t>(nativeReadScope->powerCancellationEvent()):0,
+        nativeReadScope?reinterpret_cast<std::uintptr_t>(nativeReadScope->identityCancellationEvent()):0,nativeReadScope,processGroup,businessRequestCancellation);
+    const auto receiptStatus=receipt.value("status",std::string{});
+    const bool scopeCurrent=scopeNow(false);
+    const bool observationCurrent=scopeCurrent&&(receiptStatus=="healthy"||receiptStatus=="recovered-native");
+    if(!observationCurrent)c->ownsRunning=false;
+    saveJson(root()+L"\\last-recovery-summary.json",receipt);
+    saveJson(root()+L"\\last-"+U2W(ymcc::steamOriginal::routeName(route))+L"-summary.json",receipt);
+    recordRouteTerminal(c,route,eventId,receipt,false,true);
+    publish(c,{{"phase",receipt.value("phase",receipt.value("status",std::string("unqualified")))},
+        {"reason",receipt.value("reason",std::string{})},{"eventId",eventId},{"lastResult",receipt},{"lastResultState","returned-terminal"},
+        {"currentBindingValid",scopeCurrent},
+        {"nativeRunning",observationCurrent?receipt.value("after",receipt.value("before",json::object())).value("running",json()):json()},
+        {"lastResultHistorical",!observationCurrent}});
+}
+#undef runRoute
+
+static void runOne(const std::shared_ptr<Control>& c,Pending pending,const json& config){
+    const auto sleepOriginal=(pending.kind==Trigger::Wake||pending.kind==Trigger::SuspendCapture)?SleepSteamRecovery::capturedFor(pending.generation):SleepSteamRecovery::Captured{};
+    const auto resumed=pending.startupFresh;
+    auto startupRequest=resumed?resumed->request:std::shared_ptr<StartupFreshRequest>{};
+    StartupFreshRunReturn returnStartupFresh{c,startupRequest,resumed};
+    if(resumed){
+        if(!startupFreshCurrent(c,startupRequest,resumed))return;
+        std::lock_guard<std::mutex> lock(c->mx);
+        if(resumed->phase!=StartupFreshPhase::Queued)return;
+        resumed->phase=StartupFreshPhase::Running;
+    }
+    const auto startingConfigEpoch=startupRequest?startupRequest->configEpoch:g_sleepRecoveryAutoConfigEpoch.load();
+    const auto startingRulesEpoch=startupRequest?startupRequest->rulesEpoch:g_gameRulesEpoch.load();
+    const auto startingAccount=startupRequest?startupRequest->accountCandidate:accountCandidate(SleepSteamRecovery::session().account);
+    // Each route selects Startup only after binding the exact current pair.
+    const auto operationPurpose=pending.kind==Trigger::Startup||pending.kind==Trigger::Wake
+        ?ymcc::steamnative::ReadPurpose::PrepareMutation:ymcc::steamnative::ReadPurpose::ObserveOriginal;
+    const auto operationReadScope=startupRequest?startupRequest->operationReadScope:nativeSteamNativeReadScope(SleepSteamRecovery::session(),operationPurpose);
+    if(!operationReadScope||!operationReadScope->current()){
+        if(pending.kind!=Trigger::Wake&&pending.kind!=Trigger::SuspendCapture){
+            std::lock_guard<std::mutex> lock(c->mx);if(!c->stop)c->startupPending=true;
+        }
+        c->ownsRunning=false;publish(c,{{"phase","waiting"},{"reason","native-read-scope-unavailable"}});return;
+    }
+    if(!startupRequest)startupRequest=beginStartupFreshRequest(c,pending,startingConfigEpoch,startingRulesEpoch,startingAccount,operationReadScope);
+    returnStartupFresh.request=startupRequest;
+    json routes=json::array(),best;bool terminal=startupRequest&&startupRequest->terminal.load(),bestOwns=false;
+    for(const auto route:{RecoveryRoute::LegacyDynamic,RecoveryRoute::SemiStatic}){
+        const auto routeIndex=startupFreshRouteIndex(route);
+        json observed;bool observedOwns=false;
+        if(resumed&&route!=resumed->route){
+            observed=startupRequest->routeObservations[routeIndex];observedOwns=startupRequest->routeOwns[routeIndex];
+            if(!observed.is_object())continue;
+        }else{
+            try{runRoute(c,pending,config,route,!terminal,operationReadScope,startupRequest);}
+            catch(const std::exception& error){publish(c,{{"phase","blocked"},{"reason",std::string(error.what()).substr(0,256)}});}
+            {std::lock_guard<std::mutex> lock(c->snapshotMx);observed=c->snapshot;}
+            observedOwns=c->ownsRunning.load();
+            if(startupRequest){startupRequest->routeObservations[routeIndex]=observed;startupRequest->routeOwns[routeIndex]=observedOwns;}
+        }
+        json item={{"route",ymcc::steamOriginal::routeName(route)},{"phase",observed.value("phase",std::string{})},
+            {"reason",observed.value("reason",std::string{})},{"engineDispatched",observed.value("engineDispatched",false)},
+            {"result",observed.value("lastResult",json())},{"eventId",observed.value("eventId",json())},
+            {"terminalEvidence",observed.value("terminalEvidence",json())},
+            {"terminalEvidenceHistorical",observed.value("terminalEvidenceHistorical",false)},
+            {"lastResultState",observed.value("lastResultState",std::string("unknown"))}};
+        routes.push_back(item);
+        const auto result=item["result"];const bool finished=result.is_object()&&
+            (result.value("status",std::string{})=="healthy"||result.value("status",std::string{})=="recovered-native");
+        const auto bestResult=best.is_object()?best.value("lastResult",json()):json();
+        const auto previousStatus=bestResult.is_object()?bestResult.value("status",std::string{}):std::string{};
+        const bool previousFinished=previousStatus=="healthy"||previousStatus=="recovered-native";
+        const bool newlyRecovered=result.is_object()&&result.value("status",std::string{})=="recovered-native";
+        if((finished&&(!previousFinished||(newlyRecovered&&previousStatus!="recovered-native")))||best.is_null()){
+            best=observed;bestOwns=observedOwns;
+        }
+        // No automatic second publisher after any dispatched mutation, including
+        // ambiguous/failed readback. No route can erase or refund the shared keys.
+        terminal=terminal||finished||(result.is_object()&&result.value("consumed",false));
+        if(terminal&&startupRequest){
+            startupRequest->terminal.store(true,std::memory_order_release);
+            std::lock_guard<std::mutex> lock(c->mx);
+            for(const auto& wait:c->startupFreshWaits)if(wait&&wait->request==startupRequest)wait->subscription.cancel();
+        }
+    }
+    // Actual native success or an uncertain consumed publication is terminal
+    // for automatic writes, even when another route's reader is not ready.
+    if(terminal&&pending.kind==Trigger::Wake){std::lock_guard<std::mutex> lock(c->mx);
+        if(c->deferredWake==pending.generation)c->deferredWake=0;}
+    const json dual={{"schema","ymcc.steam-original-dual-route.v1"},{"routes",routes},
+        {"legacyDynamicPreserved",true},{"independentQualification",true},{"sharedPublicationBudget",true},
+        {"atFileTime",std::to_string(sgNowFileTime())}};
+    saveJson(root()+L"\\last-dual-route-summary.json",dual);log(c,"dual-route-finished",dual);
+    if(best.is_object()){
+        best["dualRoutes"]=routes;
+        // The second route may observe OFF, an account/epoch switch or a new
+        // target. A saved successful receipt cannot resurrect old ownership.
+        NativeDetectedGame finalGame;unsigned long long finalTouch=0;
+        const auto finalSteam=SleepSteamRecovery::session();
+        const auto chosenGame=best.value("target",json()),chosenSteam=best.value("steam",json());
+        const auto matchesIdentity=[](const json& actual,const json& expected){
+            if(!actual.value("pid",DWORD{})||!expected.is_object())return false;
+            for(const auto& item:actual.items())if(!expected.contains(item.key())||expected.at(item.key())!=item.value())return false;
+            return true;
+        };
+        bool finalBinding=false;
+        {std::lock_guard<std::mutex> lock(c->mx);finalBinding=!c->stop&&c->bindingQualified&&chosenGame.is_object()&&
+            c->boundGameId==chosenGame.value("gameId",std::string{})&&c->boundAppId==chosenGame.value("appid",std::uint32_t{});}
+        const bool finalCurrent=(!startupRequest||startupFreshScopeCurrent(c,startupRequest,resumed))&&
+            operationReadScope->current()&&bestOwns&&finalBinding&&!g_exitRequested.load()&&g_sleepRecoveryAutoEnabled.load()&&
+            g_gameRulesEpoch.load()==startingRulesEpoch&&startingAccount&&accountCandidate(finalSteam.account)==startingAccount&&
+            g_sleepRecoveryAutoConfigEpoch.load()==startingConfigEpoch&&g_powerLifecycle.load()==PowerLifecycle::Ready&&
+            sharedSleepWakeClassified(pending.generation?pending.generation:currentPowerGeneration())&&
+            chosenGame.is_object()&&chosenSteam.is_object()&&
+            (sleepOriginal.request?(SleepSteamRecovery::originalTargetCurrent(sleepOriginal)&&
+                (finalGame.pid=sleepOriginal.game.pid,finalGame.processCreated=sleepOriginal.game.created,finalGame.path=sleepOriginal.game.path,true)):
+                nativeValveReadCurrentTarget(&finalGame,&finalTouch))&&
+            matchesIdentity(asJson(identity(finalGame.pid,finalGame.processCreated,finalGame.path)),chosenGame)&&
+            matchesIdentity(asJson(identity(finalSteam.pid,finalSteam.created,finalSteam.root+L"\\steam.exe")),chosenSteam)&&operationReadScope->current();
+        c->ownsRunning=finalCurrent;
+        if(bestOwns&&!finalCurrent){best["currentBindingValid"]=false;best["nativeRunning"]=nullptr;
+            best["lastResultHistorical"]=true;best["phase"]="cancelled";best["reason"]="scope-changed-after-dual-route";}
+        if(best.contains("lastResult")&&best["lastResult"].is_object())
+            saveJson(root()+L"\\last-recovery-summary.json",best["lastResult"]);
+        best.erase("routeTerminals"); // Keep both latest diagnostic slots, not the earlier best snapshot.
+        publish(c,best);
+    }
+}
+}
+static void steamOriginalRecoveryBusinessCommit(bool globalSelectionOnly,const std::function<void()>& publication){
+    SleepSteamRecovery::originalTargetCommit(globalSelectionOnly,[&]{
+        const auto c=SteamOriginalRecovery::current();
+        if(!c){publication();return;}
+        std::lock_guard<std::mutex> lock(c->mx);
+        SteamOriginalRecovery::cancelGroupRequestLocked(c,globalSelectionOnly);
+        SteamOriginalRecovery::cancelStartupFreshLocked(c);
+        publication();
+    });
+}
+static void steamOriginalRecoveryTrackerObserved(DWORD gamePid,ULONGLONG gameBirth,DWORD steamPid,ULONGLONG steamBirth,
+    const std::string& gameId,std::uint32_t appid,bool exact){
+    const auto c=SteamOriginalRecovery::current();if(!c)return;
+    std::lock_guard<std::mutex> lock(c->mx);
+    const bool same=c->boundGame.pid==gamePid&&c->boundGame.birth==gameBirth&&
+        c->boundSteam.pid==steamPid&&c->boundSteam.birth==steamBirth;
+    if(same&&c->bindingQualified&&exact&&c->boundGameId==gameId&&c->boundAppId==appid)return;
+    // Another global selection cannot revoke the original sleep target.
+    // Its own exact binding failures and public process/account events still revoke.
+    if(!same&&c->boundSleepRequest)return;
+    if(!same&&!c->active.load())return;
+    // This event can revoke only. It cannot elect a PID, replace GameID, queue
+    // a mutation, or refund an already consumed observation/dispatch.
+    SteamOriginalRecovery::cancelGroupRequestLocked(c);
+    c->bindingQualified=false;c->ownsRunning=false;
+    if(c->bindingSerial!=ULLONG_MAX)++c->bindingSerial;
+}
+struct EngineCall {
+    json request;
+    std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> group;
+    std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> business;
+    std::shared_ptr<ymcc::steamnative::ReadScope> readScope;
+    std::function<bool()> current,observation;
+    bool currentAtEntry=false,observationAtEntry=false;
+};
+std::vector<EngineCall> engineCalls;
+static std::function<json(const json&)> fixtureEngineReceipt;
+std::function<void(EngineCall&)> engineAction;
+bool firstConsumed=false;
+static json steamOriginalRecoveryEngineHandle(const json& request,const std::function<bool()>& current,const std::function<void(const json&)>& emit,
+    const std::function<bool()>& observation,std::uintptr_t,std::uintptr_t,std::uintptr_t,std::shared_ptr<ymcc::steamnative::ReadScope> readScope,
+    std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> group,std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> business){
+    EngineCall row{request,group,business,readScope,current,observation};
+    row.currentAtEntry=current();row.observationAtEntry=observation();
+    if(engineAction)engineAction(row);
+    engineCalls.push_back(std::move(row));
+    json result={{"status","unqualified"},{"reason","controlled-engine-leaf-no-native-publication"},{"consumed",firstConsumed&&engineCalls.size()==1}};
+    if(fixtureEngineReceipt)result=fixtureEngineReceipt(request);
+    emit({{"event","job-finished"},{"result",result}});return result;
+}
+std::vector<json> cases;unsigned assertions=0;
+void check(bool pass,const char* reason){++assertions;if(!pass)throw std::runtime_error(reason);}
+void test(const char* name,const std::function<void()>& run){
+    const auto before=assertions;
+    try{run();cases.push_back({{"name",name},{"pass",true},{"assertions",assertions-before}});}
+    catch(const std::exception& e){cases.push_back({{"name",name},{"pass",false},{"assertions",assertions-before},{"reason",e.what()}});throw;}
+}
+const json config={{"enabled",true},{"targetMode","generic"}};
+std::shared_ptr<SteamOriginalRecovery::Control> setup(const InertRoles::InertTree& tree,const std::wstring& selected,const NativeDetectedGame& global){
+    engineAction={};engineCalls.clear();firstConsumed=false;SteamOriginalRecovery::saved.clear();
+    g_exitRequested=false;g_sleepRecoveryAutoEnabled=true;g_sleepRecoveryAutoConfigEpoch=5;g_gameRulesEpoch=9;fixturePowerGeneration=7;g_powerLifecycle=PowerLifecycle::Ready;
+    {std::lock_guard<std::mutex> lock(g_gameValveMx);g_gameValveTarget={};g_gameValveTarget.game=global;}
+    const auto facts=g_steamSettingsObserver.identitySnapshot();
+    auto lease=ymcc::steamgamefacts::processOwner().acquire(g_steamSettingsObserver,facts,{tree.shippingPid,tree.shippingCreated,selected});
+    check(lease&&lease->processCurrent(),"actual public selected ProcessLease not current");
+    {std::lock_guard<std::mutex> lock(SleepSteamRecovery::captureMx);
+        auto request=SleepSteamRecovery::beginCaptureRequestLocked(5);check(bool(request),"real capture request signal missing");
+        SleepSteamRecovery::captured={};auto& original=SleepSteamRecovery::captured;
+        original.generation=7;original.configEpoch=5;original.boundaryGeneration=7;
+        original.game={tree.shippingPid,tree.shippingCreated,selected};original.client=SleepSteamRecovery::session();
+        original.request=request;original.selectedProcess=lease;original.identitySnapshot=facts;
+    }
+    const auto now=sgNowFileTime(),boundary=now-10000000ULL,event=now-5000000ULL;
+    SleepRecoveryAuto::state={};SleepRecoveryAuto::state.armed=GetTickCount64();
+    SleepRecoveryAuto::state.wakeAdmission={{"status","admitted"},{"source","kernel-power-507-reason-1"},
+        {"kernelWakeConfirmed",true},{"proofFresh",true},{"proofFollowedPreparedBoundary",false},
+        {"boundaryGeneration",7},{"proofObservedGeneration",7},{"boundaryFileTime",std::to_string(boundary)},
+        {"eventFileTime",std::to_string(event)},{"modernStandby",false}};
+    SleepRecoveryAuto::kernelWake={};SleepRecoveryAuto::kernelWake.eventFileTime=event;SleepRecoveryAuto::kernelWake.boundaryFileTime=boundary;
+    SleepRecoveryAuto::kernelSleepEntry={};
+    auto c=std::make_shared<SteamOriginalRecovery::Control>();c->enabled=true;c->active=true;c->startupPending=false;c->latestPower=7;
+    c->observationEvent=std::shared_ptr<void>(CreateEventW(nullptr,FALSE,FALSE,nullptr),[](void* handle){if(handle)CloseHandle(handle);});
+    check(bool(c->observationEvent),"runtime observation event missing");SteamOriginalRecovery::callbackControl=c;return c;
+}
+void runWake(const std::shared_ptr<SteamOriginalRecovery::Control>& c){SteamOriginalRecovery::runOne(c,{ymcc::steamOriginal::Trigger::Wake,7,1},config);}
+void groupsAndCleanup(const std::shared_ptr<SteamOriginalRecovery::Control>& c,DWORD selected){
+    check(engineCalls.size()==2,"full runOne did not dispatch both complete routes");
+    for(auto& row:engineCalls){
+        check(row.group&&row.group->graph().count==2&&row.group->processCurrent(),"nonempty real group not retained through engine return");
+        check(row.group->selectedGame().pid==selected&&row.request["target"]["pid"]==selected,"original selected PID replaced by global target");
+        check(row.request["target"]["gameId"]==std::to_string(fixtureFull),"exact full GameID changed");
+        check(row.business&&!row.business->current()&&WaitForSingleObject(row.business->event(),0)==WAIT_OBJECT_0,"route cleanup did not cancel retained business event");
+        check(row.currentAtEntry&&row.observationAtEntry,"scope not current on engine entry");
+        check(!row.current()&&!row.observation(),"retained callbacks revived after registration cleanup");
+    }
+    check(engineCalls[0].business!=engineCalls[1].business&&engineCalls[0].business->event()!=engineCalls[1].business->event(),"routes share request-local cancellation signal");
+    check(!c->activeGroupRequest,"completed route left active registration");
+}
+
+
+static void steamOriginalRecoveryRequestStop(){
+    SleepSteamRecovery::originalTargetCommit(false,[]{});
+    const auto c=SteamOriginalRecovery::current();if(!c)return;
+    std::deque<SteamOriginalRecovery::Pending> abandoned;
+    {std::lock_guard<std::mutex> lock(c->mx);SteamOriginalRecovery::cancelGroupRequestLocked(c);SteamOriginalRecovery::cancelStartupFreshLocked(c);c->stop=true;abandoned.swap(c->pending);}c->cv.notify_all();
+    if(c->observationEvent)SetEvent(c->observationEvent.get());
+    c->ownsRunning=false;
+}
+#include "cases.inc"
+
+int wmain(int argc,wchar_t** argv){
+(void)&steamOriginalRecoveryBusinessCommit;(void)&steamOriginalRecoveryTrackerObserved;
+    // Retain reused diagnostics and callbacks as compile-visible ports without
+    // executing unrelated original groups or suppressing compiler warnings.
+    (void)&expect;(void)&cpuTime;(void)&sourceCheck;(void)&freshCheck;
+    (void)&SleepSteamRecovery::captureRequestCurrent;(void)&SteamOriginalRecovery::enqueue;
+    if(const auto result=InertRoles::childMain(argc,argv))return *result;
+    if(argc==3&&std::wstring_view(argv[1])==L"--child"){
+        InertRoles::OwnedHandle stop(OpenEventW(SYNCHRONIZE,FALSE,argv[2]));
+        return stop.value&&WaitForSingleObject(stop.value,30000)==WAIT_OBJECT_0?0:40;
+    }
+    if(argc!=3||std::wstring_view(argv[2])!=L"--startup-completion")return 41;
+    if(!argv[1][0])return 41;
+    bool cleanup=false;std::string error;
+    try{
+        const auto root=std::filesystem::absolute(argv[1]).wstring();
+        if(std::filesystem::exists(root))throw std::runtime_error("exclusive isolated runtime workspace required");
+        std::filesystem::create_directories(root+L"\\logs");
+        wchar_t image[32768]{};const auto size=GetModuleFileNameW(nullptr,image,static_cast<DWORD>(std::size(image)));
+        if(!size||size>=std::size(image))throw std::runtime_error("own executable identity unavailable");
+        const auto steamExe=root+L"\\steam.exe",launcher=root+L"\\launcher.exe",selected=root+L"\\selected.exe";
+        if(!CopyFileW(image,steamExe.c_str(),TRUE)||!CopyFileW(image,launcher.c_str(),TRUE)||!CopyFileW(image,selected.c_str(),TRUE))throw std::runtime_error("exclusive self-owned image copies failed");
+        Registry registry(contextRegistryPath);Child steam(steamExe);Sleep(15);InertRoles::InertTree tree(root,launcher,selected);
+        registry.root(root);registry.number(L"ActiveUser",42);registry.number(L"pid",steam.pi.dwProcessId);
+        if(!g_steamSettingsObserver.start([](bool){},[]{return false;}))throw std::runtime_error("actual isolated Observer start failed");
+        struct StopObserver{~StopObserver(){g_steamSettingsObserver.stop();}} stopObserver;
+        if(!until([&]{auto s=g_steamSettingsObserver.identitySnapshot();return s&&s->presence==1&&s->windowsSessionKnown&&s->session.pid==steam.pi.dwProcessId&&s->session.account==42;}))throw std::runtime_error("actual isolated Observer identity not ready");
+        const auto add=[&](DWORD pid,const std::wstring& path,U64 created){return "["+SleepSteamRecovery::localSecond(created)+"] AppID "+std::to_string(fixtureFull)+" adding PID "+std::to_string(pid)+" as a tracked process \""+W2U(path)+"\"\n";};
+        {std::ofstream file(std::filesystem::path(root+L"\\logs\\gameprocess_log.txt"),std::ios::binary);file<<add(tree.rootPid,launcher,tree.rootCreated)<<add(tree.shippingPid,selected,tree.shippingCreated);if(!file)throw std::runtime_error("isolated gameprocess seed failed");}
+        {std::ofstream file(std::filesystem::path(root+L"\\logs\\console_log.txt"),std::ios::binary);file<<"["<<SleepSteamRecovery::localSecond(tree.shippingCreated)<<"] Game process added : AppID "<<fixtureFull<<" fixture, ProcID "<<tree.rootPid<<", IP 0.0.0.0:0\n";if(!file)throw std::runtime_error("isolated console seed failed");}
+        NativeDetectedGame global;global.pid=tree.rootPid;global.processCreated=tree.rootCreated;global.path=launcher;
+        try{std::fprintf(stderr,"BEGIN startup-completion-only\n");std::fflush(stderr);scenarios(tree,selected,global);std::fprintf(stderr,"END startup-completion-only\n");std::fflush(stderr);}catch(const std::exception& e){error=e.what();}
+        fixtureFreshReadHook={};fixtureEngineReceipt={};engineAction={};engineCalls.clear();SteamOriginalRecovery::callbackControl.reset();
+        {std::lock_guard<std::mutex> lock(SleepSteamRecovery::captureMx);SleepSteamRecovery::cancelCaptureRequestLocked();SleepSteamRecovery::captured={};SleepSteamRecovery::prepared={};}
+        g_steamSettingsObserver.stop();steam.finish();
+        const bool treeReturned=tree.finish();cleanup=treeReturned&&tree.zero&&tree.closed&&!tree.forced&&WaitForSingleObject(steam.pi.hProcess,0)==WAIT_OBJECT_0;
+    }catch(const std::exception& e){error=e.what();}
+    std::cout<<json({{"schema","ymcc.private-runtime-composition-raw.v1"},{"cases",cases},{"assertions",assertions},
+        {"error",error},{"ownedTreeNaturalJobZeroBeforeClose",cleanup},{"nativeSteamAuthority",false},{"actualFormalReadScope",true},{"powerReaderControlled",true},
+        {"realEnginePublisher",false},{"fieldAcceptance",false}}).dump(2)<<'\n';
+    return error.empty()&&cleanup&&cases.size()==3?0:2;
+}

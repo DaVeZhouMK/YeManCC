@@ -1,5 +1,7 @@
 import { migrateControllerPersona } from './controllerPersona';
-import { fs, settingsStore } from './api';
+import { rememberOrdinaryBootPreferences, captureBootPreferenceWrite, assertBootPreferenceOwner, bootStartupReceiptOwner, guardFirstBootPreferenceWrite, type BootPreferenceWrite } from './bootModeGlobalPreferences';
+export { rememberOrdinaryPerformancePreferences } from './bootModeGlobalPreferences';
+import { fs, settingsStore, type InputRuntimePower } from './api';
 import { snapshotSettingsData } from './settingsSnapshot';
 import { globalShortcutContainer, prepareGlobalShortcutEdit, retireBootGlobalShortcuts } from './bootModeSharedShortcuts';
 import { SETTINGS_BASELINE, assertSupportedSettingsBaseline, hasCompletedSettingsBaseline, stampSettingsBaseline, equalSettingsDocuments, type ConfigurationBaseline } from './settingsBaseline';
@@ -125,13 +127,9 @@ export function evaluateInputCas(
   if (current.revision !== expectedRevision) {
     return { ok: false, reason: 'revision-conflict', currentRevision: current.revision, value: snapshotSettingsData(current) };
   }
-  // Coupled pages/shortcuts cannot mutate the base while a dedicated overlay owns input.
-  if (current.gameOverride && !('gameOverride' in patch) && ('outputTarget' in patch || 'gyroMotion' in patch)) {
-    return { ok: false, reason: 'game-override-active', currentRevision: current.revision, value: snapshotSettingsData(current) };
-  }
   const next = mergeSettings(current, patch) as InputSettingsSnapshot;
-  // Overlay is a replacement, NOT deep merge: B/follow must not inherit A's parameters.
-  if ('gameOverride' in patch) next.gameOverride = snapshotSettingsData(patch.gameOverride);
+  // Global input and boot modes exclusively own input, including legacy files.
+  next.gameOverride = null;
   next.schemaVersion = 1;
   next.revision = expectedRevision + 1;
   // A successful CAS is only a durable user-config save. It has not reached
@@ -196,6 +194,8 @@ const DEFAULTS: UnifiedSettings = {
     theme: 'blue-black',
     dynamicBackgroundEnabled: true,
     steamWallpaperPauseOnBattery: false,
+    steamControllerCursorHide: true,
+    steamMenuGameIdRepair: true,
     backgroundOpacity: 0.7,
     backgroundBlur: 0,
     backgroundPositionX: 50,
@@ -238,6 +238,7 @@ const DEFAULTS: UnifiedSettings = {
     version: 2,
     configured: true,
     enabled: true,
+    templateDefaults: true,
     active: { ac: 'elite', dc: 'medium' },
     profiles: {},
   },
@@ -283,6 +284,8 @@ const DEFAULTS: UnifiedSettings = {
     virtualGamepadPersona: 'disabled',
     gyroPreset: 'off',
     bootControlCenter: true,
+    steamOverlayOnBoot: true,
+    gameBarControllerOnBoot: false,
     fanControl: false,
     rtss: false,
     energyStar: false,
@@ -383,7 +386,7 @@ async function boundedSettingsIO<T>(operation: Promise<T>, label: string, timeou
 
 function runtimeSettings(candidate: UnifiedSettings = normalizeSettings(DEFAULTS)): UnifiedSettings {
   const next = snapshotSettingsData(candidate);
-  next.startupDesired = { ...next.startupDesired, virtualGamepadPersona: 'disabled', gyroPreset: 'off', fanControl: false, rtss: false, energyStar: false, memoryCleanup: false, steamCommunity: false };
+  next.startupDesired = { ...next.startupDesired, virtualGamepadPersona: 'disabled', gyroPreset: 'off', steamOverlayOnBoot: false, fanControl: false, rtss: false, energyStar: false, memoryCleanup: false, steamCommunity: false };
   next.performanceSchedule.enabled = false;
   next.tdp.autoApply = { ...next.tdp.autoApply, boot: false, wake: false };
   next.cpu.autoEnable = { ...next.cpu.autoEnable, mode: 'off' };
@@ -467,6 +470,20 @@ function hasLegacyFrameRates(source: JsonObject): boolean {
     isObject(profile) && typeof profile.fpsTarget === 'number' && Number.isFinite(profile.fpsTarget)));
 }
 
+function performanceTemplateDefaults(source: JsonObject): boolean {
+  if (!Object.prototype.hasOwnProperty.call(source, 'performanceSchedule')) return true;
+  const schedule = isObject(source.performanceSchedule) ? source.performanceSchedule : null;
+  if (!schedule || Object.prototype.hasOwnProperty.call(schedule, 'controls') ||
+      schedule.profiles !== undefined && !isObject(schedule.profiles) ||
+      isObject(schedule.profiles) && Object.keys(schedule.profiles).length > 0) return false;
+  if (schedule.templateDefaults !== undefined) return schedule.templateDefaults === true;
+  // The exact untouched document written before the provenance marker existed.
+  return schedule.version === 2 && schedule.configured === true && schedule.enabled === true &&
+    isObject(schedule.active) && schedule.active.ac === 'elite' && schedule.active.dc === 'medium' && Object.keys(schedule.active).length === 2 &&
+    isObject(schedule.profiles) && Object.keys(schedule.profiles).length === 0 &&
+    Object.keys(schedule).every(key => ['version', 'configured', 'enabled', 'active', 'profiles'].includes(key));
+}
+
 export function normalizeSettings(raw: unknown): UnifiedSettings {
   const source = isObject(raw) ? raw : {};
   assertSupportedSettingsBaseline(source);
@@ -485,6 +502,9 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
     }
   }
   repairShape(merged as unknown as JsonObject, DEFAULTS as unknown as JsonObject);
+  // Missing input uses intentional defaults; damaged saved input never inherits
+  // their provenance just because DEFAULTS supplied finite display numbers.
+  merged.performanceSchedule.templateDefaults = performanceTemplateDefaults(source);
   if (!isObject(merged.sleep)) merged.sleep = structuredClone(DEFAULTS.sleep);
   // Preserve an explicit legacy choice; missing preferences stay off.
   if (isObject(source.sleep) && typeof source.sleep.retryOnNonUserWake !== 'boolean' &&
@@ -528,6 +548,8 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
   const ownership = isObject(input.ownership) ? input.ownership : structuredClone(DEFAULTS.input.ownership);
   ownership.frontendIsolationEnabled = ownership.frontendIsolationEnabled !== false;
   ownership.externalControllerPriority = ownership.externalControllerPriority === true;
+  // Missing means off; preserve the frozen default document for old installs.
+  if ('fseWakeReconnect' in ownership) ownership.fseWakeReconnect = ownership.fseWakeReconnect === true;
   input.ownership = ownership;
   const target = isObject(input.outputTarget) ? input.outputTarget : {};
   target.schemaVersion = Number.isSafeInteger(Number(target.schemaVersion)) ? Math.max(1, Math.floor(Number(target.schemaVersion))) : 1;
@@ -540,18 +562,9 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
     input.appliedRevision = null; input.appliedConfigHash = null; input.pendingConfigHash = null;
     input.hostAcknowledgedRevision = null; input.hostAcknowledgedConfigHash = null; input.applyStatus = 'saved-pending';
   }
-  if (isObject(input.gameOverride)) {
-    const override = input.gameOverride;
-    const savedTargets = [override.outputTarget, isObject(override.baseline) ? override.baseline.outputTarget : undefined];
-    for (const savedTarget of savedTargets) {
-      if (!isObject(savedTarget) || !('persona' in savedTarget)) continue;
-      const nextPersona = migrateControllerPersona(savedTarget.persona);
-      if (nextPersona === savedTarget.persona) continue;
-      savedTarget.persona = nextPersona; savedTarget.descriptorHash = null; savedTarget.closure = 'UNENCLOSED';
-      input.appliedRevision = null; input.appliedConfigHash = null; input.pendingConfigHash = null;
-      input.hostAcknowledgedRevision = null; input.hostAcknowledgedConfigHash = null; input.applyStatus = 'saved-pending';
-    }
-  }
+  // Retire an existing legacy owner without adding a runtime claim to the
+  // frozen factory defaults or rewriting documents that never had one.
+  if (Object.prototype.hasOwnProperty.call(input, 'gameOverride')) input.gameOverride = null;
   if (!['hidden', 'project-only', 'unavailable'].includes(String(target.visibilityPolicy))) target.visibilityPolicy = 'hidden';
   target.buttonMappingEnabled = target.buttonMappingEnabled === true;
   target.gyroEnabled = target.gyroEnabled === true;
@@ -830,6 +843,7 @@ async function migrateLegacySettings(dir = settingsDir, check: () => void = () =
   set('gamepad', summon);
   set('music', music);
   set('performanceSchedule', schedule);
+  if (schedule) next.performanceSchedule.templateDefaults = performanceTemplateDefaults({ performanceSchedule: schedule });
   set('tdp', {
     ...(control || {}),
     ...(control ? {} : legacyTdp == null ? {} : { tdpMax: legacyTdp }),
@@ -925,7 +939,10 @@ export async function loadSettings(): Promise<UnifiedSettings> {
         const importLegacy = !hasCompletedSettingsBaseline(main) && missingSection;
         const legacy = importLegacy ? await migrateLegacySettings(settingsDir, check) : DEFAULTS;
         check();
-        next = normalize(importLegacy ? mergeSettings(legacy, main) : main);
+        const imported = importLegacy ? mergeSettings(legacy, main) : main;
+        if (importLegacy && isObject(imported.performanceSchedule) && Object.prototype.hasOwnProperty.call(main, 'performanceSchedule'))
+          imported.performanceSchedule.templateDefaults = performanceTemplateDefaults(main);
+        next = normalize(imported);
         candidate = next;
         if (!equalSettingsDocuments(main, next)) {
           reason = 'write-failed';
@@ -1004,6 +1021,8 @@ export class VirtualStartProtectionActive extends Error {
   }
 }
 
+class InputRuntimePowerSuperseded extends Error {}
+
 class InputSettingsCommitConflict extends Error {
   constructor(readonly document: UnifiedSettings) { super('输入配置在提交前已变更'); }
 }
@@ -1050,6 +1069,8 @@ async function writeSettings(
   initialize = false,
   expectedInputRevision?: number,
   validatedRead?: () => void,
+  guardBootMode = false,
+  inputRuntimePower?: InputRuntimePower,
 ): Promise<UnifiedSettings> {
   assertSettingsGeneration(generation);
   if (!settingsLocationResolved || (!validatedRead && recoveryState.status === 'runtime-fallback' &&
@@ -1061,9 +1082,14 @@ async function writeSettings(
     const content = JSON.stringify(next, null, 2);
     const result = await boundedSettingsIO(settingsStore.write(path, content, {
       baseline, initialize, ...(expectedInputRevision === undefined ? {} : { expectedInputRevision }),
+      ...(guardBootMode ? { guardBootMode: true } : {}),
+      ...(inputRuntimePower === undefined ? {} : { inputRuntimePower: { ...inputRuntimePower } }),
     }), '统一配置写入');
     assertSettingsGeneration(generation);
     validatedRead?.();
+    if (typeof result === 'object' && !result.ok && result.reason === 'input-runtime-power-superseded') {
+      throw new InputRuntimePowerSuperseded('Game input runtime power retired');
+    }
     if (typeof result === 'object' && !result.ok && result.reason === 'revision-conflict') {
       throw new InputSettingsCommitConflict(normalize(JSON.parse(result.content)));
     }
@@ -1091,7 +1117,7 @@ async function writeSettings(
   } catch (error) {
     assertSettingsGeneration(generation);
     validatedRead?.();
-    if (!(error instanceof InputSettingsCommitConflict) && !(error instanceof VirtualStartProtectionActive)) {
+    if (!(error instanceof InputSettingsCommitConflict) && !(error instanceof VirtualStartProtectionActive) && !(error instanceof InputRuntimePowerSuperseded)) {
       recoveryState = { status: 'runtime-fallback', reason: 'write-failed',
         source: cache ? 'cache' : 'defaults', persisted: recoveryState.persisted,
         message: String((error as Error)?.message || error) };
@@ -1106,7 +1132,42 @@ export async function readSettingsSection<T extends JsonObject = JsonObject>(sec
   return structuredClone((settings[section] || {}) as T);
 }
 
-export async function saveSettingsSection(section: SettingsSection, value: JsonObject, expectedGeneration = settingsGeneration): Promise<void> {
+/** After the initial settings read, check before each new write without another IPC. */
+export function cachedSleepPowerPlanOptimizationEnabled(): boolean {
+  return cache?.sleep.sleepPowerPlanOptimizationEnabled === true;
+}
+
+/** Bind an ordinary output application to the settings already read by its renderer. */
+export function cachedBootStartupReceiptOwner() {
+  return cache && recoveryState.persisted ? bootStartupReceiptOwner(cache) : undefined;
+}
+
+async function writeBootPreference(next:UnifiedSettings,current:UnifiedSettings,generation:number,path:string,options:BootPreferenceWrite):Promise<UnifiedSettings> {
+  if(!options.bootContext){
+    if(!guardFirstBootPreferenceWrite(current,next,options))return writeSettings(next,current,generation,path);
+    try {
+      const committed=await writeSettings(next,current,generation,path,false,current.input.revision,undefined,true);
+      if(!settingsDeltaCommitted(current,next,committed))throw Error('配置写入回执未确认请求的更改');
+      return committed;
+    } catch(error) {
+      if(!(error instanceof InputSettingsCommitConflict))throw error;
+      cache=error.document;cacheStamp=null;
+      throw Error('开机模式或输入配置已变化，本次未保存，请重试');
+    }
+  }
+  assertBootPreferenceOwner(current,options);
+  // This path changes optional preferences only. Input or mode edits retain
+  // their original CAS transaction rather than borrowing a preference claim.
+  assertBootPreferenceOwner(next,options);
+  const revision=Number(options.bootContext.input.revision);
+  const committed=await writeSettings(next,current,generation,path,false,revision,undefined,true);
+  assertBootPreferenceOwner(committed,options);
+  if(!settingsDeltaCommitted(current,next,committed))throw Error('开机偏好写入回执未确认请求的更改');
+  return committed;
+}
+
+export async function saveSettingsSection(section: SettingsSection, value: JsonObject, expectedGeneration = settingsGeneration, options: BootPreferenceWrite = {}): Promise<void> {
+  const submittedOrigin = captureBootPreferenceWrite(options);
   assertSettingsGeneration(expectedGeneration);
   if (section === 'input') throw new Error('input section requires compareAndSwapInputSettings');
   const snapshot = snapshotSettingsData(value); // Capture at submission, not after queue wait.
@@ -1118,7 +1179,8 @@ export async function saveSettingsSection(section: SettingsSection, value: JsonO
     const path = SETTINGS_FILE;
     const next = normalize(current);
     (next as any)[section] = mergeSettings((next as any)[section], snapshot);
-    cache = await writeSettings(next, current, generation, path);
+    rememberOrdinaryBootPreferences(current, next, submittedOrigin, { section, value: snapshot });
+    cache = await writeBootPreference(next, current, generation, path, submittedOrigin);
   });
   writeQueue = run.catch(() => {});
   await run;
@@ -1128,9 +1190,11 @@ export async function saveSettingsSection(section: SettingsSection, value: JsonO
 export async function compareAndSwapInputSettings(
   expectedRevision: number,
   value: JsonObject,
-  isCurrent?: () => boolean,
-  options: { globalShortcuts?: boolean } = {},
+  isCurrent?: (settings?: UnifiedSettings) => boolean,
+  options: BootPreferenceWrite & { globalShortcuts?: boolean; inputRuntimePower?: InputRuntimePower } = {},
 ): Promise<SettingsCasResult> {
+  const submittedOrigin: BootPreferenceWrite = { origin: options.origin };
+  const inputRuntimePower = options.inputRuntimePower === undefined ? undefined : { ...options.inputRuntimePower };
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
     throw new Error('Invalid expected input revision');
   }
@@ -1161,7 +1225,7 @@ export async function compareAndSwapInputSettings(
     if (diskReady) recoveryState = { status: 'ready', reason: null, source: 'main', persisted: true, message: '' };
     const globalPatch = prepareGlobalShortcutEdit(patch);
     // Recheck at the queued commit boundary, after disk I/O, not only in the caller.
-    if (isCurrent && !isCurrent()) {
+    if (isCurrent && !isCurrent(current)) {
       result = { ok: false, reason: 'cancelled', currentRevision: snapshot.revision, value: structuredClone(snapshot) };
       return;
     }
@@ -1173,20 +1237,36 @@ export async function compareAndSwapInputSettings(
       result = options.globalShortcuts ? { ...decision, globalShortcutRules: globalShortcutContainer(current) } : decision;
       return;
     }
-    const next = normalize(current);
-    next.input = decision.value;
+    // Apply the same canonicalization before persistence and acknowledgement.
+    // A saved empty trigger, for example, becomes null on readback; comparing
+    // that normalized commit against the unnormalized patch invents a conflict
+    // after the native writer has already advanced the revision.
+    const next = normalize({ ...current, input: decision.value });
+    const configHash = computeInputConfigHash(next.input);
+    next.input.pendingConfigHash = configHash;
+    rememberOrdinaryBootPreferences(current, next, submittedOrigin);
+    // Normalization retires a legacy overlay before evaluating the edit. The
+    // native CAS must still compare the value we actually read under its lock.
+    const diskInput = diskReady && isObject(onDisk.input) ? onDisk.input : null;
+    const commitBaseline = diskInput?.gameOverride != null
+      ? { ...current, input: { ...current.input, gameOverride: diskInput.gameOverride } }
+      : current;
     try {
-      const committed = await writeSettings(next, current, generation, path, false, expectedRevision);
+      const guardMode = submittedOrigin.origin === 'boot-mode' || guardFirstBootPreferenceWrite(current, next, submittedOrigin);
+      const committed = await writeSettings(next, commitBaseline, generation, path, false, expectedRevision, undefined, guardMode, inputRuntimePower);
       // A native/legacy reply must prove this input transaction was committed.
       // Never report a stale-input drop as a successful shortcut save.
       if (committed.input.revision !== decision.revision ||
-          computeInputConfigHash(committed.input) !== computeInputConfigHash(decision.value)) {
+          computeInputConfigHash(committed.input) !== configHash) {
         throw new InputSettingsCommitConflict(committed);
       }
       Object.assign(next, committed);
     } catch (error) {
-      if (error instanceof InputSettingsCommitConflict || error instanceof VirtualStartProtectionActive) {
+      if (error instanceof InputRuntimePowerSuperseded) {
+        result = { ok: false, reason: 'cancelled', currentRevision: snapshot.revision, value: snapshotSettingsData(snapshot) };
+      } else if (error instanceof InputSettingsCommitConflict || error instanceof VirtualStartProtectionActive) {
         cache = error.document; cacheStamp = null;
+        isCurrent?.(error.document);
         result = { ok: false, reason: error instanceof VirtualStartProtectionActive ? error.reason : 'revision-conflict',
           currentRevision: error.document.input.revision, value: snapshotSettingsData(error.document.input),
           ...(options.globalShortcuts ? { globalShortcutRules: globalShortcutContainer(error.document) } : {}),
@@ -1294,7 +1374,8 @@ export async function recordInputActivationFailure(
  * a legacy section after a one-time migration. Normal feature saves continue
  * to use saveSettingsSection so unknown fields remain forward-compatible.
  */
-export async function replaceSettingsSection(section: SettingsSection, value: JsonObject): Promise<void> {
+export async function replaceSettingsSection(section: SettingsSection, value: JsonObject, options: BootPreferenceWrite = {}): Promise<void> {
+  const submittedOrigin = captureBootPreferenceWrite(options);
   if (section === 'input') throw new Error('input section requires compareAndSwapInputSettings');
   const snapshot = snapshotSettingsData(value);
   const generation = settingsGeneration;
@@ -1305,13 +1386,16 @@ export async function replaceSettingsSection(section: SettingsSection, value: Js
     const path = SETTINGS_FILE;
     const next = normalize(current);
     (next as any)[section] = snapshot;
-    cache = await writeSettings(next, current, generation, path);
+    rememberOrdinaryBootPreferences(current, next, submittedOrigin, { section, value: snapshot });
+    // Compare the committed replacement in the same canonical form as reload.
+    cache = await writeBootPreference(normalize(next), current, generation, path, submittedOrigin);
   });
   writeQueue = run.catch(() => {});
   await run;
 }
 
-export async function updateSettings(mutator: (settings: UnifiedSettings) => void): Promise<void> {
+export async function updateSettings(mutator: (settings: UnifiedSettings) => void, options: BootPreferenceWrite = {}): Promise<void> {
+  const submittedOrigin = captureBootPreferenceWrite(options);
   const generation = settingsGeneration;
   const run = writeQueue.then(async () => {
     assertSettingsGeneration(generation);
@@ -1320,11 +1404,58 @@ export async function updateSettings(mutator: (settings: UnifiedSettings) => voi
     const path = SETTINGS_FILE;
     const next = normalize(current);
     mutator(next);
+    rememberOrdinaryBootPreferences(current, next, submittedOrigin);
     const snapshot = normalize(next);
-    cache = await writeSettings(snapshot, current, generation, path);
+    cache = await writeBootPreference(snapshot, current, generation, path, submittedOrigin);
   });
   writeQueue = run.catch(() => {});
   await run;
+}
+
+/** Commit application observations with the durable input revision checked under
+ * the existing native settings lock. No input configuration edit or second store. */
+export async function updateSettingsForInputReceipt(
+  identity: { revision: number; hash: string },
+  mutator: (settings: UnifiedSettings) => boolean,
+  isCurrent: (settings?: UnifiedSettings) => boolean = () => true,
+  options: BootPreferenceWrite = {},
+): Promise<boolean> {
+  const guardBootMode = options.origin === 'boot-mode';
+  const revision = identity.revision, hash = identity.hash, generation = settingsGeneration;
+  if (!Number.isSafeInteger(revision) || revision < 0 || !/^sha256:[0-9a-f]{64}$/.test(hash))
+    throw new Error('Invalid input receipt identity');
+  let accepted = false;
+  const matches = (input: InputSettingsSnapshot) => input.revision === revision && computeInputConfigHash(input) === hash;
+  const run = writeQueue.then(async () => {
+    assertSettingsGeneration(generation);
+    if (!isCurrent()) return;
+    const current = await loadSettings();
+    assertSettingsGeneration(generation);
+    if (!isCurrent(current) || !matches(current.input)) return;
+    const next = normalize(current);
+    if (!mutator(next)) return;
+    const snapshot = normalize(next);
+    if (!matches(snapshot.input)) throw new Error('输入生效回执不得修改配置');
+    try {
+      const committed = await writeSettings(snapshot, current, generation, SETTINGS_FILE, false, revision, () => {
+        if (!isCurrent()) throw new Error('输入回执所属观察已结束');
+      }, guardBootMode);
+      cache = committed;
+      // Input CAS bypasses the ordinary delta check. Verify both the receipt
+      // delta and input bookkeeping against the actual committed document.
+      if (!matches(committed.input) || !settingsDeltaCommitted(current, snapshot, committed) ||
+          !settingsDeltaCommitted(current.input, snapshot.input, committed.input, false))
+        throw new Error('输入生效回执写入未确认');
+      accepted = true;
+    } catch (error) {
+      if (!(error instanceof InputSettingsCommitConflict)) throw error;
+      cache = error.document; cacheStamp = null;
+      isCurrent(error.document);
+    }
+  });
+  writeQueue = run.catch(() => {});
+  await run;
+  return accepted;
 }
 
 /** Only explicit recovery UI may call this; never reset on load/read failure. */

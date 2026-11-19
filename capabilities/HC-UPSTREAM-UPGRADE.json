@@ -681,6 +681,27 @@
   },
   "changes": [
     {
+      "id": "win5-motion-historical-callback-fdf0bf66",
+      "ownerPostFixField20261109": {"file": "G:/YeManCC-Work/Testing/YMCC/Evidence/Win5-Gyro-Direction-20261109-114352/owner-192710/HANDOFF.json", "bytes": 5070, "sha256": "b979a00eba496056443807513ab44a520a98060962ffb5bf803d7a00db798978", "status": "OWNER_POST_FIX_POSITIVE_FIELD_FEEDBACK_PROCESSING_AND_SDK_ARGUMENTS_VERIFIED", "scope": "Owner395 reports direction normal;1221 corrected six-axis samples and new calibration verified;43 nonzero IMU SDK arguments and71 wire samples match;peer388,custom-action and external game receipt remain separate"},
+      "familyScopeAudit20261109": {"file": "G:/YeManCC-Work/Testing/YMCC/Evidence/Win5-Gyro-Direction-20261109-114352/family-scope-20261109/HANDOFF.json", "bytes": 9098, "sha256": "368c14dc99910b9a7a3c81da1db92510cc795e6a2492ec2ffe8a20e5a325af1d", "status": "SCOPE_AUDIT_COMPLETE_FIX_IN_SOURCE_PHYSICAL_PENDING", "scope": "92 source classes;96 registered/77 primary recipes;Win5 confirmed;13 other interpretation-sensitive sensor components across10 canonical classes remain candidates,not proven faults;no global parser reversal"},
+      "ownerFieldReproduction20261109": {"file": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5-Gyro-Direction-20261109-114352\\owner-131308\\HANDOFF.json", "bytes": 2826, "sha256": "8525f50e4373f40c97b318e94798f8613cf3bd6baccb66b32ae066500e74f5c1", "scope": "user-labelled custom-on to disabled;250 samples;old-only-horizontal reproduced;corrected local direction replay verified;no device acceptance"},
+      "model": "HandheldCompanion.Devices.GPDWin5",
+      "domain": "motion",
+      "status": "LOCAL_SOFTWARE_CONSUMERS_VERIFIED_FULL_AUTHORITY_PENDING",
+      "upstreamCommit": "fdf0bf66a1e546d2321de9dd334a5b076828de65",
+      "reviewSource": "capabilities/upstream/fdf0bf66/Win5MotionReview.json",
+      "reviewSourceSha256": "d0524d599683d07b67fb191b77a9f1efef6ee7068849d2dd618ba6cb650e109f",
+      "existingTotalLibraryConsumer": "native/hc_model_motion_catalog.h -> capabilities/HcMotionCapabilityCatalog.generated.h -> existing native matrix, calibration and Host output consumers",
+      "identityPolicy": "Same hc.device.GPDWin5 for 388/395; CPU SKU alone is not a sensor-layout discriminator.",
+      "calibrationPolicy": "New recipe-specific key; retain but do not apply ambiguous old device-only offsets.",
+      "evidenceRoot": "Testing/YMCC/Evidence/Win5-Gyro-Direction-20261109-114352/candidate-unique-library",
+      "remaining": [
+        "Full registered producer compiler authority is blocked by historical toolchain manifest drift; local matrix, native consumer and calibration results do not override that failure",
+        "Physical 388/395 handheld axis and game-side output confirmation remain separate"
+      ],
+      "hardwareAcceptance": "UNKNOWN"
+    },
+    {
       "id": "oxp3-motion-f2e58468",
       "model": "HandheldCompanion.Devices.OneXPlayer3",
       "domain": "motion",

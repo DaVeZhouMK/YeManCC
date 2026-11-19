@@ -1,13 +1,13 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$EvidenceRoot)
+param([Parameter(Mandatory=$true)][string]$EvidenceRoot,[string]$NativeSource,[switch]$SharedPowerOnly)
 $ErrorActionPreference='Stop'
 $fanProject=Split-Path -Parent $PSScriptRoot
-$fanSourcePath=Join-Path $fanProject 'native\main.cpp'
+$fanSourcePath=if($NativeSource){[IO.Path]::GetFullPath($NativeSource)}else{Join-Path $fanProject 'native\main.cpp'}
 $fanSourceHash=(Get-FileHash -LiteralPath $fanSourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $fanHeaderPath=Join-Path $fanProject 'native\http_request_deadline.h'
 $fanHeaderHash=(Get-FileHash -LiteralPath $fanHeaderPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $fanAdditionalHeaders=@{}
-foreach($name in @('fan_keepalive_transport.h','fan_response_contract.h')){$fanAdditionalHeaders[$name]=(Get-FileHash -LiteralPath (Join-Path $fanProject ('native/'+$name))).Hash.ToLowerInvariant()}
+foreach($name in @('fan_keepalive_transport.h','fan_response_contract.h','sleep_power_state.h','sleep_power_observation.h','sleep_power_revocation.h')){$fanAdditionalHeaders[$name]=(Get-FileHash -LiteralPath (Join-Path $fanProject ('native/'+$name))).Hash.ToLowerInvariant()}
 $fanRaw=[IO.File]::ReadAllText($fanSourcePath)
 $fanStart=$fanRaw.IndexOf('static bool fanLeaseKeepalivePostHeartbeat(',[StringComparison]::Ordinal)
 $fanEnd=$fanRaw.IndexOf("`nstatic void fanLeaseKeepaliveTick()",$fanStart,[StringComparison]::Ordinal)
@@ -16,6 +16,11 @@ $fanExtract=$fanRaw.Substring($fanStart,$fanEnd-$fanStart)
 $fanPortCall='connectionOwner.connect(8765, fanKeepaliveProcessSelection().revision())'
 if($fanExtract.Split($fanPortCall).Count -ne 2){throw 'Fan heartbeat fixture expects one production loopback port'}
 $fanFixture=$fanExtract.Replace($fanPortCall,'connectionOwner.connect(fixturePort, fanKeepaliveProcessSelection().revision())')
+if($fanRaw.Contains('struct FanHttpPowerAdmission {')){
+ $a=$fanRaw.IndexOf('struct FanHttpPowerAdmission {',[StringComparison]::Ordinal);$b=$fanRaw.IndexOf('static void reg_http() {',$a,[StringComparison]::Ordinal)
+ if($a -lt 0 -or $b -le $a){throw 'Shared Fan admission source missing'}
+ $fanFixture=$fanRaw.Substring($a,$b-$a)+[Environment]::NewLine+$fanFixture
+}
 $fanEvidence=[IO.Path]::GetFullPath($EvidenceRoot)
 $fanControl=Join-Path $fanEvidence 'CONTROL'
 New-Item -ItemType Directory -Path $fanControl -Force | Out-Null
@@ -40,10 +45,11 @@ cl /nologo /W4 /WX /std:c++20 /EHsc /utf-8 /MT /I"$fanProject\native" /I"$fanCon
 "@ | Set-Content -LiteralPath $fanBuildFile -Encoding ascii
 & $fanBuildFile *> (Join-Path $fanEvidence 'compile.out')
 if($LASTEXITCODE -ne 0){throw ('Fan keepalive fixture compile failed; see '+(Join-Path $fanEvidence 'compile.out'))}
-& node (Join-Path $PSScriptRoot 'fan_keepalive_transport_selftest.mjs') $fanEvidence 'CONTROL' *> (Join-Path $fanEvidence 'CONTROL.out')
+& node (Join-Path $PSScriptRoot 'fan_keepalive_transport_selftest.mjs') $fanEvidence 'CONTROL' @($(if($SharedPowerOnly){'--shared-power-only'})) *> (Join-Path $fanEvidence 'CONTROL.out')
 if($LASTEXITCODE -ne 0){throw ('Fan keepalive transport gate failed; see '+(Join-Path $fanEvidence 'CONTROL.out'))}
 $fanResult=Get-Content -LiteralPath (Join-Path $fanEvidence 'CONTROL.json') -Raw | ConvertFrom-Json
-if(-not $fanResult.ok -or $fanResult.cases -ne 19){throw 'Fan keepalive transport gate is incomplete'}
+$expectedCases=if($SharedPowerOnly){6}else{25}
+if(-not $fanResult.ok -or $fanResult.cases -ne $expectedCases){throw 'Fan keepalive transport gate is incomplete'}
 if((Get-FileHash -LiteralPath $fanSourcePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $fanSourceHash -or (Get-FileHash -LiteralPath $fanHeaderPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $fanHeaderHash){throw 'Source/transport changed while validating; result needs rebinding'}
 foreach($name in $fanAdditionalHeaders.Keys){if((Get-FileHash -LiteralPath (Join-Path $fanProject ('native/'+$name))).Hash.ToLowerInvariant() -ne $fanAdditionalHeaders[$name]){throw ('Fan additional transport input changed: '+$name)}}
-Write-Output 'Fan keepalive transport: PASS (19 cases; real WinHTTP + fixture port/identity/display; no FanHost or hardware)'
+Write-Output ('Fan keepalive transport: PASS ('+$expectedCases+' cases; real WinHTTP + fixture port/identity/display; no FanHost or hardware)')

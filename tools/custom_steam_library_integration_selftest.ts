@@ -97,6 +97,7 @@ interface BridgeRuntime {
   globals: Record<string, unknown>;
   initialize(context: vm.Context): void;
   invoke(command: string, args?: object, options?: object): Promise<any>;
+  on(event: string, handler: (data: unknown) => void): () => void;
 }
 function bridgeFixture(exeDir: string, existing: string[] = [], files: Record<string, string> = {}, denied: string[] = [], runtime?: BridgeRuntime) {
   const existsCalls: string[] = [], readCalls: string[] = [];
@@ -124,7 +125,7 @@ function bridgeFixture(exeDir: string, existing: string[] = [], files: Record<st
     module, exports: module.exports,
     require: (name: string) => {
       if (name === '@/bridge/api') return api;
-      if (name === '@/bridge/ipc') return { invoke: runtime ? runtime.invoke : unexpected };
+      if (name === '@/bridge/ipc') return { invoke: runtime ? runtime.invoke : unexpected, on: runtime ? runtime.on : unexpected };
       throw new Error(`Unexpected dependency: ${name}`);
     },
     setTimeout: unexpected, setInterval: unexpected, clearTimeout: unexpected, clearInterval: unexpected,
@@ -145,7 +146,7 @@ function bridgeFixture(exeDir: string, existing: string[] = [], files: Record<st
 // path/summary fixtures above still reject all timers and app/IPC operations.
 function sessionFixture() {
   let now = 100000, nextTimer = 1, intervalCallbacks = 0, peakPendingStatus = 0;
-  const timers = new Map<number, { at: number; repeat: number; callback: () => void }>();
+  const timers = new Map<number, { at: number; repeat: number; handoff: boolean; callback: () => void }>();
   const messages: { id: number; cmd: string; args: any; answered: boolean }[] = [];
   const events: { type: string; detail?: any }[] = [];
   const hold = new Set<string>(['status']);
@@ -156,7 +157,7 @@ function sessionFixture() {
   let ipc: any, pendingIds: () => number[];
   const flush = async () => { for (let i = 0; i < 48; ++i) await Promise.resolve(); };
   const setTimer = (callback: () => void, delay: number, repeat = 0) => {
-    const id = nextTimer++; timers.set(id, { at: now + delay, repeat, callback }); return id;
+    const id = nextTimer++; timers.set(id, { at: now + delay, repeat, handoff: delay === 800, callback }); return id;
   };
   const key = (message: { cmd: string; args: any }) => message.cmd === 'customSteamLibrary.status' ? 'status'
     : message.cmd === 'customSteamLibrary.setIntegrationSession' ? message.args.enabled ? 'enable' : 'disable'
@@ -198,12 +199,17 @@ function sessionFixture() {
       });
     },
   };
+  const browserWindow = new EventTarget();
+  const browserDocument = Object.assign(new EventTarget(), { visibilityState: 'hidden' });
   const runtime: BridgeRuntime = {
     globals: {
       Date: { now: () => now }, AbortController,
-      CustomEvent: class { constructor(public type: string, public init: any = {}) {} get detail() { return this.init.detail; } },
-      window: { chrome: { webview }, dispatchEvent: (event: any) => { events.push({ type: event.type, detail: event.detail }); return true; } },
-      document: { visibilityState: 'hidden' },
+      CustomEvent,
+      window: { chrome: { webview }, addEventListener: browserWindow.addEventListener.bind(browserWindow),
+        removeEventListener: browserWindow.removeEventListener.bind(browserWindow), dispatchEvent: (event: CustomEvent) => {
+          events.push({ type: event.type, detail: event.detail }); return browserWindow.dispatchEvent(event);
+        } },
+      document: browserDocument,
       setInterval: (callback: () => void, delay: number) => setTimer(callback, delay, delay),
       setTimeout: (callback: () => void, delay: number) => setTimer(callback, delay),
       clearInterval: (id: number) => timers.delete(id), clearTimeout: (id: number) => timers.delete(id),
@@ -218,14 +224,14 @@ function sessionFixture() {
       ipc = actual.api; pendingIds = actual.ids;
     },
     invoke: (command, args, options) => ipc.invoke(command, args, options),
+    on: (event, handler) => ipc.on(event, handler),
   };
   const exeDir = windowsPath('G:', 'Fixture', 'Session');
   const bridge = bridgeFixture(exeDir, [windowsPath(exeDir, 'CustomSteamLibrary', 'CustomSteamLibrary.exe')], {}, [], runtime);
   const requests = (kind: string) => messages.filter(m => key(m) === kind);
   const outstanding = (kind: string) => requests(kind).filter(m => !m.answered);
   const snapshot = () => ({ statusRequests: requests('status').length, peakPendingStatus, pendingStatus: pendingStatus(),
-    localPending: pendingIds().length, intervalCallbacks, watchTimers: [...timers.values()].filter(t => t.repeat > 0).length,
-    oneShotTimers: [...timers.values()].filter(t => t.repeat === 0).length,
+    localPending: pendingIds().length, intervalCallbacks, timers: [...timers.values()].filter(t => !t.handoff).length,
     enables: requests('enable').length, disables: requests('disable').length, launches: requests('launch').length,
     shows: requests('window.show').length, minimizes: requests('window.minimize').length,
     closed: events.filter(e => e.type === 'customSteamLibrary:closed').length,
@@ -254,11 +260,15 @@ function sessionFixture() {
     const stopped = bridge.stop(); await flush(); await stopped;
     ipc.rejectAllPending('fixture teardown'); await flush();
     timers.clear(); messages.length = 0; events.length = 0; intervalCallbacks = 0; peakPendingStatus = 0;
+    browserDocument.visibilityState = 'hidden';
     now += 20000; hold.add('status');
     status = { configured: true, present: true, foreground: false, compatible: true, inputOwner: 'parent', pid: 77 };
   };
   return { bridge, flush, advance, reset, hold, faults, reply, requests, outstanding, pendingStatus, snapshot,
     status: (value: any) => { status = { ...status, ...value }; }, launchOk: (value: boolean) => { launchOk = value; },
+    focus: () => browserWindow.dispatchEvent(new Event('focus')),
+    visibility: (state: string) => { browserDocument.visibilityState = state; browserDocument.dispatchEvent(new Event('visibilitychange')); },
+    owner: (owner: string) => receiver!({ data: { event: 'gamepad.input-owner', data: { owner } } }),
     activeStatus: () => { const ids = new Set(pendingIds()); return requests('status').filter(m => ids.has(m.id)); },
     unexpected: () => ipc.invoke('fixture.unexpected-session-command'),
     pending: () => pendingIds().length };
@@ -278,15 +288,13 @@ async function checkSessionContracts(): Promise<void> {
   };
   const assertSuccessorContinues = async (label: string) => {
     f.hold.add('status');
-    // A healthy reopen may already have completed its immediate read. Capture
-    // its next original slot before checking slow-read ownership.
-    if (f.activeStatus().length === 0) await f.advance(250);
+    if (f.activeStatus().length === 0) await f.advance(2000);
     const active = f.activeStatus();
     assert(active.length === 1, label + ' successor has exactly one actual pending status read');
     f.reply(active[0]); await f.flush(); const before = f.snapshot();
-    await f.advance(250); const next = f.snapshot();
-    assert(next.statusRequests === before.statusRequests + 1 && next.pendingStatus === 1 && next.watchTimers === 1,
-      label + ' successor continues polling on the next original 250ms slot');
+    await f.advance(2000); const next = f.snapshot();
+    assert(next.statusRequests === before.statusRequests + 1 && next.pendingStatus === 1 && next.timers === 1,
+      label + ' successor keeps a single pending audit on its own cadence');
     await f.advance(250); const busy = f.snapshot();
     assert(busy.statusRequests === next.statusRequests && busy.peakPendingStatus === 1,
       label + ' successor slow read remains single-flight after old completion');
@@ -297,19 +305,20 @@ async function checkSessionContracts(): Promise<void> {
     await rejects(() => f.unexpected(), 'session transport rejects an unknown IPC instead of inventing success');
     assert(f.pending() === 0, 'unknown IPC refusal leaves the actual pending Map empty');
   });
-  await check('normal-250ms-hidden-parent', async () => {
-    f.hold.delete('status'); await f.bridge.launch(); await f.advance(1000);
-    assert(f.snapshot().statusRequests === 5 && f.snapshot().intervalCallbacks === 4, 'normal hidden-parent watch retains immediate + exact 250ms reads');
+  await check('healthy-hidden-parent-reduces-reads', async () => {
+    f.hold.delete('status'); await f.bridge.launch(); await f.advance(16000);
+    assert(f.snapshot().statusRequests === 9 && f.snapshot().intervalCallbacks === 0, 'healthy hidden parent issues one initial read and eight audits in 16 seconds');
     assert(f.snapshot().peakPendingStatus === 1, 'normal watch has only one actual IPC pending status');
     await f.bridge.stop(); await f.flush();
-    assert(f.pending() === 0 && f.snapshot().watchTimers === 0, 'explicit stop retires watch and real pending');
+    f.focus(); f.visibility('visible'); f.owner('yemancc'); await f.advance(2000);
+    assert(f.pending() === 0 && f.snapshot().timers === 0 && f.snapshot().statusRequests === 9, 'stop retires timer, pending read and return hints');
   });
   await check('slow-read-one-pending', async () => {
     await f.bridge.launch(); await f.advance(2000);
-    assert(f.snapshot().statusRequests === 1 && f.pendingStatus() === 1, 'eight busy interval callbacks must not issue overlapping status IO');
-    assert(f.snapshot().intervalCallbacks === 8, 'busy skip preserves four JS interval wakeups per second');
-    f.reply(f.outstanding('status')[0]); await f.flush(); await f.advance(250);
-    assert(f.snapshot().statusRequests === 2 && f.snapshot().peakPendingStatus === 1, 'settled slow read releases exactly the next scheduled read');
+    assert(f.snapshot().statusRequests === 1 && f.pendingStatus() === 1, 'slow startup read stays single-flight');
+    assert(f.snapshot().intervalCallbacks === 0 && f.snapshot().timers === 1, 'only the IPC timeout stays armed during a slow read');
+    f.reply(f.outstanding('status')[0]); await f.flush(); await f.advance(2000);
+    assert(f.snapshot().statusRequests === 2 && f.snapshot().peakPendingStatus === 1, 'settled compatible read arms one audit');
   });
   await check('stop-cleans-real-pending-late-response', async () => {
     await f.bridge.launch(); const old = f.outstanding('status')[0];
@@ -325,7 +334,7 @@ async function checkSessionContracts(): Promise<void> {
   });
   await check('replace-pending-watch', async () => {
     await f.bridge.launch(); const old = f.outstanding('status')[0]; await f.bridge.launch();
-    assert(f.pendingStatus() === 1 && f.snapshot().watchTimers === 1, 'replacement aborts old pending before installing one new watch');
+    assert(f.pendingStatus() === 1 && f.snapshot().timers === 1, 'replacement aborts old pending before installing one new watch');
     f.reply(old, { present: true, compatible: false, inputOwner: 'host' }); await f.flush();
     assert(f.snapshot().shows === 0 && f.snapshot().disables === 0 && f.snapshot().conflicts === 0, 'old status cannot disable the replacement session');
     await assertSuccessorContinues('replaced pending watch');
@@ -335,18 +344,41 @@ async function checkSessionContracts(): Promise<void> {
     assert(f.snapshot().closed === 0 && f.snapshot().disables === 0, 'missing child retains the full original ten-second startup grace');
     await f.advance(1);
     assert(f.snapshot().closed === 1 && f.snapshot().shows === 1 && f.snapshot().disables === 1, 'missing child closes once at the ten-second boundary');
-    assert(f.pending() === 0 && f.snapshot().watchTimers === 0, 'successful startup-timeout close retires pending and watch');
+    assert(f.pending() === 0 && f.snapshot().timers === 0, 'successful startup-timeout close retires pending and watch');
   });
-  await check('present-then-closed', async () => {
-    f.hold.delete('status'); await f.bridge.launch(); await f.flush(); f.status({ present: false }); await f.advance(250);
-    assert(f.snapshot().closed === 1 && f.snapshot().shows === 1 && f.snapshot().disables === 1, 'observed child disappearance closes before startup grace expires');
-    assert(f.pending() === 0 && f.snapshot().watchTimers === 0, 'successful close owns no resident watch or pending');
+  await check('return-hints-coalesce-and-verify', async () => {
+    f.hold.delete('status'); await f.bridge.launch(); await f.advance(500);
+    f.owner('custom-steam-library'); f.visibility('hidden'); await f.advance(125);
+    assert(f.snapshot().statusRequests === 1, 'child ownership and hidden visibility do not request reads');
+    f.focus(); f.visibility('visible'); f.owner('yemancc'); await f.advance(124);
+    assert(f.snapshot().statusRequests === 1 && f.snapshot().closed === 0, 'return hints allow the child to finish closing');
+    f.status({ present: false }); await f.advance(1);
+    assert(f.snapshot().statusRequests === 2 && f.snapshot().closed === 1 && f.snapshot().shows === 1 && f.snapshot().disables === 1,
+      'coalesced hints result in one verified close before the audit');
+    assert(f.pending() === 0 && f.snapshot().timers === 0, 'successful close owns no resident watch or pending');
+  });
+  await check('lost-return-hint-audit', async () => {
+    f.hold.delete('status'); await f.bridge.launch(); await f.flush(); f.status({ present: false });
+    await f.advance(1999);
+    assert(f.snapshot().statusRequests === 1 && f.snapshot().closed === 0, 'without hints no fast heartbeat runs after admission');
+    await f.advance(1);
+    assert(f.snapshot().statusRequests === 2 && f.snapshot().closed === 1 && f.snapshot().shows === 1,
+      'a lost hint still restores and closes on the first audit');
+  });
+  await check('return-arrives-during-read', async () => {
+    f.hold.delete('status'); await f.bridge.launch(); await f.flush(); f.hold.add('status'); await f.advance(2000);
+    f.owner('yemancc'); f.focus(); await f.advance(500);
+    assert(f.snapshot().statusRequests === 2 && f.pendingStatus() === 1, 'return hints do not overtake an in-flight audit');
+    f.hold.delete('status'); f.status({ present: false }); f.reply(f.activeStatus()[0], { present: true, compatible: true, inputOwner: 'parent' });
+    await f.advance(0);
+    assert(f.snapshot().statusRequests === 3 && f.snapshot().closed === 1 && f.snapshot().peakPendingStatus === 1,
+      'a return observed during a stale audit gets one fresh read after it settles');
   });
   for (const [label, state] of [['incompatible', { compatible: false }], ['foreign-owner', { inputOwner: 'host' }], ['unknown-owner', { inputOwner: 'unknown' }]] as const) {
     await check(label + '-conflict', async () => {
       f.hold.delete('status'); f.status(state); await f.bridge.launch(); await f.flush();
       assert(f.snapshot().conflicts === 1 && f.snapshot().shows === 1 && f.snapshot().disables === 1, label + ' preserves the original present/compatible/inputOwner conflict');
-      assert(f.pending() === 0 && f.snapshot().watchTimers === 0, label + ' conflict retires its resident resources');
+      assert(f.pending() === 0 && f.snapshot().timers === 0, label + ' conflict retires its resident resources');
     });
   }
   await check('status-rejection-grace', async () => {
@@ -358,21 +390,21 @@ async function checkSessionContracts(): Promise<void> {
   await check('lost-status-response-bounded', async () => {
     await f.bridge.launch(); await f.advance(10000);
     assert(f.snapshot().statusRequests === 1 && f.snapshot().closed === 1, 'lost status response expires once at ten seconds without accumulating requests');
-    assert(f.pending() === 0 && f.snapshot().watchTimers === 0, 'real IPC timeout and session close retire all pending and intervals');
+    assert(f.pending() === 0 && f.snapshot().timers === 0, 'real IPC timeout and session close retire all pending and timers');
   });
   for (const reason of ['stop', 'closed', 'conflict']) {
     await check('reopen-during-' + reason + '-disable', async () => {
       f.hold.delete('status'); await f.bridge.launch(); await f.flush(); f.hold.add('disable');
       let stopped: Promise<void> | undefined;
       if (reason === 'stop') { stopped = f.bridge.stop(); await f.flush(); }
-      else { f.status(reason === 'closed' ? { present: false } : { compatible: false }); await f.advance(250); }
+      else { f.status(reason === 'closed' ? { present: false } : { compatible: false }); f.focus(); await f.advance(250); }
       const disable = f.outstanding('disable')[0];
       assert(!!disable, reason + ' has an actual unacknowledged native disable');
       f.status({ present: true, compatible: true });
       const reopened = f.bridge.launch(); await f.flush();
       assert(f.snapshot().enables === 1 && f.snapshot().launches === 1, 'new enable and launch wait for the dispatched ' + reason + ' disable');
       f.hold.delete('disable'); f.reply(disable); await f.flush(); if (stopped) await stopped; await reopened; await f.flush();
-      assert(f.snapshot().nativeEnabled && f.snapshot().watchTimers === 1, 'old ' + reason + ' disable completion cannot clear the replacement watch');
+      assert(f.snapshot().nativeEnabled && f.snapshot().timers === 1, 'old ' + reason + ' disable completion cannot clear the replacement watch');
       assert(f.snapshot().closed === 0 && f.snapshot().conflicts === 0, 'old ' + reason + ' completion cannot publish against replacement');
       await assertSuccessorContinues('old ' + reason + ' disable');
     });
@@ -388,7 +420,7 @@ async function checkSessionContracts(): Promise<void> {
     assert(f.snapshot().enables === 1, 'new launch waits for the old enable acknowledgement');
     f.hold.delete('enable'); f.reply(enable, undefined, 'fixture rejected old enable'); await f.flush();
     assert(!(await old).ok && (await current).ok, 'old enable rejection cannot fail the new launch');
-    assert(f.snapshot().disables === 0 && f.snapshot().nativeEnabled && f.snapshot().watchTimers === 1, 'stale launch catch cannot stop the newer session');
+    assert(f.snapshot().disables === 0 && f.snapshot().nativeEnabled && f.snapshot().timers === 1, 'stale launch catch cannot stop the newer session');
   });
   await check('old-pid-response-after-new-session', async () => {
     f.hold.add('pid'); const old = f.bridge.launch(); await f.flush(); const pid = f.outstanding('pid')[0];
@@ -407,14 +439,14 @@ async function checkSessionContracts(): Promise<void> {
     await check('launch-fault-' + failure, async () => {
       if (failure === 'launch-false') f.launchOk(false); else f.faults.add(failure);
       const result = await f.bridge.launch().then(v => v, () => ({ ok: false })); await f.flush();
-      assert(!result.ok && f.snapshot().watchTimers === 0 && f.pending() === 0, failure + ' cannot start a watcher or retain local pending');
+      assert(!result.ok && f.snapshot().timers === 0 && f.pending() === 0, failure + ' cannot start a watcher or retain local pending');
       assert(f.snapshot().disables === 1 && !f.snapshot().nativeEnabled, failure + ' retires the current native session intent');
       f.faults.clear(); f.launchOk(true); const recovered = await f.bridge.launch();
       assert(recovered.ok, failure + ' rejection does not poison later explicitly requested launch');
     });
   }
   await f.reset();
-  assert(f.pending() === 0 && f.snapshot().watchTimers === 0, 'combined actual IPC fixture finishes with no pending or resident watch');
+  assert(f.pending() === 0 && f.snapshot().timers === 0, 'combined actual IPC fixture finishes with no pending or resident watch');
 }
 
 async function rejects(task: () => Promise<any>, message: string): Promise<void> {
@@ -591,8 +623,12 @@ async function checkCurrentContracts(): Promise<void> {
   }
 }
 
-void checkCurrentContracts().then(checkSessionContracts).then(() => {
-  const output = path.resolve(process.argv[2] || path.join(root, '../../Build/Validation/SelfTests/custom_steam_library_integration_summary.json'));
+const args = process.argv.slice(2);
+const sessionOnly = args.includes('--session-only');
+const outputArg = args.find(arg => arg !== '--session-only');
+void (sessionOnly ? Promise.resolve() : checkCurrentContracts()).then(checkSessionContracts).then(() => {
+  const output = path.resolve(outputArg || path.join(root, '../../Build/Validation/SelfTests', sessionOnly
+    ? 'custom_steam_library_session_summary.json' : 'custom_steam_library_integration_summary.json'));
   const relative = path.relative(path.resolve(root, '../../Build'), output);
   if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
     throw new Error('Integration report must stay inside Mainline Build');
@@ -601,7 +637,7 @@ void checkCurrentContracts().then(checkSessionContracts).then(() => {
   fs.writeFileSync(output, JSON.stringify({
     allPassed: cases.every(entry => entry.passed), caseCount: cases.length, failedCount: cases.filter(entry => !entry.passed).length, cases,
     sessionIpcCombination: { actualBridgeAndIpc: true, sameVm: true, virtualClock: true, subcases: sessionResults },
-    contract: 'nested-child-only; optional-shortcut-metadata; independent-artwork-slots',
+    contract: sessionOnly ? 'session-notifications-and-audit' : 'nested-child-only; optional-shortcut-metadata; independent-artwork-slots',
     filesystemAndIpcMocked: true, liveNetworkUsed: false,
     realSteamFilesModified: false, steamStoppedOrLaunched: false,
   }, null, 2));

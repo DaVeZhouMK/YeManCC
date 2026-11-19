@@ -20,12 +20,22 @@ inline bool validTicket(const std::string& s){
     const auto p=s.find(':');if(p==std::string::npos||p==0||p+1>=s.size()||s.find(':',p+1)!=std::string::npos||s[0]=='0'||s[p+1]=='0')return false;
     try{const auto pid=std::stoull(s.substr(0,p)),birth=std::stoull(s.substr(p+1));return pid<=MAXDWORD&&pid&&birth;}catch(...){return false;}
 }
-inline Json residue(const Json& raw){
+inline bool validResidue(const Json& raw){
     try{
-        if(!raw.is_object()||(raw.size()!=4&&raw.size()!=5)||raw.at("protocol")!=1||raw.at("active")!=true||raw.at("bridgePresent")!=true||!raw.at("frontendBuildId").is_string()||!fingerprint(raw.at("frontendBuildId").get<std::string>()))return Json::object();
-        if(raw.size()==5&&(!raw.contains("loaderVersion")||!raw["loaderVersion"].is_string()||!loaderVersion(raw["loaderVersion"].get<std::string>())))return Json::object();
-        return raw;
-    }catch(...){return Json::object();}
+        if(!raw.is_object()||(raw.size()!=4&&raw.size()!=5)||raw.at("protocol")!=1||raw.at("active")!=true||raw.at("bridgePresent")!=true||!raw.at("frontendBuildId").is_string()||!fingerprint(raw.at("frontendBuildId").get_ref<const std::string&>()))return false;
+        return raw.size()==4||(raw.contains("loaderVersion")&&raw["loaderVersion"].is_string()&&loaderVersion(raw["loaderVersion"].get_ref<const std::string&>()));
+    }catch(...){return false;}
+}
+inline Json residue(const Json& raw){
+    try{return validResidue(raw)?raw:Json::object();}catch(...){return Json::object();}
+}
+// A different or missing official Loader version cannot use the installed
+// plugin's build ID to grant a retained attachment or an in-place update.
+inline bool retainedResidueMatchesLoader(const Json& state,const std::string& installedLoader){
+    const auto prior=state.find("deckyUpdateResidue");
+    if(prior==state.end()||!prior->is_object())return false;
+    const auto loader=prior->find("loaderVersion");
+    return loader!=prior->end()&&*loader==installedLoader&&validResidue(*prior);
 }
 // V2 is an evidence chain, not a refill counter. A reservation remains spent
 // until THIS native host has observed the resulting different Steam document,
@@ -57,7 +67,16 @@ inline Json completed(const Json& ledger,const steamsession::Session& session,co
     if(!ledger.is_null()){
         if(!valid(ledger)){
             // A positively different Steam PID/birth ends the old v1 scope.
-            // Same-process v1 and all malformed/unknown history stay spent.
+            // The exact migration sentinel may also start a NEW lifecycle after
+            // THIS host's acknowledged manual repair and fresh owned-ready proof.
+            // Never infer completion of its unknown old operation or grant an
+            // automatic retry from ordinary observations. Other corruption stays closed.
+            const bool manualBoundary=!manualOrigin.empty()&&manualOrigin!=doc&&
+                manualOrigin.size()<=75&&manualOrigin.find(':')==std::string::npos;
+            const bool unknown=ledger.is_object()&&ledger.size()==2&&ledger.contains("schemaVersion")&&
+                ledger["schemaVersion"].is_number_integer()&&ledger["schemaVersion"]==1&&
+                ledger.contains("history")&&ledger["history"]=="unconfirmed";
+            if(unknown)return manualBoundary?record(session,doc,host,build,loader,"ready"):Json();
             if(!ledger.is_object()||ledger.size()!=2||!ledger.contains("schemaVersion")||!ledger["schemaVersion"].is_number_integer()||ledger["schemaVersion"]!=1||
                !ledger.contains("steamSession")||!ledger["steamSession"].is_string()||
                !validTicket(ledger["steamSession"].get<std::string>()))return {};
@@ -65,8 +84,7 @@ inline Json completed(const Json& ledger,const steamsession::Session& session,co
             // healthy lifecycle after legacy history. It needs its real starting
             // document and a different verified ready document; this is never an
             // inference about the unknown old v1 operation or an automatic refund.
-            if(ledger["steamSession"]==ticket(session)&&
-               (manualOrigin.empty()||manualOrigin==doc||manualOrigin.size()>75||manualOrigin.find(':')!=std::string::npos))return {};
+            if(ledger["steamSession"]==ticket(session)&&!manualBoundary)return {};
             return record(session,doc,host,build,loader,"ready");
         }
         if(ledger.at("steamSession")==ticket(session)&&ledger.at("status")=="reserved"&&
@@ -120,6 +138,15 @@ class Recovery {
     std::string explicitTicket_;
     bool veto_=false; // Manual/safety off cannot be undone by another cached read.
     static bool same(const steamsession::Session& a,const steamsession::Session& b){return a.pid&&a.created&&!a.root.empty()&&a==b;}
+    static std::string retainedBuild(const steamsession::Session& s,const Json& state,const std::string& installedBuild,const std::string& installedLoader){
+        try{
+            if(!s.pid||!s.created||s.root.empty()||!fingerprint(installedBuild)||!loaderVersion(installedLoader)||
+               !state.value("known",false)||!state.value("running",false)||state.at("pid")!=s.pid||
+               state.value("birth",std::string{})!=std::to_string(s.created)||state.value("mode",std::string{})!="bigpicture"||
+               !state.contains("deckyFrontendLoaded")||state["deckyFrontendLoaded"]!=true)return {};
+            return retainedResidueMatchesLoader(state,installedLoader)?state.at("deckyUpdateResidue").at("frontendBuildId").get<std::string>():std::string{};
+        }catch(...){return {};}
+    }
 public:
     void configure(const std::string& value){std::lock_guard lock(mutex_);explicitTicket_=validTicket(value)?value:std::string{};}
     void veto(){std::lock_guard lock(mutex_);veto_=true;resumed_={};explicitTicket_.clear();}
@@ -153,15 +180,30 @@ public:
     // starting/restarting Loader or granting Steam/CSS authority. OFF remains a veto.
     bool allowsRetainedFrontend(const steamsession::Session& s,const Json& state,const std::string& installedBuild,const std::string& installedLoader)const {
         std::lock_guard lock(mutex_);
-        try {
-            if(veto_||!s.pid||!s.created||s.root.empty()||!fingerprint(installedBuild)||!loaderVersion(installedLoader)||
-               !state.value("known",false)||!state.value("running",false)||state.at("pid")!=s.pid||
-               state.value("birth",std::string{})!=std::to_string(s.created)||state.value("mode",std::string{})!="bigpicture"||
-               !state.contains("deckyFrontendLoaded")||state["deckyFrontendLoaded"]!=true)return false;
-            const auto prior=residue(state.value("deckyUpdateResidue",Json()));
-            return !prior.empty()&&prior.value("frontendBuildId",std::string{})==installedBuild&&
-                   prior.value("loaderVersion",std::string{})==installedLoader;
-        }catch(...){return false;}
+        const auto prior=retainedBuild(s,state,installedBuild,installedLoader);
+        return !veto_&&!prior.empty()&&prior==installedBuild;
+    }
+    // A proven old YMCC frontend can outlive its host while its existing
+    // official socket is still opening. Report pending only for this native
+    // update grant and same Loader/session; this grants no attach or launch.
+    // Runtime retains its original reconnect deadline and escalation ladder.
+    bool waitsForFrontendUpdateBackend(const steamsession::Session& s,const Json& state,const std::string& installedBuild,const std::string& installedLoader)const {
+        std::lock_guard lock(mutex_);
+        if(veto_||!same(s,resumed_)||!state.is_object()||
+           !state.contains("deckyBackendState")||state.at("deckyBackendState")!="socket-connecting"||
+           !state.contains("deckyBackendConnected")||state.at("deckyBackendConnected")!=false)return false;
+        const auto prior=retainedBuild(s,state,installedBuild,installedLoader);
+        return !prior.empty()&&prior!=installedBuild;
+    }
+    // A verified native update grant may replace only our observed old plugin
+    // through Decky's existing importPlugin. The official Loader must already
+    // match. This is not Loader reinjection or a document/BPM cleanup grant;
+    // durable unknown/spent cleanup history remains untouched.
+    std::string frontendUpdateSource(const steamsession::Session& s,const Json& state,const std::string& installedBuild,const std::string& installedLoader)const {
+        std::lock_guard lock(mutex_);
+        if(veto_||!same(s,resumed_)||!state.is_object()||!state.contains("deckyBackendConnected")||state.at("deckyBackendConnected")!=true)return {};
+        const auto prior=retainedBuild(s,state,installedBuild,installedLoader);
+        return prior!=installedBuild?prior:std::string{};
     }
     // Only the private native worker may supply this pair after reading BOTH
     // durable copies. JS mode/account callbacks do not carry this authority.

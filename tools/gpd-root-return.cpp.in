@@ -1,0 +1,171 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <cfgmgr32.h>
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <iostream>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
+#include "json.hpp"
+#include "one_shot_helper_diagnostic.h"
+#include "native_foreground_source_policy.h"
+#include "msi_foreground_isolation.h"
+using json=nlohmann::json;
+
+// Scalar projection only. Neither predicate nor root-query body is copied here.
+// The real owner poll/launch/retirement is outside this finite consumer.
+struct FixtureLease {
+    ymcc::nativeForeground::Profile profile=ymcc::nativeForeground::Profile::Gpd;
+    bool cycleAccepted=false,helperXusbTarget=true;
+    bool helperExitQueryAttempted=true,helperExitQuerySucceeded=true;
+    DWORD helperExitQueryError=0,helperExitCode=6;
+    std::string root,helperGameTarget,retiredNativeWriterAttempt="fixture-retired-attempt";
+    std::vector<std::wstring> locations;
+    HANDLE nativeRefreshWriter=nullptr,cycleProcess=nullptr;
+    json helperDiagnostic;
+};
+static FixtureLease g_msiNativeForegroundLease;
+static std::atomic<bool> g_msiNativeForegroundCyclePending{false};
+static ymcc::nativeForeground::Profile currentProfile=ymcc::nativeForeground::Profile::Gpd;
+static ymcc::nativeForeground::Profile nativeForegroundProfile(){return currentProfile;}
+@@ASCII_LOWER@@
+@@UTF8_TO_WIDE@@
+[[maybe_unused]]
+@@ROOT_CANDIDATE@@
+
+static const std::string selectedRoot="USB\\VID_045E&PID_028E\\7&2EA17D0F&0&1";
+static const std::wstring selectedLocation=L"PCIROOT(0)#PCI(1400)#USBROOT(0)#USB(1)";
+static bool rootPresent=true,rootStarted=true,rootHasProblem=false,statusAvailable=true,locationCurrent=true;
+static ULONG rootProblem=0;
+static unsigned locationReads=0,locateReads=0,statusReads=0,spoolWrites=0;
+static std::vector<std::wstring> msiForegroundIsolationLocations(const std::string& root){
+    ++locationReads;
+    return locationCurrent && ascii_lower(root)==ascii_lower(selectedRoot)?std::vector<std::wstring>{selectedLocation}:std::vector<std::wstring>{};
+}
+static CONFIGRET WINAPI fixtureLocate(PDEVINST node,DEVINSTID_W id,ULONG flags){
+    ++locateReads;
+    if(flags!=CM_LOCATE_DEVNODE_NORMAL || !id || std::wstring(id)!=U2W(selectedRoot))throw std::logic_error("foreign root locate");
+    if(!rootPresent)return CR_NO_SUCH_DEVNODE;
+    *node=71;return CR_SUCCESS;
+}
+static CONFIGRET WINAPI fixtureStatus(PULONG status,PULONG problem,DEVINST node,ULONG flags){
+    ++statusReads;
+    if(node!=71 || flags!=0)throw std::logic_error("foreign root status");
+    if(!statusAvailable)return CR_FAILURE;
+    *status=(rootStarted?DN_STARTED:0u)|(rootHasProblem?DN_HAS_PROBLEM:0u);*problem=rootProblem;return CR_SUCCESS;
+}
+// Only these hardware reads are redirected. Real Win32 spool/handle APIs stay real.
+#define CM_Locate_DevNodeW fixtureLocate
+#define CM_Get_DevNode_Status fixtureStatus
+[[maybe_unused]]
+@@ROOT_STARTED@@
+#undef CM_Get_DevNode_Status
+#undef CM_Locate_DevNodeW
+@@TERMINAL_PREDICATE@@
+
+static json refreshRecord(const char* stage="root-cycle"){
+    return {{"Schema",1},{"Kind","ymcc.gameRefresh.failure"},{"Result",6},{"Stage",stage},
+        {"RootPortCycle",true},{"Xusb",true},{"DisableCallEntered",false},{"DisableResult",nullptr},
+        {"EnableCallEntered",false},{"EnableResult",nullptr},{"CompensationAttempted",false}};
+}
+static json readSpoolText(const std::string& text,DWORD exitCode=6){
+    ymcc::input::OneShotHelperDiagnostic capture;
+    if(!capture.prepare())throw std::runtime_error("real diagnostic prepare failed");
+    const auto output=capture.startup()->hStdOutput;
+    DWORD written=0;
+    if(text.size()>MAXDWORD || !WriteFile(output,text.data(),static_cast<DWORD>(text.size()),&written,nullptr) || written!=text.size())
+        throw std::runtime_error("real diagnostic stdout WriteFile failed");
+    ++spoolWrites;
+    capture.started();
+    return capture.terminal(exitCode);
+}
+static json readSpool(const json& record,DWORD exitCode=6){
+    return readSpoolText("YMCC_MSI_GAME_AUTHORITY_DIAGNOSTIC "+record.dump()+"\r\n",exitCode);
+}
+static void reset(const json& record=refreshRecord()){
+    g_msiNativeForegroundLease=FixtureLease{};
+    auto& s=g_msiNativeForegroundLease;s.root=selectedRoot;s.helperGameTarget=selectedRoot;s.locations={selectedLocation};
+    s.helperDiagnostic=readSpool(record);
+    g_msiNativeForegroundCyclePending=false;currentProfile=ymcc::nativeForeground::Profile::Gpd;
+    rootPresent=rootStarted=statusAvailable=locationCurrent=true;rootHasProblem=false;rootProblem=0;
+    locationReads=locateReads=statusReads=0;
+}
+static bool returned(){return msiNativeForegroundGpdTerminalGameWriterReturnedLocked();}
+static bool accepted(){return g_msiNativeForegroundLease.helperDiagnostic.value("state",std::string{})=="record-accepted";}
+
+int main(){
+    std::vector<std::string> names,failures;std::string infrastructureFailure;
+    DWORD handlesBefore=0,handlesAfter=0;
+    const bool beforeKnown=GetProcessHandleCount(GetCurrentProcess(),&handlesBefore)!=FALSE;
+    const auto check=[&](const char* name,bool pass){names.emplace_back(name);if(!pass)failures.emplace_back(name);};
+    try{
+        reset();
+        check("root-cycle-diagnostic-accepted",accepted());
+        check("root-cycle-returned-with-current-root",returned() && locationReads==1 && locateReads==1 && statusReads==1);
+        reset(refreshRecord("prepare"));
+        check("prepare-diagnostic-accepted",accepted());
+        check("prepare-failure-returned-with-current-root",returned());
+        reset(refreshRecord("revalidate"));
+        check("revalidate-failure-returned-with-current-root",returned());
+        reset();rootPresent=false;
+        check("missing-root-keeps-original-restore",!returned());
+        reset();rootStarted=false;
+        check("not-started-keeps-original-restore",!returned());
+        reset();rootProblem=22;
+        check("problem-code-keeps-original-restore",!returned());
+        reset();rootHasProblem=true;
+        check("has-problem-bit-keeps-original-restore",!returned());
+        reset();statusAvailable=false;
+        check("unknown-root-status-keeps-original-restore",!returned());
+        reset();locationCurrent=false;
+        check("changed-location-keeps-original-restore",!returned() && locateReads==0 && statusReads==0);
+        auto malformed=refreshRecord("prepare");malformed["RootPortCycle"]="true";reset(malformed);
+        check("malformed-root-marker-decoder-rejected",!accepted() && !returned());
+        malformed=refreshRecord("prepare");malformed["DisableCallEntered"]="false";reset(malformed);
+        check("malformed-cm-flag-decoder-rejected",!accepted() && !returned());
+        malformed=refreshRecord("prepare");malformed.erase("DisableCallEntered");reset(malformed);
+        check("missing-no-disable-fact-is-unknown",!returned());
+        reset();g_msiNativeForegroundLease.profile=ymcc::nativeForeground::Profile::Rog;
+        check("non-gpd-lease-cannot-use-root-return",!returned());
+        reset();g_msiNativeForegroundLease.helperGameTarget+="-OTHER";
+        check("different-target-cannot-use-root-return",!returned());
+        reset();g_msiNativeForegroundLease.root="USB\\VID_0B05&PID_1B4C\\OTHER";g_msiNativeForegroundLease.helperGameTarget=g_msiNativeForegroundLease.root;
+        check("foreign-root-cannot-use-root-return",!returned());
+        reset();g_msiNativeForegroundLease.helperXusbTarget=false;
+        check("non-xusb-helper-cannot-use-root-return",!returned());
+        reset();g_msiNativeForegroundLease.nativeRefreshWriter=reinterpret_cast<HANDLE>(static_cast<uintptr_t>(11));
+        check("live-writer-keeps-original-owner",!returned() && locationReads==0);
+        reset();g_msiNativeForegroundLease.cycleProcess=reinterpret_cast<HANDLE>(static_cast<uintptr_t>(12));
+        check("live-process-keeps-original-owner",!returned() && locationReads==0);
+        reset();g_msiNativeForegroundCyclePending=true;
+        check("pending-retirement-keeps-original-owner",!returned() && locationReads==0);
+        auto debt=refreshRecord("prepare");debt["EnableCallEntered"]=true;debt["EnableResult"]=23;reset(debt);
+        check("enable-debt-cannot-borrow-root-return",!returned());
+        debt=refreshRecord("prepare");debt["DisableCallEntered"]=true;debt["DisableResult"]=0;reset(debt);
+        check("acknowledged-disable-cannot-borrow-root-return",!returned());
+        debt=refreshRecord("prepare");debt["CompensationAttempted"]=true;reset(debt);
+        check("compensation-cannot-borrow-root-return",!returned());
+        reset();g_msiNativeForegroundLease.helperDiagnostic=readSpool(refreshRecord("prepare"),7);g_msiNativeForegroundLease.helperExitCode=7;
+        check("exit-seven-remains-seven-and-restore",!accepted() && !returned());
+        reset();g_msiNativeForegroundLease.helperDiagnostic=nullptr;
+        check("missing-diagnostic-cannot-invent-return",!returned());
+        reset();g_msiNativeForegroundLease.cycleAccepted=true;g_msiNativeForegroundLease.helperExitCode=0;rootPresent=false;
+        check("old-success-exit-zero-contract-preserved",returned() && locationReads==0);
+        auto legacy=refreshRecord("disable");legacy.erase("RootPortCycle");legacy["DisableCallEntered"]=true;legacy["DisableResult"]=23;reset(legacy);
+        check("old-disable-veto-contract-preserved",accepted() && returned() && locationReads==0);
+    }catch(const std::exception& error){infrastructureFailure=error.what();}
+    const bool afterKnown=GetProcessHandleCount(GetCurrentProcess(),&handlesAfter)!=FALSE;
+    check("real-spool-handles-returned",beforeKnown && afterKnown && handlesBefore==handlesAfter);
+    const bool passed=failures.empty() && infrastructureFailure.empty();
+    std::cout<<json{{"mode","gpd-root-return"},{"passed",passed},{"checks",names.size()},{"caseNames",names},{"failures",failures},
+        {"infrastructureFailure",infrastructureFailure},{"spoolWrites",spoolWrites},{"handlesBefore",handlesBefore},{"handlesAfter",handlesAfter},
+        {"hardwareAccess",false},{"realProcessesLaunched",false},{"realWin32Spool",true},
+        {"coverage","source-exact terminal predicate and root-started query; real diagnostic spool/decoder; scalar lease with hardware-read ports only"},
+        {"notCovered",{"writer retirement execution","Native Start/recovery","actual hardware","input delivery","CPU"}}}.dump()<<"\n";
+    return passed?0:1;
+}

@@ -1,6 +1,7 @@
 #pragma once
 #include "mouse_mode_policy.h"
 #include "game_application_catalog.h"
+#include <utility>
 namespace ymcc::mousePolicy {
 struct AutoOverrides {
  bool valid=true;std::uint64_t epoch=0;
@@ -22,21 +23,30 @@ struct GameContextRules{
  std::wstring targetPath;std::vector<std::wstring> whitelist,configured;
  std::string observation;
 };
-inline Context classifyApplications(Context context,const std::wstring& image,const GameContextRules& rules){
+// Lists are borrowed only during this synchronous call; Context stores values.
+inline Context classifyApplicationsBorrowed(Context context,const std::wstring& image,const GameContextRules& rules,
+ const std::vector<std::wstring>& whitelist,const std::vector<std::wstring>& configured){
  using namespace ymcc::gameApplications;
  context.rulesEpoch=rules.rulesEpoch;context.gameTargetPid=rules.targetPid;context.gameObservation=rules.observation;
  if(!context.identityKnown||image.empty())return context;
- const auto category=classify(image);
- context.emulator=category==Category::Emulator;context.gameLibrary=category==Category::GameLibrary;
+ // Reuse one normalized executable name across all rule sets in this read.
+ const auto executable=base(image);
+ const auto matchesName=[&](const std::vector<std::wstring>& patterns){
+  return std::any_of(patterns.begin(),patterns.end(),[&](const auto& rule){return patternMatches(executable,rule);});
+ };
+ context.emulator=matchesName(emulators());context.gameLibrary=!context.emulator&&matchesName(gameLibraries());
  context.classificationKnown=rules.observationKnown;
  // Whitelisted executable names are explicit games, including renamed emulators.
  // A game blacklist alone does not exclude ordinary browser/office mouse use.
- context.game=matches(image,rules.whitelist)||matches(image,rules.configured)||
+ context.game=matchesName(whitelist)||matchesName(configured)||
   // Keep a positively identified game blocked during a shared observation refresh.
   // PID, process birth and full path must still identify the current foreground.
   (context.pid==rules.targetPid&&context.created!=0&&context.created==rules.targetCreated&&
    !rules.targetPath.empty()&&image==rules.targetPath);
  context.applicationCategory=context.emulator?"emulator":context.gameLibrary?"game-library":context.game?"game":"ordinary";
  return context;
+}
+inline Context classifyApplications(Context context,const std::wstring& image,const GameContextRules& rules){
+ return classifyApplicationsBorrowed(std::move(context),image,rules,rules.whitelist,rules.configured);
 }
 }

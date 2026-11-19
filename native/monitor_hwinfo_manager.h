@@ -1,5 +1,6 @@
 #pragma once
 #include "monitor_hwinfo_transaction.h"
+#include "process_basic_candidates.h"
 #include "monitor_hwinfo_config_commit.h"
 #include <filesystem>
 #include "monitor_hwinfo_sensor_journal.h"
@@ -43,15 +44,25 @@ inline std::vector<DWORD> processes(){
     if(!Process32FirstW(snapshot.h,&row)){if(GetLastError()!=ERROR_NO_MORE_FILES)winFail(4,"HWiNFO process enumeration could not start");return out;}
     do{if(_wcsicmp(row.szExeFile,L"HWiNFO64.exe")==0)out.push_back(row.th32ProcessID);}while(Process32NextW(snapshot.h,&row));if(GetLastError()!=ERROR_NO_MORE_FILES)winFail(4,"HWiNFO process enumeration did not finish");return out;
 }
+inline bool anyProcesses(){
+    std::vector<DWORD> pids;DWORD error=ERROR_SUCCESS;
+    const auto status=ymcc::processNames::candidates(L"HWiNFO64.exe",pids,error,
+        ymcc::processNames::resolveBasicQuery(),ymcc::processNames::NameMatch::CrtIgnoreCase,0);
+    if(status!=ymcc::processNames::BasicResult::Complete)
+        winFail(4,"HWiNFO process enumeration failed",error?error:ERROR_GEN_FAILURE);
+    return !pids.empty();
+}
 inline std::optional<std::string> readBytes(const std::wstring&p,std::size_t limit,bool optional=false){
     Handle f(CreateFileW(p.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr));if(!f){const auto e=GetLastError();if(optional&&(e==ERROR_FILE_NOT_FOUND||e==ERROR_PATH_NOT_FOUND))return {};winFail(8,"HWiNFO configuration could not be opened",e);}
     LARGE_INTEGER size{};if(!GetFileSizeEx(f.h,&size))winFail(8,"HWiNFO configuration length unavailable");require(size.QuadPart>=0&&static_cast<unsigned long long>(size.QuadPart)<=limit,"HWiNFO configuration exceeds its byte budget");std::string s(static_cast<std::size_t>(size.QuadPart),'\0');DWORD got=0;
     if(!s.empty()&&(!ReadFile(f.h,s.data(),static_cast<DWORD>(s.size()),&got,nullptr)||got!=s.size()))winFail(8,"HWiNFO configuration changed during read");char extra=0;if(!ReadFile(f.h,&extra,1,&got,nullptr)||got!=0)throw Error(8,"HWiNFO configuration grew during read");return s;
 }
-inline std::string sha256(const std::wstring&p){
+inline std::string sha256(const std::wstring&p,std::uint64_t expectedBytes=0){
     HCRYPTPROV provider=0;if(!CryptAcquireContextW(&provider,nullptr,nullptr,PROV_RSA_AES,CRYPT_VERIFYCONTEXT))winFail(8,"HWiNFO hash provider unavailable");struct Provider{HCRYPTPROV h;~Provider(){CryptReleaseContext(h,0);}}a{provider};
     HCRYPTHASH hash=0;if(!CryptCreateHash(provider,CALG_SHA_256,0,0,&hash))winFail(8,"HWiNFO hash unavailable");struct Hash{HCRYPTHASH h;~Hash(){CryptDestroyHash(h);}}b{hash};
     Handle f(CreateFileW(p.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr));if(!f)winFail(8,"HWiNFO image could not be hashed");LARGE_INTEGER size{};if(!GetFileSizeEx(f.h,&size))winFail(8,"HWiNFO image length unavailable");require(size.QuadPart>0&&size.QuadPart<=67108864,"HWiNFO image exceeds verified sensor-policy budget");
+    // Unequal size cannot match the pinned image; equal size still needs the full hash.
+    if(expectedBytes&&static_cast<std::uint64_t>(size.QuadPart)!=expectedBytes)return {};
     unsigned char buffer[65536];DWORD got=0;for(;;){if(!ReadFile(f.h,buffer,sizeof(buffer),&got,nullptr))winFail(8,"HWiNFO image hash read failed");if(!got)break;if(!CryptHashData(hash,buffer,got,0))winFail(8,"HWiNFO image hash failed");}unsigned char digest[32]{};DWORD length=32;if(!CryptGetHashParam(hash,HP_HASHVAL,digest,&length,0)||length!=32)winFail(8,"HWiNFO hash result unavailable");constexpr char hex[]="0123456789abcdef";std::string out;out.reserve(64);for(auto c:digest){out+=hex[c>>4];out+=hex[c&15];}return out;
 }
 inline void writeAtomic(const std::wstring&path,const std::string&bytes,bool keepExisting=false){
@@ -233,9 +244,13 @@ struct SensorJournalOperations {
         require(read(kind)==expected,"Sensor receipt changed concurrently");writeAtomic(path,value,!expected);require(read(kind)==std::optional<std::string>{value},"Sensor receipt write unconfirmed");
     }
     std::wstring executable;
-    bool verified(){return sha256(executable)==verifiedSensorImage;}
+    bool verified(){
+        // Pinned e4ce0c85 image and byte length share the original qualification record.
+        constexpr std::uint64_t verifiedImageBytes=11484648;
+        return sha256(executable,verifiedImageBytes)==verifiedSensorImage;
+    }
     bool enabled(){const auto bytes=readBytes(destination,262144);for(const auto&e:entries(decodeIni(*bytes)))if(lower(e.section)==L"settings"&&lower(e.key)==L"rememberpreferences"){unsigned n=0;if(!number(e.value,n)||!n)return false;}return true;}
-    void stopped(){if(!processes().empty())throw Error(4,"Producer running; sensor debt unchanged");}
+    void stopped(){if(anyProcesses())throw Error(4,"Producer running; sensor debt unchanged");}
     SensorState state(const std::wstring&group){return readSensor(group);}
     void set(const std::wstring&group,SensorState value){writeSensor(group,value);}
 };
@@ -251,14 +266,14 @@ struct Operations {
     bool acquire(DWORD ms){mutex=Handle(CreateMutexW(nullptr,FALSE,L"Global\\YeManCC_HWiNFO_Recovery"));if(!mutex)winFail(1,"HWiNFO recovery mutex unavailable");const auto rc=WaitForSingleObject(mutex.h,ms);owned=rc==WAIT_OBJECT_0||rc==WAIT_ABANDONED;if(rc==WAIT_FAILED)winFail(1,"HWiNFO recovery mutex wait failed");return owned;}
     void release(){if(owned&&mutex){ReleaseMutex(mutex.h);owned=false;}mutex.reset();}
     bool interrupted(){return cancelled&&cancelled();}
-    bool healthy(){return !processes().empty()&&sharedProof().has_value();}
+    bool healthy(){return anyProcesses()&&sharedProof().has_value();}
     std::string healthySensorPolicy(const Request&request){try{const auto exe=resolve(request.executable);if(exe.empty())return "unconfirmed-installation";const auto path=(fs::path(exe).parent_path()/L"HWiNFO64.INI").wstring();validateIniBackups(path);SensorJournalOperations ops(path);return sensorJournalHealth(ops);}catch(...){return "unconfirmed-journal";}}
     void applyAffinity(){for(auto pid:processes()){Handle p(OpenProcess(PROCESS_SET_INFORMATION,FALSE,pid));if(p)SetProcessAffinityMask(p.h,0xA0);}}
     std::wstring resolve(const std::wstring& explicitPath){return hwinfo::resolve(explicitPath);}
     std::string planned(const Request&request,const std::optional<std::string>&existing){return mergeIni(managedIni(acquisition(powerControl)),existing?std::optional<Ini>{decodeIni(*existing)}:std::optional<Ini>{},request.period);}
     std::string planned(const Request&request){return planned(request,readBytes(destination,262144,true));}
     void prepare(const std::wstring&path,const Request&request){destination=(fs::path(path).parent_path()/L"HWiNFO64.INI").wstring();validateIniBackups(destination);(void)planned(request);}
-    void assertStopped(){if(!processes().empty())throw Error(4,"HWiNFO64.exe is running; configuration/launch refused");}
+    void assertStopped(){if(anyProcesses())throw Error(4,"HWiNFO64.exe is running; configuration/launch refused");}
     void stop(){
         const auto list=processes();std::vector<Handle> running;running.reserve(list.size());
         for(auto pid:list){Handle p(OpenProcess(PROCESS_TERMINATE|SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid));if(!p){const auto e=GetLastError();if(e==ERROR_INVALID_PARAMETER)continue;winFail(4,"HWiNFO64.exe could not be opened for confirmed stop",e);}const auto path=imagePath(p.h);if(path.empty())winFail(4,"HWiNFO64.exe process identity unavailable");if(lower(fs::path(path).filename().wstring())!=L"hwinfo64.exe")continue;running.push_back(std::move(p));}

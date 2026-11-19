@@ -1,15 +1,85 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {capturePaths,sealPaths,evidenceRoot,hash,REPO} from './output-evidence.mjs';
 import {getCapabilityCatalogAdapters} from './adapter.mjs';
 import {checkStructuredEvidence} from '../runner.mjs';
+import {simulationCorePath} from '../release-host-environment.mjs';
 const dispatch='fan.unified-capability-dispatch',roundtrip='fan.unified-capability-roundtrip';
-function fixture(t,id=dispatch){const tempRoot=fs.realpathSync(os.tmpdir()),root=fs.mkdtempSync(path.join(tempRoot,'ymcc-catalog-closure-'));t.after(()=>{const target=fs.realpathSync(root);assert.equal(path.dirname(target),tempRoot);assert(path.basename(target).startsWith('ymcc-catalog-closure-'));fs.rmSync(target,{recursive:true,force:true});});const write=(rel,value)=>{const file=path.join(root,rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);return file;};const input=write('input/source.cs','fixture source before consumer'),artifact=write('input/reference.dll','fixture reference bytes'),inputs={sources:[input],artifacts:[artifact]};capturePaths(id,root,inputs);const assemblies=id===dispatch?['YeManFanHost','YeManFanBackend','HcCapabilityCatalogSelfTest','HcCapabilityHotPathSelfTest']:['FanCapabilityRoundtrip','YeManFanBackend'];for(const name of assemblies)for(const suffix of ['.dll','.pdb'])write('build/bin/'+name+'/release_win-x64/'+name+suffix,'fixture generated '+name+suffix);const report=id===dispatch?'result.json':'actual-roundtrip-results.json',host=path.join(root,'build/bin/YeManFanHost/release_win-x64/YeManFanHost.dll'),raw=id===dispatch?{fixtureOnly:true,status:'PASS',checks:3,failures:[],hostSha256:hash(host),catalogSha256:'a'.repeat(64)}:{fixtureOnly:true,status:'passed',passed:true,checks:3,binaryStatus:'passed-actual-locked-dll',hardwareAccess:'none'};write(report,JSON.stringify(raw,null,2));write('consumer.log','fixture consumer completed');return{root,id,inputs,report,raw,write,host};}
-for(const id of [dispatch,roundtrip])test('seal actual evidence fields and reject consumed generated DLL mutation: '+id,t=>{const f=fixture(t,id),original=fs.readFileSync(path.join(f.root,f.report));const result=sealPaths(id,f.root,f.inputs);assert.deepEqual(fs.readFileSync(result.evidenceClosure.originalReport.path),original);assert(result.sourceHashes.length>10);const contract={resultFiles:[f.report]};assert.equal(checkStructuredEvidence(f.root,contract,REPO).failed,false);const name=id===dispatch?'YeManFanHost':'FanCapabilityRoundtrip',dll=path.join(f.root,'build/bin/'+name+'/release_win-x64/'+name+'.dll');fs.appendFileSync(dll,'corrupt copied generated artifact');const changed=checkStructuredEvidence(f.root,contract,REPO);assert.equal(changed.failed,true);assert(changed.paths[0].sourceMismatches.includes(dll));});
+const samePath=(a,b)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
+function fixture(t,id=dispatch){
+ const workspace=simulationCorePath('Workspace'),parent=fs.realpathSync.native(workspace);
+ assert(samePath(parent,workspace)&&!fs.lstatSync(workspace).isSymbolicLink());
+ const root=fs.mkdtempSync(path.join(parent,'ymcc-catalog-closure-')),identity=fs.lstatSync(root,{bigint:true});
+ t.after(()=>{
+  const actual=fs.realpathSync.native(root),current=fs.lstatSync(root,{bigint:true});
+  assert(samePath(actual,root)&&samePath(path.dirname(actual),parent));
+  assert(current.isDirectory()&&!current.isSymbolicLink()&&current.dev===identity.dev&&current.ino===identity.ino);
+  fs.rmSync(actual,{recursive:true,force:true});
+ });
+ const write=(rel,value)=>{const file=path.join(root,rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);return file;};
+ const input=write('input/source.cs','fixture source before consumer'),artifact=write('input/reference.dll','fixture reference bytes'),inputs={sources:[input],artifacts:[artifact]};capturePaths(id,root,inputs);
+ const assemblies=id===dispatch?['YeManFanHost','YeManFanBackend','HcCapabilityCatalogSelfTest','HcCapabilityHotPathSelfTest']:['FanCapabilityRoundtrip','YeManFanBackend'];for(const name of assemblies)for(const suffix of ['.dll','.pdb'])write('build/bin/'+name+'/release_win-x64/'+name+suffix,'fixture generated '+name+suffix);
+ const report=id===dispatch?'result.json':'actual-roundtrip-results.json',host=path.join(root,'build/bin/YeManFanHost/release_win-x64/YeManFanHost.dll');
+ const raw=id===dispatch?{fixtureOnly:true,status:'PASS',checks:3,failures:[],hostSha256:hash(host),catalogSha256:'a'.repeat(64)}:{fixtureOnly:true,status:'passed',passed:true,checks:3,binaryStatus:'passed-actual-locked-dll',shippingOneXStatus:'passed-actual-shipping-one-x-contract',hardwareAccess:'none'};
+ write(report,JSON.stringify(raw,null,2));write('consumer.log','fixture consumer completed');return{root,id,inputs,report,raw,write,host};
+}
+for(const id of [dispatch,roundtrip])test('seal actual evidence fields and reject consumed generated DLL mutation: '+id,t=>{
+ const f=fixture(t,id),file=path.join(f.root,f.report),original=fs.readFileSync(file);
+ if(id===roundtrip){
+  f.write(f.report,JSON.stringify({...f.raw,shippingOneXStatus:undefined}));
+  assert.throws(()=>sealPaths(id,f.root,f.inputs),/ROUNDTRIP_ORIGINAL_NOT_COMPLETE/);
+  assert(!fs.existsSync(path.join(f.root,'consumer-original-report.json')));
+  f.write(f.report,original);
+ }
+ const result=sealPaths(id,f.root,f.inputs),closure=result.evidenceClosure;
+ assert.deepEqual(fs.readFileSync(closure.originalReport.path),original);assert(result.sourceHashes.length>10);
+ for(const sealed of [closure.originalReport,closure.inputSnapshot]){
+  assert.deepEqual(result.sourceHashes.find(row=>row.path===sealed.path),sealed);
+  assert.equal(hash(sealed.path),sealed.sha256);
+ }
+ const contract={resultFiles:[f.report]};assert.equal(checkStructuredEvidence(f.root,contract,REPO).failed,false);
+ const name=id===dispatch?'YeManFanHost':'FanCapabilityRoundtrip',dll=path.join(f.root,'build/bin/'+name+'/release_win-x64/'+name+'.dll');fs.appendFileSync(dll,'corrupt copied generated artifact');
+ const changed=checkStructuredEvidence(f.root,contract,REPO);assert.equal(changed.failed,true);assert(changed.paths[0].sourceMismatches.includes(dll));
+});
+test('sealing rejects output or checkpoint bytes changed after JSON validation',t=>{
+ for(const [mode,error] of [
+  ['report',/ORIGINAL_REPORT_CHANGED_DURING_SEAL/],
+  ['checkpoint',/INPUT_SNAPSHOT_CHANGED_DURING_SEAL/],
+  ['host',/CONSUMED_HOST_CHANGED_DURING_SEAL/],
+  ['input-copy',/INPUT_COPY_CHANGED_DURING_SEAL/],
+ ]){
+  const f=fixture(t),file=path.join(f.root,f.report),checkpoint=path.join(f.root,'catalog-input-snapshot.json');
+  const copyPath=JSON.parse(fs.readFileSync(checkpoint,'utf8')).inputs.find(row=>row.kind==='sources').snapshotPath;
+  const changed={report:file,checkpoint,host:f.host,'input-copy':copyPath}[mode],copy=fs.copyFileSync;
+  const marker='\n ';
+  const hook=t.mock.method(fs,'copyFileSync',(source,output,flags)=>{
+   if(source===file)fs.appendFileSync(changed,marker);
+   return copy(source,output,flags);
+  });
+  try{
+   assert.throws(()=>sealPaths(dispatch,f.root,f.inputs),error,mode);
+   assert(fs.readFileSync(changed,'utf8').endsWith(marker));
+   assert(!Object.hasOwn(JSON.parse(fs.readFileSync(file,'utf8')),'evidenceClosure'));
+  }finally{hook.mock.restore();}
+ }
+ for(const id of [dispatch,roundtrip]){
+  const f=fixture(t,id),file=path.join(f.root,f.report),original=fs.readFileSync(file);
+  const pdb=path.join(f.root,'build/bin/YeManFanBackend/release_win-x64/YeManFanBackend.pdb');
+  const copy=fs.copyFileSync,hook=t.mock.method(fs,'copyFileSync',(source,output,flags)=>{
+   copy(source,output,flags);
+   if(source===file)fs.unlinkSync(pdb);
+  });
+  try{
+   assert.throws(()=>sealPaths(id,f.root,f.inputs),/REQUIRED_GENERATED_ARTIFACT_MISSING/,id);
+   assert(!fs.existsSync(pdb));
+   assert.deepEqual(fs.readFileSync(file),original);
+   assert.deepEqual(fs.readFileSync(path.join(f.root,'consumer-original-report.json')),original);
+  }finally{hook.mock.restore();}
+ }
+});
 test('missing PDB rejects a green original report',t=>{const f=fixture(t);fs.unlinkSync(f.host.replace(/\.dll$/,'.pdb'));assert.throws(()=>sealPaths(f.id,f.root,f.inputs),/REQUIRED_GENERATED_ARTIFACT_MISSING/);assert(!fs.existsSync(path.join(f.root,'consumer-original-report.json')));});
 test('claimed consumed Host checksum must match the generated artifact',t=>{const f=fixture(t);f.raw.hostSha256='0'.repeat(64);f.write(f.report,JSON.stringify(f.raw));assert.throws(()=>sealPaths(f.id,f.root,f.inputs),/CONSUMED_HOST_IDENTITY_DIFFERS/);});
 test('changed source input rejects before the original report is wrapped',t=>{const f=fixture(t);fs.appendFileSync(f.inputs.sources[0],'changed while consumer was running');assert.throws(()=>sealPaths(f.id,f.root,f.inputs),/INPUT_CHANGED/);assert(!fs.existsSync(path.join(f.root,'consumer-original-report.json')));});

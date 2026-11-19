@@ -21,29 +21,66 @@ def static_wake_parser_binding(native_text,main_text):
             '#include <windows.h>\n#include <cfgmgr32.h>\n#include <algorithm>\n#include <set>\n#include <sstream>\n#include <string>\n#include <vector>\n'
             'namespace ymcc { namespace staticwake { namespace native {\n'+conversions+helpers+splitter+parser+'\n}}}\n')
 
+def capture_507_binding(source):
+    """Exact original constructor and ordinary emission, with journal IO omitted."""
+    callback=source.index('static DWORD WINAPI sgKernelPowerEventCallback(')
+    prepare='    json residency;\n    if (leaving) {'
+    prepare_end='    if (hibernateWake) {\n        sgRecordFact("kernel-power-107", {'
+    emit='    if (leaving && residency.is_object()) {\n        // Preserve the OS\'s completed-session accounting in ordinary exports.'
+    emit_end='    traceLog("kernel power event id=%d reason=%s targetState=%d", eventId,'
+    assert all(source.count(anchor)==1 for anchor in [prepare,prepare_end,emit,emit_end]),'native507capture boundary changed'
+    first,last=source.index(prepare,callback),source.index(prepare_end,callback)
+    emission,finish=source.index(emit,callback),source.index(emit_end,callback)
+    journal=source.index('sgRecordFact(',callback)
+    assert first<last<=journal<emission<finish,'native507 success must precede first journal'
+    construction=source[first:last];output=source[emission:finish]
+    assert construction.count('ymcc::sleep_residency::makeEvidence(xml)')==1
+    assert construction.count('sgSleepTimeoutObserveCompleted(residency,eventFileTime,callbackGeneration,reason);')==1
+    assert output.count('sgRecordFact("s0-low-power-residency", residency);')==1
+    assert 'makeEvidence(' not in output and 'sgSleepTimeoutObserveCompleted(' not in output
+    hook=construction+'\n'+output
+    slices=[{'begin':len(source[:a].encode()),'end':len(source[:b].encode()),'sha256':hashlib.sha256(source[a:b].encode()).hexdigest()}
+            for a,b in [(first,last),(emission,finish)]]
+    return hook,{'source':'native/main.cpp','normalization':'utf8-sig-universal-newlines','slices':slices,'separator':'\n',
+                 'bodyAdaptations':0,'constructorExecutionsPer507':1,'journalAndUnrelatedCallbackBodyExcluded':True}
+
 started=time.perf_counter()
 p=argparse.ArgumentParser();p.add_argument('--output-dir',required=True)
-p.add_argument('--component-scope',choices=['all','abnormal','timeout','late-wake'],default='all')
+p.add_argument('--component-scope',choices=['all','abnormal','timeout','late-wake','export','static-wake-schedule'],default='all')
+p.add_argument('--export-phase',choices=['query-output','query-finalization'],default=None)
+p.add_argument('--prepare-only',action='store_true')
+p.add_argument('--schedule-case',choices=["schedule-pool-exit-diag-active","schedule-pool-exit-diag-abandoned","schedule-pool-exit-diag-refusal-retry","schedule-pool-exit-crt-all-worker-handles","schedule-pool-exit-crt-first-direct","schedule-pool-exit-crt-empty-refusal-stop","schedule-pool-exit-crt-never-started-stop","schedule-pool-exit-crt-partial-wake","schedule-pool-exit-crt-partial-stop","schedule-pool-exit-crt-repeat-wake","schedule-pool-exit-crt-off-reenable","schedule-pool-exit-crt-tls-isolation","schedule-pool-exit-trace-format","schedule-pool-exit-trace-contention","schedule-pool-exit-timeout-retains","schedule-pool-exit-partial-actual-join","schedule-pool-exit-finite-complete","schedule-pool-exit-no-trace","schedule-pool-exit-infinite","schedule-pool-exit-idle-trace","schedule-pool-exit-empty-join",'schedule-pool-cold-off-reenable','schedule-pool-normal', 'schedule-pool-reserve-failure', 'schedule-pool-first-thread-failure', 'schedule-pool-partial-thread-failure', 'schedule-pool-partial-stop', 'schedule-pool-one-worker', 'schedule-pool-sixteen-workers', 'schedule-pool-worker-exception', 'schedule-pool-stop-drops-pending','schedule-admission-off-reenable','schedule-original', 'schedule-admission-normal', 'schedule-admission-queue-allocation', 'schedule-admission-queue-allocation-log-failure', 'schedule-admission-unavailable', 'schedule-admission-worker-log-failure', 'schedule-admission-worker-scan-failure', 'schedule-admission-stale-before-worker'],default=None)
 p.add_argument('--mutation',choices=['none','hardware-zero-confirmed','missing-as-zero','callback-success-ignored','accepted-s4-shutdown','terminal-cleanup-removed','stale-evidence-permitted','previous-session-health-permitted','owned-intent-veto-lost','owned-budget-refilled','etw-loss-counters-ignored','etw-post-query-veto-ignored','etw-post-query-freshness-ignored','etw-terminal-health-dropped','stale-scan-start-accepted','conservative-arm-regressed','conservative-owned-regressed','global-snapshot-failure-retried','wake-armed-locale-regressed','late-wake-monitor-sender'],default='none');args=p.parse_args()
+if args.export_phase is not None and (args.component_scope!='export' or args.mutation!='none' or args.prepare_only or args.schedule_case is not None):p.error('export phase requires exact export none scope')
+if args.component_scope=='static-wake-schedule':
+    if args.mutation!='none':p.error('static schedule exact scope refuses unrelated mutations')
+    import runpy
+    project=Path(__file__).resolve().parents[1]
+    raise SystemExit(runpy.run_path(str(project/'tools/fixtures/sleep_residency/static_wake_schedule_admission.py'))['run'](project,Path(os.path.abspath(args.output_dir)),args.schedule_case or 'schedule-original',args.prepare_only))
+if args.prepare_only or args.schedule_case is not None:p.error('schedule flags require exact static-wake-schedule scope')
+if args.component_scope=='export' and args.mutation!='none':p.error('export exact scope supports only the independent none group')
 if args.component_scope=='timeout' and args.mutation!='none':p.error('timeout exact scope supports only the independent none group')
 if args.component_scope=='late-wake' and args.mutation not in ['none','late-wake-monitor-sender']:p.error('late-wake exact scope refuses unrelated mutations')
 if args.mutation=='late-wake-monitor-sender' and args.component_scope!='late-wake':p.error('monitor negative requires exact late-wake scope')
 late_enabled=args.component_scope=='late-wake' or (args.component_scope=='all' and args.mutation=='none')
-exact_scope=args.component_scope in ['timeout','late-wake']
+exact_scope=args.component_scope in ['timeout','late-wake','export']
 project=Path(__file__).resolve().parents[1];out=Path(os.path.abspath(args.output_dir));out.mkdir(parents=True,exist_ok=True)
 for path in [project,out]:
     if any(c in str(path) for c in '"%\r\n'):raise SystemExit('Unsupported command path')
 cpp=project/'tools/sleep_residency_evidence_selftest.cpp'
 # Export-only helper and actual adapter are compiled in both scopes, same execution.
 export_inputs=[project/'native/sleep_export_diagnostics.h',project/'native/sleep_export_diagnostics_native.inc',project/'tools/fixtures/sleep_residency/sleep_export_harness.inc']
+export_inputs += [project/name for name in ['native/log_ai_index.h', 'native/log_export_evidence.h', 'native/buffered_domain_log.h', 'native/log_jsonl_boundary.h', 'tools/input_pipe_test_allocation_fault.h']]
+export_inputs += [project/'native'/name for name in ('gamepad_backend_cost_json.h','gamepad_backend_cost.h','ui_gamepad_cycle_log.h','input_idle_scope.h')]
 # Identity is bound in every mutation; only none copies/compiles this independent group.
 activity_inputs=[project/'native/sleep_activity_evidence.h',project/'native/sleep_activity_evidence_native.inc',project/'native/sleep_notification_evidence.h',project/'tools/fixtures/sleep_residency/sleep_activity_native_harness.inc']
-timeout_inputs=[project/'native/sleep_timeout_policy.h',project/'native/sleep_timeout_native.inc',project/'tools/fixtures/sleep_residency/sleep_timeout_native_harness.inc']
-late_inputs=[project/'tools/fixtures/sleep_residency/latewake_cases.inc',project/'tools/fixtures/sleep_non_user_wake/amd_rog_late_spontaneous_ac.json',project/'native/sleep_abnormal_resleep.h']
+timeout_inputs=[project/'native/sleep_timeout_policy.h',project/'native/sleep_timeout_native.inc',project/'native/sleep_kernel_cycle.h',project/'native/sleep_kernel_cycle_native.inc',project/'tools/fixtures/sleep_residency/sleep_timeout_native_harness.inc',project/'native/sleep_power_state.h',project/'native/sleep_power_observation.h',project/'native/sleep_power_dispatch.h']
+late_inputs=[project/'tools/fixtures/sleep_residency/latewake_cases.inc',project/'tools/fixtures/sleep_non_user_wake/amd_rog_late_spontaneous_ac.json',project/'native/sleep_abnormal_resleep.h',project/'native/sleep_cancel_ready.h']
 copy_paths=[project/'native'/name for name in ['sleep_abnormal_resleep.h','sleep_abnormal_resleep_native.inc','sleep_abnormal_etw_native.inc','sleep_request_fallback.h','sleep_retry_budget.h']]
 copy_paths += [project/'tools/fixtures/sleep_residency'/name for name in ['abnormal_native_harness.inc','cases.json']]
 if args.component_scope=='all':
     copy_paths += [project/'native'/name for name in ['sleep_static_wake_policy.h','sleep_static_wake_receipt.h','sleep_static_wake_native.inc','sleep_static_wake_schedule.h','sleep_static_wake_schedule_native.inc']]
+    copy_paths += [project/'native'/name for name in ['sleep_power_state.h','sleep_power_observation.h','sleep_power_revocation.h']]
     copy_paths += [project/'tools/fixtures/sleep_residency'/name for name in ['static_wake_harness.inc','static_wake_schedule_harness.inc']]
 if exact_scope:
     copy_paths=[project/'native/sleep_request_fallback.h',project/'native/sleep_retry_budget.h']
@@ -153,7 +190,7 @@ def timeout_slices(filename,names,kind,artifacts=None):
                 anchor='    const bool hibernateWake = eventId == 107 &&'
                 local_begin=callback.index(anchor);local_end=callback.index(';',local_begin)+1
             else:
-                anchor='    if(hibernateWake&&eventFileTime)sgSleepTimeoutRecordSystemSuccess(eventFileTime);'
+                anchor='    if((hibernateWake || (leaving&&reason==20))&&eventFileTime)\n        sgSleepTimeoutRecordSystemSuccess(eventFileTime);'
                 assert callback.count(anchor)==1,'S4 original-time success callback hook missing or nonunique'
                 local_begin=callback.index(anchor);local_end=local_begin+len(anchor)
                 assert callback.index('const ULONGLONG eventFileTime =')<local_begin<callback.index('sgRecordFact(')<callback.index('PostMessageW('),'S4 success must precede log/UI using original event time'
@@ -162,8 +199,8 @@ def timeout_slices(filename,names,kind,artifacts=None):
             matches=list(re.finditer(r'^enum class '+name+r'\b[^\n]+',source,re.M))
             assert len(matches)==1,'timeout enum definition missing or nonunique: '+name
             begin,end=matches[0].span()
-        elif name=='SgSystemSleepRequestResult':
-            begin=source.index('struct SgSystemSleepRequestResult {');end=source.index('\n};',begin)+3
+        elif name in ['SgSystemSleepRequestResult','SgSleepRetryFailureScope']:
+            begin=source.index('struct '+name+' {');end=source.index('\n};',begin)+3
         else:
             matches=list(re.finditer(r'^static (?:constexpr|bool)[^;\n]*\b'+re.escape(name)+r'\b[^;]*;',source,re.M))
             assert len(matches)==1,'timeout declaration missing or nonunique: '+name
@@ -172,15 +209,21 @@ def timeout_slices(filename,names,kind,artifacts=None):
         records.append({'name':name,'begin':len(source[:begin].encode()),'end':len(source[:end].encode()),'sha256':hashlib.sha256(chunk.encode()).hexdigest()})
     prefix='// Exact main.cpp slices; inert ports supplied by sleep_timeout_native_harness.inc.\n'
     payload=(prefix+'\n\n'.join(chunks)+'\n').encode()
+    # Retain W4/WX and annotate this existing unused local explicitly;
+    # the original initializer and source-slice checks stay unchanged.
+    if filename=='production_late_wake_bindings.inc':
+        anchor=b'    const auto phase=g_powerLifecycle.load(std::memory_order_acquire);'
+        assert payload.count(anchor)==1,'late-entry unused-local annotation anchor changed'
+        payload=payload.replace(anchor,b'    [[maybe_unused]] const auto phase=g_powerLifecycle.load(std::memory_order_acquire);')
     artifacts.append({'path':filename,'sha256':hashlib.sha256(payload).hexdigest(),'prefix':prefix,'separator':'\n\n','suffix':'\n','slices':records})
     if args.mutation=='none' or late_enabled:(out/filename).write_bytes(payload)
-timeout_slices('production_timeout_types.inc',['SgSleepMode','SgRetryKind','SgSystemSleepRequestResult','g_sgRetrySleepTimeout','SG_ENTRY_RETRY_DELAYS_MS','SG_PAUSE_READY_WAIT_MAX_MS','SG_PAUSE_READY_POLL_MS','SG_MAX_ENTRY_RETRIES','SG_NON_USER_WAKE_CLASSIFY_MS'],'declaration')
-timeout_slices('production_timeout_bindings.inc',['sgUserWakeCancelsSleepIntent','sgPowerButtonSleepMode','sgRetryKindName','sgRequestSystemSleep','sgScheduleNextSleepRetry','sgDispatchSameModeRetry','sgStartSleepRetry','sgAdvanceSleepRetry'],'function')
+timeout_slices('production_timeout_types.inc',['SgSleepMode','SgRetryKind','SgSystemSleepRequestResult','SgSleepRetryFailureScope','g_sgRetrySleepTimeout','SG_ENTRY_RETRY_DELAYS_MS','SG_PAUSE_READY_WAIT_MAX_MS','SG_PAUSE_READY_POLL_MS','SG_MAX_ENTRY_RETRIES','SG_NON_USER_WAKE_CLASSIFY_MS','SG_S0_ENTRY_FAILURE_WINDOW_MS'],'declaration')
+timeout_slices('production_timeout_bindings.inc',['sgPublishSleepEventTime','sgAutomaticClassicSleepPending','sgUserWakeCancelsSleepIntent','sgPowerButtonSleepMode','sgRetryKindName','sgRequestSystemSleep','sgArmSleepRetryTimer','sgScheduleNextSleepRetry','sgDispatchSameModeRetry','sgStartSleepRetry','sgObserveUnattributedSleepRetryFailure'],'function')
 timeout_slices('production_timeout_s4_hook.inc',['hibernateWake','original107-success-before-log'],'s4-callback')
-timeout_binding={'sourcePath':'native/main.cpp','sourceSha256':source_hashes[project/'native/main.cpp'],'normalization':'utf8-sig-universal-newlines','artifacts':timeout_artifacts}
+timeout_binding={'entryObservationScope':'No entry observation episode in this companion; Present/Held/Join false, RememberExit inert, Interrupt hard refusal; actual observation/handoff predicates are selected only by joined non-user consumer','sourcePath':'native/main.cpp','sourceSha256':source_hashes[project/'native/main.cpp'],'normalization':'utf8-sig-universal-newlines','artifacts':timeout_artifacts}
 late_artifacts=[]
-timeout_slices('production_late_wake_types.inc',['SG_USER_STANDBY_DEVICE_DELAY_MS','SG_S0_REASON7_FAILURE_WINDOW_MS','SG_INTERNAL_SLEEP_506_WINDOW_MS','SG_INTERNAL_SLEEP_506_CLOCK_SKEW_MS','g_sgFactMonitorEnabled'],'late-declaration',late_artifacts)
-timeout_slices('production_late_wake_bindings.inc',['sgAutomaticClassicSleepPending','sgPublishSleepEventTime','sgInternalSleepRequestMatches506','sgSleepTriggerOrigin','sgRefreshSleepTriggerOrigin','sgNonUserWakeGuardEnabled','sgExternalDeviceWakeIntentAge','sgClearUnexpectedWake','sgArmNonUserWakeGuard','sgEvaluateExternalDeviceWake','sgObserveNonUserWake','sgNoteExternalDeviceNodeChange','sgNoteExternalDeviceAcDcChange','sgNoteExternalDeviceKernel507Reason5','sgNoteExternalDeviceKernel507Reason7','sgS0EntryFailureEligible'],'function',late_artifacts)
+timeout_slices('production_late_wake_types.inc',['SG_USER_STANDBY_DEVICE_DELAY_MS','SG_INTERNAL_SLEEP_506_WINDOW_MS','SG_INTERNAL_SLEEP_506_CLOCK_SKEW_MS','g_sgFactMonitorEnabled'],'late-declaration',late_artifacts)
+timeout_slices('production_late_wake_bindings.inc',['sgInternalSleepRequestMatches506','sgSleepTriggerOrigin','sgRefreshSleepTriggerOrigin','sgNonUserWakeGuardEnabled','sgExternalDeviceWakeIntentAge','sgClearUnexpectedWake','sgArmNonUserWakeGuard','sgEvaluateExternalDeviceWake','sgObserveNonUserWake','sgNoteExternalDeviceNodeChange','sgNoteExternalDeviceAcDcChange','sgNoteExternalDeviceKernel507Reason5','sgNoteExternalDeviceKernel507Reason7','sgEntryFailureWindowEligible','sgS0EntryFailureEligible','sgRenewCancellationReady'],'function',late_artifacts)
 timeout_slices('production_late_wake_message.inc',['WM_SG_S0_WAKE-complete-body'],'late-message',late_artifacts)
 timeout_slices('production_late_wake_manual_callback.inc',['manual507-callback-before-log-UI'],'late-manual',late_artifacts)
 late_binding={'sourcePath':'native/main.cpp','sourceSha256':source_hashes[project/'native/main.cpp'],'normalization':'utf8-sig-universal-newlines','artifacts':late_artifacts}
@@ -189,11 +232,7 @@ if late_enabled:
     snippets=[source.encode()[s['begin']:s['end']].decode() for a in [*timeout_artifacts,*late_artifacts] for s in a['slices'] if s['name'] in decision_names]
     assert len(snippets)==len(decision_names) and all('g_domainLogEnabled' not in s and 'sensorDetailLoggingGate' not in s and 'g_sgFactMonitorEnabled' not in s for s in snippets),'late detection/sender gained log-frequency precondition'
 
-start='    if (leaving) {\n        // Preserve the OS\'s completed-session accounting in ordinary exports.'
-end='    traceLog("kernel power event id=%d reason=%s targetState=%d", eventId,'
-assert source.count(start)==1 and source.count(end)==1,'native507capture boundary changed'
-hook=source[source.index(start):source.index(end)]
-assert hook.count('sgRecordFact("s0-low-power-residency", residency);')==1
+hook,capture_hook_binding=capture_507_binding(source)
 (out/'production_capture_hook.inc').write_text(hook,encoding='utf-8')
 original=header.read_text('utf-8-sig');mutated=original;expected_failure=None
 if args.mutation=='late-wake-monitor-sender':
@@ -295,10 +334,13 @@ identity_commands='where cl.exe >compiler-path.txt\nwhere link.exe >linker-path.
 # exceed legacy CL path limits under the registered consumer's evidence layout.
 export_define=" /DYMCC_SLEEP_EXPORT_DIAGNOSTICS_SHARED=1 /DYMCC_SLEEP_ACTIVITY_NATIVE_SHARED=1 /DYMCC_SLEEP_TIMEOUT_NATIVE_SHARED=1" if args.mutation!="none" else ""
 if args.component_scope=="timeout":export_define+=" /DYMCC_SLEEP_TIMEOUT_ONLY=1"
+if args.component_scope=="export":export_define=" /DYMCC_SLEEP_EXPORT_ONLY=1 /DYMCC_SLEEP_TIMEOUT_NATIVE_SHARED=1"
+if args.export_phase=="query-output":export_define+=" /DYMCC_SLEEP_EXPORT_OUTPUT_ONLY=1 /wd4505"
+if args.export_phase=="query-finalization":export_define+=" /DYMCC_SLEEP_EXPORT_FINALIZATION_ONLY=1 /wd4505"
 if late_enabled:export_define+=" /DYMCC_SLEEP_LATE_WAKE_ENABLE=1"
 if args.component_scope=="late-wake":export_define=" /DYMCC_SLEEP_LATE_WAKE_ENABLE=1 /DYMCC_SLEEP_LATE_WAKE_ONLY=1"
 if args.mutation=="late-wake-monitor-sender":export_define+=" /DYMCC_SLEEP_LATE_WAKE_MONITOR_MUTATION=1 /wd4505" # Exact one-case negative leaves other original static helpers unused; keep /WX and semantic checks.
-bat.write_text(toolchain.stdout+identity_commands+f'cl /nologo {export_define} /std:c++20 /utf-8 /EHsc /W4 /WX /MT /sourceDependencies "dependencies.json" /I"." "{cpp.name}" /Fo"selftest.obj" /Fe"selftest.exe"\n',encoding='ascii')
+bat.write_text(toolchain.stdout+identity_commands+f'cl /nologo {export_define} /std:c++20 /utf-8 /EHsc /W4 /WX /MT /sourceDependencies "dependencies.json" /I"." "{cpp.name}" /Fo"selftest.obj" /Fe"selftest.exe" /link /VERBOSE:LIB\n',encoding='ascii')
 prepared=time.perf_counter()
 compile_run=subprocess.run([os.environ.get('COMSPEC','cmd.exe'),'/d','/c',str(bat)],cwd=out,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8',errors='replace')
 (out/'compile.log').write_text(compile_run.stdout,encoding='utf-8');compiled=time.perf_counter()
@@ -311,9 +353,11 @@ ok=(run.returncode==0) if expected_failure is None else (run.returncode!=0 and e
 source_identity_stable=all(hashlib.sha256(f.read_bytes()).hexdigest()==value for f,value in source_hashes.items())
 ok=ok and source_identity_stable
 receipt={'status':'passed' if ok else 'failed','componentScope':args.component_scope,'staticWakeStatus':('EXECUTED' if run.returncode==0 else 'NOT_REACHED') if args.component_scope=='all' else 'NOT_RUN','mutation':args.mutation,'compileExit':compile_run.returncode,'runExit':run.returncode,'expectedFaultCaught':expected_failure is not None and ok,'expectedFailure':expected_failure,'output':run.stdout.strip(),'sourceIdentityStable':source_identity_stable,'realSleepTriggered':False,'realEtwStarted':False,'realSleepStudyQuery':False,'productionHeaderSha256':source_hashes[header],'compiledHeaderSha256':hashlib.sha256((out/'sleep_residency_evidence.h').read_bytes()).hexdigest(),'productionHeaderNormalizedSha256':hashlib.sha256(original.encode()).hexdigest(),'productionHookSha256':hashlib.sha256(hook.encode()).hexdigest()}
-receipt['sleepExportDiagnostics']={'status':('EXECUTED' if run.returncode==0 else 'NOT_REACHED') if args.mutation=='none' and not exact_scope else ('NOT_RUN_'+args.component_scope.upper().replace('-','_')+'_SCOPE' if exact_scope else 'NOT_RUN_MUTATION_SCOPE'),'inputs':[{'path':str(f.relative_to(project)).replace('\\','/'),'sha256':source_hashes[f]} for f in export_inputs]}
+receipt['captureHookBinding']=capture_hook_binding
+receipt['exportPhase']=args.export_phase
+receipt['sleepExportDiagnostics']={'status':('EXECUTED' if run.returncode==0 else 'NOT_REACHED') if args.mutation=='none' and (not exact_scope or args.component_scope=='export') else ('NOT_RUN_'+args.component_scope.upper().replace('-','_')+'_SCOPE' if exact_scope else 'NOT_RUN_MUTATION_SCOPE'),'inputs':[{'path':str(f.relative_to(project)).replace('\\','/'),'sha256':source_hashes[f]} for f in export_inputs]}
 receipt['sleepActivityEvidence']={'status':('EXECUTED' if run.returncode==0 else 'NOT_REACHED') if args.mutation=='none' and not exact_scope else ('NOT_RUN_'+args.component_scope.upper().replace('-','_')+'_SCOPE' if exact_scope else 'NOT_RUN_MUTATION_SCOPE'),'executedThisRun':args.mutation=='none' and not exact_scope,'actualPassedThisRun':args.mutation=='none' and not exact_scope and ok,'factHook':activity_hook_binding,'inputs':[{'path':str(f.relative_to(project)).replace('\\','/'),'sha256':source_hashes[f]} for f in activity_inputs]}
-receipt['sleepTimeoutNative']={'status':'NOT_RUN_LATE_WAKE_SCOPE' if args.component_scope=='late-wake' else (('EXECUTED' if run.returncode==0 else 'NOT_REACHED') if args.mutation=='none' else 'NOT_RUN_MUTATION_SCOPE'),'executedThisRun':args.mutation=='none' and args.component_scope!='late-wake','actualPassedThisRun':args.mutation=='none' and args.component_scope!='late-wake' and ok,'binding':timeout_binding,'inputs':[{'path':str(f.relative_to(project)).replace('\\','/'),'sha256':source_hashes[f]} for f in timeout_inputs]}
+receipt['sleepTimeoutNative']={'status':'NOT_RUN_'+args.component_scope.upper().replace('-','_')+'_SCOPE' if args.component_scope in ['late-wake','export'] else (('EXECUTED' if run.returncode==0 else 'NOT_REACHED') if args.mutation=='none' else 'NOT_RUN_MUTATION_SCOPE'),'executedThisRun':args.mutation=='none' and args.component_scope not in ['late-wake','export'],'actualPassedThisRun':args.mutation=='none' and args.component_scope not in ['late-wake','export'] and ok,'binding':timeout_binding,'inputs':[{'path':str(f.relative_to(project)).replace('\\','/'),'sha256':source_hashes[f]} for f in timeout_inputs]}
 receipt['lateWakeNative']={'status':('EXECUTED' if run.returncode==0 else 'EXPECTED_FAULT_CAUGHT' if ok else 'FAILED') if late_enabled else ('NOT_RUN_TIMEOUT_SCOPE' if args.component_scope=='timeout' else 'NOT_RUN_MUTATION_SCOPE'),'executedThisRun':late_enabled,'actualPassedThisRun':late_enabled and args.mutation=='none' and ok,'binding':late_binding,'inputs':[{'path':str(f.relative_to(project)).replace('\\','/'),'sha256':source_hashes[f]} for f in late_inputs],'provenance':late_provenance,'logGateBoundary':'Actual selected decision/sender snippets have no high-frequency/legacy-fact preference precondition. Ordinary fact output is an inert memory port, not disk writer validation.'}
 if late_enabled and expected_failure is not None and (out/'result.json').exists():
     fault_raw=json.loads((out/'result.json').read_text('utf-8-sig'))
@@ -322,7 +366,10 @@ if late_enabled and expected_failure is not None and (out/'result.json').exists(
     assert fault_raw['componentScope']=='late-wake' and fault_raw['cases']==1 and fault_raw['caseResults'][0]['name']=='rog-stable-ac-20min-control' and fault_raw['caseResults'][0]['status']=='failed' and fault_raw['caseResults'][0]['monitorCalls']==1 and fault_raw['caseResults'][0]['mockSuspendCalls']==0,'MONITOR_FAULT_EXACT_SELECTION_NOT_PROVEN'
 if run.returncode==0 and (args.mutation=='none' or late_enabled):
     native_result=json.loads((out/'result.json').read_text('utf-8-sig'))
-    if args.component_scope!='late-wake':
+    if args.component_scope=='export':
+        receipt['sleepExportDiagnostics']['checks']=native_result['sleepExportDiagnosticChecks']
+        assert receipt['sleepExportDiagnostics']['checks']>0 and native_result['cases']==1 and native_result['caseResults']==[{'name':'original-export-helper-and-native-adapter','status':'passed'}],'EXPORT_EXACT_SELECTION_NOT_PROVEN'
+    if args.component_scope not in ['late-wake','export']:
         receipt['sleepTimeoutNative']['checks']=native_result['sleepTimeoutNativeChecks']
         receipt['sleepTimeoutNative']['scenarios']=native_result['sleepTimeoutNativeScenarios']
         assert receipt['sleepTimeoutNative']['checks']>0 and receipt['sleepTimeoutNative']['scenarios'],'TIMEOUT_COMPANION_NOT_EXECUTED'
@@ -346,9 +393,9 @@ for name in ['c1xx.dll','c2.dll','mspdbcore.dll','msvcp140.dll','vcruntime140.dl
     if (compiler_dir/name).exists():tools.append(compiler_dir/name)
 receipt['toolInputs']=[{'path':str(f),'sha256':hashlib.sha256(f.read_bytes()).hexdigest()} for f in tools]
 receipt['timingsMs']={'prepare':round((prepared-started)*1000,2),'compile':round((compiled-prepared)*1000,2),'execute':round((finished-compiled)*1000,2),'total':round((finished-started)*1000,2)}
-receipt['selection']={'componentScope':args.component_scope,'mutation':args.mutation,'timeoutExecutedOnce':args.mutation=='none' and args.component_scope!='late-wake','lateWakeExecutedOnce':late_enabled,'otherResidencyGroupsExecuted':not exact_scope}
+receipt['selection']={'componentScope':args.component_scope,'mutation':args.mutation,'timeoutExecutedOnce':args.mutation=='none' and args.component_scope not in ['late-wake','export'],'lateWakeExecutedOnce':late_enabled,'otherResidencyGroupsExecuted':not exact_scope}
 receipt['sourceDrift']=[{'path':str(f.relative_to(project)).replace('\\','/'),'before':value,'after':hashlib.sha256(f.read_bytes()).hexdigest()} for f,value in source_hashes.items() if hashlib.sha256(f.read_bytes()).hexdigest()!=value]
-receipt['scope']='Late-wake scope executes only new actual nonuser helpers/S0 branch/manual callback/shared sender with synthetic and owner-verified archived payload facts; no physical root-cause or logging writer acceptance. Actual timeout policy/native include and exact shared sender/retry/action slices execute in none only; original506Reason1 required, no PBT/idle substitute, elapsed policy not high-power proof; exact timeout scope excludes other residency groups. Actual completed507 accounting and conservative production entries; staged engine/ETW regressions historical-only; static costs/scheduling per declared scope; all Windows boundaries mocked; activity observer compiles/executes in none only, other mutations require same-run reference; export-only SleepStudy adapter uses inert commands and owned local files; no physical CPU/sleep acceptance'
+receipt['scope']='Late-wake scope executes only new actual nonuser helpers/S0 branch/manual callback/shared sender with synthetic and owner-verified archived payload facts; no physical root-cause or logging writer acceptance. Actual timeout policy/native include and exact shared sender/retry/action slices execute in none only; original506Reason1 required, no PBT/idle substitute, elapsed policy not high-power proof; exact timeout scope excludes other residency groups. Actual completed507 accounting and conservative production entries; staged engine/ETW regressions historical-only; static costs/scheduling per declared scope; all Windows boundaries mocked; activity observer compiles/executes in none only, other mutations require same-run reference; export-only Windows transition adapter uses inert commands and owned local files; no physical CPU/sleep acceptance'
 (out/'receipt.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 print(json.dumps({k:v for k,v in receipt.items() if k not in ['sourceInputs','compiledInputs','discoveredDependencies','toolInputs']},ensure_ascii=False,indent=2))
 raise SystemExit(0 if ok else 1)

@@ -10,7 +10,7 @@ import argparse,collections,datetime,hashlib,json,re,stat,zipfile
 from log_lane_audit import canonical_log_name,event_name
 MAX_ARCHIVE=128*1024*1024;MAX_MEMBERS=2048;MAX_MEMBER=8*1024*1024;MAX_TOTAL=32*1024*1024;MAX_LINE=64*1024;MAX_ROWS=50000;MAX_EVIDENCE=32
 HASH_KEYS={'nativeSha256':'appVersionOrHash','hostDllSha256':'hostSha256OrUnknown','fanBackendDllSha256':'backendSha256OrUnknown','runtimeManifestSha256':'runtimeManifestSha256OrUnknown'}
-MEMBERS={'native-lifecycle.log','native-detail.log','fan-lifecycle.log','fan-api.log','fan-host-fault.log','yeman-fan-host-runtime.log','sleep-facts.log','virtual-gamepad.log','gyro-motion.log','input-host-cost.log'}
+MEMBERS={'native-lifecycle.log','native-detail.log','fan-lifecycle.log','fan-api.log','fan-host-fault.log','yeman-fan-host-runtime.log','sleep-facts.log','virtual-gamepad.log','gyro-motion.log','gyro-motion-samples.log','input-host-cost.log'}
 NODES={
  'LOG-SIM-01':{'title':'版本、机型身份和能力路由','events':{'machine-identity','host.identity','host.instance-started','startup.handshake','api.response','hc.initialization.failure','hc.fan-dispatch.begin','fan.capability.result'},'expectedSoftwareState':'Version tuple and actual model/route are observations; startup or HTTP200 does not prove writes.'},
  'LOG-SIM-02':{'title':'风扇完整控制周期与归还','events':{'api.response','api.request-failure','api.transport-failure','hc.fan-dispatch.begin','hc.fan-dispatch.callback-returned','hc.fan-dispatch.callback-failure','fan.capability.result','restore.success','restore.failure','restore.close-hc-success','restore.deferred-hc-timeout','restore.close-hc-already-retired','power.suspend-preclose-release-decision'},'expectedSoftwareState':'Intent, transport/callback return, cleanup settlement and physical response remain separate.'},
@@ -54,7 +54,7 @@ def audit_archive(path:Path,expected:dict|None=None):
    seen.add(name)
    if info.file_size>MAX_MEMBER or info.file_size>max(1,info.compress_size)*200:issue('MEMBER_READ_LIMIT',name);continue
    selected.append((name,base,info))
-  priority={name:i for i,name in enumerate(['YeManCC-export-manifest.txt','native-lifecycle.log','fan-host-fault.log','yeman-fan-host-runtime.log','fan-lifecycle.log','fan-api.log','sleep-facts.log','virtual-gamepad.log','input-host-cost.log','gyro-motion.log','native-detail.log'])}
+  priority={name:i for i,name in enumerate(['YeManCC-export-manifest.txt','native-lifecycle.log','fan-host-fault.log','yeman-fan-host-runtime.log','fan-lifecycle.log','fan-api.log','sleep-facts.log','virtual-gamepad.log','input-host-cost.log','gyro-motion.log','native-detail.log','gyro-motion-samples.log'])}
   selected.sort(key=lambda item:(priority.get(item[1],99),item[0]!=item[1],item[0]))
   for name,base,info in selected:
    if budgets['rows']>=MAX_ROWS:issue('TOTAL_ROW_LIMIT');break

@@ -1,11 +1,24 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';
-import os from 'node:os';
 import {GENERATED_NAMES,TRACE_SCHEMA,digest,fileHash,writeMotionGenerated,validateProcessProof,parseMotionLibraries,evaluateMotionTrace,traceRef,captureMotionProcess,beginMotionCompile,finishMotionCompile,requireMotionNativeProcess,expectedMotionTraceAuthority,verifyMotionTraceConfiguration} from '../../../lib/hc_motion_compiler_trace.mjs';
 import {verifyMotionOriginalCompilerTrace,verifyMotionOriginalCompilerTraceParallel} from './original-compiler-trace.mjs';
-const root=path.join(os.tmpdir(),'ymcc-motion-trace-contract-'+process.pid);let sequence=0;
+const workspace=path.resolve('G:/YeManCC-Work/Testing/YMCC/Workspace');
 const purpose='fabricated-schema-sample-not-compiler-execution';
+function ownedSample(t,kind){
+ const prefix='motion-trace-'+kind+'-',parent=fs.lstatSync(workspace,{bigint:true});
+ assert(parent.isDirectory()&&!parent.isSymbolicLink());
+ assert.equal(fs.realpathSync(workspace).toLowerCase(),workspace.toLowerCase());
+ const own=fs.mkdtempSync(path.join(workspace,prefix)),identity=fs.lstatSync(own,{bigint:true});
+ t.after(()=>{
+  const now=fs.lstatSync(workspace,{bigint:true}),stat=fs.lstatSync(own,{bigint:true});
+  assert(now.isDirectory()&&!now.isSymbolicLink()&&now.dev===parent.dev&&now.ino===parent.ino);
+  assert(stat.isDirectory()&&!stat.isSymbolicLink()&&stat.dev===identity.dev&&stat.ino===identity.ino);
+  assert.equal(path.dirname(own),workspace);assert(path.basename(own).startsWith(prefix));
+  assert.equal(fs.realpathSync(own).toLowerCase(),own.toLowerCase());fs.rmSync(own,{recursive:true,force:false});
+ });
+ return own;
+}
 function sample(t){
- const folder=path.join(root,'scratch','schema-'+process.pid+'-'+sequence++);fs.mkdirSync(folder,{recursive:true});t.after(()=>fs.rmSync(folder,{recursive:true,force:true}));
+ const folder=ownedSample(t,'schema');
  const repo=path.join(folder,'repo'),out=path.join(folder,'owned-r'),tool=path.join(folder,'tool');for(const p of [repo,out,tool,path.join(out,'Release')])fs.mkdirSync(p,{recursive:true});
  const source=path.join(repo,'main.cpp'),runner=path.join(repo,'producer.mjs'),header=path.join(tool,'known.h'),lib=path.join(tool,'known.lib'),unknown=path.join(tool,'unlisted.lib'),cl=path.join(tool,'cl.exe');
  for(const p of [source,runner,header,lib,unknown,cl])fs.writeFileSync(p,purpose+' '+path.basename(p));
@@ -35,7 +48,9 @@ const verify=f=>verifyMotionTraceConfiguration({repo:f.repo,out:f.out,report:f.r
 test('complete fabricated schema sample only checks guard structure and retained duplicate occurrences',t=>{const f=sample(t);assert.equal(f.purpose,purpose);const proof=verify(f);assert.equal(proof.headerOccurrences,4);assert.equal(proof.libraryOccurrences,3);assert.equal(proof.compileExit,0);assert.equal(proof.nativeExit,0);});
 const changes=[
  ['absent mandatory trace',f=>delete f.config.compilerTrace],['wrong trace digest',f=>f.config.compilerTrace.sha256='0'.repeat(64)],['old command without sourceDependencies',f=>f.config.compileCommand.splice(f.config.compileCommand.indexOf('/sourceDependencies'),2)],['old command without verbose lib',f=>f.config.compileCommand.pop()],['native binary changed',f=>fs.writeFileSync(f.exe,'tampered')],['source bytes changed',f=>fs.writeFileSync(f.source,'tampered')],['stored source copy changed',f=>fs.writeFileSync(path.join(f.out,f.expectedAuthority.sourceRows[0].saved),'tampered')],['loaded header changed',f=>fs.writeFileSync(f.header,'tampered')],['searched library changed',f=>fs.writeFileSync(f.lib,'tampered')],['compiler tool changed',f=>fs.writeFileSync(f.cl,'tampered')],['original compile log altered',f=>fs.writeFileSync(path.join(f.dir,'compile.log'),'incomplete')],['native stdout evidence altered',f=>fs.writeFileSync(path.join(f.dir,'run.log'),'incomplete')],['generated-at-creation authority absent',f=>delete f.report.generatedInputsAtCreation],
-];for(const [name,change]of changes)test('fabricated filesystem sample rejects '+name,t=>{const f=sample(t);change(f);assert.throws(()=>verify(f));});
+ ['hash-mismatched compiler stdout bytes',f=>fs.appendFileSync(path.join(f.out,f.compile.proof.stdout.path),'tampered'),/MOTION_TRACE_FILE_CHANGED/],
+ ['hash-mismatched compiler stderr bytes',f=>fs.appendFileSync(path.join(f.out,f.compile.proof.stderr.path),'tampered'),/MOTION_TRACE_FILE_CHANGED/],
+];for(const [name,change,expected]of changes)test('fabricated filesystem sample rejects '+name,t=>{const f=sample(t);change(f);assert.throws(()=>verify(f),expected);});
 function resign(f,relative,change){const file=path.join(f.out,relative),value=JSON.parse(fs.readFileSync(file,'utf8'));change(value);fs.writeFileSync(file,JSON.stringify(value));return traceRef(f.out,file);}
 for(const [name,change]of [
  ['invented observed header row',v=>v.headers.push({...v.headers[1]})],['reordered repeated includes',v=>v.headers.reverse()],['no actual libraries',v=>v.libraries=[]],['library declaration replaces actual trace',v=>v.libraries=[{path:'declared-only'}]],['wrong configuration',v=>v.configuration='Checked'],['authority traversal',v=>v.authority.path='../compiler-declaration.json'],['unexecuted compiler proof',v=>v.compilerProcess.path='missing.process.json'],
@@ -57,46 +72,83 @@ for(const [name,args,options,accepted]of [
  ['nonzero',['-e','process.exitCode=7'],{},false],
  ['timeout',['-e','setInterval(()=>{},1000)'],{timeout:30},false],
  ['output overflow',['-e','process.stdout.write("x".repeat(2048))'],{maxBuffer:32},false],
-])test('actual bounded Node process port '+name,t=>{const folder=path.join(root,'scratch','node-port-'+process.pid+'-'+sequence++);fs.mkdirSync(path.join(folder,'Release'),{recursive:true});t.after(()=>fs.rmSync(folder,{recursive:true,force:true}));const startedAt=Date.now(),raw=spawnSync(process.execPath,args,{windowsHide:true,timeout:180000,maxBuffer:32*1024*1024,...options});const saved=captureMotionProcess({out:folder,log:'Release/compile.log',command:process.execPath,argv:args,env:process.env,cwd:folder,raw,startedAt});if(accepted){assert.doesNotThrow(()=>validateProcessProof(saved.proof,[0]));assert.equal(fs.readFileSync(path.join(folder,saved.proof.stdout.path),'utf8'),'complete stdout');assert.equal(fs.readFileSync(path.join(folder,saved.proof.stderr.path),'utf8'),'complete stderr');}else assert.throws(()=>validateProcessProof(saved.proof,[0]));});
-test('actual Node missing executable keeps launch refusal distinct from semantic exit1',t=>{const folder=path.join(root,'scratch','node-missing-'+process.pid+'-'+sequence++);fs.mkdirSync(path.join(folder,'Release'),{recursive:true});t.after(()=>fs.rmSync(folder,{recursive:true,force:true}));const command=path.join(folder,'missing.exe'),startedAt=Date.now(),raw=spawnSync(command,[],{windowsHide:true,timeout:180000,maxBuffer:32*1024*1024}),saved=captureMotionProcess({out:folder,log:'Release/compile.log',command,argv:[],env:process.env,cwd:folder,raw,startedAt});assert(saved.proof.launchError);assert.equal(saved.proof.naturalExitObserved,false);assert.throws(()=>validateProcessProof(saved.proof,[0,1]));});
+])test('actual bounded Node process port '+name,t=>{const folder=ownedSample(t,'node-port');fs.mkdirSync(path.join(folder,'Release'));const startedAt=Date.now(),raw=spawnSync(process.execPath,args,{windowsHide:true,timeout:180000,maxBuffer:32*1024*1024,...options});const saved=captureMotionProcess({out:folder,log:'Release/compile.log',command:process.execPath,argv:args,env:process.env,cwd:folder,raw,startedAt});if(accepted){assert.doesNotThrow(()=>validateProcessProof(saved.proof,[0]));assert.equal(fs.readFileSync(path.join(folder,saved.proof.stdout.path),'utf8'),'complete stdout');assert.equal(fs.readFileSync(path.join(folder,saved.proof.stderr.path),'utf8'),'complete stderr');}else assert.throws(()=>validateProcessProof(saved.proof,[0]));});
+test('actual Node missing executable keeps launch refusal distinct from semantic exit1',t=>{const folder=ownedSample(t,'node-missing');fs.mkdirSync(path.join(folder,'Release'));const command=path.join(folder,'missing.exe'),startedAt=Date.now(),raw=spawnSync(command,[],{windowsHide:true,timeout:180000,maxBuffer:32*1024*1024}),saved=captureMotionProcess({out:folder,log:'Release/compile.log',command,argv:[],env:process.env,cwd:folder,raw,startedAt});assert(saved.proof.launchError);assert.equal(saved.proof.naturalExitObserved,false);assert.throws(()=>validateProcessProof(saved.proof,[0,1]));});
 test('library schema parser preserves complete GB18030 paths instead of hashing UTF8 replacement characters',()=>{const bytes=Buffer.concat([Buffer.from(' Searching C:\\tool\\'),Buffer.from([0xb2,0xe2,0xca,0xd4]),Buffer.from('.lib:\r\n')]);const parsed=parseMotionLibraries(bytes,Buffer.alloc(0));assert.equal(parsed.encodings.stdout,'gb18030');assert.equal(parsed.rows[0].path,path.resolve('C:\\tool\\测试.lib'));});
 test('schema native exit1 is acceptable only as natural execution; it alone is never semantic detection',t=>{const f=sample(t),proof={...f.native.proof,exitCode:1};assert.doesNotThrow(()=>validateProcessProof(proof,[0,1]));assert.throws(()=>validateProcessProof({...proof,timedOut:true},[0,1]));assert.throws(()=>validateProcessProof({...proof,signal:'SIGTERM'},[0,1]));assert.throws(()=>validateProcessProof({...proof,exitCode:3},[0,1]));});
 test('unknown linked library failure leaves a concrete path/hash receipt and cannot become a semantic fault',t=>{const f=sample(t),stdoutFile=path.join(f.out,f.compile.proof.stdout.path);fs.writeFileSync(stdoutFile,' Searching '+f.unknown+':\n');f.compile.proof.stdout=traceRef(f.out,stdoutFile);assert.throws(()=>finishMotionCompile({out:f.out,name:'Release',argv:f.argv,before:f.before,processRecord:f.compile,authority:f.session}),/MOTION_TRACE_UNKNOWN_ACTUAL_INPUT/);const failed=JSON.parse(fs.readFileSync(path.join(f.dir,'compiler-trace.failure.json')));assert.equal(failed.status,'FAIL');assert.equal(failed.evidence.file,f.unknown);assert.equal(failed.evidence.actualSha256,fileHash(f.unknown));});
-import {captureTraceAuthority} from '../../../lib/hc_motion_compiler_trace.mjs';
-import {motionConsumerInputs,REPO_ROOT} from './inputs.mjs';
+import {captureDeclaredTraceAuthority} from '../../../lib/hc_motion_compiler_trace.mjs';
+import {motionConsumerDeclarations,REPO_ROOT} from './inputs.mjs';
 import {MATRIX_TOOL_MANIFESTS,MOTION_TOOL_ADDITIONS,MOTION_MD_PREREQUISITES,validateMotionToolAdditions,matrixToolchainInputs} from './matrix-evidence.mjs';
 const readJson=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 function toolSchema(){return structuredClone(readJson(path.join(REPO_ROOT,MOTION_TOOL_ADDITIONS)));}
+// Keep the prior reviewed inventory and check the sole addition for OneX.
+const priorSourceInventorySha='3b22f73a921c00db20597a061e9c6094402574ba5fbe86efa282c9d8a64c5c59';
+const oneXDeviceInterface='capabilities/upstream/f2e58468/IDevice.cs';
+function assertSourceInventory(sources){
+ const paths=sources.map(file=>path.relative(REPO_ROOT,path.resolve(REPO_ROOT,file)).replaceAll('\\','/'));
+ assert(paths.every(file=>file&&!path.isAbsolute(file)&&!file.split('/').includes('..')));
+ assert.equal(new Set(paths.map(file=>file.toLowerCase())).size,paths.length);
+ assert(paths.includes(oneXDeviceInterface),'Motion declared-source inventory is missing the OneX device interface');
+ assert.equal(digest(JSON.stringify(paths.filter(file=>file!==oneXDeviceInterface).sort())),priorSourceInventorySha,'Motion declared-source inventory changed beyond the OneX device interface; review the exact path delta');
+}
 test('motion independent manifest declares exactly the approved8 real-byte prerequisites alongside all574 inherited tools',()=>{
  const spec=toolSchema(),contract=validateMotionToolAdditions(spec);assert.equal(contract.prerequisites,8);assert.equal(contract.observedLinkInputs,false);assert.equal(MATRIX_TOOL_MANIFESTS.length,6);assert.equal(MATRIX_TOOL_MANIFESTS[0],MOTION_TOOL_ADDITIONS);assert.equal(MATRIX_TOOL_MANIFESTS[1],spec.sharedManifest);assert.equal(fileHash(path.join(REPO_ROOT,spec.sharedManifest)),spec.sharedManifestSha256);
  for(const row of spec.additional){assert(fs.statSync(row.path).isFile());assert.equal(fileHash(row.path),row.sha256);assert(MOTION_MD_PREREQUISITES.some(approved=>approved.path===row.path&&approved.sha256===row.sha256));}
- const tools=matrixToolchainInputs(REPO_ROOT),inputs=motionConsumerInputs(REPO_ROOT);assert.equal(tools.files.length,582);assert.equal(inputs.tools.files.length,582);assert.equal(inputs.sources.length,144);assert.equal(inputs.artifacts.length,756);assert(inputs.sources.includes(MOTION_TOOL_ADDITIONS));assert(inputs.sources.includes('tools/lib/hc_motion_compiler_trace.mjs'));assert(inputs.sources.includes('tools/ymcc_sim/global/motion-consumer-signals/original-compiler-trace.mjs'));assert.equal(tools.declaredOnly,true);for(const row of tools.files)assert(inputs.artifacts.some(file=>path.resolve(file).toLowerCase()===path.resolve(row.path).toLowerCase()));
+ const tools=matrixToolchainInputs(REPO_ROOT),inputs=motionConsumerDeclarations(REPO_ROOT);assert.equal(tools.files.length,582);assert.deepEqual(inputs.tools,tools);assertSourceInventory(inputs.sources);assert.equal(inputs.artifacts.length,756);assert(inputs.sources.includes(MOTION_TOOL_ADDITIONS));assert(inputs.sources.includes('tools/lib/hc_motion_compiler_trace.mjs'));assert(inputs.sources.includes('tools/ymcc_sim/global/motion-consumer-signals/original-compiler-trace.mjs'));assert.equal(tools.declaredOnly,true);for(const row of tools.files)assert(inputs.artifacts.some(file=>path.resolve(file).toLowerCase()===path.resolve(row.path).toLowerCase()));
 });
 for(const [name,change] of [
  ['wrong schema',s=>s.schemaVersion=2],['missing parent hash',s=>delete s.sharedManifestSha256],['wrong parent hash',s=>s.sharedManifestSha256='0'.repeat(64)],['other parent',s=>s.sharedManifest=MATRIX_TOOL_MANIFESTS[2]],['additional files bypass',s=>s.files=[{...s.additional[0]}]],['one prerequisite removed',s=>s.additional.pop()],['ninth unapproved prerequisite',s=>s.additional.push({...s.additional[0],path:'C:/unapproved/ninth.lib'})],['duplicate member hides missing last',s=>s.additional[7]={...s.additional[0]}],['last member path replaced',s=>s.additional[7].path=s.additional[7].path.replace('ucrtd.lib','unapproved.lib')],['last member digest changed',s=>s.additional[7].sha256='0'.repeat(64)],['last member extra field',s=>s.additional[7].observed=true],['last member missing digest',s=>delete s.additional[7].sha256],['member directory grant',s=>s.additional[0].path=path.dirname(s.additional[0].path)],
 ])test('manifest schema sample rejects '+name,()=>{const s=toolSchema();change(s);assert.throws(()=>validateMotionToolAdditions(s));});
-function copiedManifests(t){const repo=path.join(root,'manifest-schema-'+process.pid+'-'+sequence++);for(const rel of MATRIX_TOOL_MANIFESTS){const dest=path.join(repo,rel);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(REPO_ROOT,rel),dest);}t.after(()=>fs.rmSync(repo,{recursive:true,force:true}));return repo;}
+function copiedManifests(t){
+ const repo=ownedSample(t,'manifest-schema');
+ for(const rel of MATRIX_TOOL_MANIFESTS){const dest=path.join(repo,rel);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.writeFileSync(dest,fs.readFileSync(path.join(REPO_ROOT,rel)),{flag:'wx'});}
+ return repo;
+}
 test('loader rejects an altered local manifest tail rather than silently authorizing it',t=>{const repo=copiedManifests(t),file=path.join(repo,MOTION_TOOL_ADDITIONS),spec=readJson(file);assert.equal(matrixToolchainInputs(repo).files.length,582);spec.additional[7].sha256='f'.repeat(64);fs.writeFileSync(file,JSON.stringify(spec));assert.throws(()=>matrixToolchainInputs(repo),/MATRIX_MOTION_TOOL_MEMBER/);});
 test('loader rejects altered shared parent bytes without changing any shared G manifest',t=>{const repo=copiedManifests(t),parent=path.join(repo,MATRIX_TOOL_MANIFESTS[1]);fs.appendFileSync(parent,'\n');assert.throws(()=>matrixToolchainInputs(repo),/MATRIX_TOOL_MANIFEST_HASH/);});
 test('loader rejects a changed inherited base-manifest tail',t=>{const repo=copiedManifests(t),file=path.join(repo,MATRIX_TOOL_MANIFESTS.at(-1)),spec=readJson(file);spec.files.at(-1).sha256='f'.repeat(64);fs.writeFileSync(file,JSON.stringify(spec));assert.throws(()=>matrixToolchainInputs(repo),/MATRIX_TOOL_MANIFEST_HASH/);});
-test('collector and independent expected-authority builder see the same582 tools and144 sources',t=>{
- // A schema-only generator boundary exercises actual source/pin capture. It
- // never compiles or runs the copied C++ bytes and creates no native acceptance.
- const out=path.join(root,'authority-schema-'+process.pid+'-'+sequence++);fs.mkdirSync(out,{recursive:true});t.after(()=>fs.rmSync(out,{recursive:true,force:true}));
- const frozen='D:/M26/2026-10-19T20-24-37-900Z-18c7a76e/cases/gyro.machine-motion-consumers/m/r',report=readJson(path.join(frozen,'source-bindings.json'));
- report.out=out;report.source={path:path.join(REPO_ROOT,'native/main.cpp'),sha256:fileHash(path.join(REPO_ROOT,'native/main.cpp'))};report.runner={path:path.join(REPO_ROOT,'tools/hc_model_motion_consumer_selftest.mjs'),sha256:fileHash(path.join(REPO_ROOT,'tools/hc_model_motion_consumer_selftest.mjs'))};
- for(const file of ['tools/lib/hc_motion_compiler_trace.mjs','tools/ymcc_sim/global/motion-consumer-signals/original-compiler-trace.mjs'])report.fixtures.push({path:path.join(REPO_ROOT,file),sha256:fileHash(path.join(REPO_ROOT,file))});
- // Refresh only this in-memory schema sample's fixture identities. The old
- // M26 receipt on disk remains unchanged and cannot approve current sources.
- report.fixtures=report.fixtures.map(row=>({...row,sha256:fileHash(row.path)}));
- report.generatedInputsAtCreation=[];for(const name of GENERATED_NAMES)writeMotionGenerated(out,name,fs.readFileSync(path.join(frozen,name)),report.generatedInputsAtCreation);report.generatedCppSha256=fileHash(path.join(out,'motion_consumer.cpp'));
- const inputs=motionConsumerInputs(REPO_ROOT),sourceInputs=inputs.sources.map(file=>({path:path.join(REPO_ROOT,file),sha256:fileHash(path.join(REPO_ROOT,file)),status:'OK'})),externalInputs=inputs.artifacts.map(file=>({path:file,sha256:fileHash(file),status:'OK'}));
- const actual=captureTraceAuthority(REPO_ROOT,out,report,report.generatedInputsAtCreation),expected=expectedMotionTraceAuthority({repo:REPO_ROOT,out,report,sourceInputs,externalInputs,toolInputs:inputs.tools.files});
- assert.equal(actual.authority.toolRows.length,582);assert.equal(expected.toolRows.length,582);assert.deepEqual(actual.authority.toolRows,expected.toolRows);assert.deepEqual(actual.authority.sourceRows,expected.sourceRows);assert.equal(actual.authority.sourceRows.filter(row=>row.role==='declared-source').length,144);assert.equal(actual.authority.sourceRows.filter(row=>row.role==='declared-historical-input').length,174);assert.equal(actual.authority.declarationIsNotObservedGraph,true);
- for(const row of MOTION_MD_PREREQUISITES){assert(actual.authority.toolRows.some(p=>p.path===row.path&&p.sha256===row.sha256));assert(expected.toolRows.some(p=>p.path===row.path&&p.sha256===row.sha256));}
+test('collector and independent expected-authority builder agree on source, history, tools and generated pins',t=>{
+ // The installed toolchain and full inventory are tested separately. Exercise the
+ // real collector and independent verifier with owned, non-executable bytes.
+ const own=ownedSample(t,'collector-schema');
+ const repo=path.join(own,'repo'),out=path.join(own,'evidence-schema');fs.mkdirSync(out);
+ const make=(relative,content=purpose+' '+relative)=>{
+  const file=path.join(own,relative);fs.mkdirSync(path.dirname(file),{recursive:true});
+  fs.writeFileSync(file,content,{flag:'wx'});return {path:file,sha256:digest(content)};
+ };
+ const source=make('repo/source.cpp'),runner=make('repo/producer.mjs'),catalog=make('repo/catalog.h');
+ const history=make('archived/main.before.cpp'),legacy=make('archived/catalog.before.h');
+ const toolInputs=[make('tool/include.h'),make('tool/runtime.lib')];
+ const manifests=MATRIX_TOOL_MANIFESTS.map(name=>make('repo/'+name));
+ const report={source,before:history,historical:history,capabilityBefore:history,legacyCatalog:legacy,legacyOracle:legacy,catalog,msi:catalog,runner,fixtures:[catalog],generatedInputsAtCreation:[]};
+ for(const name of GENERATED_NAMES)writeMotionGenerated(out,name,Buffer.from('// '+purpose+' '+name),report.generatedInputsAtCreation);
+ report.generatedCppSha256=report.generatedInputsAtCreation.find(row=>path.basename(row.path)==='motion_consumer.cpp').sha256;
+ const sourceInputs=[source,runner,catalog],externalInputs=[history,toolInputs[0],legacy,toolInputs[1]];
+ const inputs={sources:['source.cpp','producer.mjs','catalog.h'],artifacts:externalInputs.map(row=>row.path),tools:{files:toolInputs}};
+ const expected=expectedMotionTraceAuthority({repo,out,report,sourceInputs,externalInputs,toolInputs});
+ const generated=report.generatedInputsAtCreation;
+ const actual=captureDeclaredTraceAuthority(repo,out,report,generated,inputs);
+ assert.deepEqual(actual.authority.toolRows,expected.toolRows);
+ assert.deepEqual(actual.authority.sourceRows,expected.sourceRows);
+ assert.deepEqual(actual.authority.toolRows,toolInputs.map(row=>({...row,role:'declared-tool-prerequisite'})));
+ assert.deepEqual(actual.authority.sourceRows.map(({path,role})=>({path,role})),[
+  ...sourceInputs.map(row=>({path:row.path,role:'declared-source'})),
+  ...[history,legacy].map(row=>({path:row.path,role:'declared-historical-input'})),
+  ...generated.map(({path,role})=>({path,role})),
+ ]);
+ assert.deepEqual(actual.authority.manifestRows,manifests.map(row=>({...row,role:'tool-manifest'})));
+ assert.equal(actual.authority.declarationIsNotObservedGraph,true);assert.equal(actual.authority.osModuleLoadingProven,false);
+ for(const row of actual.authority.sourceRows)assert.equal(fileHash(path.join(out,row.saved)),row.sha256);
+ const declaration=path.join(out,actual.ref.path);
+ assert.equal(fileHash(declaration),actual.ref.sha256);assert.deepEqual(readJson(declaration),actual.authority);
+ assert.throws(()=>captureDeclaredTraceAuthority(repo,out,report,generated,{...inputs,sources:inputs.sources.slice(1)}),/MOTION_TRACE_UNDECLARED_PRODUCER_INPUT/);
+ assert.throws(()=>captureDeclaredTraceAuthority(repo,out,report,generated,{...inputs,tools:{files:[toolInputs[0],{...toolInputs[1],sha256:'0'.repeat(64)}]}}),/MOTION_TRACE_FILE_CHANGED/);
+ assert.throws(()=>captureDeclaredTraceAuthority(repo,out,report,generated.slice(1),inputs),/MOTION_TRACE_GENERATED_SET/);
+ assert.equal(fileHash(declaration),actual.ref.sha256);
 });
 test('parallel original trace preserves bounded budget and declares its actual worker source',async()=>{
  for(const timeoutMs of [undefined,0,-1,900001,NaN])await assert.rejects(verifyMotionOriginalCompilerTraceParallel({}, {timeoutMs}),/MOTION_TRACE_PARALLEL_BUDGET_REQUIRED/);
- const inputs=motionConsumerInputs(REPO_ROOT);assert(inputs.sources.includes('tools/ymcc_sim/global/motion-consumer-signals/original-compiler-trace-worker.mjs'));
- assert.equal(inputs.sources.length,144);assert.equal(new Set(inputs.sources).size,144);
+ const inputs=motionConsumerDeclarations(REPO_ROOT);assert(inputs.sources.includes('tools/ymcc_sim/global/motion-consumer-signals/original-compiler-trace-worker.mjs'));
+ assertSourceInventory(inputs.sources);
 });

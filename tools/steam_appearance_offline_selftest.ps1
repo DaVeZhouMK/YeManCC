@@ -1,10 +1,11 @@
-param([string]$Out='G:\YeManCC-Work\_scratch\steam-appearance-unlock-20261011\offline')
+﻿param([string]$Out='G:\YeManCC-Work\_scratch\steam-appearance-unlock-20261011\offline')
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 # No live process or listener lookups in an offline fixture.
 function Get-Process {param($Name,$Id) @()}
 function Get-NetTCPConnection {param($State,$LocalPort) @()}
 . (Join-Path $root 'PowerControl\steam-appearance.ps1') -Action Library
+function Get-AppearanceSteamSession {$null} # Explicit offline public Steam facts for this owned fixture.
 $liveFiles=@((Read-PresetManifest).files | ForEach-Object {$file=Join-Path (Join-Path $env:USERPROFILE 'homebrew\themes') $_.path;if(Test-Path -LiteralPath $file -PathType Leaf){@{path=$file;hash=(Get-ConfigHash $file)}}})
 $Out=[IO.Path]::GetFullPath($Out)
 New-Item -ItemType Directory -Path $Out -Force|Out-Null

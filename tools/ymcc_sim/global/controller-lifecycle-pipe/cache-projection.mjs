@@ -56,10 +56,24 @@ export function verifyWireProjectionReference({manifest,graph,caseDir,requirePin
  if(!enabled(manifest))return null;
  const root=path.resolve(caseDir,'lifecycle-pipe');
  need(graph?.id==='controller.lifecycle-native-managed-pipe'&&graph.status==='PASS'&&graph.passed===true,'BASELINE_NOT_PASS');
- const readPinned=(file,expected)=>{
+ const readPinned=(file,expected,compactReceipt=false)=>{
   need(inside(caseDir,file),'EVIDENCE_OUTSIDE_CASE');
   const pin=expected===undefined?requirePin(file):requirePin(file,expected);
-  const bytes=fs.readFileSync(file);need(bytes.length<=16*1024*1024&&sha(bytes)===pin.sha256,'EVIDENCE_CHANGED');return bytes;
+  const bytes=fs.readFileSync(file);need(sha(bytes)===pin.sha256,'EVIDENCE_CHANGED');
+  const limit=16*1024*1024;
+  if(!compactReceipt){need(bytes.length<=limit,'EVIDENCE_CHANGED');return bytes;}
+  // The two-profile aggregate repeats complete child bindings. Its pretty
+  // layout is not JSON payload. Verify all original bytes first, then remove
+  // only the four JSON whitespace bytes outside strings in this private copy.
+  let written=0,quoted=false,escaped=false;
+  for(let i=0;i<bytes.length;i++){
+   const value=bytes[i];
+   if(quoted){if(escaped)escaped=false;else if(value===92)escaped=true;else if(value===34)quoted=false;}
+   else if(value===34)quoted=true;
+   else if(value===32||value===9||value===10||value===13)continue;
+   need(written<limit,'RECEIPT_JSON_PAYLOAD_TOO_LARGE');bytes[written++]=value;
+  }
+  need(!quoted,'RECEIPT_JSON_UNTERMINATED_STRING');return bytes.subarray(0,written);
  };
  const proofPath=path.join(root,'source-projection.json');
  need(graph.sourceProjection?.path===proofPath&&typeof graph.sourceProjection.sha256==='string','PROOF_MISSING');
@@ -86,7 +100,7 @@ export function verifyWireProjectionReference({manifest,graph,caseDir,requirePin
   const directory=path.join(root,variant.dir),cpp=path.join(directory,'source/fixture.cpp');
   need(sha(readPinned(cpp))===sha(generated.cpp),'COMPILED_INPUT_MAPPING');
   const receiptFile=path.join(directory,'RESULT.json');need(variant.raw?.path===receiptFile,'RESULT_MAPPING');
-  const receipt=JSON.parse(readPinned(receiptFile,variant.raw.sha256).toString('utf8'));
+  const receipt=JSON.parse(readPinned(receiptFile,variant.raw.sha256,true).toString('utf8'));
   need(receipt.status==='PASS'&&receipt.passed===true&&receipt.sourceUnchanged===true&&receipt.expectedSemanticRejection===variant.expected,'RESULT_STATUS_MAPPING');
   need(receipt.sources?.some(row=>row.path===variant.source&&row.sha256===sha(source)),'RESULT_SOURCE_MAPPING');
   const bindings=JSON.parse(readPinned(path.join(directory,'source-bindings.json')).toString('utf8'));

@@ -15,6 +15,7 @@ const description = computed(() => {
   if (enabled.value && status.value?.reason === 'log-write-failed') return '本轮 Steam 恢复未确认，且诊断保存失败；请检查日志目录权限。';
   if (enabled.value && status.value?.phase === 'blocked') return status.value.steamRecovery?.associationVerified ? 'Steam 游戏关联保留，但输入恢复未确认；诊断已留在后台日志。' : '本轮 Steam 恢复未确认，诊断已留在后台日志；不会重复启动游戏。';
   if (enabled.value && status.value?.phase === 'game-wait') return '正在等待原游戏睡眠暂停释放，再恢复 Steam 输入归属；不会解除手动暂停。';
+  if (enabled.value && status.value?.phase === 'command-wait') return '正在等待 Steam 当前操作结束，随后继续核对原游戏状态。';
   if (enabled.value && status.value?.phase === 'session-wait') return '正在等待同一 Steam 会话重新就绪；原游戏未被替换，不会重开游戏或绕过账户校验。';
   if (enabled.value && status.value?.phase === 'settle-wait') return '正在等待 Steam 手柄重连并复查原游戏状态；短暂焦点匹配不会提前结束检查。';
   if (enabled.value && ['waiting', 'game-wait', 'session-wait', 'settle-wait', 'inspecting', 'confirm-wait', 'verifying'].includes(status.value?.phase || '')) return '正在后台核对原游戏与 Steam 输入归属，必要时返回原游戏并刷新大屏列表。';

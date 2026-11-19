@@ -1,3 +1,9 @@
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 // Exhaustive bytes, dynamic NUL-terminated needles and lvalue view lifetimes.
 #include <algorithm>
 #include <array>
@@ -53,5 +59,14 @@ int main(){try{
  for(const std::string replacement:std::vector<std::string>{"GPU Clock",std::string(256,'A'),std::string{},"Physical Memory Used"}){mutableName=replacement;for(const auto*needle:{"gpu clock","physical memory used","","a"})check((after==needle)==(before==needle));}
  for(unsigned count=0;count<=128;++count){std::array<unsigned char,128> bytes{};bytes.fill(0xff);for(unsigned i=0;i<count;++i)bytes[i]='A';if(count<128)bytes[count]=0;const auto a=monitorTextFieldView(bytes.data(),bytes.size()),b=baseline::monitorTextFieldView(bytes.data(),bytes.size());check(a==b);check(a.size()==count);}
  check(monitorTextFieldView(nullptr,128).empty());check(monitorTextFieldView("x",0).empty());
+#if defined(_WIN32)
+
+ {const auto originalChecks=checks;SYSTEM_INFO info{};GetSystemInfo(&info);const size_t page=info.dwPageSize;void* allocation=VirtualAlloc(nullptr,3*page,MEM_RESERVE|MEM_COMMIT,PAGE_NOACCESS);check(allocation!=nullptr);struct GuardRelease{void*p;~GuardRelease(){if(p)VirtualFree(p,0,MEM_RELEASE);}} release{allocation};auto* middle=static_cast<char*>(allocation)+page;DWORD oldProtection=0;check(VirtualProtect(middle,page,PAGE_READWRITE,&oldProtection)!=FALSE);
+ for(unsigned side=0;side<2;++side)for(size_t length=0;length<=81;++length)for(unsigned pattern=0;pattern<4;++pattern){char* raw=side?middle+page-length:middle;for(size_t i=0;i<length;++i)raw[i]=pattern==0?'A':pattern==1?'a':pattern==2?static_cast<char>((i*67+129)%256):'x';if(pattern==3&&length)raw[length-1]='b';const std::string actual(raw,length),oracle=folded(actual);const MonitorFoldedText view{std::string_view(raw,length)};const baseline::MonitorFoldedText old{std::string_view(raw,length)};
+ for(const auto&key:std::vector<std::string>{"","a","aa","ab","b","x","xx","xxx","GPU","power",std::string(15,'a'),std::string(16,'a'),std::string(17,'a'),std::string(1,char(255))}){const std::string expected(key.c_str());check(view.find(key.c_str())==oracle.find(expected));check(view.find(key.c_str())==old.find(key.c_str()));}}
+ for(size_t position:std::vector<size_t>{0,1,14,15,16,17,30,31,32,47,48})for(unsigned first=0;first<256;++first)for(unsigned second=0;second<256;++second){std::string actual(64,'!');actual[position]=static_cast<char>(first);actual[position+1]=static_cast<char>(second);std::string needle;needle+=static_cast<char>(first);needle+=static_cast<char>(second);const MonitorFoldedText value{std::string_view(actual)};check(value.find(needle.c_str())==folded(actual).find(std::string(needle.c_str())));}
+ check(VirtualFree(allocation,0,MEM_RELEASE)!=FALSE);release.p=nullptr;std::cout<<"ORIGINAL_BYTE_CHECKS "<<originalChecks<<" GUARD_AND_BLOCK_CHECKS "<<checks-originalChecks<<"\n";}
+
+#endif
  std::cout<<"FOLD_FIRST_BYTE_BYTE_AND_LIFETIME_PASS "<<checks<<" checks; no hardware or CPU timing\n";return 0;
 }catch(const char*e){std::cerr<<e<<" at "<<checks<<"\n";return 1;}}

@@ -1,5 +1,7 @@
 using System;
 using System.Text.Json;
+using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace YeManInputHost.Diagnostics;
@@ -9,9 +11,46 @@ namespace YeManInputHost.Diagnostics;
 internal static class HostTerminalCleanup
 {
     internal const int ReleaseFailedExitCode = 7;
+
+    // Only the process entry owns this deadline. No ordinary RELEASE, frame,
+    // source wait or retry can arm it. It stays armed through runtime exit
+    // handlers, which can themselves wait inside the SDK or a diagnostic sink.
+    internal sealed class ProcessExit
+    {
+        internal const int DeadlineMilliseconds = 10_000;
+        private readonly Timer _deadline = new(static _ =>
+        {
+            // Logging may be the blocked owner. Exit only this exact process;
+            // code7 is not a managed, endpoint or physical release receipt.
+            if (!TerminateProcess(GetCurrentProcess(), ReleaseFailedExitCode))
+                Environment.Exit(ReleaseFailedExitCode);
+        }, null, Timeout.Infinite, Timeout.Infinite);
+        private int _armed;
+
+        internal void Begin()
+        {
+            if (Interlocked.CompareExchange(ref _armed, 1, 0) == 0)
+                _deadline.Change(DeadlineMilliseconds, Timeout.Infinite);
+        }
+
+        internal void Complete(int exitCode)
+        {
+            Begin();
+            // Returning Main would leave retained SDK foreground threads alive.
+            Environment.Exit(exitCode);
+        }
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+    }
     internal delegate bool Release(out string detail);
     internal readonly record struct Attempt(bool Succeeded, string Detail);
-    internal readonly record struct LoopResult(int ExitCode, string Reason, Attempt? ShutdownRelease = null);
+    internal readonly record struct LoopResult(int ExitCode, string Reason,
+        Attempt? ShutdownRelease = null, string? DiagnosticDetail = null);
     internal sealed record Receipt(int ExitCode, int SourceExitCode, string Reason,
         bool ManagedReleaseComplete, string ResourceDisposition, int ReleaseAttempts,
         int DirectReleaseAttempts, bool Retried, string FirstDetail, string FinalDetail);
@@ -74,20 +113,30 @@ internal static class HostTerminalCleanup
         var root = document.RootElement;
         var ok = root.GetProperty("ok").GetBoolean();
         var detail = root.GetProperty("detail").GetString() ?? "";
-        return new LoopResult(0, "shutdown-ordered", new Attempt(ok, detail));
+        return new LoopResult(0, "shutdown-ordered", new Attempt(ok, detail), "shutdown-command");
     }
 
     internal static async Task<int> RunAsync(Func<Task<LoopResult>> run, Release release,
-        Action<string, string> log)
+        Action<string, string> log, Action? beginTerminal = null)
     {
         LoopResult outcome;
         try { outcome = await run().ConfigureAwait(false); }
         catch (Exception ex)
         {
-            Log(log, "fatal-exception", ex.GetType().Name + ": " + ex.Message);
-            outcome = new LoopResult(4, "fatal-exception");
+            outcome = new LoopResult(4, "fatal-exception",
+                DiagnosticDetail: ex.GetType().Name + ": " + ex.Message);
         }
+        // Lifecycle order: stop accepting commands -> settle the original owner
+        // once -> emit terminal diagnostics. A synchronous log sink may stall;
+        // it must never prevent release from starting. This does not prove a
+        // bounded logger/process exit or authorize a replacement target.
+        // The same deadline may already be armed by parent loss or by an
+        // accepted SHUTDOWN whose synchronous handler has not returned.
+        try { beginTerminal?.Invoke(); }
+        catch { /* Deadline setup failure must not skip the original settlement. */ }
         var receipt = Settle(outcome, release);
+        if (outcome.DiagnosticDetail is { } diagnostic)
+            Log(log, outcome.Reason, diagnostic);
         Log(log, receipt.ManagedReleaseComplete ? "terminal-cleanup-complete" : "terminal-cleanup-failed",
             JsonSerializer.Serialize(receipt));
         return receipt.ExitCode;

@@ -23,19 +23,18 @@ const readReceiptBytes = (file, budget) => {
   budget.used += bytes.length;
   return bytes;
 };
-const receiptHash = (file, budget) => crypto.createHash('sha256').update(readReceiptBytes(file, budget)).digest('hex');
-const readRun = (file, budget) => JSON.parse(readReceiptBytes(file, budget).toString('utf8').replace(/^\uFEFF/, ''));
+const receiptDigest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+const parseRun = bytes => JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''));
+const receiptIdentity = (file, bytes) => ({ path: path.resolve(file), sha256: receiptDigest(bytes), bytes: bytes.length });
+const unreadableReceipt = (file, error) => ({ path: path.resolve(file), sha256: null, bytes: null, readError: error.message });
 function receiptSnapshot(receiptFiles) {
   const budget = receiptBudget();
   return receiptFiles.map(file => {
-    try {
-      const bytes = readReceiptBytes(file, budget);
-      return { path: path.resolve(file), sha256: crypto.createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length };
-    } catch (error) { return { path: path.resolve(file), sha256: null, bytes: null, readError: error.message }; }
+    try { return receiptIdentity(file, readReceiptBytes(file, budget)); }
+    catch (error) { return unreadableReceipt(file, error); }
   });
 }
-function readValidRun(file, budget) {
-  const run = readRun(file, budget);
+function validateRun(run) {
   if (!run || run.tool !== 'ymcc_sim-global' || run.schemaVersion !== 1
     || !['run', 'log-check'].includes(run.mode) || !Array.isArray(run.results) || !run.results.length)
     throw Error('INVALID_RUN_CONTAINER');
@@ -47,6 +46,7 @@ function readValidRun(file, budget) {
   }
   return run;
 }
+const readValidRun = (file, budget) => validateRun(parseRun(readReceiptBytes(file, budget)));
 const priority = status => status === 'FAIL' ? 0
   : status === 'STALE_OR_INVALID_EVIDENCE' || status === 'NEEDS_REAUDIT' ? 1
   : status === 'BLOCKED' ? 2 : status === 'NOT_RUN' ? 3
@@ -131,13 +131,15 @@ function recordedInputSnapshot(receiptFiles, selectedIds, repoRoot) {
 // Host roots and explicit artifacts stay separate even when the case IDs match.
 // These are recorded execution bindings, not instructions to load or install.
 function executionBindings(audit) {
-  const latest = new Map(), beforeBudget = receiptBudget(), readBudget = receiptBudget(), afterBudget = receiptBudget();
+  const latest = new Map(), readBudget = receiptBudget(), afterBudget = receiptBudget();
   for (const source of audit.sourceRuns) {
     let run;
     try {
-      if (receiptHash(source.file, beforeBudget) !== source.sha256) throw Error('RECEIPT_DRIFT');
-      run = readRun(source.file, readBudget);
-      if (receiptHash(source.file, afterBudget) !== source.sha256) throw Error('RECEIPT_DRIFT');
+      // Bind the parsed bytes to the audited identity, then re-read from disk.
+      const bytes = readReceiptBytes(source.file, readBudget);
+      if (receiptDigest(bytes) !== source.sha256) throw Error('RECEIPT_DRIFT');
+      run = parseRun(bytes);
+      if (receiptDigest(readReceiptBytes(source.file, afterBudget)) !== source.sha256) throw Error('RECEIPT_DRIFT');
     } catch { throw Error('RECEIPT_CHANGED_DURING_PLANNING'); }
     for (const row of run.results) {
       const explicitArtifacts = Array.isArray(row.candidateArtifacts)
@@ -345,9 +347,17 @@ export function selectContributingReceipts(receiptFiles) {
   if (!Array.isArray(receiptFiles) || !receiptFiles.length || receiptFiles.length > 256
     || receiptFiles.some(file => typeof file !== 'string' || !file || /[\0\r\n]/.test(file)))
     throw Error('RECEIPT_SELECTION_INPUT_INVALID');
-  const before = receiptSnapshot(receiptFiles), budget = receiptBudget();
+  const before = [], budget = receiptBudget();
   const rows = receiptFiles.map((file, index) => {
-    try { return { file, index, run: readValidRun(file, budget), valid: true }; }
+    let bytes;
+    try {
+      bytes = readReceiptBytes(file, budget);
+      before.push(receiptIdentity(file, bytes));
+    } catch (error) {
+      before.push(unreadableReceipt(file, error));
+      return { file, index, run: null, valid: false };
+    }
+    try { return { file, index, run: validateRun(parseRun(bytes)), valid: true }; }
     catch { return { file, index, run: null, valid: false }; }
   });
   const latest = new Map();

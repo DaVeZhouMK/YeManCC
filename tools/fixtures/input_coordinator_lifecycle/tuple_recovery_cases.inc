@@ -5,6 +5,7 @@
 // Expected on the audited production code: stale admission mutates recovery
 // state; deferred work adopts a replacement epoch; already-owned Stop repeats;
 // an ordinary current-tuple reopen bypasses the central inspection/reservation.
+static constexpr const char* postFinalTupleVariants[]={"fresh-queued","fresh-deferred","read-only-queued","read-only-deferred","neutral-queued","neutral-deferred","idle"};
 static void protectedTupleRecoveryCases() {
     if (fixtureFullPipe) throw std::logic_error("tuple cases require native owned-event fixture");
 
@@ -89,9 +90,10 @@ static void protectedTupleRecoveryCases() {
         check(std::find(queued.begin(), queued.end(), json(reason)) != queued.end(),
             "exact epoch-bearing token is observed before actual dispatch");
     };
-    const auto prepare = [&](const std::string& name) {
+    const auto prepare = [&](const std::string& name, bool runtimeIncident = false) {
         cases.push_back({{"name", name}});
         seed();
+        fixtureRuntimeRecoveryOsEnabled = runtimeIncident;
         // Same existing source/process boundaries as switchRecoveryCases().
         g_machineIdentity.family = YmccFamily::AsusRogAllyX;
         g_machineIdentity.manufacturer = "ASUSTEK COMPUTER INC.";
@@ -121,6 +123,21 @@ static void protectedTupleRecoveryCases() {
         check(g_inputHostProcess && g_inputHostEpoch && !g_inputHostRunId.empty() &&
                 WaitForSingleObject(g_inputHostProcess, 0) == WAIT_TIMEOUT,
             "actual Host tuple is bound to a live unsignaled fixture-owned event");
+        if (runtimeIncident) {
+            // Controlled physical-reader input, matching the existing return
+            // cases: this selected slot is still the admitted physical source.
+            // Without it the original XInput-plane gate correctly stays UNKNOWN
+            // and never dispatches the target-return proof under test.
+            g_xinputPhysicalSourceLocked = true;
+            // Native event ACKs do not execute a real managed PREPARE wire.
+            // Establish this explicit controlled old-target input through the
+            // unchanged production write-ahead hook and real private Session.
+            // This tests runtime settlement, not managed-wire reservation.
+            std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+            check(inputHostTargetReturnBeforeCreateLocked("PREPARE_TARGET", g_inputHostSequence + 1),
+                "runtime fixture establishes its old target through the actual write-ahead hook");
+            cases.back()["oldTargetInput"] = "native owned event; real production reservation/Session; no managed-wire claim";
+        }
         cases.back()["lifecycleVersion"] = ymcc::VirtualStartProtection::lifecycleVersion;
     };
     const auto replaceHost = [&]() {
@@ -168,6 +185,62 @@ static void protectedTupleRecoveryCases() {
         if (g_inputHostProcess) throw std::logic_error("tuple fixture retained owned event at teardown");
         fixtureFrameFirstAck = false; fixtureXinputSourceLive = false;
     };
+
+
+    // Real final -> captured real report -> existing queued/deferred consumer.
+    // Reads and intentional neutral output cannot retire an unresolved tuple.
+    for(const char* raw:postFinalTupleVariants){
+        const std::string variant=raw;const bool idle=variant=="idle";
+        const bool deferred=variant.find("deferred")!=std::string::npos;
+        const bool accepted=variant.rfind("fresh-",0)==0,neutral=variant.rfind("neutral-",0)==0;
+        prepare("post-final-tuple/"+variant);
+        const auto candidate=beginInspection();startProtectionClock+=candidate.verificationRemainingMs;readCurrent();
+        {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchVerificationMaintenanceLocked();}
+        check(g_virtualStartProtection.view(startProtectionClock).phase=="success" &&
+            !g_virtualStartProtection.view(startProtectionClock).locked,"steady tuple starts after actual final success");
+        const auto epoch=g_inputHostEpoch;const auto run=g_inputHostRunId;const auto host=g_inputHostProcess;
+        const auto originalProtection=protectionView();const auto beforeAccepted=g_inputHostTupleAccepted.acceptedSerial;
+        if(idle){
+            const auto budget=budgetView();const auto stops=stopCount();auto sample=readCurrent();sample.pad.wButtons=XINPUT_GAMEPAD_A;
+            const auto ack=fullPipeSubmitSource(sample,true,false);
+            check(ack.value("hostSubmission","")=="frame-accepted" &&
+                g_inputHostTupleAccepted.acceptedSerial==beforeAccepted && budgetView()==budget && stopCount()==stops &&
+                !g_inputHostRecoveryPending.load() && !g_inputHostLifecycleWorkRequested.load(),
+                "healthy ordinary ACK without unresolved tuple does not start evidence tracking work or recovery");
+            finishCase();continue;
+        }
+        if(deferred)g_inputHostRecoveryLastStartTick=GetTickCount64();queueTuple(epoch);
+        if(deferred){drain();check(g_inputHostRecoveryPending.load()&&!g_inputHostTupleHealPending.load(),
+            "actual post-final token is deferred without spending or Stop");}
+        auto sample=readCurrent();
+        if(accepted || neutral){
+            sample.pad.wButtons=accepted?XINPUT_GAMEPAD_A:0;
+            const auto reply=fullPipeSubmitSource(sample,true,neutral);
+            check(reply.value("hostSubmission","")=="frame-accepted","post-final test observes an actual Host accepted frame");
+            check(accepted?g_inputHostTupleAccepted.acceptedSerial>beforeAccepted:
+                    g_inputHostTupleAccepted.acceptedSerial==beforeAccepted,
+                accepted?"post-final proof comes from an actual current-source accepted report":
+                    "intentional neutral ACK cannot supply current-source tuple resolution proof");
+        }else check(g_inputHostTupleAccepted.acceptedSerial==beforeAccepted,
+            "fresh source read without Host acceptance does not resolve a tuple fault");
+        g_inputHostRecoveryLastStartTick=0;g_inputHostRecoveryDeferredUntil=0;
+        const auto budget=budgetView();const auto stops=stopCount(),creates=createCount();inputHostRecoveryMaintenanceTick();drain();
+        if(accepted){
+            check(stopCount()==stops && createCount()==creates && g_inputHostProcess==host &&
+                g_inputHostEpoch==epoch && g_inputHostRunId==run && g_inputHostPrepared && g_inputHostNeutralized,
+                "fresh post-final acceptance cancels only unspent repair without stopping the healthy target");
+            check(budgetView()==budget && !g_inputHostRecoveryPending.load() && !g_inputHostTupleHealPending.load(),
+                "resolved post-final tuple spends no shared budget and leaves no pending repair");
+            const auto resolved=[&](){return std::count_if(fixtureEvents.begin(),fixtureEvents.end(),[](const auto& e){return
+                e.value("event","")=="input-host-tuple-recovery" && e["detail"].value("stage","")=="resolved";});};
+            check(resolved()==1,"actual tuple consumer logs one exact unspent resolution edge");
+            inputHostRecoveryMaintenanceTick();drain();
+            check(stopCount()==stops && budgetView()==budget && protectionView()==originalProtection && resolved()==1,
+                "resolved tuple cannot reappear rewrite the completed final or repeat its edge log");
+        }else check(stopCount()==stops+1 && g_inputHostRecoveryEpisodeAttempts.load()==budget["episode"].get<int>()+1,
+                "read-only or neutral ACK preserves the original bounded repair and its one charge");
+        finishCase();
+    }
 
     // 1. Staleness must be checked before budget, cooldown, or power branches.
     // Two real Starts supply E_old/E_new; no fabricated epoch counter is used.
@@ -389,4 +462,358 @@ static void protectedTupleRecoveryCases() {
         finishCase();
     }
 
+    // The original tuple consumer also owns these bounded post-final transport
+    // cases. No second runner, recovery model, clock or direct settlement stub.
+    struct RuntimeParameter { const char* command; const char* condition; bool hostFirst; };
+    const std::vector<RuntimeParameter> runtimeParameters = {
+        {"HIDHIDE_QUERY_STATE","return-order",true}, {"HIDHIDE_QUERY_STATE","return-order",false},
+        {"SUBMIT_FRAME","return-order",true}, {"SUBMIT_FRAME","return-order",false},
+        {"SUBMIT_FRAME","target-present",true}, {"SUBMIT_FRAME","target-unknown",true},
+        {"SUBMIT_FRAME","commit-denied",true},
+        {"SUBMIT_FRAME","cancel-off",true}, {"SUBMIT_FRAME","cancel-exit",true},
+        {"SUBMIT_FRAME","cancel-power",true}, {"SUBMIT_FRAME","cancel-intent",true},
+        {"SUBMIT_FRAME","cancel-new-request",true},
+        {"SUBMIT_FRAME","episode-exhausted",true}, {"SUBMIT_FRAME","rolling-exhausted",true},
+        {"SUBMIT_FRAME","cooldown",true}, {"HIDHIDE_QUERY_STATE","nonretryable",true},
+        {"HIDHIDE_QUERY_STATE","verification-period",true}, {"SUBMIT_FRAME","recording-pause",true},
+        {"SUBMIT_FRAME","quiescence-power",true}, {"SUBMIT_FRAME","quiescence-intent",true}
+    };
+    const auto runtimeView = []() {
+        const auto& r=ymcc::inputHost::runtimeRecovery::state;
+        return json{{"serial",r.serial},{"oldRequestId",r.requestId},{"hostEpoch",r.hostEpoch},
+            {"runId",r.runId},{"hostInstanceId",r.hostInstanceId},{"persona",r.persona},
+            {"intentRevision",r.intentRevision},{"power",r.power},{"sequence",r.sequence},
+            {"command",r.command},{"error",r.error},{"pending",r.pending},{"queued",r.queued},
+            {"stopInvoked",r.stopInvoked},{"spent",r.spent},{"recoveryRequestId",r.recoveryRequestId},
+            {"atomicPending",g_inputHostRuntimeRecoveryPending.load()}};
+    };
+    const auto runtimeQueued = [&]() {
+        const auto queue=queueView();unsigned count=0;
+        for(const auto& reason:queue)if(reason.get<std::string>().rfind("runtime-transport-recovery:",0)==0)++count;
+        return count;
+    };
+    const auto oldFinals = [](std::uint64_t ticket) {
+        json result=json::array();
+        for(const auto& event:fixtureEvents)if(event.value("event","")=="input-host-switch-verification" &&
+            event["detail"].value("stage","")=="final" && event["detail"].value("requestId",0ULL)==ticket)
+            result.push_back(event);
+        return result;
+    };
+    const auto loadRuntimeDisk = []() {
+        return ymcc::targetReturn::load(fixtureTargetReturnRecordPath(),inputHostTargetReturnMachineBinding());
+    };
+    const auto runtimeBusinessSnapshot = []() {
+        std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+        const auto& ledger=ymcc::inputHost::targetReturnRuntime::state;
+        return json{{"hostInstanceId",g_inputHostHostInstanceId},{"runId",g_inputHostRunId},{"epoch",g_inputHostEpoch},
+            {"hostPresent",g_inputHostProcess!=nullptr},{"primaryThread",g_inputHostPrimaryThread!=nullptr},
+            {"hello",g_inputHostHello},{"prepared",g_inputHostPrepared},{"active",g_inputHostActive},
+            {"journalActive",g_hidHideVisibilityJournal.active},{"quarantined",g_inputHostReleaseQuarantined},
+            {"pipeRetirement",inputHostPipeRetirementProvenLocked()},
+            {"sessionReady",ledger.session && ledger.session->ready()},{"targets",ledger.targets.size()},
+            {"proven",ledger.proven.size()},{"physicals",ledger.physicals.size()},
+            {"hidHideRestoreResult",g_startEntrySeam.hidHideRestoreResult}};
+    };
+    const auto runtimeTick = [&]() { inputHostRecoveryMaintenanceTick(); drain(); };
+    const auto revokeRecoveryDemand = []() {
+        std::lock_guard<std::mutex> personaLock(g_inputHostPersonaMx);
+        g_inputHostRecoveryIntent.invalidate();
+    };
+    // Simulate one already-scheduled production observation after exact return.
+    // Do not roll nextProbe, request/cooldown deadlines, owner state or quotas.
+    const auto observeNextRuntimeProbe = [&]() {
+        const auto& r=ymcc::inputHost::runtimeRecovery::state;
+        if(!r.pending || r.queued || r.spent)return;
+        const auto now=GetTickCount64();
+        if(!r.nextProbe || r.nextProbe<=now)return;
+        const auto delta=r.nextProbe-now;
+        if(delta>1000)throw std::logic_error("runtime-fixture-probe-outside-original-cadence");
+        cases.back()["nextScheduledProbe"]={{"beforeTick",now},{"originalNextProbe",r.nextProbe},
+            {"advanceMs",delta},{"oldRequestId",r.requestId},{"recoveryRequestBefore",r.recoveryRequestId}};
+        fixturePowerClockOffset+=delta;startProtectionClock+=delta;
+        // Existing verified source reader supplies the sample at the new time;
+        // this does not create a frame receipt, health credit or device proof.
+        readCurrent();runtimeTick();
+        cases.back()["nextScheduledProbe"]["pendingAfter"]=r.pending;
+        cases.back()["nextScheduledProbe"]["recoveryRequestAfter"]=r.recoveryRequestId;
+    };
+    for(const auto& parameter:runtimeParameters) {
+        const std::string condition=parameter.condition;
+        prepare(std::string("runtime-after-final/")+parameter.command+"/"+condition+
+            (condition=="return-order"?(parameter.hostFirst?"/host-first":"/target-first"):""),true);
+        const auto candidate=beginInspection();
+        if(condition!="verification-period") {
+            startProtectionClock+=candidate.verificationRemainingMs;readCurrent();
+            {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostSwitchVerificationMaintenanceLocked();}
+            check(g_virtualStartProtection.view(startProtectionClock).phase=="success" &&
+                !g_virtualStartProtection.view(startProtectionClock).locked,
+                "runtime input starts only after the original actual successful final");
+            startProtectionClock+=480001;fixturePowerClockOffset+=480001;readCurrent();
+        }
+        const auto oldTicket=candidate.requestId,oldEpoch=g_inputHostEpoch,oldPower=currentPowerGeneration();
+        const auto oldRun=g_inputHostRunId,oldInstance=g_inputHostHostInstanceId,oldPersona=g_inputHostBoundPersona;
+        const auto oldIntent=g_inputHostVirtualIntentRevision.load();const auto finalBefore=oldFinals(oldTicket);
+        check(condition=="verification-period"?finalBefore.empty():finalBefore.size()==1,
+            "original player final scope is observed before the runtime error");
+        HANDLE observation=nullptr;
+        if(!DuplicateHandle(GetCurrentProcess(),g_inputHostProcess,GetCurrentProcess(),&observation,0,FALSE,DUPLICATE_SAME_ACCESS))
+            throw std::runtime_error("runtime-owned-event-observer");
+        ymcc::targetReturn::fileDetail::Handle oldHost(observation),denyReplace(INVALID_HANDLE_VALUE);
+        fixtureRuntimeRecoveryOldHost=observation;
+        fixtureRuntimeRecoveryOldOwner=inputHostTargetReturnCaptureOwner(g_inputHostProcess);
+        check(fixtureRuntimeRecoveryOldOwner.has_value(),"runtime old Host has the exact controlled PID and birth identity");
+        const auto running=loadRuntimeDisk();std::vector<ymcc::targetReturn::Origin> oldOrigins;
+        if(running.record)for(const auto& duty:running.record->obligations)
+            if(duty.origin.runId==oldRun && duty.origin.epoch==oldEpoch)oldOrigins.push_back(duty.origin);
+        check(running.state==ymcc::targetReturn::LoadState::Valid && !oldOrigins.empty(),
+            "runtime fault begins with a real persisted nonempty exact old-target obligation");
+        if(oldOrigins.empty())throw std::runtime_error("runtime-old-target-reservation-missing");
+        const auto oldDutyRemains = [&]() {
+            const auto disk=loadRuntimeDisk();
+            if(disk.state!=ymcc::targetReturn::LoadState::Valid || !disk.record)return true;
+            for(const auto& origin:oldOrigins)if(std::any_of(disk.record->obligations.begin(),disk.record->obligations.end(),
+                [&](const auto& duty){return ymcc::targetReturn::sameOrigin(duty.origin,origin);}))return true;
+            return false;
+        };
+        const auto runtimeSettled = [&]() {
+            std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+            return inputHostTargetReturnRuntimeSettledLocked(oldRun,oldEpoch);
+        };
+        if(condition=="commit-denied") {
+            denyReplace.value=CreateFileW(fixtureTargetReturnRecordPath().c_str(),GENERIC_READ,FILE_SHARE_READ,
+                nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+            if(!denyReplace.valid())throw std::runtime_error("runtime-private-commit-denial");
+        }
+        const auto oldEpochCounter=g_inputHostEpochCounter.load();
+        const auto terminalSerialBefore=ymcc::inputHost::recoveryFallback::nextSerial;
+        const auto now=GetTickCount64();
+        if(condition=="episode-exhausted")g_inputHostRecoveryEpisodeAttempts=kRecoveryEpisodeMax;
+        if(condition=="rolling-exhausted"){g_inputHostRecoveryRolling[0]=now;g_inputHostRecoveryRolling[1]=now;}
+        if(condition=="cooldown")g_inputHostRecoveryLastStartTick=now;
+        const auto budgetBefore=budgetView();
+        const bool sharedTerminalCase=std::strcmp(parameter.command,"SUBMIT_FRAME")==0 &&
+            (condition=="episode-exhausted" || condition=="rolling-exhausted");
+        auto expectedBudget=budgetBefore;
+        if(sharedTerminalCase){expectedBudget["terminal"]=true;expectedBudget["fallbackState"]=3;}
+        g_startEntrySeam.hostExitWait=WAIT_TIMEOUT;fixtureRuntimeRecoveryCensus="unknown";
+        fixtureFrameFirstAck=false;g_startEntrySeam.pipeFailCommand=parameter.command;
+        fixtureStartupTransportError=condition=="nonretryable"?ERROR_ACCESS_DENIED:ERROR_SEM_TIMEOUT;
+        fixtureRuntimeRecoveryFaultEnabled=true;fixtureRuntimeRecoveryFaultConsumed=false;
+        if(std::strcmp(parameter.command,"HIDHIDE_QUERY_STATE")==0) {
+            std::lock_guard<InputHostMutex> lock(g_inputHostMx);HidHidePeriodicState queried;
+            check(!hidHidePeriodicStateViaPipe(queried),"actual periodic Host query receives the controlled OS transport failure");
+        } else {
+            auto sample=readCurrent();sample.pad.wButtons=XINPUT_GAMEPAD_A;
+            const auto receipt=fullPipeSubmitSource(sample,true,false);
+            check(receipt.value("hostSubmission","")!="frame-accepted","actual frame consumer receives the controlled OS transport failure");
+        }
+        check(fixtureRuntimeRecoveryFaultConsumed && fixtureRuntimeRecoveryFaultCalls==1 && g_inputHostTransportFault,
+            "one real request classifier consumes exactly one injected transport OS error");
+        fixtureRuntimeRecoveryFaultEnabled=false;g_startEntrySeam.pipeFailCommand.clear();
+        fixtureStartupTransportError=ERROR_SUCCESS;fixtureFrameFirstAck=true;
+        if(condition=="nonretryable" || condition=="verification-period") {
+            check(!g_inputHostRuntimeRecoveryPending.load() && !ymcc::inputHost::runtimeRecovery::state.pending &&
+                !ymcc::inputHost::runtimeRecovery::state.serial && !runtimeQueued() && stopCount()==0 &&
+                createCount()==1 && budgetView()==budgetBefore,
+                "nonretryable error or unfinished player verification cannot offer a runtime incident");
+        } else {
+            auto& runtime=ymcc::inputHost::runtimeRecovery::state;const auto serial=runtime.serial;
+            check(serial && runtime.pending && runtime.requestId==oldTicket && runtime.hostEpoch==oldEpoch &&
+                runtime.runId==oldRun && runtime.hostInstanceId==oldInstance && runtime.persona==oldPersona &&
+                runtime.intentRevision==oldIntent && runtime.power==oldPower && runtime.command==parameter.command &&
+                runtime.error==ERROR_SEM_TIMEOUT && !runtime.recoveryRequestId,
+                "actual runtime offer captures the complete faulted old owner without reusing its final ticket");
+            const auto terminalFactSnapshot=[&]() {
+                std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+                const auto& f=ymcc::inputHost::recoveryFallback::request;
+                return json{{"serial",f.serial},{"nextSerial",ymcc::inputHost::recoveryFallback::nextSerial},
+                    {"request",f.request},{"power",f.power},{"demand",f.demand},{"persona",f.persona},
+                    {"epoch",f.epoch},{"epochCounter",f.epochCounter},{"run",f.run},{"instance",f.instance},
+                    {"stopInvoked",f.stopInvoked},{"deadline",f.deadline},{"stoppedAt",f.stoppedAt}};
+            };
+            const auto terminalStoppedForOldOwner=[&]() {
+                std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+                const auto& f=ymcc::inputHost::recoveryFallback::request;
+                return f.serial==terminalSerialBefore+1 && f.serial &&
+                    ymcc::inputHost::recoveryFallback::nextSerial==f.serial &&
+                    f.request==oldTicket && f.power==oldPower && f.demand==runtime.demandRevision &&
+                    f.persona==oldPersona && f.epoch==oldEpoch && f.epochCounter==oldEpochCounter &&
+                    g_inputHostEpochCounter.load()==oldEpochCounter && f.run==oldRun &&
+                    f.instance==oldInstance && f.stopInvoked && runtime.serial==serial &&
+                    !runtime.pending && !runtime.queued && runtime.spent && !runtime.stopInvoked &&
+                    !g_inputHostRuntimeRecoveryPending.load();
+            };
+            cases.back()["offeredRuntime"]=runtimeView();
+            runtimeTick();
+            const auto terminalWaiting=sharedTerminalCase?terminalFactSnapshot():json();
+            check(stopCount()==1 && traced(sharedTerminalCase?"stop:recovery-exhausted-physical-fallback":
+                "stop:runtime-transport-recovery") && createCount()==1 &&
+                (sharedTerminalCase?terminalStoppedForOldOwner():(runtime.stopInvoked && !runtime.spent)) &&
+                !runtime.recoveryRequestId && budgetView()==expectedBudget,
+                "original serialized owner performs exactly one uncharged runtime safety Stop");
+            check(g_inputHostReleaseQuarantined && g_inputHostPrepared && g_inputHostHello &&
+                g_inputHostEpoch==oldEpoch && g_inputHostRunId==oldRun && oldDutyRemains() && !runtimeSettled(),
+                "unknown return retains prepared hello and the exact old persistent duty before Clear");
+            const auto waiting=runtimeView();const auto pnpBefore=fixtureRuntimeRecoveryCensusCalls;
+            const auto writerBefore=fixtureRuntimeRecoveryWriterCalls;
+            for(unsigned duplicate=0;duplicate<32;++duplicate) {
+                {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+                    inputHostRuntimeRecoveryOfferLocked(parameter.command,runtime.sequence,ERROR_SEM_TIMEOUT);
+                    inputHostRuntimeRecoveryMaintenanceLocked();}
+                inputHostPerformRuntimeRecovery(serial);
+            }
+            check(runtimeView()==waiting && stopCount()==1 && createCount()==1 && budgetView()==expectedBudget &&
+                (!sharedTerminalCase || (terminalStoppedForOldOwner() && terminalFactSnapshot()==terminalWaiting)) &&
+                fixtureRuntimeRecoveryCensusCalls==pnpBefore && fixtureRuntimeRecoveryWriterCalls==writerBefore,
+                "duplicate fault and maintenance cannot repeat Stop proof IO ticket or shared charge");
+            const auto cancel = condition.rfind("cancel-",0)==0;
+            if(cancel) {
+                if(condition=="cancel-off" || condition=="cancel-new-request") {
+                    reg_fs();const auto before=json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE));
+                    check(writeTarget(before,targetDocument(condition=="cancel-off"?"disabled":"elite",2)).value("ok",false),
+                        "runtime cancellation enters through the original player settings admission");
+                    inputCaptureRefreshRealStickSettings(true);
+                }
+                if(condition=="cancel-exit")g_exitRequested=true;
+                if(condition=="cancel-power")g_powerGeneration=oldPower+1;
+                if(condition=="cancel-intent"){g_inputHostVirtualIntentRevision.fetch_add(1);revokeRecoveryDemand();}
+                const auto playerBefore=protectionView();
+                {std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostRuntimeRecoveryMaintenanceLocked();}
+                inputHostPerformRuntimeRecovery(serial);inputHostConsumeRuntimeFaultCleanup(oldEpoch);
+                check(!runtime.pending && !g_inputHostRuntimeRecoveryPending.load() && !runtime.recoveryRequestId &&
+                    stopCount()==1 && createCount()==1 && budgetView()==budgetBefore && protectionView()==playerBefore,
+                    "OFF exit power intent or newer player request retires only the old runtime serial");
+            } else {
+                if(!parameter.hostFirst) {
+                    fixtureRuntimeRecoveryCensus="absent";fullPipeQuarantineProbe();runtimeTick();
+                    check(createCount()==1 && !runtime.recoveryRequestId && oldDutyRemains() &&
+                        WaitForSingleObject(observation,0)==WAIT_TIMEOUT && budgetView()==budgetBefore,
+                        "complete target absence cannot substitute for the still-live exact old Host");
+                }
+                check(SetEvent(observation)!=FALSE,"only the exact fixture-owned old Host event is signaled exited");
+                g_startEntrySeam.hostExitWait=WAIT_OBJECT_0;
+                if(parameter.hostFirst) {
+                    const auto restoreCallsBeforeUnprovedTarget=fullPipeRestoreCount();
+                    fixtureRuntimeRecoveryCensus=condition=="target-present"?"present":"unknown";
+                    fullPipeQuarantineProbe();
+                    check(fullPipeRestoreCount()==restoreCallsBeforeUnprovedTarget,
+                        "present or unknown old target forbids physical restoration before complete absence proof");
+                    check(createCount()==1 && !runtime.recoveryRequestId && oldDutyRemains() &&
+                        !g_inputHostProcess && g_inputHostPrepared && g_inputHostHello &&
+                        g_inputHostEpoch==oldEpoch && g_inputHostRunId==oldRun,
+                        "dead exact Host with present or unknown PnP retains the real prepared hello quarantine tuple");
+                }
+                if(condition=="recording-pause")g_shortcutRecordingActive=true;
+                const bool quiescenceBoundary=condition=="quiescence-power" || condition=="quiescence-intent";
+                if(quiescenceBoundary) {
+                    fixtureRuntimeRecoveryWriterPathCallback=[&]() {
+                        if(condition=="quiescence-power")g_powerGeneration=oldPower+1;
+                        else {g_inputHostVirtualIntentRevision.fetch_add(1);revokeRecoveryDemand();}
+                    };
+                }
+                fixtureRuntimeRecoveryCensus="absent";readCurrent();fullPipeQuarantineProbe();
+                cases.back()["runtimeReturnBusinessSnapshot"]=runtimeBusinessSnapshot();
+                if(quiescenceBoundary) {
+                    check(fixtureRuntimeRecoveryWriterPathCallbackCalls==1 && !fixtureRuntimeRecoveryWriterPathCallback &&
+                        (condition=="quiescence-power"?currentPowerGeneration()==oldPower+1:
+                            g_inputHostVirtualIntentRevision.load()==oldIntent+1),
+                        "last real quiescence writer-path IO fires the armed post-commit power or intent change exactly once");
+                    check(!oldDutyRemains() && runtimeSettled(),
+                        "late quiescence invalidation preserves the already committed exact old-origin settlement");
+                    check(!g_inputHostProcess && g_inputHostReleaseQuarantined && g_inputHostPrepared && g_inputHostHello &&
+                        g_inputHostEpoch==oldEpoch && g_inputHostRunId==oldRun && g_inputHostHostInstanceId==oldInstance &&
+                        !runtime.recoveryRequestId && createCount()==1 && stopCount()==1 && budgetView()==budgetBefore,
+                        "post-commit quiescence IO invalidation cannot return success Clear the retained tuple or create a new ticket Host or charge");
+                    runtimeTick();inputHostPerformRuntimeRecovery(serial);
+                    check(!runtime.pending && !g_inputHostRuntimeRecoveryPending.load() && !runtime.recoveryRequestId &&
+                        g_inputHostEpoch==oldEpoch && g_inputHostRunId==oldRun && g_inputHostHostInstanceId==oldInstance &&
+                        createCount()==1 && stopCount()==1 && budgetView()==budgetBefore &&
+                        fixtureRuntimeRecoveryWriterPathCallbackCalls==1,
+                        "original runtime maintenance retires the late power or intent serial without reviving its settled old request");
+                } else {
+                if(condition=="commit-denied") {
+                    bool proven=false;{std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+                        const auto& ledger=ymcc::inputHost::targetReturnRuntime::state;
+                        for(const auto& origin:oldOrigins)proven=proven || std::any_of(ledger.proven.begin(),ledger.proven.end(),
+                            [&](const auto& item){return ymcc::targetReturn::sameOrigin(item,origin);});}
+                    check(proven && oldDutyRemains() && g_inputHostPrepared && g_inputHostHello &&
+                        !runtime.recoveryRequestId && createCount()==1 && budgetView()==budgetBefore,
+                        "real atomic commit failure retains proven old duty and cannot mint a recovery ticket");
+                    const auto provedCensusCalls=fixtureRuntimeRecoveryCensusCalls;
+                    fixtureRuntimeRecoveryCensus="unknown"; // later OS observation must not erase the exact earlier completed proof
+                    fullPipeQuarantineProbe();
+                    check(oldDutyRemains() && !runtimeSettled() && createCount()==1 && budgetView()==budgetBefore,
+                        "retained proof cannot erase duty or restart while the original atomic write is still denied");
+                    check(fixtureRuntimeRecoveryCensusCalls==provedCensusCalls,
+                        "already-proven exact return retries its denied durable commit without another PnP census");
+                    check(denyReplace.close(),"only the private commit-denial handle is released");
+                    fullPipeQuarantineProbe();
+                    check(fixtureRuntimeRecoveryCensusCalls==provedCensusCalls,
+                        "later unknown census cannot block completion of the already-proven old return");
+                    cases.back()["runtimeReturnBusinessSnapshotAfterCommitRetry"]=runtimeBusinessSnapshot();
+                }
+                check(!oldDutyRemains() && runtimeSettled() && fixtureRuntimeRecoveryWriterCalls>0 && fixtureRuntimeRecoveryCensusCalls>0,
+                    "production exact-host death PnP parser and Session durably settle the old target before restart");
+                runtimeTick();
+                if(condition=="episode-exhausted" || condition=="rolling-exhausted") {
+                    check(!runtime.recoveryRequestId && createCount()==1 && stopCount()==1 && budgetView()==expectedBudget &&
+                        (!sharedTerminalCase || (terminalStoppedForOldOwner() && terminalFactSnapshot()==terminalWaiting)),
+                        "original shared episode or rolling exhaustion permits safety return but no replacement charge or ticket");
+                } else {
+                    if(condition=="cooldown" || condition=="recording-pause") {
+                        check(runtime.pending && !runtime.recoveryRequestId && createCount()==1 && budgetView()==budgetBefore,
+                            "expected pause or original cooldown waits without fabricating another fault or charge");
+                        if(condition=="cooldown"){fixturePowerClockOffset+=1001;startProtectionClock+=1001;}
+                        g_shortcutRecordingActive=false;readCurrent();runtimeTick();
+                    }
+                    observeNextRuntimeProbe();
+                    const auto newTicket=runtime.recoveryRequestId;
+                    check(newTicket && newTicket!=oldTicket && runtime.spent && !runtime.pending &&
+                        g_inputHostRuntimeRecoveryPending.load() && runtime.monitoring && createCount()==2 && stopCount()==1 &&
+                        g_inputHostProcess && g_inputHostPrepared && g_inputHostNeutralized && g_inputHostHello &&
+                        g_inputHostEpoch!=oldEpoch && g_inputHostRunId!=oldRun && g_inputHostBoundPersona==oldPersona &&
+                        g_inputHostRecoveryEpisodeAttempts.load()==budgetBefore["episode"].get<int>()+1,
+                        "proven return creates one distinct internally charged same-persona ordinary Start");
+                    const auto charged=budgetView();const auto newHost=g_inputHostProcess;
+                    const auto newEpoch=g_inputHostEpoch;const auto newRun=g_inputHostRunId;
+                    for(unsigned duplicate=0;duplicate<32;++duplicate) {
+                        inputHostPerformRuntimeRecovery(serial);inputHostConsumeRuntimeFaultCleanup(oldEpoch);runtimeTick();
+                    }
+                    check(runtime.recoveryRequestId==newTicket && g_inputHostProcess==newHost &&
+                        g_inputHostEpoch==newEpoch && g_inputHostRunId==newRun && createCount()==2 &&
+                        stopCount()==1 && budgetView()==charged,
+                        "spent serial and old fault token cannot Stop successor reissue a ticket or charge again");
+                    for(int frame=0;frame<kInputHostFreshNeutralFramesRequired+1;++frame) {
+                        auto sample=readCurrent();fullPipeSubmitSource(sample,true,false);
+                    }
+                    const auto inspection=g_virtualStartProtection.view(startProtectionClock);
+                    check(inspection.requestId==newTicket && inspection.phase=="verifying" &&
+                        inspection.verificationRemainingMs==ymcc::VirtualStartProtection::settleMs &&
+                        inspection.fallbackAttempts==0 && inspection.remainingMs<=ymcc::VirtualStartProtection::maxMs,
+                        "new internal ticket retains the original ten-second inspection thirty-second cap and unspent one fallback");
+                    startProtectionClock+=inspection.verificationRemainingMs;readCurrent();runtimeTick();
+                    check(g_virtualStartProtection.view(startProtectionClock).requestId==newTicket &&
+                        g_virtualStartProtection.view(startProtectionClock).phase=="success" && oldFinals(newTicket).size()==1,
+                        "ordinary verifier emits exactly one new-ticket successful final");
+                }
+                }
+            }
+            cases.back()["observedRuntime"]=runtimeView();
+            if(sharedTerminalCase){cases.back()["terminalBeforeDuplicates"]=terminalWaiting;cases.back()["observedTerminal"]=terminalFactSnapshot();cases.back()["expectedTerminalBudget"]=expectedBudget;}
+        }
+        check(oldFinals(oldTicket)==finalBefore,"runtime processing neither changes nor republishes the completed original player final");
+        cases.back()["runtimeOs"]=fixtureRuntimeRecoveryOsObservations;
+        cases.back()["oldRequestId"]=oldTicket;cases.back()["oldFinalBefore"]=finalBefore;
+        cases.back()["originalBudget"]=budgetBefore;
+        // Observations above are final. Restore only fixture inputs for owned
+        // teardown; never erase the ledger, proven vector or pending incident.
+        fixtureRuntimeRecoveryWriterPathCallback={};
+        g_exitRequested=false;g_inputHostExitFence=false;g_inputCaptureStop=false;
+        g_powerGeneration=oldPower;g_shortcutRecordingActive=false;
+        fixtureRuntimeRecoveryCensus="absent";
+        check(SetEvent(observation)!=FALSE,"runtime teardown signals its own old Host observer");
+        denyReplace.close();finishCase();
+        check(oldHost.close(),"runtime exact old Host observation handle is closed");
+        fixtureRuntimeRecoveryOldHost=nullptr;fixtureRuntimeRecoveryOldOwner.reset();fixtureRuntimeRecoveryOsEnabled=false;
+    }
 }

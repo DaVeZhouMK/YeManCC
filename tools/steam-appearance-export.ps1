@@ -1,8 +1,8 @@
 ﻿# Read-only packaging check: PowerShell scripts and their theme payload ship together.
 function Get-SteamAppearanceFileHash([string]$Path) {
-    $sha=[Security.Cryptography.SHA256]::Create();$stream=[IO.File]::OpenRead($Path)
-    try { ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','').ToLowerInvariant() }
-    finally {$stream.Dispose();$sha.Dispose()}
+    $sha=[Security.Cryptography.SHA256]::Create();$stream=$null
+    try { $stream=[IO.File]::OpenRead($Path);([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','').ToLowerInvariant() }
+    finally {if($stream){$stream.Dispose()};$sha.Dispose()}
 }
 function Get-SteamAppearanceFileReceiptProperty([string]$Relative) {
     $sha=[Security.Cryptography.SHA256]::Create()
@@ -31,6 +31,8 @@ function Get-SteamAppearanceExportFiles([string]$PowerControl) {
     $entry=Join-Path $root 'steam-appearance.ps1';$tokens=$null;$errors=$null
     $ast=[Management.Automation.Language.Parser]::ParseFile($entry,[ref]$tokens,[ref]$errors)
     if($errors.Count){throw 'Steam appearance script has syntax errors'}
+    $sourceReader=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Read-AppearanceThemeConfig'},$true)
+    if(!$sourceReader){throw 'Steam appearance same-byte source reader missing'}
     $parameters=@($ast.ParamBlock.Parameters|ForEach-Object {$_.Name.VariablePath.UserPath})
     foreach($name in @('Action','Payload','BackendPath','SessionPid','SessionBirth','ReadyEvent','IdleEvent','GateTimeoutMs','StartBackend','VerifyOnly')){if($name -notin $parameters){throw "Steam appearance script protocol mismatch: missing $name"}}
     if([IO.File]::ReadAllText($entry) -notmatch "'Automatic'"){throw 'Steam appearance automatic use component missing'}
@@ -41,12 +43,18 @@ function Get-SteamAppearanceExportFiles([string]$PowerControl) {
     if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\idle.ps1')) -notmatch 'function Assert-CssDesktopNotEditing'){throw 'Steam appearance Desktop editing protection missing'}
     if([IO.File]::ReadAllText($entry) -notmatch 'Invoke-OwnedPresetResourceUpdate \$current' -or [IO.File]::ReadAllText($entry) -notmatch "Invoke-AppearanceControl 'UpdateOwnedResources'" -or [IO.File]::ReadAllText((Join-Path $root 'steam-appearance\preset.ps1')) -notmatch 'function Invoke-OwnedPresetResourceUpdate'){throw 'Steam appearance owned resource update protocol missing'}
     $refresh=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-AutomaticAppearanceRefresh'},$true)
-    if(!$refresh -or $refresh.Extent.Text -notmatch "Invoke-AppearanceControl 'Reconcile'" -or [IO.File]::ReadAllText($entry) -notmatch 'Invoke-AutomaticAppearanceRefresh\|Out-Null'){throw 'Steam appearance automatic reapply protocol missing'}
+    # Recognize the actual command rather than one historical spelling of its
+    # optional arguments. A function declaration or comment is not a call.
+    $refreshCalls=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -ceq 'Invoke-AutomaticAppearanceRefresh'},$true))
+    if(!$refresh -or $refresh.Extent.Text -notmatch "Invoke-AppearanceControl 'Reconcile'" -or $refreshCalls.Count -ne 1){throw 'Steam appearance automatic reapply protocol missing'}
+    if([IO.File]::ReadAllText($entry) -notmatch 'AutomaticInitializeGateProtocol\s*=\s*1'){throw 'Steam appearance initialization gate protocol missing'}
     if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\resident.ps1')) -notmatch 'function Start-ResidentAppearanceBackend'){throw 'Steam appearance resident singleton component missing'}
     if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\idle.ps1')) -match 'Stop-VerifiedIdleProcesses|\.Kill\('){throw 'Steam appearance resident policy forbids backend termination'}
     if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\idle.ps1')) -notmatch 'AppearanceRenderProtocol\s*=\s*4'){throw 'Steam appearance per-theme render receipt protocol missing'}
     if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\idle.ps1')) -notmatch 'AppearanceContextProtocol\s*=\s*1'){throw 'Steam appearance independent context protocol missing'}
-    if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\resident.ps1')) -notmatch 'AppearanceProcessQueryProtocol\s*=\s*2'){throw 'Steam appearance shared process-query protocol 2 required'}
+    if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\resident.ps1')) -notmatch 'AppearanceProcessQueryProtocol\s*=\s*3'){throw 'Steam appearance shared process-query protocol 3 required'}
+    if([IO.File]::ReadAllText($entry) -notmatch 'SharedSteamReadProtocol\s*=\s*1' -or [IO.File]::ReadAllText((Join-Path $root 'steam-appearance\idle.ps1')) -notmatch 'AppearanceSharedSteamProtocol\s*=\s*1'){throw 'Steam appearance public Steam document consumer required'}
+    if([IO.File]::ReadAllText((Join-Path $root 'steam-appearance\resident.ps1')) -notmatch 'AppearanceListenerQueryProtocol\s*=\s*1'){throw 'Steam appearance native listener-query protocol 1 required'}
     $renderTokens=$null;$renderErrors=$null
     $renderAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $root 'steam-appearance\idle.ps1'),[ref]$renderTokens,[ref]$renderErrors)
     if($renderErrors.Count){throw 'Steam appearance renderer has syntax errors'}

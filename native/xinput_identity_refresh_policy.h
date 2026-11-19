@@ -74,6 +74,11 @@ public:
         const bool valid=!exhausted_&&known_&&haveKey_&&kind_==Kind::Physical&&epoch_==epoch&&power_==power;
         return {episode_,epoch_,power_,valid,!provider_};
     }
+    // Borrow only under the original gamepad-read mutex.
+    std::wstring_view physicalPath(Tick epoch,Tick power) const noexcept {
+        const auto proof=capture(epoch,power);
+        return proof.valid && !proof.legacyFallback ? std::wstring_view(path_) : std::wstring_view{};
+    }
     Stop stop(const Proof& p,Tick epoch,Tick power) const noexcept {
         if(!p.valid||exhausted_||p.legacyFallback==provider_||!haveKey_||p.episode!=episode_||p.identityEpoch!=epoch||p.power!=power||epoch_!=epoch||power_!=power)return Stop::Retired;
         if(!known_)return Stop::Wait;

@@ -17,9 +17,10 @@ internal sealed record Snapshot(int Schema,bool Ok,bool Supported,bool BatteryPr
     public bool? CapabilityDeclaredByFrozenHc {get;init;}
     public string? CapabilityCatalogSha256 {get;init;}
 }
-internal class Store(string directory)
+internal class Store(string directory,Func<bool>? requestCurrent=null)
 {
     const int MaxBytes=16384;
+    void RequireRequestCurrent(){if(requestCurrent is not null&&!requestCurrent())throw new IOException("BOOT_CHARGE_REQUEST_EXPIRED");}
     public string DirectoryPath=>directory;
     static void ValidateJournal(string text)
     {
@@ -69,15 +70,15 @@ internal class Store(string directory)
             ValidateJournal(Encoding.UTF8.GetString(bytes));
             _=Load<Recovery>(name); // Never overwrite a newly corrupt or unreadable original.
         }
-        Directory.CreateDirectory(directory);var path=Path.Combine(directory,name);var temp=path+"."+Guid.NewGuid().ToString("N")+".tmp";
-        try{using(var f=new FileStream(temp,FileMode.CreateNew,FileAccess.Write,FileShare.None)){f.Write(bytes);f.Flush(true);}File.Move(temp,path,true);}
+        RequireRequestCurrent();Directory.CreateDirectory(directory);var path=Path.Combine(directory,name);var temp=path+"."+Guid.NewGuid().ToString("N")+".tmp";
+        try{using(var f=new FileStream(temp,FileMode.CreateNew,FileAccess.Write,FileShare.None)){f.Write(bytes);f.Flush(true);}RequireRequestCurrent();File.Move(temp,path,true);}
         finally{if(File.Exists(temp))File.Delete(temp);}
     }
     public virtual void Clear(string name)
     {
         var p=Path.Combine(directory,name);
         if(name==Controller.RecoveryFile&&Load<Recovery>(name) is null)throw new IOException("充电恢复记录缺失，未确认归还记录已清理");
-        File.Delete(p);
+        RequireRequestCurrent();File.Delete(p);
     }
 }
 internal sealed class Controller
@@ -91,20 +92,25 @@ internal sealed class Controller
     readonly Func<(bool Present,bool Ac,int? Percent)> power;
     readonly Store store;
     readonly Func<bool> ready;
+    readonly Func<bool> requestCurrent;
+    void RequireRequestCurrent(){if(!requestCurrent())throw new IOException("BOOT_CHARGE_REQUEST_EXPIRED");}
     readonly string session=Guid.NewGuid().ToString("N");
     Preference? preference;
     Recovery? recovery;
     int revision;
     bool active,conflict;
+    bool resumeCleanupPending;
+    int resumeCleanupAttempts;
+    const int MaxResumeCleanupAttempts=3;
     bool invalidStore,journalUnresolved;
     volatile bool suspended;
     string warning="";
     string verification="unknown";
     int? expectedRaw;
-    public Controller(Identity identity,Store store,Func<Route,IChargeProvider> factory,Func<(bool Present,bool Ac,int? Percent)>? power=null,Func<bool>? ready=null)
+    public Controller(Identity identity,Store store,Func<Route,IChargeProvider> factory,Func<(bool Present,bool Ac,int? Percent)>? power=null,Func<bool>? ready=null,Func<bool>? requestCurrent=null)
     {
         this.identity=identity;this.store=store;capability=Policy.ResolveCapability(identity);route=capability?.Consumer;open=()=>factory(route??throw new IOException("未知机型"));this.power=power??WindowsFacts.Power;
-        this.ready=ready??(static ()=>true);
+        this.ready=ready??(static ()=>true);this.requestCurrent=requestCurrent??(static ()=>true);
         ReloadStore();
     }
     // Keep known ownership in memory on every failed reload. Missing/corrupt IO
@@ -208,8 +214,16 @@ internal sealed class Controller
         public Reading Read()=>provider.Read();
         public void Write(int value,Reading before)
         {
-            if(provider is IChargeWriteAdmission guarded)guarded.Write(value,before,owner.RequireAvailable);
+            owner.RequireRequestCurrent();
+            if(provider is IChargeWriteAdmission guarded)guarded.Write(value,before,
+                owner.route?.Software==true?owner.RequireRequestCurrent:owner.RequireAvailable);
             else provider.Write(value,before); // Preserve existing explicit restoration during suspend/stop.
+        }
+        public void WritePolicy(int value,Reading before)
+        {
+            owner.RequirePolicyAvailable();
+            if(provider is IChargeWriteAdmission guarded)guarded.Write(value,before,owner.RequirePolicyAvailable);
+            else provider.Write(value,before);
         }
         public void Dispose()
         {
@@ -225,7 +239,7 @@ internal sealed class Controller
             }
         }
     }
-    IChargeProvider OpenOwnedProvider()
+    ProviderLease OpenOwnedProvider()
     {
         if(providerCleanupDebt.Count!=0)throw new IOException("原硬件通道尚未归还，未创建新终端");
         return new ProviderLease(this,open());
@@ -247,8 +261,15 @@ internal sealed class Controller
         if(!conflict&&warning==providerCleanupReason)warning="";
         providerCleanupReason="";
     }
+    sealed class PolicyAdmissionExpiredException(IOException cause) : IOException(cause.Message,cause);
+    void RequirePolicyAvailable()
+    {
+        try{RequireAvailable();}
+        catch(IOException cause){throw new PolicyAdmissionExpiredException(cause);}
+    }
     void RequireAvailable()
     {
+        RequireRequestCurrent();
         if(route is null)throw new IOException(Policy.Unavailable(identity));
         if(!power().Present)throw new IOException("未检测到内置电池");
         if(!Policy.FirmwareAllowed(route,identity))
@@ -290,7 +311,9 @@ internal sealed class Controller
             try
             {
                 EnsureJournal();RequireAvailable();if(route is null||!Policy.ValueAllowed(route,target))return State(false,false,null,"此机型不支持所选充电档位");
-                using var p=OpenOwnedProvider();before=p.Read();
+                using var p=OpenOwnedProvider();var observed=p.Read();
+                RequireAvailable(); // A slow read cannot admit persistence in a later public power generation.
+                before=observed; // Keep preflight rejection separate from an uncertain submitted write.
                 if(fence!=Fence(before))return State(false,!conflict,before,"充电状态已更新，请确认当前值后重新应用");
                 if(conflict)throw new IOException("存在未解决的充电恢复记录，请先停止软件限充或核对厂商设置");
                 if(route.Software)
@@ -300,17 +323,18 @@ internal sealed class Controller
                     if(!active&&before.Paused==true)throw new IOException("旁路充电已由其他程序开启，请先关闭厂商软件的旁路设置");
                     var owner=recovery??new(1,identity.Key,route.RouteId,before.Raw,before.Raw,true);
                     SaveRecovery(owner); // durable owner before any bypass write
-                    var next=new Preference(1,identity.Key,route.RouteId,target,true);store.Save(SettingsFile,next);preference=next;
+                    var next=new Preference(1,identity.Key,route.RouteId,target,true);RequireAvailable();store.Save(SettingsFile,next);preference=next;
                     active=true;expectedRaw=before.Raw;warning="";verification="software-active";revision++;
                     TickLocked();var result=Read();return result with {Ok=!conflict&&result.Ok};
                 }
                 var desired=new Preference(1,identity.Key,route.RouteId,target,true);
                 if(p.CanReadLimit&&before.Limit==target)
-                {store.Save(SettingsFile,desired);preference=desired;verification="readback";warning="";revision++;return State(true,true,before);}
+                {RequireAvailable();store.Save(SettingsFile,desired);preference=desired;verification="readback";warning="";revision++;return State(true,true,before);}
                 SaveRecovery(new(1,identity.Key,route.RouteId,before.Raw,null,false));
                 RequireAvailable(); // Stop/power changes during pre-read must precede any new firmware write.
                 p.Write(target,before);
                 var after=p.Read();
+                RequireAvailable(); // Preserve the unconfirmed journal if readback crossed a power revocation.
                 if(p.CanReadLimit&&after.Limit!=target)throw new IOException("写入后回读不一致；显示实际值，请检查厂商软件是否同时控制充电");
                 store.Save(SettingsFile,desired);preference=desired;ClearRecovery();
                 verification=p.CanReadLimit?"readback":"acknowledged";warning="";revision++;
@@ -341,6 +365,7 @@ internal sealed class Controller
                 if(recovery is {Software:false}&&route is not null&&recovery.IdentityKey==identity.Key)
                 {
                     RequireAvailable();using var p=OpenOwnedProvider();_ = p.Read();
+                    RequireAvailable(); // Acknowledgement cannot discard ownership after an old slow read.
                     if(preference is not null){var disabled=preference with {Managed=false};store.Save(SettingsFile,disabled);preference=disabled;}
                     ClearRecovery();conflict=false;warning="";revision++;
                 }
@@ -385,6 +410,7 @@ internal sealed class Controller
     }
     void TickLocked()
     {
+        if(resumeCleanupPending){RetryResumeCleanup();if(resumeCleanupPending)return;}
         if(!active||suspended||route is null||preference is null)return;
         try
         {
@@ -392,9 +418,13 @@ internal sealed class Controller
             if(current.Raw!=expectedRaw)throw new IOException("检测到其他软件改变充电状态，已暂停软件限充");
             var facts=power();int decision=Policy.BypassDecision(facts.Percent,facts.Present&&facts.Ac,preference.Target,current.Paused==true)??0;
             if((current.Paused==true)==(decision==1))return;
+            // A new pause needs current admission. Returning the owned byte
+            // to normal charging keeps its existing restoration authority.
+            if(decision==1)RequirePolicyAvailable();
             int wantedRaw=decision==1?PauseRaw:ResumeRaw;
             var nextRecovery=recovery! with {OwnedRaw=wantedRaw};SaveRecovery(nextRecovery);
-            p.Write(decision,current);var after=p.Read();
+            if(decision==1)p.WritePolicy(decision,current);else p.Write(decision,current);
+            var after=p.Read();
             if(after.Raw!=wantedRaw)throw new IOException("未能确认旁路充电状态");
             expectedRaw=after.Raw;revision++;
         }
@@ -402,7 +432,14 @@ internal sealed class Controller
         {
             active=false;conflict=true;warning=e.Message;verification=invalidStore?"unknown":"unconfirmed";
             // Only restore a byte that still equals our journalled write. Never guess through a read failure.
-            try{RestoreOwned();}catch(Exception cleanup){warning+="；"+cleanup.Message;}
+            try
+            {
+                RestoreOwned();
+                // Only a known unsubmitted policy refusal, followed by a
+                // verified return and cleared journal, may resume later.
+                if(e is PolicyAdmissionExpiredException&&recovery is null)conflict=false;
+            }
+            catch(Exception cleanup){warning+="；"+cleanup.Message;}
         }
     }
     public void Tick(){lock(gate)TickLocked();}
@@ -431,13 +468,34 @@ internal sealed class Controller
     public void Suspend()
     {
         suspended=true;
-        lock(gate){active=false;try{RestoreOwned();}catch(Exception e){warning=e.Message;conflict=true;}}
+        lock(gate){resumeCleanupPending=false;resumeCleanupAttempts=0;active=false;try{RestoreOwned();}catch(Exception e){warning=e.Message;conflict=true;}}
+    }
+    void RetryResumeCleanup()
+    {
+        if(!resumeCleanupPending||suspended||!ready()||resumeCleanupAttempts>=MaxResumeCleanupAttempts)return;
+        resumeCleanupAttempts++;
+        try
+        {
+            bool hadChannelDebt=providerCleanupDebt.Count!=0;
+            RetryProviderCleanup();
+            // A verified return with its journal already cleared may have failed only during Dispose.
+            if(hadChannelDebt&&recovery is null&&!invalidStore)conflict=false;
+            // The exact prior channel has returned. Allow StartSaved's first policy Tick;
+            // an active policy owns a normal journal, not pending cleanup work.
+            resumeCleanupPending=false;
+            StartSaved();
+            resumeCleanupPending=providerCleanupDebt.Count!=0||(!active&&recovery is {Software:true});
+        }
+        catch(Exception error){resumeCleanupPending=true;warning=error.Message;}
     }
     public void Resume()
     {
-        suspended=false;
-        // Firmware thresholds are not fought against OEM software on resume; software bypass restarts only after cleanup.
-        if(route?.Software==true)StartSaved();
+        lock(gate)
+        {
+            suspended=false;
+            // Keep actual channel debt; retry only its exact owner, at most three existing-tick attempts.
+            if(route?.Software==true){resumeCleanupPending=true;resumeCleanupAttempts=0;RetryResumeCleanup();}
+        }
     }
     public void Shutdown()
     {

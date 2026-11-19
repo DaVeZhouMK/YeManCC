@@ -2,6 +2,14 @@
 
 固定模式为 global、xbox、steam、xbox-steam。各检查共用原登记、原执行器和核心证据层，不由普通导出自动触发。
 
+## 原设置基线的实际文件模式
+
+`node tools/settings_baseline_selftest.mjs --native-files <新的自有证据目录>` 让原基线断言通过正式 repository/API/IPC 消费原生文件后端。未传该参数时仍走原内存模式，`--case <原用例完整名称>` 两种模式均可用；未知用例或重复模式参数在原生准备前拒绝，不静默退回内存。
+
+文件后端复用 `diskSettings.mjs`，`lockedSettings.mjs` 只提取原 `SettingsFileGuard` 与公开 writer，并把命名 mutex 映射到自有名称。Win32 主文件、备份、归档和原子写入实际运行，InputHost 准入仍为隔离端口，不读写安装版配置或硬件。原编译45秒、业务12秒不放宽；自有进程及外层预算仍由原执行入口约束，没有新增默认 ID、minimum 或父门。
+
+`NATIVE-BASELINE-RESULT.json` 是关闭 helper 前的业务原件。完整本次结果还须核对 CLI 最终结果中的 `nativeClosing`、`SOURCE-CLOSING.json`、helper 请求计数/退出码及原外层 Job 终态；源码漂移或退出失败不能由业务 PASS 覆盖。完整 native/main、工具闭包、安装与物理验收独立保留。
+
 ## 正式用例
 
 | canonical ID | 入口与范围 | 预算 |

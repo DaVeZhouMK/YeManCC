@@ -47,8 +47,10 @@ static bool tickCostEnabled(){return false;}
 static json manualStopLog=json::array();
 static std::function<void()> inManualCapabilities;
 static json nativeManualXInputCapabilitiesEvidence(DWORD){if(inManualCapabilities)inManualCapabilities();return {{"attempted",true},{"rc",0},{"physicalMotorEffectObserved",false}};}
-static json pendingLog=json::array();static bool throwPendingLog=false;
-static void appendNativeLifecycleLog(const char* event,const json& row){if(std::string(event)=="onex-manual-feedback-stop")manualStopLog.push_back(row);if(std::string(event)=="gamepad-feedback-stop-pending"){if(throwPendingLog)throw std::runtime_error("fixture logger");pendingLog.push_back(row);}}
+static json pendingLog=json::array(),exitFeedbackLog=json::array();static bool throwPendingLog=false;
+static void appendNativeLifecycleLog(const char* event,const json& row){if(std::string(event)=="gamepad-feedback-exit"||std::string(event)=="aokzoe-feedback-exit")exitFeedbackLog.push_back(row);if(std::string(event)=="onex-manual-feedback-stop"||std::string(event)=="gamepad-manual-feedback-stop")manualStopLog.push_back(row);if(std::string(event)=="gamepad-feedback-stop-pending"){if(throwPendingLog)throw std::runtime_error("fixture logger");pendingLog.push_back(row);}}
+// The actual low-level writer audit runs in the manual producer's write-audit selection.
+static json nativeXInputFeedbackWriteEvidence(){return {{"fixtureOutputOnly",true}};}
 static std::string W2U(const std::wstring& s){return std::string(s.begin(),s.end());}
 static bool openAvailable=true,pathReadable=true,connected=true,writeAllowed=true;
 static std::wstring occupant=L"HID#physical-A";
@@ -67,7 +69,7 @@ static auto msiDinputFeedbackSourceSnapshot(){return msiSource;}
 #endif
 static std::atomic<unsigned long long> g_msiFeedbackModeGeneration{1},g_msiFeedbackSourceGeneration{0},g_msiFeedbackSamplePower{1},g_msiFeedbackSampleMode{1},g_msiFeedbackSampleTopology{1};
 static std::atomic<bool> g_msiDinputSourceValid{false};
-enum class YmccFamily { Unknown, OneXPlayer };
+enum class YmccFamily { Unknown, OneXPlayer, Aokzoe, AsusRogAlly, AsusRogAllyX, MsiClaw, Ayanero, Gpd, LenovoLegionGo };
 static struct {std::string deviceClass="ROG";YmccFamily family=YmccFamily::Unknown;} g_machineIdentity;
 static bool hardwareWriteAllowed(){return writeAllowed;}
 static bool returnTapMsi=false;
@@ -104,7 +106,7 @@ static std::condition_variable g_gamepadSerialCv;
 static bool g_gamepadSerialStopping=false;
 struct FeedbackStopDeadline {unsigned long long generation=0,due=0;};
 static std::optional<FeedbackStopDeadline> g_gamepadSerialFeedbackStop;
-static void gamepadSerialStartLocked(){}
+static bool gamepadSerialStartLocked(){return true;}
 static bool gamepadSerialScheduleFeedbackStop(unsigned long long,int);
 @@POLICY_HELPER@@
 @@MSI_RETRY@@
@@ -141,6 +143,10 @@ static auto g_feedbackSetState=fakeSetState;
 @@START@@
 @@RECEIPT@@
 @@SCHEDULE@@
+static unsigned exitWaits=0;
+static std::function<void()> duringExitWait;
+static void Sleep(DWORD duration){++exitWaits;fakeTick.fetch_add(duration);if(duringExitWait){auto callback=std::move(duringExitWait);duringExitWait={};callback();}}
+@@EXIT_CLEANUP@@
 static void sample(bool dirtyDiscovery=false,bool boundaryFullScan=false){
  std::lock_guard<std::mutex> lock(g_gamepadReadMx);
  const auto probeNow=GetTickCount64();const DWORD i=0;
@@ -189,6 +195,150 @@ template<class A,class B>static void expect(const char* name,A a,B b){checks.pus
 static void finish(const std::string& name){bool ok=true;for(const auto& c:checks)ok&=c["passed"].get<bool>();cases.push_back({{"name",name},{"passed",ok},{"checks",checks},{"motorWrites",writes}});checks=json::array();}
 static int zerosFor(const std::wstring& who){int n=0;for(const auto& w:writes)if(w["occupant"]==W2U(who)&&w["left"]==0&&w["right"]==0)++n;return n;}
 int main(){
+#if defined(YMCC_PHYSICAL_FEEDBACK_EXIT_ONLY)
+ const auto aokzoe=[](){g_machineIdentity.family=YmccFamily::Aokzoe;g_machineIdentity.deviceClass="HandheldCompanion.Devices.AOKZOEA1X";exitFeedbackLog=json::array();exitWaits=0;duringExitWait={};};
+ const auto touchStart=[](){const auto source=nativePhysicalFeedbackReady();const auto pulse=nativePhysicalFeedbackStart(40,18,true,&source);if(!pulse.ok||!gamepadSerialScheduleFeedbackStop(pulse.pulseGeneration,18))throw std::runtime_error("AOKZOE touch setup failed");return pulse;};
+ // Exact existing failure: Finish keeps the failed zero, while the real serial
+ // scheduler rejects its retry after exit. This is not an injected OEM protocol.
+ {
+  reset();aokzoe();sample();const auto pulse=touchStart();zeroFailures=1;g_exitRequested=true;g_gamepadSerialStopping=true;g_gamepadSerialFeedbackStop.reset();
+  physicalFeedbackFinish(pulse.pulseGeneration);
+  expect("existing failed zero retains nonzero motor owner",g_feedbackPulseActive&&motors[occupant]>0,true);
+  expect("existing exit scheduler has refused the retained zero retry",g_gamepadSerialFeedbackStop.has_value(),false);
+  finish("physical-feedback-existing-exit-retry-refusal-reproduced");
+  attempts=json::array();writes=json::array();zeroFailures=1;
+  physicalFeedbackExitCleanup(true);physicalFeedbackExitCleanup(false);
+  expect("exit worker retries the same captured target to zero",!g_feedbackPulseActive&&motors[occupant]==0,true);
+  expect("exit retry is bounded to two zero attempts",attempts.size(),size_t(2));
+  expect("one existing backoff is used",exitWaits,1u);
+  expect("no nonzero command is emitted by cleanup",std::all_of(attempts.begin(),attempts.end(),[](const auto& r){return r["left"]==0&&r["right"]==0;}),true);
+  expect("ordinary exit receipt records actual zero API acceptance",exitFeedbackLog.size()>=2&&exitFeedbackLog[1]["zeroApiAccepted"]==true&&exitFeedbackLog[1]["hardwareStopObserved"]==false,true);
+  const auto denied=nativePhysicalFeedbackStart(40,18,true);expect("exit cannot restart a pulse",denied.attempted,false);
+  finish("physical-feedback-transient-exit-zero-failure-recovers-without-new-output");
+ }
+ {
+  reset();aokzoe();sample();const auto pulse=nativePhysicalFeedbackStart(30,1000,false);g_exitRequested=true;g_gamepadSerialStopping=true;
+  attempts=json::array();physicalFeedbackExitCleanup(true);
+  expect("manual pulse is returned before its detached duration expires",pulse.ok&&!g_feedbackPulseActive&&motors[occupant]==0,true);
+  expect("manual exit needs only its zero",attempts.size()==1&&attempts[0]["left"]==0,true);
+  expect("successful first zero adds no delay",exitWaits,0u);finish("physical-feedback-manual-pulse-exit-owned-return");
+ }
+ {
+  reset();aokzoe();sample();touchStart();zeroFailures=3;g_exitRequested=true;g_gamepadSerialStopping=true;attempts=json::array();
+  physicalFeedbackExitCleanup(true);const auto count=attempts.size();physicalFeedbackExitCleanup(false);
+  expect("permanent failure retains unresolved ownership",g_feedbackPulseActive&&motors[occupant]>0,true);
+  expect("no more than two zero attempts",count,size_t(2));expect("final evidence issues no extra hardware write",attempts.size(),count);
+  expect("failure remains visibly unaccepted",exitFeedbackLog.size()==3&&exitFeedbackLog[1]["zeroApiAccepted"]==false&&exitFeedbackLog[2]["activeOwner"]==true,true);
+  finish("physical-feedback-permanent-exit-zero-failure-stays-failed-and-bounded");
+ }
+ {
+  reset();aokzoe();sample();touchStart();zeroFailures=1;g_exitRequested=true;g_gamepadSerialStopping=true;attempts=json::array();
+  duringExitWait=[](){occupant=L"HID#physical-B";sample(true,false);motors[occupant]=9000;};
+  physicalFeedbackExitCleanup(true);
+  expect("replacement physical controller is never zeroed",attempts.size()==1&&motors[L"HID#physical-B"]==9000,true);
+  expect("retired target does not create a new motor owner",g_feedbackPulseActive,false);
+  expect("retirement is not reported as accepted zero",exitFeedbackLog.size()==2&&exitFeedbackLog[1]["zeroApiAccepted"]==false,true);
+  finish("physical-feedback-exit-does-not-follow-reused-slot");
+ }
+ {
+  reset();aokzoe();sample();touchStart();g_exitRequested=true;writeAllowed=false;attempts=json::array();physicalFeedbackExitCleanup(true);
+  expect("power gate remains authoritative",attempts.empty(),true);
+  expect("no API stop success is invented",exitFeedbackLog.size()==1&&exitFeedbackLog[0]["zeroWriteAttempted"]==false&&exitFeedbackLog[0]["zeroApiAccepted"]==false,true);
+  finish("physical-feedback-exit-preserves-power-and-identity-guards");
+ }
+ {
+  reset();aokzoe();sample();g_exitRequested=true;attempts=json::array();physicalFeedbackExitCleanup(true);
+  expect("no pulse means no blanket zero of connected controllers",attempts.empty(),true);
+  finish("physical-feedback-idle-exit-does-not-touch-unowned-motors");
+ }
+
+ const std::vector<std::pair<YmccFamily,std::string>> families={
+  {YmccFamily::Unknown,"generic-physical-xinput"},{YmccFamily::Aokzoe,"HandheldCompanion.Devices.AOKZOEA1X"},
+  {YmccFamily::OneXPlayer,"HandheldCompanion.Devices.OneXPlayer3"},{YmccFamily::AsusRogAlly,"HandheldCompanion.Devices.XboxROGAlly"},
+  {YmccFamily::AsusRogAllyX,"HandheldCompanion.Devices.XboxROGAllyX"},{YmccFamily::MsiClaw,"HandheldCompanion.Devices.ClawG3E"},
+  {YmccFamily::Ayanero,"HandheldCompanion.Devices.AYANEOKUN"},{YmccFamily::Gpd,"HandheldCompanion.Devices.GPDWin5"},
+  {YmccFamily::LenovoLegionGo,"HandheldCompanion.Devices.LegionGoTablet"}};
+ {
+  bool returned=true,zeroOnly=true;
+  for(const auto& [family,model]:families){
+   reset();aokzoe();g_machineIdentity={model,family};sample();const auto pulse=nativePhysicalFeedbackStart(30,1000,false);
+   g_exitRequested=true;g_gamepadSerialStopping=true;attempts=json::array();physicalFeedbackExitCleanup(true);
+   returned&=pulse.ok&&!g_feedbackPulseActive&&motors[occupant]==0;
+   zeroOnly&=attempts.size()==1&&attempts[0]["left"]==0&&attempts[0]["right"]==0&&exitWaits==0;
+  }
+  expect("all nine existing family identities return only their owned XInput target",returned,true);
+  expect("common cleanup adds only zero with no successful-stop delay",zeroOnly,true);
+  finish("physical-feedback-exit-returns-owned-target-across-families");
+ }
+ {
+  bool usable=true;
+  for(const auto& [family,model]:families){
+   reset();aokzoe();g_machineIdentity={model,family};sample();const auto source=nativePhysicalFeedbackReady();const auto pulse=nativePhysicalFeedbackStart(40,18,true,&source);
+   usable&=pulse.ok&&motors[occupant]==26214;gamepadSerialScheduleFeedbackStop(pulse.pulseGeneration,18);fakeTick+=18;pump();usable&=!g_feedbackPulseActive&&motors[occupant]==0;
+  }
+  expect("normal touch pulse and stop remain usable for all nine identities",usable,true);finish("physical-feedback-normal-runtime-remains-usable-across-families");
+ }
+ {
+  reset();aokzoe();fakePower=43001;sample();const auto source=nativePhysicalFeedbackReady();afterFeedbackWrite=[](){g_exitRequested=true;};
+  const auto pulse=nativePhysicalFeedbackStart(40,18,true,&source);
+  expect("exit during baseline refuses later nonzero",!pulse.ok&&pulse.reason==ymcc::touchhaptic::Reason::Cancelled,true);
+  expect("only baseline zero reached XInput",attempts.size()==1&&attempts[0]["left"]==0&&attempts[0]["right"]==0,true);
+  expect("cancelled start creates no motor owner",g_feedbackPulseActive,false);finish("physical-feedback-xinput-exit-during-baseline-cannot-send-nonzero");
+ }
+ {
+  reset();aokzoe();g_machineIdentity={"HandheldCompanion.Devices.OneXPlayer3",YmccFamily::OneXPlayer};sample();inManualCapabilities=[](){g_exitRequested=true;};
+  const auto pulse=nativePhysicalFeedbackStart(50,1000,false);inManualCapabilities={};
+  expect("exit during manual query refuses nonzero",!pulse.ok&&pulse.reason==ymcc::touchhaptic::Reason::Cancelled,true);
+  expect("query-raced pulse never reaches XInput",attempts.empty()&&!g_feedbackPulseActive,true);finish("physical-feedback-xinput-exit-during-manual-query-cannot-send-nonzero");
+ }
+ const auto msi=[&](bool a1m=false){
+  aokzoe();g_machineIdentity={a1m?"HandheldCompanion.Devices.ClawA1M":"HandheldCompanion.Devices.ClawG3E",YmccFamily::MsiClaw};
+  msiSource=std::make_shared<HidHideMsiMainSourceRecord>();fixturePublishMsiSource();g_msiFeedbackSourceGeneration=7;g_msiDinputSourceValid=true;
+ };
+ {
+  bool stopped=true;
+  for(const bool a1m:{false,true}){
+   reset();msi(a1m);const auto pulse=nativePhysicalFeedbackStart(26,1000,false);g_exitRequested=true;g_gamepadSerialStopping=true;physicalFeedbackExitCleanup(true);
+   stopped&=pulse.ok&&!g_feedbackPulseActive&&fixtureMsiZeros()==1&&writes.empty()&&exitFeedbackLog.size()==1&&exitFeedbackLog[0]["zeroWriteAttempted"]==true&&exitFeedbackLog[0]["zeroApiAccepted"]==true;
+  }
+  expect("MSI A1M and linear sources keep their original zero protocol during exit",stopped,true);finish("physical-feedback-msi-exit-returns-A1M-and-linear-targets");
+ }
+ {
+  reset();msi();MsiFeedbackLeaseOps::fixtureWrites=nullptr;fixtureMsiBeforeOpen=[](){g_exitRequested=true;};
+  const auto pulse=nativePhysicalFeedbackStart(26,1000,false);
+  expect("exit after MSI open cancels before WriteFile",!pulse.attempted&&pulse.reason==ymcc::touchhaptic::Reason::Cancelled&&fixtureMsiSdkReports.empty(),true);
+  expect("cancelled MSI open is retired",g_msiFeedbackLease.resource()==nullptr&&!g_feedbackPulseActive,true);finish("physical-feedback-msi-exit-during-open-cannot-send-nonzero");
+ }
+ {
+  reset();msi();MsiFeedbackLeaseOps::fixtureWrites=nullptr;const auto pulse=nativePhysicalFeedbackStart(26,1000,false);g_exitRequested=true;
+  const auto beforeWrites=fixtureMsiSdkReports.size();const auto late=msiDinputFeedbackWrite(30,50,false,"late-exit-request");
+  expect("late direct MSI nonzero is cancelled",!late.attempted&&late.reason==ymcc::touchhaptic::Reason::Cancelled&&fixtureMsiSdkReports.size()==beforeWrites,true);
+  physicalFeedbackExitCleanup(true);expect("owned MSI zero is still admitted",pulse.ok&&!g_feedbackPulseActive&&exitFeedbackLog.back()["zeroApiAccepted"]==true,true);finish("physical-feedback-msi-late-direct-nonzero-is-rejected");
+ }
+ {
+  reset();msi();MsiFeedbackLeaseOps::fixtureWrites=nullptr;nativePhysicalFeedbackStart(26,1000,false);fixtureMsiIo=FixtureMsiIo::Failed;g_exitRequested=true;
+  fixtureMsiSdkReports=json::array();physicalFeedbackExitCleanup(true);physicalFeedbackExitCleanup(false);
+  expect("MSI permanent failed stop remains unresolved",g_feedbackPulseActive&&exitFeedbackLog.size()==3&&exitFeedbackLog[1]["zeroApiAccepted"]==false,true);
+  expect("MSI zero retries stay bounded",fixtureMsiSdkReports.size()==2&&exitWaits==1,true);
+  expect("MSI cleanup never retries nonzero",std::all_of(fixtureMsiSdkReports.begin(),fixtureMsiSdkReports.end(),[](const auto& r){return r[4]==0&&r[5]==0;}),true);
+  fixtureMsiIo=FixtureMsiIo::Sync;physicalFeedbackFinish(g_rogVibratePulseGen);finish("physical-feedback-msi-persistent-zero-failure-stays-bounded");
+ }
+ {
+  reset();msi();MsiFeedbackLeaseOps::fixtureWrites=nullptr;nativePhysicalFeedbackStart(26,1000,false);fixtureMsiIo=FixtureMsiIo::Incomplete;g_exitRequested=true;
+  fixtureMsiSdkReports=json::array();physicalFeedbackExitCleanup(true);physicalFeedbackExitCleanup(false);
+  expect("pending MSI stop retains its physical owner",g_feedbackPulseActive,true);
+  expect("second pending-IO receipt does not fabricate a new write",exitFeedbackLog.size()==3&&exitFeedbackLog[0]["zeroWriteAttempted"]==true&&exitFeedbackLog[1]["zeroWriteAttempted"]==false&&fixtureMsiSdkReports.size()==1,true);
+  fixtureMsiIo=FixtureMsiIo::Sync;physicalFeedbackFinish(g_rogVibratePulseGen);finish("physical-feedback-msi-pending-io-does-not-fabricate-second-write");
+ }
+ {
+  reset();msi();MsiFeedbackLeaseOps::fixtureWrites=nullptr;nativePhysicalFeedbackStart(26,1000,false);fixtureMsiIo=FixtureMsiIo::Failed;g_exitRequested=true;
+  fixtureMsiSdkReports=json::array();duringExitWait=[](){g_msiFeedbackModeGeneration.fetch_add(1);};physicalFeedbackExitCleanup(true);
+  expect("MSI cleanup never follows a replaced mode",fixtureMsiSdkReports.size()==1&&!g_feedbackPulseActive,true);
+  expect("mode retirement is not stop success",exitFeedbackLog.size()==2&&exitFeedbackLog[1]["zeroWriteAttempted"]==false&&exitFeedbackLog[1]["zeroApiAccepted"]==false,true);
+  fixtureMsiIo=FixtureMsiIo::Sync;finish("physical-feedback-msi-exit-does-not-follow-retired-mode");
+ }
+
+#else
  for(const std::string trigger:{"dirty","boundary","none"}){
   reset();sample();start();const auto generation=g_feedbackSlotGeneration[0];sample(trigger=="dirty",trigger=="boundary");fakeTick+=18;pump();
   expect("same identity preserves active zero",motors[L"HID#physical-A"],0);expect("owner reclaimed",g_feedbackPulseActive,false);expect("one zero",zerosFor(L"HID#physical-A"),1);
@@ -459,7 +609,7 @@ int main(){
   expect("OneX read-only capability delay cannot write after a power change",!cancelled.ok&&cancelled.reason==ymcc::touchhaptic::Reason::PowerTransition&&writes.empty(),true);
   g_machineIdentity.family=YmccFamily::Unknown;manualStopLog=json::array();sample(true);
   const auto common=nativePhysicalFeedbackStart(70,125,false);fakeTick+=125;physicalFeedbackFinish(common.pulseGeneration);
-  expect("other-family manual output has no OneX evidence",manualStopLog.empty(),true);
+  expect("other-family manual stop has its own receipt without changing output",manualStopLog.size()==1&&manualStopLog.back()["backend"]=="xinput"&&manualStopLog.back()["zeroApiAccepted"]==true&&common.ok,true);
   finish("onex-manual-output-observation-preserves-writes");
  }
  // New source/power episode initialization is event driven. All of these calls
@@ -617,6 +767,7 @@ int main(){
   check("same-source overwrite keeps its normal stop",!g_feedbackPulseActive,true);
   finish("manual-source-replacement-preserves-same-source-and-touch-arbitration");
  }
+#endif
 #endif
  int failures=0,total=0,bad=0;for(const auto& c:cases){failures+=!c["passed"].get<bool>();for(const auto& e:c["checks"]){++total;bad+=!e["passed"].get<bool>();}}
  std::cout<<json{{"caseCount",cases.size()},{"checks",total},{"failedCases",failures},{"failedChecks",bad},{"cases",cases},{"actualStartStopFinishAndScheduleExtracted",true},{"deviceHostSdkExecuted",false}}.dump(2)<<std::endl;return failures?1:0;

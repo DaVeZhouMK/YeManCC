@@ -13,6 +13,7 @@ export interface AppearanceDraftState {
 }
 interface Storage { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void; }
 interface Dependencies {
+  rememberPreferences?(snapshot: AppearanceSnapshot, states: Changes): Promise<AppearanceResult>;
   reconcileExisting?(snapshot: AppearanceSnapshot): Promise<AppearanceResult>;
   read(): Promise<AppearanceSnapshot>; apply(snapshot: AppearanceSnapshot, states: Changes): Promise<AppearanceResult>;
   refresh(): Promise<AppearanceResult>; reset(mode: 'preset' | 'previous'): Promise<AppearanceResult>;
@@ -65,13 +66,30 @@ export function createAppearanceDraft(deps: Dependencies) {
   let boundTarget = '', dueAt = Infinity, timer: any = null, task: Promise<void> | null = null, readTask: Promise<void> | null = null;
   let reapply = false, readRequested = false, failed = false;
   let journalStatus: JournalStatus = deps.storage ? 'idle' : 'unavailable', journalMessage = '';
+  let preferenceWarning = '';
+  let preferenceRetry: Changes = {}, preferenceRepair = false;
   const journalBaselines = new Map<string, string | null>(), journalOwned = new Map<string, Set<string>>();
   const owned = () => { let names = journalOwned.get(boundTarget); if (!names) journalOwned.set(boundTarget, names = new Set()); return names; };
   const restoredTargets = new Set<string>(), listeners = new Set<(state: AppearanceDraftState) => void>();
   const changes = (): Changes => Object.fromEntries(Object.entries(entries).map(([name, entry]) => [name, entry!.value]));
   const pending = () => Object.keys(entries).length;
   const key = (id: string) => 'YMCC.steamAppearanceDraft.v1:' + id;
-  function state(): AppearanceDraftState { return { snapshot: snapshot ? clone(snapshot) : null, changes: changes(), pendingCount: pending(), saving, locked, phase, message, journalStatus, journalMessage }; }
+  function state(): AppearanceDraftState {
+    const showWarning = !!preferenceWarning && !saving && !locked && !pending();
+    return { snapshot: snapshot ? clone(snapshot) : null, changes: changes(), pendingCount: pending(), saving, locked,
+      phase: showWarning && phase === 'idle' ? 'saved-unconfirmed' : phase,
+      message: showWarning && !message.includes(preferenceWarning) ? [message, preferenceWarning].filter(Boolean).join('；') : message,
+      journalStatus, journalMessage };
+  }
+  function preferenceResult(result: AppearanceResult, intent: Changes) {
+    if (result.preferenceSaved === true) {
+      for (const name of Object.keys(intent)) delete preferenceRetry[name as AppearanceThemeName];
+      if (!Object.keys(preferenceRetry).length) preferenceWarning = '';
+    } else if (result.preferenceSaved === false) {
+      preferenceRetry = { ...preferenceRetry, ...intent };
+      preferenceWarning = result.preferenceReason || '开机全局外观偏好未保存';
+    }
+  }
   function notify() { const value = state(); for (const listener of listeners) { try { listener(value); } catch {} } }
   function clearTimer() { if (timer !== null) deps.cancel(timer); timer = null; }
 
@@ -135,7 +153,7 @@ export function createAppearanceDraft(deps: Dependencies) {
       persist(); entries = {}; clearTimer(); reapply = false; failed = true;
       phase = 'error'; message = '加载器主题目录已改变；旧目录的未提交选择已保留，未写入新目录，请重新选择。';
     }
-    if (boundTarget !== id) { restoredTargets.delete(id); journalFault(id ? 'idle' : 'unavailable', id ? '' : '主题目录身份未知，未读取草稿'); }
+    if (boundTarget !== id) { preferenceWarning = ''; preferenceRetry = {}; preferenceRepair = false; restoredTargets.delete(id); journalFault(id ? 'idle' : 'unavailable', id ? '' : '主题目录身份未知，未读取草稿'); }
     snapshot = clone(value); boundTarget = id;
     if (restore) restoreJournal();
   }
@@ -189,17 +207,20 @@ export function createAppearanceDraft(deps: Dependencies) {
     receive(current, false); persist();
     const patch: Changes = {};
     for (const name of names) if (submitted[name] && current.themes.find(row => row.name === name)?.configured !== submitted[name]!.value) patch[name] = submitted[name]!.value;
-    const result: AppearanceResult = Object.keys(patch).length ? await deps.apply(current, patch) : { ok: true, saved: true, snapshot: current, message: '选择已与配置一致，无需重复写入' };
+    const intent: Changes = Object.fromEntries(names.filter(name => submitted[name]).map(name => [name, submitted[name]!.value]));
+    const result: AppearanceResult = Object.keys(patch).length ? await deps.apply(current, patch) : deps.rememberPreferences
+      ? await deps.rememberPreferences(current, intent) : { ok: true, saved: true, snapshot: current, message: '选择已与配置一致，无需重复写入' };
     if (!result.snapshot) throw new Error('后台未返回可校验状态，未丢弃选择');
     if (result.snapshot && id && target(result.snapshot) !== id) { receive(result.snapshot, false); throw new Error('加载器返回了不同主题目录，未确认旧选择'); }
     if (result.snapshot) receive(result.snapshot, false);
+    preferenceResult(result, intent);
     const acknowledged = (result.ok || result.saved === true) && !!result.snapshot;
     if (acknowledged) for (const name of names) {
       if (submitted[name] && entries[name]?.sequence === submitted[name]!.sequence && result.snapshot!.themes.find(row => row.name === name)?.configured === submitted[name]!.value) delete entries[name];
     }
     persist();
     if (names.some(name => submitted[name] && entries[name]?.sequence === submitted[name]!.sequence)) throw new Error(result.message || '返回状态与所选开关不一致，未丢弃选择');
-    if (!result.ok) {
+    if (!result.ok || result.preferenceSaved === false) {
       if (acknowledged && !pending()) { phase = 'saved-unconfirmed'; message = result.message || '配置已保存，后台应用未确认'; }
       else throw new Error(result.message || '提交未确认，选择已保留；点击重新应用重试');
     } else { phase = pending() ? 'pending' : 'idle'; message = pending() ? '仍有新选择，停止操作 3 秒后自动应用' : result.message || '配置已保存'; }
@@ -207,6 +228,18 @@ export function createAppearanceDraft(deps: Dependencies) {
   async function run() {
     saving = true; phase = 'saving'; ++writeEpoch; notify();
     try {
+      if (preferenceRepair) {
+        preferenceRepair = false;
+        if (!pending() && deps.rememberPreferences && Object.keys(preferenceRetry).length) {
+          const intent = { ...preferenceRetry }, id = boundTarget, current = await deps.read();
+          if (!id || target(current) !== id) { receive(current, false); throw new Error('主题目录已变化，未补写旧全局偏好'); }
+          const result = await deps.rememberPreferences(current, intent);
+          if (!result.snapshot || target(result.snapshot) !== id) throw new Error('全局偏好补存回执身份未确认');
+          receive(result.snapshot, false); preferenceResult(result, intent);
+          phase = result.ok && result.preferenceSaved !== false ? 'idle' : 'saved-unconfirmed';
+          message = result.message || '';
+        }
+      }
       if (pending()) await submit();
       if (reapply && !pending() && !locked) {
         reapply = false;
@@ -223,7 +256,7 @@ export function createAppearanceDraft(deps: Dependencies) {
   }
   function kick(): Promise<void> {
     if (task) return task;
-    if (locked || failed || pending() && deps.now() < dueAt || !pending() && !reapply) return Promise.resolve();
+    if (locked || failed || pending() && deps.now() < dueAt || !pending() && !reapply && !preferenceRepair) return Promise.resolve();
     task = run().finally(() => {
       task = null;
       if (!locked && !failed && (pending() && deps.now() >= dueAt || !pending() && reapply)) void kick(); else schedule();
@@ -239,23 +272,25 @@ export function createAppearanceDraft(deps: Dependencies) {
     ++writeEpoch; failed = false;
     for (const [key, value] of items) {
       const name = key as AppearanceThemeName; owned().add(name);
-      if (!saving && snapshot?.themes.find(row => row.name === name)?.configured === value) delete entries[name];
+      if (!saving && snapshot?.themes.find(row => row.name === name)?.configured === value && preferenceRetry[name] === undefined) delete entries[name];
       else entries[name] = { value, sequence: ++sequence };
     }
     dueAt = deps.now() + APPEARANCE_DEBOUNCE_MS;
     phase = pending() ? 'pending' : 'idle'; message = pending() ? '已选择 · 停止操作 3 秒后自动应用' : '选择与当前配置一致，无需提交';
     persist(true); notify(); schedule();
   }
-  function flush(reapplyRequested = true) {
+  async function flush(reapplyRequested = true) {
     if (locked) return Promise.resolve();
-    if (!snapshot || !boundTarget) { clearTimer(); phase = 'error'; message = '主题目录身份未知，未应用草稿'; notify(); return Promise.resolve(); }
+    if (!snapshot || !boundTarget) await read();
+    if (!snapshot || !boundTarget) { clearTimer(); phase = 'error'; message = '主题目录身份未知，未应用草稿'; notify(); return; }
+    if (!pending() && Object.keys(preferenceRetry).length && deps.rememberPreferences) preferenceRepair = true;
     persist(true); failed = false; reapply ||= reapplyRequested; dueAt = deps.now(); clearTimer();
     if (saving) { message = '已排队应用最新选择；开关仍可继续调整'; notify(); return task || Promise.resolve(); }
     return kick();
   }
   async function reset(mode: 'preset' | 'previous') {
     if (locked) return;
-    locked = true; failed = false; ++writeEpoch; clearTimer(); entries = {}; reapply = false; persist();
+    locked = true; failed = false; ++writeEpoch; clearTimer(); entries = {}; reapply = false; preferenceRepair = false; persist();
     phase = 'resetting'; message = '正在恢复预设，未提交的选择已取消'; notify();
     try {
       if (task) await task;
@@ -267,7 +302,8 @@ export function createAppearanceDraft(deps: Dependencies) {
       // leave the previous configuration displayed as the new confirmed state.
       if (!result.snapshot) snapshot = null;
       receive(result.snapshot || await deps.read(), false);
-      phase = result.ok ? 'idle' : result.saved ? 'saved-unconfirmed' : 'error';
+      preferenceResult(result, Object.fromEntries(result.snapshot?.themes.map(row => [row.name, row.configured]) || []));
+      phase = result.ok && result.preferenceSaved !== false ? 'idle' : result.saved ? 'saved-unconfirmed' : 'error';
       message = result.message || (result.ok ? '已恢复外观' : '恢复外观未确认');
     } catch (error) { phase = 'error'; message = errorText(error); }
     finally { locked = false; saving = false; ++writeEpoch; notify(); if (readRequested) { readRequested = false; void read(); } }
@@ -286,6 +322,6 @@ const journal: Storage = {
 // Owns finite timers outside component lifetime. Closing the editor / routing away
 // must not lose the final click; recreating YMCC only restores a journal for display.
 export const steamAppearanceDraft = createAppearanceDraft({
-  read: steamAppearance.read, reconcileExisting: steamAppearance.reconcileExisting, apply: steamAppearance.apply, refresh: steamAppearance.refresh, reset: steamAppearance.reset,
+  read: steamAppearance.read, reconcileExisting: steamAppearance.reconcileExisting, apply: steamAppearance.apply, rememberPreferences: steamAppearance.rememberPreferences, refresh: steamAppearance.refresh, reset: steamAppearance.reset,
   now: () => Date.now(), later: (fn, ms) => setTimeout(fn, ms), cancel: timer => clearTimeout(timer), storage: journal,
 });

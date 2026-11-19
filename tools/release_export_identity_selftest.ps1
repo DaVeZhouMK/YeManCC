@@ -16,9 +16,11 @@ function Fixture {
  Text (Join-Path $project 'capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs') 'inert-managed-capability'
  # The fixture materializes the maintained required-file contract, then the
  # behavior cases below independently test stale/missing/changed payloads.
- $requiredBlock=[regex]::Match([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'release-export-identity.ps1')),'foreach\(\$relative in @\((.*?)\)\)\s*\{',[Text.RegularExpressions.RegexOptions]::Singleline)
- if(-not $requiredBlock.Success){throw 'Required source contract missing'}
- foreach($entry in [regex]::Matches($requiredBlock.Groups[1].Value,"'([^']+)'")){ $name=$entry.Groups[1].Value;Text (Join-Path $project $name) ('inert-'+$name) }
+ $requiredBlocks=[regex]::Matches((Get-Command Get-ExportSourceIndex -CommandType Function).Definition,'foreach\(\$relative in @\((.*?)\)\)\s*\{',[Text.RegularExpressions.RegexOptions]::Singleline)
+ if(-not $requiredBlocks.Count){throw 'Required source contract missing'}
+ foreach($block in $requiredBlocks){
+   foreach($entry in [regex]::Matches($block.Groups[1].Value,"'([^']+)'")){ $name=$entry.Groups[1].Value;Text (Join-Path $project $name) ('inert-'+$name) }
+ }
  Text (Join-Path $project 'version.json') '{"version":"0.0.33"}'
  # Keep the existing Web contract: the required probe replaces the optional CSS fixture.
  foreach($name in @('index.html','hud-output.html','radial-output.html','app.config.json','assets/current.js')){Text (Join-Path $work ('Build/App/Web/'+$name)) ('web-'+$name)}
@@ -31,7 +33,7 @@ function Fixture {
  Text (Join-Path $work 'Build/App/BatteryHost/fixture-owner.dll') 'inert-battery-owner'
  Text (Join-Path $project 'PowerControl/battery-host/battery-host.payload.json') '{"fixture":true}'
  foreach($name in @('YeManInputHost.exe','YeManInputHost.dll','YeManInputHost.deps.json','YeManInputHost.runtimeconfig.json','HIDMaestro.Core.dll')) { Text (Join-Path $work ('Build/App/Native/InputHost/'+$name)) ('inert-inputhost-'+$name) }
- foreach($name in @('YeManLightSetter.exe','YeManLightSetter.dll','YeManLightSetter.deps.json','YeManLightSetter.runtimeconfig.json','YeManLightSetter.json','YeManLightDeviceCore.dll')) { Text (Join-Path $project ('PowerControl/light-setter/'+$name)) ('inert-light-setter-'+$name) }
+ foreach($name in @('YeManLightSetter.exe','YeManLightSetter.dll','YeManLightSetter.deps.json','YeManLightSetter.runtimeconfig.json','YeManLightSetter.json','YeManLightDeviceCore.dll','LICENSE.HueSync.txt')) { Text (Join-Path $project ('PowerControl/light-setter/'+$name)) ('inert-light-setter-'+$name) }
  $before=@(Get-ExportSourceIndex $project)
  $build=Write-ExportBuildIdentity $project $work $before
  foreach($r in $build.payload){$rel=$r.path;$file=if($r.lane-eq'web'){Join-Path $work ('Build/App/Web/'+$rel.Substring(8))}elseif($r.lane-eq'native'){Join-Path $work ('Build/App/Native/'+$rel.Substring(8))}elseif($r.lane-eq'inputhost'){Join-Path $work ('Build/App/Native/InputHost/'+[IO.Path]::GetFileName($rel))}elseif($rel.StartsWith('PowerControl/decky/plugins/')){Join-Path $work ('Build/App/Decky/'+$rel.Substring(19))}else{Join-Path $project $rel};$target=Join-Path $stage $rel;New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($target))|Out-Null;Copy-Item -LiteralPath $file -Destination $target}
@@ -169,14 +171,16 @@ if($PreMainOnly){
    foreach($name in @('native/game_detection_blacklist_entries.h','native/process_efficiency.h','deps/json/json.hpp','CustomSteamLibrary/assets/custom-steam-library.ico')){Text (Join-Path $f.project $name) ('inert-'+$name)}
    Text (Join-Path $f.project 'CustomSteamLibrary/SteamArtworkLab.exe') 'inert-old-worker'
    Text (Join-Path $f.project 'CustomSteamLibrary/CustomSteamLibrary.exe') 'inert-old-host'
-   Text (Join-Path $f.project 'CustomSteamLibrary/package-manifest.json') '{"packageVersion":"0.0.33","generatedAt":"inert-initial","backgroundMediaProtocol":1,"backgroundCatalogProtocol":1,"backgroundIdentityProtocol":1,"backgroundVideoQualityPolicy":3,"backgroundManualProtocol":1,"backgroundVideoSelectionProtocol":1,"sourceBuild":{"host":"inert-host","worker":"old"},"fileIndex":[{"path":"SteamArtworkLab.exe","bytes":0,"sha256":"old"},{"path":"CustomSteamLibrary.exe","bytes":0,"sha256":"old"}]}'
-   for($n=0;$n -lt 64;$n++){
-     try{$null=@(Get-CustomSteamLibrarySourceIndex $f.project host);break}catch{
-       $message=$_.Exception.Message;$prefix='Missing host build input: '
-       if(-not $message.StartsWith($prefix)){throw}
-       $rel=$message.Substring($prefix.Length);$target=[IO.Path]::GetFullPath((Join-Path $f.project $rel))
-       if(-not $target.StartsWith($f.project+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Inert host input escaped original fixture'}
-       Text $target ('inert-original-host-input-'+$rel)
+   Text (Join-Path $f.project 'CustomSteamLibrary/package-manifest.json') '{"packageVersion":"0.0.33","generatedAt":"inert-initial","backgroundSteamSourceProtocol":1,"backgroundMediaProtocol":1,"backgroundCatalogProtocol":1,"backgroundIdentityProtocol":1,"backgroundVideoQualityPolicy":3,"backgroundManualProtocol":1,"backgroundVideoSelectionProtocol":1,"sourceBuild":{"host":"inert-host","worker":"old"},"fileIndex":[{"path":"SteamArtworkLab.exe","bytes":0,"sha256":"old"},{"path":"CustomSteamLibrary.exe","bytes":0,"sha256":"old"}]}'
+   foreach($kind in @('host','worker')){
+     for($n=0;$n -lt 64;$n++){
+       try{$null=@(Get-CustomSteamLibrarySourceIndex $f.project $kind);break}catch{
+         $message=$_.Exception.Message;$prefix="Missing $kind build input: "
+         if(-not $message.StartsWith($prefix) -or $n -eq 63){throw}
+         $rel=$message.Substring($prefix.Length);$target=[IO.Path]::GetFullPath((Join-Path $f.project $rel))
+         if(-not $target.StartsWith($f.project+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Inert child input escaped original fixture'}
+         Text $target ('inert-original-'+$kind+'-input-'+$rel)
+       }
      }
    }
    $tools=Join-Path $f.root 'selected-tools';New-Item -ItemType Directory -Path $tools|Out-Null
@@ -199,6 +203,7 @@ if($PreMainOnly){
    $m=Get-Content -LiteralPath (Join-Path $root 'package-manifest.json') -Raw|ConvertFrom-Json
    $hp=Get-CslStagePin $cslHostPayload;$m.sourceBuild.host=$hp.sha256
    $m.sourceBuild|Add-Member -NotePropertyName hostSources -NotePropertyValue @(Get-CustomSteamLibrarySourceIndex $f.project host) -Force
+   $m|Add-Member -NotePropertyName backgroundSharedSleepProtocol -NotePropertyValue 1 -Force
    $entry=@($m.fileIndex|Where-Object{$_.path -ceq 'CustomSteamLibrary.exe'});$entry[0].bytes=$hp.bytes;$entry[0].sha256=$hp.sha256
    $m.generatedAt=[DateTimeOffset]::Now.ToString('o')
    $m|ConvertTo-Json -Depth 20|Set-Content -LiteralPath (Join-Path $root 'package-manifest.json') -Encoding UTF8
@@ -382,7 +387,7 @@ Case 'fixture orchestration source identity detects same-length changes without 
  foreach($name in $names){if(@($changed|Where-Object {$_.path-ceq$name}).Count-ne1){throw ('MISSING_CHANGED_ORCHESTRATION_SOURCE: '+$name)}}
  Reject {Assert-ExportBuildIdentity $f.project $f.work} 'EXPORT_SOURCE_CHANGED:'
 }
-Case 'source/build/staging/whole ZIP including identity match' {param($f)$b=Assert-ExportBuildIdentity $f.project $f.work;$r=Assert-ExportArchiveIdentity $f.zip $f.stage $b;if($r.status-ne'passed'-or$r.files-ne32){throw 'Unexpected valid receipt'}}
+Case 'source/build/staging/whole ZIP including identity match' {param($f)$b=Assert-ExportBuildIdentity $f.project $f.work;$r=Assert-ExportArchiveIdentity $f.zip $f.stage $b;if($r.status-ne'passed'-or$r.files-ne33){throw 'Unexpected valid receipt'}}
 Case 'development install refreshes stale identity only after matching native web and Decky' {param($f)
  $old='old-development-identity';Text (Join-Path $f.stage 'YeManCC/export-identity.json') $old
  $backup=Join-Path $f.root 'installed-backup'
@@ -433,6 +438,19 @@ foreach($name in @('tools/steam_cssloader_manual_observation_selftest.cpp','tool
 foreach($name in @('Native/YeManCC.exe','Native/InputHost/YeManInputHost.dll','Native/InputHost/HIDMaestro.Core.dll','Web/assets/current.js','Web/hud-output.html','Decky/plugins/ymcc-sidebar/dist/index.js','Decky/plugins/ymcc-sidebar/LICENSE.vue')){Case ('same-length built payload change rejected: '+$name) {param($f)Alter (Join-Path $f.work ('Build/App/'+$name));Reject {Assert-ExportBuildIdentity $f.project $f.work} 'EXPORT_BUILD_CHANGED:'}}
 Case 'light setter payload changed after build rejects packaging' {param($f)Alter (Join-Path $f.project 'PowerControl/light-setter/YeManLightSetter.dll');Reject {Assert-ExportBuildIdentity $f.project $f.work} 'EXPORT_BUILD_CHANGED:'}
 Case 'independent lighting core changed after build rejects packaging' {param($f)Alter (Join-Path $f.project 'PowerControl/light-setter/YeManLightDeviceCore.dll');Reject {Assert-ExportBuildIdentity $f.project $f.work} 'EXPORT_BUILD_CHANGED:'}
+Case 'lighting license is bound to build identity and rejects changed or missing bytes' {param($f)
+ $relative='PowerControl/light-setter/LICENSE.HueSync.txt'
+ $rows=@($f.build.payload|Where-Object path -CEQ $relative)
+ if($rows.Count -ne 1 -or $rows[0].bytes -le 0 -or $rows[0].sha256 -cne (Get-ExportFileHash (Join-Path $f.project $relative))){throw 'Lighting license missing from actual build tuple'}
+ Alter (Join-Path $f.project $relative)
+ Reject {Assert-ExportBuildIdentity $f.project $f.work} 'EXPORT_BUILD_CHANGED:'
+ Alter (Join-Path $f.project $relative)
+ [IO.File]::Delete((Join-Path $f.stage $relative))
+ Reject {Assert-ExportStagedBuild $f.stage $f.build} 'EXPORT_STAGE_MISSING:'
+ Copy-Item -LiteralPath (Join-Path $f.project $relative) -Destination (Join-Path $f.stage $relative)
+ Zip-Edit $f $relative delete
+ Reject {Assert-ExportArchiveIdentity $f.zip $f.stage $f.build} 'EXPORT_ZIP_MISSING:'
+}
 Case 'complete runnable Release matches the ZIP tree' {param($f)$dest=Join-Path $f.work 'Release';New-Item -ItemType Directory -Path $dest|Out-Null;Copy-Item -Path (Join-Path $f.stage '*') -Destination $dest -Recurse;Assert-ExportPublishedTree $dest $f.stage $f.build}
 Case 'preliminary stage may defer InputHost but final Release cannot omit it' {param($f)$file=Join-Path $f.stage 'PowerControl/feature-assets/virtual-gamepad/YeManInputHost.dll';[IO.File]::Delete($file);Assert-ExportStagedBuild $f.stage $f.build -BeforeCompletePackage;Reject {Assert-ExportStagedBuild $f.stage $f.build} 'EXPORT_STAGE_MISSING:'}
 Case 'runnable Release missing a complete-package dependency is rejected' {param($f)$dest=Join-Path $f.work 'Release';New-Item -ItemType Directory -Path $dest|Out-Null;Copy-Item -Path (Join-Path $f.stage '*') -Destination $dest -Recurse;[IO.File]::Delete((Join-Path $dest 'PowerControl/runtime/owner.bin'));Reject {Assert-ExportPublishedTree $dest $f.stage $f.build} 'EXPORT_RELEASE_TREE_MISMATCH:'}

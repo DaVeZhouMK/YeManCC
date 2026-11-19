@@ -138,7 +138,7 @@ static bool msiDinputManagedMainSourceActive(HidHideMsiMainSourceRecord&r){++cfg
 static bool physicalReleaseWindowActive(){return cfg.window;}
 static bool inputHostProcessAliveLocked(){++cfg.hostAliveCalls;return cfg.existingHostAlive;}
 static std::vector<HidHideInterfaceRecord>hidHideBuildSourceInterfaceInventory(const std::string&,const std::string&,bool*complete=nullptr){++cfg.inventoryReads;if(complete)*complete=cfg.inventoryComplete;if(cfg.onInventory)cfg.onInventory();return cfg.inventory;}
-static bool hidHideGetPhysicalIdentities(std::vector<HidHidePhysicalIdentity>&r){r=cfg.physical;return cfg.sourceResolved;}
+static bool hidHideGetPhysicalIdentities(std::vector<HidHidePhysicalIdentity>&r,const char** failure=nullptr){if(failure)*failure=nullptr;r=cfg.physical;return cfg.sourceResolved;}
 static void hidHideServiceHealth(const char*){}
 static bool hidHideCaptureVisibilitySnapshot(HidHideVisibilitySnapshot&r){++cfg.fullReads;r=cfg.visibility;return cfg.fullReadback;}
 static bool hidHideCapturePeriodicVisibilityState(HidHidePeriodicState&r){++cfg.slimReads;r.hidden=cfg.visibility.hidden;r.cloaking=cfg.visibility.cloaking;return cfg.periodicReadback;}

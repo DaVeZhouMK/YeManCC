@@ -626,19 +626,19 @@
     },
     {
       "id": "battery",
-      "status": "42-exact-rules-12-protocols-connected; apex-field-firmware-rejection-open; hardware-acceptance-qualified-per-model",
+      "status": "reviewed-source-rules-registered; ordinary-package-and-physical-validation-separate",
+      "sourceRegistrationRef": "capabilities/hc-device-catalog.json#/domains/battery",
       "consumers": [
         "HcBatteryCapabilityCatalog exact identity dispatcher",
         "actual Policy and Controller",
         "existing native provider/readback/recovery",
         "existing component consumes actual Controller JSON"
       ],
-      "registeredIdentityRules": 42,
-      "frozenIdentityRules": 34,
-      "reviewedNativeExtensions": 8,
       "sourceDeclarationNotRequiredForReviewedNativeProvider": [
-        "GPDWinMini_HX370"
+        "GPDWinMini_HX370",
+        "OneXPlayerX2MiniPro"
       ],
+      "verifiedScopeNote": "The following verifiedScope and evidence fields describe prior software runs. They do not validate the current rule set, later Mini Pro route, ordinary package or physical behavior.",
       "verifiedScope": "All existing rule identities select the original Route instance, enter actual Controller read/write against memory providers, restore software bypass on shutdown, and retain firmware/readback/conflict/recovery rejection. Actual provider protocol and UI tests retained. The OXP3 reviewed extension selects one exact SystemProduct identity (ONEXPLAYER 3 / ONEXPLAYER-3) into Oxp3WmiProvider: root\\WMI SuRwECRegInterface ReadECReg/WriteECReg, packed address 0xA304 for 0x4A3, independent readback, stale/parallel-change rejection, WMI failure and readback mismatch rejection, source range 0..100 readback with product choices 50..100. The production Oxp3WmiEc adapter executes ReadECReg/WriteECReg method names, packed arguments, hex response/status parsing, missing/malformed result and method-failure paths through a controlled external in-memory method terminal; WMI enumeration and live WMI/EC remain unexecuted. The 0x4A4 bypass mapping exists only at the provider contract and is not product-exposed.",
       "evidence": {
         "controllerGroups": 62,
@@ -648,21 +648,24 @@
         "oxp3WmiProviderChecks": "exact identity, 0x4A3 readback/write, stale fence/provider write rejection, WMI failure, ignored-write mismatch, invalid raw and unknown identity zero-open; production adapter method names/packed args, non-zero status, missing/malformed response and method failure through a controlled in-memory method terminal",
         "physicalHardwareVerified": false
       },
-      "runtimeSourceContract": "Includes four source-linked catalog files plus ProcessEfficiency; modified shared generated source is a stale-contract negative",
+      "runtimeSourceContract": "Check tools/battery-charge-contract.mjs against both contracts in the same build capture. This proves source identity consistency, not which DLL was packaged or loaded.",
       "remaining": [
         "SuiPlay0X1 inherited source protocol remains explicitly not admitted by reviewed Windows policy",
         "same-version installation/physical battery and vendor protocol validation are separate",
         "OXP3 real WMI/EC hardware readback and charge cutoff remain UNKNOWN; the 0x4A4 bypass mode is source-mapped but not product-expressible",
         "continue joint lifecycle/dependency review",
         "APEX newest 2026-11-05 02:33 session reports BIOS/EC 0.12; major=0 fails inherited X1 major>=1 gate before provider open. The previous 12-GET archive lacked these values. HC X1 inheritance and Linux ACPI8 0xE5/0xE6 remain not interchangeable",
-        "X2/X2MiniPro remain explicitly source-disabled; OneX direct bypass modes are not exposed by percentage UI",
+        "X2 remains unregistered. Frozen HC did not admit X2 Mini Pro through X1 inheritance; the separate reviewed YMCC threshold-only route is registered in source, not in ordinary export 20261118-145316. A fresh ordinary package and separate field SET, GET and physical cutoff are pending. OneX direct bypass modes are not exposed by percentage UI",
         "Super X 75..100 dual UMA-reader/checked-SIO-writer source route is registered; live target readback/cutoff and deployment remain separately unverified"
       ],
-      "latestSourceAudit": {
+      "currentSourceAuditRef": "capabilities/BATTERY-CAPABILITY-AUDIT.json",
+      "historicalSourceAudit20261105": {
+        "historicalSnapshot": true,
         "dateHongKong": "2026-11-05",
-        "path": "capabilities/BATTERY-CAPABILITY-AUDIT.json",
-        "report": "capabilities/BATTERY-CAPABILITY-AUDIT.md",
-        "sha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
+        "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-260-BATTERY-AUDIT-REPORT-DRIFT/BEFORE/BATTERY-CAPABILITY-AUDIT.json",
+        "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-260-BATTERY-AUDIT-REPORT-DRIFT/BEFORE/BATTERY-CAPABILITY-AUDIT.md",
+        "sha256": "4acd927b35db10946fe151d08c8f6547b5ad98671fd9b9470dbe02d927c5c20e",
+        "previousIndexSha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
         "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105",
         "upstreamCommit": "db93cadd55cb9f199beb1cb1dff016bc0150048e",
         "upstreamDeviceFiles": 104,
@@ -707,7 +710,7 @@
           "sha256": "09142f59a044c2d5ed87de4605c2daef1657fd17a6962097875fa5217bbdf9af"
         }
       },
-      "latestFieldEvidence": {
+      "historicalApexFieldEvidence20261105": {
         "archive": "G:/YeManCC-Work/日志/其他/YeManCC-logs-20261105-023324-onexplayer3.zip",
         "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105\\field-023324\\field-summary.json",
         "evidenceSha256": "2ac99d75d827ed0bb71495c200c8a01a514be31b2fdf577878dbf64b3b5df693",
@@ -2472,10 +2475,17 @@
     "wholeFamilyComplete": false
   },
   "currentBatteryCapabilityAudit": {
-    "dateHongKong": "2026-11-05",
     "path": "capabilities/BATTERY-CAPABILITY-AUDIT.json",
     "report": "capabilities/BATTERY-CAPABILITY-AUDIT.md",
-    "sha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
+    "scope": "Source coverage and historical field evidence only. The actual ordinary export pointer and packaged DLL determine package inclusion."
+  },
+  "historicalBatteryCapabilityAudit20261105": {
+    "historicalSnapshot": true,
+    "dateHongKong": "2026-11-05",
+    "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-260-BATTERY-AUDIT-REPORT-DRIFT/BEFORE/BATTERY-CAPABILITY-AUDIT.json",
+    "report": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-260-BATTERY-AUDIT-REPORT-DRIFT/BEFORE/BATTERY-CAPABILITY-AUDIT.md",
+    "sha256": "4acd927b35db10946fe151d08c8f6547b5ad98671fd9b9470dbe02d927c5c20e",
+    "previousIndexSha256": "213ac9d9933082736d105dba6116d22939ba7bb360ad11746a9274abaafbdda1",
     "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BatteryCapability-20261105",
     "upstreamCommit": "db93cadd55cb9f199beb1cb1dff016bc0150048e",
     "upstreamDeviceFiles": 104,

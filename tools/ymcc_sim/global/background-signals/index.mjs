@@ -4,6 +4,7 @@ import {spawn} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {getBackgroundAdapters} from './adapter.mjs';
+import {classifyBundledInput,verifyBundledToolScope} from '../bundled-node-tool-authority.mjs';
 export {getBackgroundAdapters};
 const here=path.dirname(fileURLToPath(import.meta.url));
 const defaultRepo=path.resolve(here,'../../../..');
@@ -48,6 +49,29 @@ async function executeOwned({pwshPath,nodePath,repoRoot,evidenceDir,timeoutMs}){
   process.on('close',async(code,signal)=>{clearTimeout(timer);result.exitCode=code;result.signal=signal;try{await Promise.all([fs.writeFile(path.join(evidenceDir,'runner.stdout.log'),stdout),fs.writeFile(path.join(evidenceDir,'runner.stderr.log'),stderr)]);}catch(error){result.launchError??=error.code??'EVIDENCE_WRITE_FAILED';}resolve(result);});
  });
 }
+async function verifyBackgroundBundles(worker,repoRoot,evidenceDir){
+ const authority=verifyBundledToolScope(worker.bundledToolAuthority,repoRoot);
+ const names=['original-dynamic.mjs','behavior.mjs'];
+ if(worker.bundles?.length!==names.length||worker.bundles.some((b,i)=>b.path!==names[i]||b.esbuildVersion!==authority.compilerVersion))throw failure('BACKGROUND_BUNDLE_SET_MISMATCH');
+ const sources=new Map(),tools=new Map();
+ for(const bundle of worker.bundles){
+  const output=path.join(evidenceDir,bundle.path),metaPath=output.slice(0,-4)+'.metafile.json';
+  for(const file of [output,metaPath]){
+   const stat=await fs.lstat(file);
+   if(!stat.isFile()||stat.isSymbolicLink()||stat.size>8*1024*1024)throw failure('BACKGROUND_BUNDLE_OUTPUT_INVALID');
+  }
+  if(sha(await fs.readFile(output))!==bundle.sha256)throw failure('BACKGROUND_BUNDLE_HASH_CHANGED');
+  const meta=await json(metaPath),inputs=Object.keys(meta.inputs??{});
+  if(!inputs.length||inputs.length>3072)throw failure('BACKGROUND_BUNDLE_METAFILE_INVALID');
+  for(const input of inputs){
+   const file=path.resolve(repoRoot,input),{role,row}=classifyBundledInput(repoRoot,file,await fs.readFile(file),authority);
+   (role==='tool'?tools:sources).set(row.path,row);
+  }
+ }
+ const verify=(expected,observed)=>Array.isArray(observed)&&observed.length===expected.size&&new Set(observed.map(row=>row.path)).size===expected.size&&observed.every(row=>row.status==='OK'&&expected.get(row.path)?.sha256===row.sha256);
+ if(!verify(sources,worker.compiledInputs)||!verify(tools,worker.compiledToolInputs))throw failure('BACKGROUND_BUNDLE_INPUT_SET_MISMATCH');
+ return {status:'PASS',graphSha256:authority.graphSha256,sources:sources.size,tools:tools.size};
+}
 export async function runBackgroundRegressions(input={}){
  const repoRoot=path.resolve(input.repoRoot??defaultRepo);if(!input.evidenceDir)throw failure('FRESH_EVIDENCE_DIRECTORY_REQUIRED');
  const evidenceDir=path.resolve(input.evidenceDir);if(within(repoRoot,evidenceDir))throw failure('EVIDENCE_MUST_BE_OUTSIDE_REPOSITORY');
@@ -72,7 +96,10 @@ export async function runBackgroundRegressions(input={}){
   for(const item of [...result.actualCompiledInputs,...(worker.nativeSourceInputs??[])]){const old=combined.get(item.path);if(old&&old.sha256!==item.sha256)throw failure('ACTUAL_COMPILE_INPUT_DIFFERS_FROM_RUN_SNAPSHOT');combined.set(item.path,{...item,status:'OK'});}
   result.sourceHashes=[...combined.values()].sort((a,b)=>a.path.localeCompare(b.path));
   result.sourceVerification=await verifyBackgroundInputs(repoRoot,result.sourceHashes);
-  if(result.process.exitCode===0&&result.validation.status==='PASS'&&result.sourceVerification.status==='PASS')result.status='PASS';
+  if(result.process.exitCode===0&&result.validation.status==='PASS'&&result.sourceVerification.status==='PASS'){
+   result.bundleVerification=await verifyBackgroundBundles(worker,repoRoot,evidenceDir);
+   result.status='PASS';
+  }
   if(result.sourceVerification.status!=='PASS')result.failure={code:'SOURCE_CHANGED_DURING_BACKGROUND_RUN',changed:result.sourceVerification.changed};
  }catch(error){result.status=error.code?.includes('CHANGED')||error.code?.includes('DIFFERS')?'FAIL':'BLOCKED';result.failure={code:error.code??error.message,exceptionType:error.name};result.remainingGaps.push('Required actual compiler/source/transport/receipt was unavailable; no mock-success fallback.');}
  result.finishedAt=new Date().toISOString();await fs.writeFile(path.join(evidenceDir,'result.json'),JSON.stringify(result,null,2));return result;

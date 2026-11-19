@@ -1,5 +1,5 @@
 import { getPolicyGame } from './gamePolicyTarget';
-import { SAVING_RULES, automaticCpuControls, stepContinuousFloat, type ContinuousSideControls, type ContinuousFloatState, type ControlSide } from './performanceControls';
+import { SAVING_RULES, automaticCpuControls, stepContinuousFloat, beginInvalidTdpRecovery, finishInvalidTdpRecovery, type InvalidTdpRecovery, type ContinuousSideControls, type ContinuousFloatState, type ControlSide } from './performanceControls';
 import { displayedFramerateForControl } from './monitorControlFramerate';
 import { monitorProofFresh, monitorCpuFresh } from './monitorSnapshotSignals';
 // autofloat.ts — 自动浮动优化桥层（CPU主频调度 + TDP节能联动）
@@ -160,7 +160,7 @@ export function getTdpTarget(tdpMax: number, strategy: TdpFloatStrategy): number
   return Math.max(getTdpHardwareMinimum(), Math.floor(maximum * (1 - p.ratio)));
 }
 
-async function applyTdpLimit(next: number, reassert = false): Promise<number> {
+async function applyTdpLimit(next: number, reassert = false, recoveryCurrent?: () => boolean): Promise<number> {
   const runId = floatRunId, targetRevision = tdpTargetRevision, owner = continuousOwner;
   const game = getPolicyGame(), gamePid = game?.pid ?? 0, gameBirth = String(game?.processCreated || '');
   // This owner's validated full budget is the fallback, never a missing value,
@@ -182,7 +182,7 @@ async function applyTdpLimit(next: number, reassert = false): Promise<number> {
     owner.tdpSafetyReason = '设备解析目标越过设定TDP区间，已暂停浮动';
     notify(); return 0;
   }
-  const isCurrent = () => runId === floatRunId && targetRevision === tdpTargetRevision && continuousOwner === owner && !owner.revoked && !owner.tdpEditPaused &&
+  const isCurrent = () => runId === floatRunId && targetRevision === tdpTargetRevision && continuousOwner === owner && !owner.revoked && (!owner.tdpEditPaused || recoveryCurrent?.() === true) &&
     (owner.current.isCurrent?.() ?? true) && (getPolicyGame()?.pid ?? 0) === gamePid && String(getPolicyGame()?.processCreated || '') === gameBirth &&
     Number.isFinite(owner.safeTdp) && owner.bank.tdp === owner.safeTdp && value <= Math.min(owner.safeTdp, owner.pendingTdpMax ?? owner.safeTdp) && value >= getTdpTarget(owner.safeTdp, owner.bank.auto.saving);
   if (value <= 0 || (!reassert && value === tdpLimit)) return tdpLimit;
@@ -194,7 +194,8 @@ async function applyTdpLimit(next: number, reassert = false): Promise<number> {
   // The native write lease remains authoritative at actual dispatch.
   if (continuousOwner && (continuousOwner.revoked || !await continuousOwner.current())) return tdpLimit;
   let accepted: number | null = null;
-  const applied = await setTdp(tdpMode, value, { apply: true, save: false, vendor, source: 'autofloat', minWatts: floor, maxWatts: owner.safeTdp, isCurrent, onAccepted: w => { accepted = w; } });
+  const applied = await setTdp(tdpMode, value, { apply: true, save: false, vendor, source: 'autofloat', minWatts: floor, maxWatts: owner.safeTdp,
+    currentMaxWatts: owner.current.tdpMaximum, isCurrent, onAccepted: w => { accepted = w; } });
   if (runId !== floatRunId || targetRevision !== tdpTargetRevision) return tdpLimit;
   if (!isCurrent()) return 0; // Keep old/cancelled receipts out of this owner's state.
   if (!applied) { tdpLimit = 0; notify(); return 0; }
@@ -214,6 +215,9 @@ async function applyTdpLimit(next: number, reassert = false): Promise<number> {
     owner.bank.tdp = owner.safeTdp = accepted;
   }
   if (owner.tdpSafetyReason) owner.state = { ...owner.state, watts: accepted, trial: null, stable: 0 };
+  if (accepted >= floor) {
+    try { owner.onTdpAccepted?.({ requested: value, accepted }); } catch { /* an observer cannot revoke the accepted write */ }
+  }
   notify();
   return accepted;
 }
@@ -357,6 +361,7 @@ export type CtlAction = 'down-freq' | 'down-tdp' | 'up-freq' | 'up-tdp' | 'hold'
  */
 export interface FloatInfo {
   enabled: boolean;
+  tdpOwnerCurrent: boolean; // cached lease only; enabled timer is not TDP ownership
   target: FpsTarget;
   profile: FloatProfile;
   tdpStrategy: TdpFloatStrategy;
@@ -420,6 +425,7 @@ function notify() {
 export function getFloatInfo(): FloatInfo {
   return {
     enabled: timer !== null || starting,
+    tdpOwnerCurrent: !!continuousOwner && !continuousOwner.revoked && continuousOwner.current.isCurrent?.() !== false,
     target: curTarget,
     profile: curProfile,
     tdpStrategy: curTdpStrategy,
@@ -504,12 +510,34 @@ async function reactivateFloatPolicyAfterWrite(): Promise<void> {
 
 interface FloatTdpHealth { writtenAt: number; observedAt: number; highSince: number; retryAt: number }
 interface ContinuousFloatOwner {
+  invalidDataRecovery?: InvalidTdpRecovery;
   tdpHealth?: FloatTdpHealth;
   safeTdp: number; pendingTdpMax?: number; tdpSafetyReason?: string;
-  bank: ContinuousSideControls; side: ControlSide; revoked?: boolean; tdpEditPaused?: boolean; retryAfter?: number; current: (() => Promise<boolean>) & { revoke?: () => void; isCurrent?: () => boolean };
-  applyCore: (watts: number) => Promise<void>; state: ContinuousFloatState; targetPid: number; initialTdp?: { requested: number; accepted: number };
+  bank: ContinuousSideControls; side: ControlSide; revoked?: boolean; tdpEditPaused?: boolean; retryAfter?: number; current: (() => Promise<boolean>) & { revoke?: () => void; isCurrent?: () => boolean; tdpMaximum?: () => number | null };
+  applyCore: (watts: number) => Promise<void>; state: ContinuousFloatState; targetPid: number; targetCreated?: string; initialTdp?: { requested: number; accepted: number };
+  onTdpAccepted?: (receipt: { requested: number; accepted: number }) => void;
 }
 let continuousOwner: ContinuousFloatOwner | null = null;
+
+// Startup/wake corrections share the live float owner and hardware writer.
+// Drain its old work and preserve its current target instead of restarting CPU
+// control or raising a valid temporary target back to the full budget.
+export async function reassertContinuousFloatTdp(): Promise<boolean | null> {
+  const owner = continuousOwner, run = floatRunId;
+  if (!owner) return null;
+  if (owner.revoked || owner.tdpEditPaused || starting) return false;
+  owner.tdpEditPaused = true;
+  const current = () => continuousOwner === owner && run === floatRunId && !owner.revoked && owner.tdpEditPaused === true;
+  try {
+    if (tickWork) await tickWork;
+    await ctlApplyQueue;
+    if (!current() || !await owner.current() || !current()) return false;
+    const target = tdpLimit >= getTdpTarget(owner.safeTdp, owner.bank.auto.saving) && tdpLimit <= owner.safeTdp ? tdpLimit : owner.safeTdp;
+    return await applyTdpLimit(target, true, current) > 0 && current();
+  } finally {
+    if (continuousOwner === owner && run === floatRunId) owner.tdpEditPaused = false;
+  }
+}
 
 // Source selection belongs to the shared power event lane, never the tick.
 // Revoke before the queued new-side bank can await/drain old hardware work.
@@ -588,6 +616,8 @@ async function tickContinuous(owner: ContinuousFloatOwner, sample: Parameters<ty
       if (run === floatRunId && continuousOwner === owner && accepted !== owner.safeTdp) owner.retryAfter = sample.now + 30000;
       return; // Restore an acknowledged under-floor value, never optimize on missing FPS.
     }
+    const recovery = reconcileInvalidFloatData(owner, sample);
+    if (recovery && await recovery) return;
     const at = sample.observedAt;
     const valid = typeof sample.fps === 'number' && Number.isFinite(sample.fps) && sample.fps > 0 &&
       typeof sample.cpuBusy === 'number' && Number.isFinite(sample.cpuBusy) && sample.cpuBusy >= 0 && sample.cpuBusy <= 100 &&
@@ -603,6 +633,7 @@ async function tickContinuous(owner: ContinuousFloatOwner, sample: Parameters<ty
     notify(); return;
   }
   if (tdpLimit <= 0) {
+    if (owner.invalidDataRecovery) { const recovery = reconcileInvalidFloatData(owner, sample); if (recovery && await recovery) return; }
     const accepted = await applyTdpLimit(owner.bank.tdp).catch(() => {
       if (run === floatRunId && continuousOwner === owner && !owner.revoked) tdpLimit = 0;
       return 0;
@@ -612,6 +643,8 @@ async function tickContinuous(owner: ContinuousFloatOwner, sample: Parameters<ty
     owner.state = { ...owner.state, watts: accepted, trial: null, stable: 0, recoverUntil: sample.now + 5000 };
     return;
   }
+  const recovery = reconcileInvalidFloatData(owner, sample);
+  if (recovery && await recovery) return;
   const next = stepContinuousFloat(owner.bank, owner.state, sample), prior = owner.state;
   if (run !== floatRunId || continuousOwner !== owner || !await owner.current()) return;
   if (next.watts !== prior.watts) {
@@ -626,7 +659,23 @@ async function tickContinuous(owner: ContinuousFloatOwner, sample: Parameters<ty
   if (run !== floatRunId || continuousOwner !== owner || !await owner.current()) return;
   if (next.frequencyMHz !== prior.frequencyMHz || next.aggressiveness !== prior.aggressiveness) {
     ctl = { freq: next.frequencyMHz, aggr: next.aggressiveness };
-    if (!await applyCtl()) { ctl = { freq: prior.frequencyMHz, aggr: prior.aggressiveness }; owner.retryAfter = sample.now + 3000; return; }
+    if (!await applyCtl()) {
+      ctl = { freq: prior.frequencyMHz, aggr: prior.aggressiveness };
+      if (run !== floatRunId || continuousOwner !== owner || !await owner.current()) return;
+      if (next.action === 'probe-both' && next.watts < prior.watts) {
+        // The CPU half failed: undo the acknowledged TDP half once. Do not
+        // retain a joint success or keep lowering on a partial write receipt.
+        const restored = await applyTdpLimit(prior.watts, true).catch(() => {
+          if (run === floatRunId && continuousOwner === owner && !owner.revoked) tdpLimit = 0;
+          return 0;
+        });
+        if (run !== floatRunId || continuousOwner !== owner || !await owner.current()) return;
+        owner.state = { ...prior, watts: restored > 0 ? restored : prior.watts, trial: null, stable: 0,
+          savingBackoff: true, probeMHz: 100, cpuBlockedUntil: sample.now + 5000,
+          tdpBlockedUntil: sample.now + 5000, recoverUntil: sample.now + 5000, action: 'rollback' };
+      } else owner.state = { ...prior, watts: tdpLimit > 0 ? tdpLimit : prior.watts };
+      owner.retryAfter = sample.now + 3000; notify(); return;
+    }
   }
   if (run !== floatRunId || continuousOwner !== owner || !await owner.current()) return;
   owner.state = next;
@@ -639,10 +688,57 @@ async function tickContinuous(owner: ContinuousFloatOwner, sample: Parameters<ty
   notify();
 }
 
+/** Missing control data pauses savings, but never abandons the committed TDP.
+ * Only the invalid branch compares receipts; healthy ticks do no maintenance. */
+function reconcileInvalidFloatData(owner: ContinuousFloatOwner, sample: Parameters<typeof stepContinuousFloat>[2]): boolean | Promise<boolean> {
+  // An owner admitted without a game has no missing game telemetry to recover.
+  // Preserve its original fresh-power overshoot protection instead.
+  if (owner.bank.auto.saving === 'none' || owner.targetPid === 0 && getPolicyGame() === null) { owner.invalidDataRecovery = undefined; return false; }
+  const valid = sample.fps !== null && Number.isFinite(sample.fps) && sample.fps > 0 &&
+    sample.low !== null && Number.isFinite(sample.low) && sample.low > 0 &&
+    sample.cpuBusy !== null && Number.isFinite(sample.cpuBusy) && sample.cpuBusy >= 0 && sample.cpuBusy <= 100 &&
+    monitorProofFresh(sample.observedAt, sample.now, 6000) && monitorProofFresh(sample.lowObservedAt, sample.now, 6000);
+  if (valid) {
+    if (owner.invalidDataRecovery) {
+      owner.invalidDataRecovery = undefined;
+      owner.state = { ...owner.state, watts: tdpLimit > 0 ? tdpLimit : owner.safeTdp, trial: null, stable: 0, recoverUntil: sample.now + 5000 };
+    }
+    return false;
+  }
+  if (!owner.invalidDataRecovery) {
+    owner.invalidDataRecovery = beginInvalidTdpRecovery(sample.now);
+    // An existing trial already has its original ten-second safety deadline.
+    // The slow fallback must not extend that deadline while debouncing loss.
+    if (owner.state.trial) owner.invalidDataRecovery.nextCheck = owner.invalidDataRecovery.nextWrite =
+      Math.min(owner.invalidDataRecovery.nextCheck, owner.state.trial.at + 10000);
+  }
+  const recovery = owner.invalidDataRecovery;
+  if (sample.now < recovery.nextCheck) return true;
+  recovery.nextCheck = sample.now + 60000;
+  const game = getPolicyGame();
+  if (!game || game.pid !== owner.targetPid || String(game.processCreated || '') !== owner.targetCreated || owner.revoked || owner.tdpEditPaused || continuousOwner !== owner) return true;
+  // The sole owner's full committed budget is the UI target; never a prior
+  // savings trial, stale tdp.txt, measured package power or selectable ceiling.
+  if (sample.now < recovery.nextWrite && tdpLimit === owner.safeTdp) return true;
+  return writeInvalidFloatTdp(owner, recovery, sample.now);
+}
+async function writeInvalidFloatTdp(owner: ContinuousFloatOwner, recovery: InvalidTdpRecovery, now: number): Promise<boolean> {
+  const run = floatRunId, revision = tdpTargetRevision;
+  const current = () => continuousOwner === owner && run === floatRunId && revision === tdpTargetRevision &&
+    !owner.revoked && !owner.tdpEditPaused && owner.current.isCurrent?.() !== false && owner.invalidDataRecovery === recovery &&
+    getPolicyGame()?.pid === owner.targetPid && String(getPolicyGame()?.processCreated || '') === owner.targetCreated;
+  if (!current() || !await owner.current() || !current()) return true;
+  const accepted = await applyTdpLimit(owner.safeTdp, true, current).catch(() => 0);
+  if (!current()) return true;
+  finishInvalidTdpRecovery(recovery, now, accepted === owner.safeTdp);
+  if (accepted > 0) owner.state = { ...owner.state, watts: accepted, trial: null, stable: 0 };
+  return true;
+}
+
 export async function enableContinuousFloat(bank: ContinuousSideControls, side: ControlSide, target: number,
   current: () => Promise<boolean>, applyCore: (watts: number) => Promise<void>,
-  initialTdp?: { requested: number; accepted: number }): Promise<void> {
-  if (!bank || bank.tdpValid === false || !Number.isFinite(bank.tdp) || bank.tdp < floatTdpMinimum() || bank.tdp > getTdpHardwareMaximum()) {
+  initialTdp?: { requested: number; accepted: number }, onTdpAccepted?: ContinuousFloatOwner['onTdpAccepted']): Promise<void> {
+  if (!bank || bank.cpuValid === false || bank.tdpValid === false || !Number.isFinite(bank.tdp) || bank.tdp < floatTdpMinimum() || bank.tdp > getTdpHardwareMaximum()) {
     if (continuousOwner) { continuousOwner.tdpSafetyReason = '启动目标无效，保留原TDP并等待有效数据'; notify(); }
     return;
   }
@@ -652,7 +748,7 @@ export async function enableContinuousFloat(bank: ContinuousSideControls, side: 
 
   const receipt = initialTdp && Number.isFinite(initialTdp.requested) && Number.isFinite(initialTdp.accepted) &&
     initialTdp.accepted >= floatTdpMinimum() && initialTdp.accepted <= Math.min(bank.tdp, initialTdp.requested, getTdpHardwareMaximum()) && initialTdp.accepted >= getTdpTarget(bank.tdp, bank.auto.saving) ? initialTdp : undefined;
-  const owner: ContinuousFloatOwner = { bank: structuredClone(bank), safeTdp: receipt?.accepted ?? bank.tdp, side, current, applyCore, initialTdp: receipt, tdpSafetyReason: initialTdp && !receipt ? '启动TDP回执无效，保留设定目标并等待有效数据' : undefined, targetPid: getPolicyGame()?.pid || 0,
+  const owner: ContinuousFloatOwner = { bank: structuredClone(bank), safeTdp: receipt?.accepted ?? bank.tdp, side, current, applyCore, initialTdp: receipt, onTdpAccepted, tdpSafetyReason: initialTdp && !receipt ? '启动TDP回执无效，保留设定目标并等待有效数据' : undefined, targetPid: getPolicyGame()?.pid || 0, targetCreated: String(getPolicyGame()?.processCreated || ''),
     state: { watts: bank.tdp, frequencyMHz: cpu.maxMHz, aggressiveness: cpu.aggressiveness, stable: 0, lastDown: Date.now(), recoverUntil: 0 } };
   await startFloatRuntime(target, owner, bank.auto.saving, false);
 }
@@ -699,7 +795,9 @@ async function applyCtl(): Promise<boolean> {
         // each coalesced dynamic write, otherwise only the saved values move.
         if (owner.revoked || continuousOwner !== owner || !await owner.current()) continue;
         ctlLastApplied = false;
-        const applied = await applyFloatPowerParams(next.params).catch(() => false);
+        const applied = await applyFloatPowerParams(next.params, { maxMHz: automaticCpuControls(owner.bank).maxMHz,
+          isCurrent: () => next.runId === floatRunId && continuousOwner === owner && !owner.revoked &&
+            (owner.current.isCurrent?.() ?? true) }).catch(() => false);
         ctlLastApplied = applied;
         if (applied && next.runId === floatRunId && continuousOwner === owner && await owner.current()) await reactivateFloatPolicyAfterWrite();
       }
@@ -717,7 +815,7 @@ async function applyCtl(): Promise<boolean> {
 async function reconcileFloatTdp(owner: ContinuousFloatOwner, view: MonitorSnapshotView | null): Promise<boolean> {
   const now = Date.now(), game = getPolicyGame();
   const health = owner.tdpHealth ??= { writtenAt: now, observedAt: 0, highSince: 0, retryAt: 0 };
-  if (!owner.targetPid || game?.pid !== owner.targetPid || owner.revoked || owner.tdpEditPaused) {
+  if ((owner.targetPid ? game?.pid !== owner.targetPid : game !== null) || owner.revoked || owner.tdpEditPaused) {
     health.highSince = 0; return false;
   }
   const top = view?.top;
@@ -785,7 +883,7 @@ async function tickOnce(): Promise<void> {
     if (!continuousOwner) {
       lastAction = 'idle'; lastTdpAction = 'idle'; notify(); return;
     }
-    if (await reconcileFloatTdp(continuousOwner, view)) { notify(); return; }
+    if (!continuousOwner.invalidDataRecovery && await reconcileFloatTdp(continuousOwner, view)) { notify(); return; }
     // A live heartbeat without Displayed is a missing sample. Keep the existing
     // trial deadline running; tickContinuous still checks the current owner.
     if (!st || st.idle) {
@@ -795,7 +893,10 @@ async function tickOnce(): Promise<void> {
     const top = view?.top, now = Date.now(), game = getPolicyGame();
     const correctCreation = !!st.processCreated && st.processCreated === game?.processCreated;
     // A foreign/unconfirmed game is not a measured zero-FPS game.
-    if (!game || !st.game || st.pid !== continuousOwner.targetPid || !correctCreation) return;
+    if (!game || !st.game || st.pid !== continuousOwner.targetPid || !correctCreation) {
+      await tickContinuous(continuousOwner, { now, fps: null, low: null, target: curTarget, minimum: getTdpHardwareMinimum(), cpuBusy: null }).catch(() => {});
+      return;
+    }
     const cpuBusy = monitorCpuFresh(top, now, false, true) ? top!.cpuUsage : null;
     const hardwareFresh = !!top && !view?.hwDown && !top.hwDown && monitorProofFresh(top.ts, now, 6000);
     // Only the confirmed selected adapter; legacy multi-GPU maxima cannot establish ownership.

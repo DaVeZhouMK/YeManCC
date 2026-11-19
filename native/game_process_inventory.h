@@ -4,6 +4,7 @@
 #include <winternl.h>
 #include <algorithm>
 #include <atomic>
+#include <clocale>
 #include <string>
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +19,7 @@
 // hints for 5 seconds, with per-candidate live identity validation, a shared
 // read-rate limit and an advancing background cursor; it adds no timer/thread.
 namespace ymcc::gameInventory {
+inline constexpr ULONGLONG topologyIntervalMs = 5000;
 using Query = NTSTATUS (NTAPI*)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 using Entry = ymcc::processInventory::DetailView;
 
@@ -105,18 +107,25 @@ class BasicSnapshot {
     struct Storage {
         std::shared_ptr<const ymcc::processInventory::Snapshot> snapshot;
         std::vector<BasicEntry> rows;
+        std::vector<ymcc::processInventory::ParentEntry> parents;
         bool inUse = false;
     };
     static Storage& storage() { static thread_local Storage value; return value; }
     Storage* owned_ = nullptr;
     bool valid_ = false;
 public:
-    explicit BasicSnapshot(Query query = resolveQuery()) noexcept {
+    enum class Projection { CompatibilityRows, TopologyOnly };
+    explicit BasicSnapshot(Query query = resolveQuery(), Projection projection = Projection::CompatibilityRows) noexcept {
         auto& scratch = storage();
         if (!query || scratch.inUse) return;
         owned_ = &scratch; scratch.inUse = true;
         try {
             scratch.rows.clear();
+            if (projection == Projection::TopologyOnly) {
+                scratch.snapshot.reset();
+                valid_ = ymcc::processInventory::owner().readFreshParents(query, scratch.parents);
+                return;
+            }
             scratch.snapshot = ymcc::processInventory::read(query,
                 ymcc::processInventory::currentTime, 0, false);
             if (!scratch.snapshot || scratch.snapshot->basicStatus != ymcc::processInventory::Status::Complete) return;
@@ -131,25 +140,18 @@ public:
     BasicSnapshot& operator=(const BasicSnapshot&) = delete;
     bool valid() const noexcept { return valid_; }
     const std::vector<BasicEntry>& entries() const noexcept { return owned_->rows; }
+    // Borrowed only while this lease is alive. No per-row name views are needed.
+    const std::vector<ymcc::processInventory::ParentEntry>* topology() const noexcept {
+        return valid_ && !owned_->snapshot ? &owned_->parents : nullptr;
+    }
 };
 
-// Recurring game discovery also consumes the native owner, with the existing
-// bounded topology age. One-shot Steam listeners above always request fresh0.
-class SharedBasicSnapshot {
-    std::shared_ptr<const ymcc::processInventory::Snapshot> snapshot_;
-    std::vector<BasicEntry> rows_;
-public:
-    SharedBasicSnapshot() {
-        snapshot_ = ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
-            ymcc::processInventory::currentTime, 250, false);
-        if (snapshot_->basicStatus != ymcc::processInventory::Status::Complete) return;
-        rows_.reserve(snapshot_->rows.size());
-        for (const auto& row : snapshot_->rows)
-            rows_.push_back({row.pid, row.name, row.sequence, row.parentPid});
-    }
-    bool valid() const noexcept { return snapshot_->basicStatus == ymcc::processInventory::Status::Complete; }
-    const std::vector<BasicEntry>& entries() const noexcept { return rows_; }
-};
+// Recurring game discovery consumes the native owner's immutable Basic rows
+// directly. One-shot Steam listeners above always request fresh0.
+inline auto readSharedBasicSnapshot() {
+    return ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
+        ymcc::processInventory::currentTime, 250, false);
+}
 
 // These state objects are accessed under the existing g_gameValveMx. The
 // atomic is only an invalidation ticket published by explicit IPC requests.
@@ -178,44 +180,137 @@ struct TopologyEntry {
     DWORD pid; std::wstring name; ULONG64 sequence;
     bool operator==(const TopologyEntry&) const = default;
 };
+using TopologyFilter = bool (*)(const BasicEntry&, const RuleKey&);
+// Read-only working-set hints. AccessDenied is the same current inability to
+// open a process required by the live validator, not a persistent negative.
+enum class WorkingSetRead { Read, AccessDenied, Unavailable };
+using WorkingSetReader = WorkingSetRead (*)(const TopologyEntry&, OwnedEntry&);
+inline bool readWorkingSetHints(const std::vector<TopologyEntry>& topology,
+    WorkingSetReader reader, std::vector<OwnedEntry>& rows) {
+    std::vector<OwnedEntry> staged; staged.reserve(topology.size());
+    for (const auto& entry : topology) {
+        OwnedEntry row{};
+        const auto status = reader(entry, row);
+        if (status == WorkingSetRead::AccessDenied) return false;
+        if (status != WorkingSetRead::Read || entry.name.empty() ||
+            row.pid != entry.pid || row.name != entry.name)
+            return false; // Unknown/partial data falls back to the original full receipt.
+        staged.push_back(std::move(row));
+    }
+    rows = std::move(staged);
+    return true;
+}
 struct Memo {
+    TopologyFilter topologyFilter = nullptr;
+    WorkingSetReader workingSetReader = nullptr;
     bool ready = false, available = false, wasForeground = false, resetProgress = true;
     ULONGLONG at = 0, fullAt = 0;
     bool topologyAvailable = false;
-    std::vector<TopologyEntry> topology;
+    std::vector<TopologyEntry> topology, rawTopology;
+    std::vector<unsigned char> rawRelevant;
+    std::string filterLocale;
     unsigned long long invalidationTicket = 0, version = 0;
     RuleKey rules;
     std::vector<OwnedEntry> rows;
 };
-inline const Memo& inventory(const RuleKey& rules, bool actualForeground) {
+inline const Memo& inventory(const RuleKey& rules, bool actualForeground, TopologyFilter topologyFilter = nullptr, WorkingSetReader workingSetReader = nullptr) {
     static Memo memo;
     const auto ticket = invalidation.load(std::memory_order_acquire);
     const auto now = GetTickCount64();
     const bool becameForeground = actualForeground && !memo.wasForeground;
     memo.wasForeground = actualForeground;
-    const bool mandatory = !memo.ready || !(memo.rules == rules) || memo.invalidationTicket != ticket || becameForeground;
-    if (mandatory || now - memo.at >= 5000) {
-        SharedBasicSnapshot basic;
-        std::vector<TopologyEntry> topology;
-        if (basic.valid()) {
-            topology.reserve(basic.entries().size());
-            for (const auto& entry : basic.entries())
-                topology.push_back({entry.pid, std::wstring(entry.name), entry.sequence});
+    const bool mandatory = !memo.ready || !(memo.rules == rules) || memo.invalidationTicket != ticket || becameForeground ||
+        memo.topologyFilter != topologyFilter || memo.workingSetReader != workingSetReader;
+    if (mandatory || now - memo.at >= topologyIntervalMs) {
+        const auto basic = readSharedBasicSnapshot();
+        const bool basicValid = basic->basicStatus == ymcc::processInventory::Status::Complete;
+        using BasicRow = ymcc::processInventory::Entry;
+        std::vector<const BasicRow*> order;
+        if (basicValid) {
+            order.reserve(basic->rows.size());
+            for (const auto& row : basic->rows) order.push_back(&row);
+            std::sort(order.begin(), order.end(), [](const BasicRow* a, const BasicRow* b) { return a->pid < b->pid; });
         }
-        std::sort(topology.begin(), topology.end(), [](const TopologyEntry& a, const TopologyEntry& b) { return a.pid < b.pid; });
-        const bool unchanged = basic.valid() && memo.topologyAvailable && topology == memo.topology;
+        const bool rawUnchanged = basicValid && memo.topologyAvailable &&
+            std::equal(order.begin(), order.end(), memo.rawTopology.begin(), memo.rawTopology.end(),
+                [](const BasicRow* row, const TopologyEntry& old) {
+                    return row->pid == old.pid && row->name == old.name && row->sequence == old.sequence;
+                });
+        std::vector<TopologyEntry> rawTopology;
+        if (basicValid && !rawUnchanged) {
+            rawTopology.reserve(order.size());
+            for (const auto* row : order) rawTopology.push_back({row->pid, row->name, row->sequence});
+        }
+        // Stable raw topology needs no repeated name normalization or rule
+        // matching. Mandatory requests must still recompute the projection.
+        const bool reuseProjection = !mandatory && rawUnchanged;
+        std::vector<TopologyEntry> topology;
+        std::vector<unsigned char> relevant;
+        std::string filterLocale;
+        if (!reuseProjection) {
+            const auto& raw = rawUnchanged ? memo.rawTopology : rawTopology;
+            topology.reserve(raw.size());
+            relevant.reserve(raw.size());
+            if (const auto* locale = std::setlocale(LC_CTYPE, nullptr)) filterLocale = locale;
+            // This is a name hint only, never a cached live process decision.
+            const bool reuseRows = !mandatory && memo.topologyAvailable &&
+                !filterLocale.empty() && filterLocale == memo.filterLocale &&
+                memo.rawRelevant.size() == memo.rawTopology.size();
+            const auto project = [&](bool reuse) {
+                size_t prior = 0;
+                for (const auto& entry : raw) {
+                    while (reuse && prior < memo.rawTopology.size() && memo.rawTopology[prior].pid < entry.pid) ++prior;
+                    const bool unchangedRow = reuse && prior < memo.rawTopology.size() && memo.rawTopology[prior] == entry;
+                    const bool selected = unchangedRow ? memo.rawRelevant[prior++] != 0 :
+                        !topologyFilter || topologyFilter({entry.pid, entry.name, entry.sequence, 0}, rules);
+                    relevant.push_back(selected);
+                    if (selected) topology.push_back(entry);
+                }
+            };
+            project(reuseRows);
+            const auto* localeAfter = std::setlocale(LC_CTYPE, nullptr);
+            if (!localeAfter || filterLocale != localeAfter) {
+                filterLocale.clear();
+                if (reuseRows) {
+                    relevant.clear(); topology.clear();
+                    project(false);
+                }
+            }
+        }
+        const bool unchanged = basicValid && memo.topologyAvailable && (reuseProjection || topology == memo.topology);
         memo.at = now;
+        if (!rawUnchanged) memo.rawTopology = std::move(rawTopology);
+        if (!reuseProjection) {
+            memo.rawRelevant = std::move(relevant);
+            memo.filterLocale = std::move(filterLocale);
+        }
         // Unknown Basic data is never a confirmed empty topology. Foreground
         // uses the original 5s full cadence; background has a 30s WS backstop.
         if (!mandatory && !actualForeground && unchanged && memo.available && now - memo.fullAt < 30000)
             return memo;
+        const bool periodicWorkingSetRefresh = memo.available && now >= memo.fullAt && now - memo.fullAt >= 30000;
+        const bool topologyWorkingSetRefresh = memo.available && memo.topologyAvailable && basicValid && !unchanged;
         memo.resetProgress = mandatory;
         memo.ready = true; memo.available = false; memo.fullAt = now;
-        memo.invalidationTicket = ticket; memo.rules = rules; ++memo.version;
-        memo.topologyAvailable = basic.valid(); memo.topology = std::move(topology);
+        memo.invalidationTicket = ticket; memo.rules = rules;
+        memo.topologyFilter = topologyFilter; memo.workingSetReader = workingSetReader; ++memo.version;
+        memo.topologyAvailable = basicValid;
+        if (!reuseProjection) memo.topology = std::move(topology);
         memo.rows.clear();
+        // Existing complete receipts may refresh working-set hints from a
+        // complete Basic topology, including relevant background topology changes.
+        // Startup, rules/invalidation, foreground/manual, unavailable Basic and
+        // failed-source recovery retain the original complete-snapshot path.
+        const bool selective = workingSetReader && !mandatory && !actualForeground &&
+            manualDepth == 0 && basicValid &&
+            ((periodicWorkingSetRefresh && unchanged) || topologyWorkingSetRefresh);
+        if (selective && readWorkingSetHints(memo.topology, workingSetReader, memo.rows)) {
+            // A reused Basic table cannot acquire a later absence-proof age.
+            memo.fullAt = (std::min)(now, basic->observedAt);
+            memo.available = true;
+        } else {
         Snapshot snapshot;
-        if (snapshot.valid() && (snapshot.creationTimesVerified() || basic.valid())) {
+        if (snapshot.valid() && (snapshot.creationTimesVerified() || basicValid)) {
             memo.rows.reserve(snapshot.entries().size());
             for (const auto& entry : snapshot.entries()) {
                 const auto hint = std::lower_bound(memo.topology.begin(), memo.topology.end(), entry.pid,
@@ -224,6 +319,7 @@ inline const Memo& inventory(const RuleKey& rules, bool actualForeground) {
                 memo.rows.push_back({entry.pid, std::wstring(entry.name), entry.workingSet, entry.processCreated, sequence});
             }
             memo.available = true;
+        }
         }
         // Full-snapshot failure remains unavailable. Each scanner's exact
         // Toolhelp fallback is retried only in a new discovery epoch.
@@ -255,12 +351,15 @@ struct Candidates {
     bool complete = false;
     bool sourceAvailable = true;
     bool topologyChanged = false;
+    bool candidateUnconfirmed = false;
+    bool hasUnconfirmed = false;
     std::vector<RejectedHint> rejected;
     void reset(unsigned long long value, bool clearProgress) {
         if (clearProgress || complete) rejected.clear();
         version = value; qualificationObservedAt = 0;
         ranked.clear(); cursor = windowEnd = 0; complete = false;
         sourceAvailable = true; topologyChanged = false;
+        candidateUnconfirmed = false; hasUnconfirmed = false;
     }
     void rank() {
         // Keep rejected hints across ordinary TTL refreshes until this pass
@@ -292,6 +391,7 @@ Game next(Candidates& candidates, bool fast, ULONGLONG started, Validate validat
         auto& hint = candidates.ranked[candidates.cursor];
         ++checked;
         Game live;
+        candidates.candidateUnconfirmed = false;
         const bool accepted = validate(hint, live);
         const bool changedIdentity = accepted && ((hint.expectedBirth && hint.expectedBirth != live.processCreated) ||
             (!hint.expectedPath.empty() && !live.path.empty() && _wcsicmp(hint.expectedPath.c_str(), live.path.c_str()) != 0));
@@ -301,6 +401,11 @@ Game next(Candidates& candidates, bool fast, ULONGLONG started, Validate validat
             return {}; // A stale inventory is pending, never a completed idle proof.
         }
         if (!accepted) {
+            if (candidates.candidateUnconfirmed) {
+                candidates.hasUnconfirmed = true;
+                ++candidates.cursor;
+                continue;
+            }
             candidates.rejected.push_back({hint.pid, hint.name, hint.workingSet, hint.group, hint.snapshotBirth, hint.snapshotSequence});
             ++candidates.cursor;
             continue;
@@ -311,7 +416,7 @@ Game next(Candidates& candidates, bool fast, ULONGLONG started, Validate validat
         hint.expectedPath = live.path;
         return live;
     }
-    candidates.complete = true;
+    candidates.complete = !candidates.hasUnconfirmed;
     return {};
 }
 } // namespace ymcc::gameInventory

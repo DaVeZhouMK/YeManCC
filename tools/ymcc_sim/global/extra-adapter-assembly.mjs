@@ -19,8 +19,10 @@ export function assembleExtraAdapters(factories,index,{repoRoot,selectedIds,audi
   const wanted=(!selection&&!indexCurrent)||(!selection&&!audit)||identity.rows.some(row=>selection?.has(row.id)||audit?.has(row.id)||(!selection&&audit&&row.lifecycleDeclared));
   if(!wanted){if(audit&&!selection)result.push(...identity.rows.map(({lifecycleDeclared,...row})=>({...row,registrationIdentityOnly:true})));continue;}
   const id=path.resolve(repoRoot)+'|'+i+'|'+JSON.stringify(selectedIds??null),prior=cache.get(id);let rows;
-  if(indexCurrent&&prior&&prior.env===env&&unchanged(prior,shared))rows=structuredClone(prior.rows);
-  else{const captured=observeRegistration(factories[i]);if(indexCurrent)cache.set(id,{...captured,env,rows:structuredClone(captured.rows)});rows=captured.rows;}
+  // A stale index forbids reuse; do not collect observations that will be discarded.
+  if(!indexCurrent)rows=factories[i]();
+  else if(prior&&prior.env===env&&unchanged(prior,shared))rows=structuredClone(prior.rows);
+  else{const captured=observeRegistration(factories[i]);cache.set(id,{...captured,env,rows:structuredClone(captured.rows)});rows=captured.rows;}
   const actual=rows.map(row=>({id:row.id,domain:row.domain,profiles:row.profiles,lifecycleDeclared:row.lifecycleContract!==undefined}));if(JSON.stringify(actual)!==JSON.stringify(identity.rows))throw Error('EXTRA_REGISTRATION_INDEX_CHANGED:'+i);
   result.push(...rows);
  }

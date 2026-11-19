@@ -17,6 +17,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Runner.cs" />
+    <Compile Include="OneXCloseReturnChecks.cs" />
     <Compile Include="PinnedFanSourceChecks.cs" />
     <Compile Include="PinnedFanCurveChecks.cs" />
     <Compile Include="PinnedFanHostConsumerChecks.cs" />

@@ -38,7 +38,7 @@ function extract(name, file = source, kind = 'method', record = true) {
 }
 const clock = code => code.replaceAll('Environment.TickCount64', 'Fixture.Now').replaceAll('Thread.Sleep', 'Fixture.Sleep');
 const fields = ['BaseFields', 'FrameFields', 'HidHideFields'].map(n => extract(n, source, 'field'));
-const methods = ['TryParseEnvelope', 'AttachReportChainMetadata1410Safely', 'TryReadString', 'TryReadUInt64', 'TryReadInt32', 'TryReadShort', 'TryReadByte', 'TryReadAxis', 'TryReadTrigger', 'TryReadImuAxis', 'IsSha256', 'CanonicalFrameHash', 'AppendFrameHashBits', 'SameTuple', 'DescribeEndpointCounts', 'DescribePrepareException', 'SanitizeReceiptField'].map(n => extract(n));
+const methods = ['TryParseEnvelope', ...(text.includes('private static string ReuseEnvelopeFieldName(') ? ['ReuseEnvelopeFieldName'] : []), 'AttachReportChainMetadata1410Safely', 'TryReadString', 'TryReadUInt64', 'TryReadInt32', 'TryReadShort', 'TryReadByte', 'TryReadAxis', 'TryReadTrigger', 'TryReadImuAxis', 'IsSha256', 'CanonicalFrameHash', 'AppendFrameHashBits', 'SameTuple', 'DescribeEndpointCounts', 'DescribePrepareException', 'SanitizeReceiptField'].map(n => extract(n));
 for (const n of ['WaitForEndpointFamilyRemoval', 'WaitForVirtualEndpointArrival', 'WaitForVirtualEndpointRemoval']) methods.push(clock(extract(n)));
 for (const n of ['TryReadScreenPads', 'TryReadScreenPad']) methods.push(extract(n, path.join(host, 'ScreenTouchpadReport.cs')));
 methods.push(extract('TryReadScreenButtons', path.join(host, 'ScreenButtonReport.cs')));

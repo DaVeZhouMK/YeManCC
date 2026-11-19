@@ -5,6 +5,8 @@
 #include <cwctype>
 #include <string>
 #include <utility>
+#include <functional>
+#include <stdexcept>
 
 // Explicit RTSS layout transactions only. Profile APIs accept UTF-16LE, but
 // misread a UTF-8 BOM / UTF-16BE header and may append a second Settings section.
@@ -12,6 +14,7 @@
 // interoperable. The first raw preimage is a fixed, bounded backup, never a
 // source of restore authority. No sampler, discovery, timer or retry loop.
 namespace ymcc::rtssprofiletext {
+inline void requireCurrent(const std::function<bool()>&current){if(current&&!current())throw std::runtime_error("BOOT_RTSS_REQUEST_EXPIRED");}
 inline constexpr std::size_t maxBytes=1U<<20;
 inline constexpr std::size_t profileWriteHeadroom=256; // bounded Layout/section growth by the profile API
 struct Handle {HANDLE value=INVALID_HANDLE_VALUE;explicit Handle(HANDLE v):value(v){}~Handle(){if(value!=INVALID_HANDLE_VALUE)CloseHandle(value);}Handle(const Handle&)=delete;};
@@ -75,25 +78,32 @@ inline std::string utf16le(const std::wstring&text){
     std::string bytes="\xff\xfe";bytes.reserve(2+text.size()*2);
     for(unsigned c:text){bytes.push_back(static_cast<char>(c&255));bytes.push_back(static_cast<char>(c>>8));}return bytes;
 }
-inline Status saveFirstBackup(const std::wstring&path,const std::string&bytes,bool&created){
+inline Status saveFirstBackup(const std::wstring&path,const std::string&bytes,bool&created,const std::function<bool()>&current={}){
+    requireCurrent(current);
     static std::atomic<unsigned long long> sequence{0};
     const auto temporary=path+L".tmp-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64())+L"-"+std::to_wstring(++sequence);
     HANDLE file=CreateFileW(temporary.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr);
     if(file==INVALID_HANDLE_VALUE)return fail("RTSS_CONFIG_BACKUP_FAILED",GetLastError());
+    bool closed=false;try {
+    requireCurrent(current);
     DWORD got=0,error=ERROR_SUCCESS;
     if(!bytes.empty()){
         if(!WriteFile(file,bytes.data(),static_cast<DWORD>(bytes.size()),&got,nullptr))error=GetLastError();
         else if(got!=bytes.size())error=ERROR_WRITE_FAULT;
     }
+    requireCurrent(current);
     if(error==ERROR_SUCCESS&&!FlushFileBuffers(file))error=GetLastError();
-    if(!CloseHandle(file)&&error==ERROR_SUCCESS)error=GetLastError();
+    if(!CloseHandle(file)&&error==ERROR_SUCCESS)error=GetLastError();closed=true;
     if(error!=ERROR_SUCCESS){DeleteFileW(temporary.c_str());return fail("RTSS_CONFIG_BACKUP_FAILED",error);}
+    requireCurrent(current);
     if(MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH)){created=true;return {};}
     error=GetLastError();DeleteFileW(temporary.c_str());
     if(error==ERROR_FILE_EXISTS||error==ERROR_ALREADY_EXISTS)return {}; // retain the first preimage
     return fail("RTSS_CONFIG_BACKUP_FAILED",error);
+    } catch(...) {if(!closed)CloseHandle(file);DeleteFileW(temporary.c_str());throw;}
 }
-template<class Commit> Status normalize(const std::wstring&path,Commit&&commit){
+template<class Commit> Status normalize(const std::wstring&path,Commit&&commit,const std::function<bool()>&current={}){
+    requireCurrent(current);
     Snapshot original;auto result=read(path,original);if(!result.ok||original.missing)return result;
     if(original.bytes.size()>maxBytes-profileWriteHeadroom)return fail("RTSS_CONFIG_TOO_LARGE",ERROR_FILE_TOO_LARGE);
     std::wstring text;result=decode(original.bytes,text);if(!result.ok)return result;
@@ -102,16 +112,19 @@ template<class Commit> Status normalize(const std::wstring&path,Commit&&commit){
     const auto converted=utf16le(text);std::wstring roundtrip;result=decode(converted,roundtrip);
     if(!result.ok||text!=roundtrip)return fail("RTSS_CONFIG_ENCODING_ROUNDTRIP_FAILED");
     const auto backup=path+L".ymcc-encoding-original.bak";bool created=false;
-    result=saveFirstBackup(backup,original.bytes,created);if(!result.ok)return result;
+    requireCurrent(current);
+    result=saveFirstBackup(backup,original.bytes,created,current);if(!result.ok)return result;
     Snapshot saved;result=read(backup,saved);if(!result.ok||saved.missing)return fail("RTSS_CONFIG_BACKUP_FAILED",result.error);
     if(created&&saved.bytes!=original.bytes)return fail("RTSS_CONFIG_BACKUP_VERIFY_FAILED");
-    Snapshot current;result=read(path,current);if(!result.ok)return result;
-    if(current.missing||current.bytes!=original.bytes)return fail("RTSS_CONFIG_CHANGED");
+    Snapshot observed;result=read(path,observed);if(!result.ok)return result;
+    if(observed.missing||observed.bytes!=original.bytes)return fail("RTSS_CONFIG_CHANGED");
     // The main's existing unique-temp atomic writer is reused. This observed
     // preimage check is not a cross-process compare-and-swap guarantee.
+    requireCurrent(current);
     if(!commit(path,converted))return fail("RTSS_CONFIG_WRITE_FAILED",GetLastError());
     Snapshot verified;result=read(path,verified);if(!result.ok)return result;
     if(verified.missing||verified.bytes!=converted)return fail("RTSS_CONFIG_VERIFY_FAILED");
+    requireCurrent(current);
     result.changed=true;result.backupCreated=created;return result;
 }
 inline std::wstring trim(std::wstring value){const auto space=[](wchar_t c){return c==0xfeff||iswspace(c)!=0;};std::size_t first=0,last=value.size();while(first<last&&space(value[first]))++first;while(last>first&&space(value[last-1]))--last;return value.substr(first,last-first);}

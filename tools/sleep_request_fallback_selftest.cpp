@@ -5,6 +5,8 @@
 #include <powrprof.h>
 #include "json.hpp"
 #include "sleep_request_fallback.h"
+#include "sleep_power_observation.h"
+#include <algorithm>
 #include <atomic>
 #include <cwchar>
 #include <fstream>
@@ -16,13 +18,15 @@ using Mode=ymcc::sleeprequest::Mode;
 static unsigned checks=0,scenarios=0,totalSuspendCalls=0,totalMonitorCalls=0,totalWindowQueries=0;
 static void check(bool ok,const char* label){++checks;if(!ok)throw std::runtime_error(label);}
 enum class SgRetryKind {None,EntryFailure,UnexpectedWake,SleepTimeout};
-struct {SgRetryKind retryKind=SgRetryKind::EntryFailure;unsigned retryAttempt=0;} g_sgTask;
+struct {SgRetryKind retryKind=SgRetryKind::EntryFailure;unsigned retryAttempt=0;ULONGLONG retryEntryFileTime=0;} g_sgTask;
+enum class SgSuspendAdmissionKind { Retry };
 struct {SgRetryKind kind=SgRetryKind::None;ULONGLONG dispatchTick=0,dispatchFileTime=0;} g_sgInternalSleepRequest;
 static constexpr ULONGLONG SG_INTERNAL_SLEEP_506_WINDOW_MS=60000,SG_INTERNAL_SLEEP_506_CLOCK_SKEW_MS=2000;
 static ULONGLONG testTick=10000;
 static ULONGLONG fakeGetTickCount64(){return testTick;}
 enum class PowerLifecycle {Ready,Suspending,Suspended,Resuming};
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Suspending};
+static std::atomic<bool> g_exitRequested{false};
 static bool g_sgSleepQueryGateClosed=true,g_sgSleepQueryOwnsGeneration=true;
 static ULONGLONG g_sgSleepQueryGeneration=7,g_sgRetryDueTick=1;
 static unsigned guardArms=0;
@@ -40,20 +44,34 @@ static ULONGLONG sgSleepTimeoutOriginalIntent(){return timeoutOriginalIntent;}
 static bool sgSleepTimeoutDispatchPermitted(){++timeoutPermissionQueries;return g_sgRetrySleepTimeout && timeoutDispatchPermitted;}
 static std::atomic<ULONGLONG> g_sgLastPowerButtonWakeEventFileTime{0},g_sgLastPowerButtonSleepIntentFileTime{0};
 static std::atomic<ULONGLONG> g_sgLatestUserSleepEntryFileTime{0},g_sgClosedSleepIntentFileTime{0};
+static std::atomic<ULONGLONG> g_sgLatestSleepEntryFileTime{0},g_sgLastKernel506EventFileTime{0};
+static ULONGLONG g_entryFailureQuickDeadline=0,g_entryFailureInterruptedAt=0,g_entryFailureNewOffFileTime=0;
+static bool g_entryFailureExpanded=false;
+static ymcc::sleeprequest::CompletionWitness g_sgRetryWindowsSuccessAtAdmission;
+static ULONGLONG sgSleepTimeoutSuccessfulExitTime(){return 0;}
+static bool sgSleepTimeoutSuccessAfter(ULONGLONG){return false;}
 static std::atomic<ULONGLONG> g_sgOriginalPowerButtonWakeFileTime{0};
 static std::atomic<Mode> g_sgAutomaticSleepTarget{Mode::None};
 static ULONGLONG testGeneration=7;
 static ULONGLONG currentPowerGeneration(){return testGeneration;}
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t bytes){
+    if(!out || bytes!=sizeof(*out))return 0;
+    *out={};out->generation=testGeneration;out->phase=static_cast<std::uint32_t>(g_powerLifecycle.load());
+    out->flags=ymcc::sleeppower::kKnown;return 1;
+}
+static void revokeSharedPowerMirrors(){}
 static ULONGLONG testClock=1000000;
 static ULONGLONG sgNowFileTime(){return testClock;}
 static std::vector<std::pair<std::string,json>> facts;
 static std::string injectWakeAt;
+static bool exitDuringFinalDispatch=false;
 static ULONGLONG injectedWakeTime=0,stagedOrigin=0;
 static Mode dispatchMode=Mode::None;
 static void injectConfirmedWake(const char* point){if(injectWakeAt==point)g_sgLastPowerButtonWakeEventFileTime=injectedWakeTime;}
 static void sgRecordFact(const char* key,const json& value){
     facts.emplace_back(key,value);injectConfirmedWake(key);
     if(std::string(key)=="sleep-request-dispatch"){
+        if(exitDuringFinalDispatch)g_exitRequested.store(true,std::memory_order_release);
         const auto target=value.at("target").get<std::string>();
         dispatchMode=target=="modern-standby" ? Mode::ModernStandby : target=="sleep" ? Mode::Sleep : Mode::Hibernate;
     }
@@ -128,10 +146,12 @@ static BOOLEAN fakeSetSuspendState(BOOLEAN hibernate,BOOLEAN critical,BOOLEAN di
 #define SetSuspendState fakeSetSuspendState
 #include "production_request.inc"
 static bool productionRetrySuspendConfirmation(){
+    const struct { SgSuspendAdmissionKind kind; } suspendAdmission{SgSuspendAdmissionKind::Retry};
 #include "production_suspend_confirmation.inc"
     return false;
 }
 static void reset(bool ms=true,bool ordinary=true,bool hibernate=true){
+    g_exitRequested=false;exitDuringFinalDispatch=false;
     g_sgInternalSleepRequest={};testTick=10000;g_sgTask.retryAttempt=0;guardArms=0;
     g_powerLifecycle=PowerLifecycle::Suspending;g_sgSleepQueryGateClosed=g_sgSleepQueryOwnsGeneration=true;g_sgSleepQueryGeneration=7;g_sgRetryDueTick=1;
     capability={};capability.AoAc=ms;capability.SystemS3=ordinary;capability.SystemS4=hibernate;capability.HiberFilePresent=hibernate;
@@ -145,6 +165,7 @@ static void reset(bool ms=true,bool ordinary=true,bool hibernate=true){
     g_sgLastPowerButtonWakeEventFileTime=0;g_sgAutomaticSleepTarget=Mode::None;testGeneration=7;
     g_sgLatestUserSleepEntryFileTime=0;g_sgClosedSleepIntentFileTime=0;g_sgOriginalPowerButtonWakeFileTime=0;
     modern=sleepReply={};calls.clear();suspendArguments=json::array();facts.clear();injectWakeAt.clear();injectedWakeTime=stagedOrigin=0;testClock=1000000;dispatchMode=Mode::None;
+    g_sgTask.retryEntryFileTime=testClock;
 }
 static void selectRetryKind(SgRetryKind kind){g_sgTask.retryKind=kind;g_sgRetrySleepTimeout=kind==SgRetryKind::SleepTimeout;}
 static void setRetryIntent(ULONGLONG intent){g_sgLastPowerButtonSleepIntentFileTime=intent;timeoutOriginalIntent=intent;}
@@ -160,6 +181,18 @@ static void run(const std::string& label,const std::vector<Mode>& expected,bool 
     check(!facts.empty() && facts.back().first=="sleep-request-route-result","route result always recorded");
     check(facts.back().second.contains("arguments") && facts.back().second.at("arguments")==json::array({false,false,false}),"final request result records all three FALSE arguments");
     check(facts.back().second.contains("hibernate") && facts.back().second.at("hibernate")==false,"final request result explicitly records hibernate false");
+    std::size_t callIndex=0;
+    for(const auto& attempt:facts.back().second.at("attempts")){
+        const auto& apiCall=attempt.at("apiCall");
+        if(callIndex==calls.size() || attempt.at("target")!=ymcc::sleeprequest::name(calls[callIndex])){
+            check(apiCall.is_null(),"no API receipt for a route that did not call Windows");
+            continue;
+        }
+        const auto& reply=calls[callIndex++]==Mode::ModernStandby?modern:sleepReply;
+        check(attempt.at("invoked")==true && apiCall.at("accepted")==reply.accepted &&
+            apiCall.at("win32Error")== (reply.accepted?ERROR_SUCCESS:reply.error),"receipt belongs to the actual call, including fallback and raw error");
+    }
+    check(callIndex==calls.size(),"every mock Windows call has exactly one route receipt");
     check(result.accepted || g_sgAutomaticSleepTarget.load()==Mode::None,"failed request never retains a pending target");
     check(sgAutomaticClassicSleepPending()==(accepted && target==Mode::Sleep),"modern routing never creates a classic receipt");
     check(std::string(result.api)==(target==Mode::None ? "none" : "SetSuspendState"),"both routed modes identify the actual suspend API");
@@ -232,6 +265,7 @@ static void runLate506Cases(){
         reset();selectRetryKind(kind);g_sgTask.retryAttempt=2;g_sgInternalSleepRequest={kind,tick,dispatched};g_sgAutomaticSleepTarget=Mode::ModernStandby;
         const std::string name="suspend-confirmation retains internal506 marker / "+std::to_string(static_cast<unsigned>(kind));
         ++scenarios;selectedCases.push_back(name);
+        check(sgSleepRetryActive(),"retry was active before suspend confirmation");
         check(productionRetrySuspendConfirmation(),name.c_str());
         check(g_sgInternalSleepRequest.kind==kind && g_sgInternalSleepRequest.dispatchTick==tick && g_sgInternalSleepRequest.dispatchFileTime==dispatched,"all completed retry kinds retain their original internal506 marker");
         check(guardArms==(kind==SgRetryKind::UnexpectedWake ? 1U : 0U),"only unexpected wake rearms the separate non-user guard");
@@ -265,6 +299,14 @@ int main(int argc,char**argv){try{
         throw std::runtime_error("mutation failed to activate");
     }
     check(mutation=="none","unknown mutation is refused");
+    reset();g_exitRequested.store(true,std::memory_order_release);
+    {const auto callsBefore=totalSuspendCalls;
+     run("exit before helper cancels automatic sleep",{},false,Mode::ModernStandby,ERROR_CANCELLED);
+     check(totalSuspendCalls==callsBefore,"entry exit never calls fake SetSuspendState");}
+    reset();exitDuringFinalDispatch=true;
+    {const auto callsBefore=totalSuspendCalls;
+     run("exit at final dispatch cancels automatic sleep",{},false,Mode::ModernStandby,ERROR_CANCELLED);
+     check(totalSuspendCalls==callsBefore,"final dispatch exit never calls fake SetSuspendState");}
     runTimeoutIntentCases();runLate506Cases();
     check(std::string(ymcc::sleeprequest::api(Mode::ModernStandby))=="SetSuspendState","generic modern API is direct suspend");
     {unsigned invoked=0;const auto result=ymcc::sleeprequest::request(ymcc::sleeprequest::Capabilities{true,false,false,true,0},[&](Mode){++invoked;return ymcc::sleeprequest::Reply{ymcc::sleeprequest::Outcome::Accepted,0};});

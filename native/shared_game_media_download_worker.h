@@ -1,5 +1,7 @@
 #pragma once
 #include "power_source_channel.h"
+#include "sleep_power_native_task.h"
+#include "steam_source_lease_transfer.h"
 #include "shared_game_media_download_queue.h"
 #include "shared_game_media_identity_worker.h"
 #include "custom-steam-library/custom_steam_library_network_policy.h"
@@ -240,14 +242,19 @@ inline void validateDownloadedVideo(const fs::path &path) {
   const auto kind = mediaKind(path);
   if (kind != "mp4" && kind != "webm")
     throw std::runtime_error("media-slot-container-mismatch");
-  const auto size = fs::file_size(path);
-  std::ifstream input(path, std::ios::binary);
+  std::error_code storageError;const auto size = fs::file_size(custom_steam_library::ioPath(path),storageError);
+  if(storageError)throw std::runtime_error("media-storage-unavailable");
+  std::ifstream input(custom_steam_library::ioPath(path), std::ios::binary);
+  if(!input)throw std::runtime_error("media-storage-unavailable");
   auto readAt = [&](uint64_t offset, unsigned char *data, size_t count) {
     if (offset > size || count > size - offset)
       throw std::runtime_error("media-video-truncated");
     input.seekg(static_cast<std::streamoff>(offset));
     input.read(reinterpret_cast<char *>(data), count);
-    if (!input) throw std::runtime_error("media-video-truncated");
+    if (!input) {
+      if(input.bad()||!input.eof())throw std::runtime_error("media-storage-unavailable");
+      throw std::runtime_error("media-video-truncated");
+    }
   };
   if (kind == "mp4") {
     bool metadata = false, payload = false;
@@ -355,13 +362,14 @@ inline bool strongEtag(const std::string& tag) {
     return usableValidator(tag)&&tag.size()>=2&&tag.front()=='"'&&tag.back()=='"'&&
       tag.substr(1,tag.size()-2).find('"')==std::string::npos;
   }
-inline bool retainedResume(const fs::path &part,const std::string &identity,const std::string& key) {
+inline bool retainedResume(const fs::path &part,const std::string &identity,const std::string& key,bool* storageUnavailable=nullptr) {
+    if(storageUnavailable)*storageUnavailable=false;
     try {
       const auto metadata=checkpoint::read(resumeMetadata(part),64*1024,1,"resumeProtocol");std::error_code ec;
       const auto hex=[](std::string v){return std::string(16-v.size(),'0')+v;};
       if(part.filename()!=wide(hex(digestKey(identity))+hex(digestKey("resume:"+identity))+".part"))return false;
-      const auto status=fs::symlink_status(part,ec);if(ec||!fs::is_regular_file(status)||fs::is_symlink(status))return false;
-      const auto bytes=fs::file_size(part,ec);const auto expected=metadata.find("expectedSize");
+      const auto status=fs::symlink_status(custom_steam_library::ioPath(part),ec);if(ec||!fs::is_regular_file(status)||fs::is_symlink(status))return false;
+      const auto bytes=fs::file_size(custom_steam_library::ioPath(part),ec);const auto expected=metadata.find("expectedSize");
       const auto type=stringField(metadata,"validatorType"),tag=stringField(metadata,"validator"),source=stringField(metadata,"finalSource");
       if(expected==metadata.end()||!expected->is_number_integer()||
           (!expected->is_number_unsigned()&&expected->get<int64_t>()<0)||expected->get<uint64_t>()>capacity::maxAssetBytes||
@@ -375,7 +383,7 @@ inline bool retainedResume(const fs::path &part,const std::string &identity,cons
       const auto total=expected->get<uint64_t>();const bool complete=metadata["complete"].get<bool>();
       if(complete?(!total||bytes!=total):(total&&bytes>=total))return false;
       return !ec&&bytes>0&&bytes<=capacity::maxAssetBytes&&stringField(metadata,"identity")==identity&&usableValidator(tag);
-    }catch(const checkpoint::UpgradeRequired&){throw;}catch(...){return false;}
+    }catch(const checkpoint::UpgradeRequired&){throw;}catch(const checkpoint::ReadUnavailable&){if(storageUnavailable)*storageUnavailable=true;return false;}catch(...){return false;}
   }
 
 struct WorkerContext {
@@ -390,20 +398,25 @@ struct WorkerContext {
   static constexpr uint64_t stagingLimit=6ull*1024*1024*1024;
   explicit WorkerContext(const fs::path &root) {
     std::error_code ec;size_t count=0;
-    for(fs::directory_iterator it(root/L"cache"/L"jobs"/L"game-media",ec),end;
-        !ec&&it!=end&&count<8192;it.increment(ec),++count) {
-      if(it->is_symlink(ec)||!it->is_regular_file(ec)) continue;
+    fs::directory_iterator it(custom_steam_library::ioPath(root/L"cache"/L"jobs"/L"game-media"),ec),end;
+    // A fresh absent staging directory is empty. Failed observation of an
+    // existing directory is not permission to spend an unknown cache budget.
+    if(ec){if(ec!=std::errc::no_such_file_or_directory)failure="media-storage-unavailable";return;}
+    for(;!ec&&it!=end&&count<8192;it.increment(ec),++count) {
       const auto name=it->path().filename().wstring();
       if(it->path().extension()!=L".part"&&name.find(L".part.corrupt.")==std::wstring::npos)continue;
-      const auto bytes=it->file_size(ec);if(!ec) used+=bytes;ec.clear();
+      const bool link=it->is_symlink(ec);if(ec)break;if(link)continue;
+      const bool regular=it->is_regular_file(ec);if(ec)break;if(!regular)continue;
+      const auto bytes=it->file_size(ec);if(ec)break;used+=bytes;
     }
+    if(ec)failure="media-storage-unavailable";
   }
   void trim(const fs::path &root) {
     struct Item {fs::path file;uint64_t bytes;fs::file_time_type at;};std::vector<Item> old;
     std::error_code ec;size_t count=0;const auto folder=root/L"cache"/L"jobs"/L"game-media";
     const auto target=stagingLimit-2*capacity::maxAssetBytes;
     if(used<=target) return;
-    for(fs::directory_iterator it(folder,ec),end;!ec&&it!=end&&count<8192;it.increment(ec),++count) {
+    for(fs::directory_iterator it(custom_steam_library::ioPath(folder),ec),end;!ec&&it!=end&&count<8192;it.increment(ec),++count) {
       const auto name=it->path().filename().wstring();
       if(name.size()!=37||name.substr(32)!=L".part"||name.substr(0,32).find_first_not_of(L"0123456789abcdef")!=std::wstring::npos||
           it->is_symlink(ec)||!it->is_regular_file(ec)) continue;
@@ -417,21 +430,24 @@ struct WorkerContext {
     std::sort(old.begin(),old.end(),[](const auto&a,const auto&b){return a.at<b.at;});
     for(const auto &item:old) {
       if(used<=target) break;ec.clear();
-      if(fs::remove(item.file,ec)&&!ec) {used=item.bytes>used?0:used-item.bytes;auto metadata=item.file;metadata.replace_extension(L".resume.json");fs::remove(metadata,ec);}
+      if(fs::remove(custom_steam_library::ioPath(item.file),ec)&&!ec) {used=item.bytes>used?0:used-item.bytes;auto metadata=item.file;metadata.replace_extension(L".resume.json");fs::remove(custom_steam_library::ioPath(metadata),ec);}
     }
   }
   void collectAbandoned(const fs::path& root) {
     const auto folder=root/L"cache"/L"jobs"/L"game-media";std::error_code ec;size_t count=0;
-    const auto records=Queue(root).temporaryRecords();
-    for(fs::directory_iterator it(folder,ec),end;!ec&&it!=end&&count<8192;it.increment(ec),++count) {
+    bool ownershipReadable=false;const auto records=Queue(root).temporaryRecords(&ownershipReadable);
+    // Failed observation is not evidence that old files have no owner. Keep
+    // ordinary tracking repair unchanged; only skip this destructive collector.
+    if(!ownershipReadable)return;
+    for(fs::directory_iterator it(custom_steam_library::ioPath(folder),ec),end;!ec&&it!=end&&count<8192;it.increment(ec),++count) {
       const auto name=it->path().filename().wstring();
       if(name.size()!=37||name.substr(32)!=L".part"||name.substr(0,32).find_first_not_of(L"0123456789abcdef")!=std::wstring::npos||
           records.contains(utf8(name))||it->is_symlink(ec)||!it->is_regular_file(ec))continue;
       auto metadata=it->path();metadata.replace_extension(L".resume.json");
-      const bool checkpoint=fs::exists(metadata,ec);if(ec||checkpoint){ec.clear();continue;}
+      const bool checkpoint=fs::exists(custom_steam_library::ioPath(metadata),ec);if(ec||checkpoint){ec.clear();continue;}
       const auto stamp=it->last_write_time(ec);if(ec||fs::file_time_type::clock::now()-stamp<std::chrono::hours(24)){ec.clear();continue;}
       const auto bytes=it->file_size(ec);if(ec){ec.clear();continue;}
-      if(fs::remove(it->path(),ec)&&!ec)release(bytes);ec.clear();
+      if(fs::remove(custom_steam_library::ioPath(it->path()),ec)&&!ec)release(bytes);ec.clear();
     }
   }
   void reserve(const fs::path &root,uint64_t bytes) {
@@ -439,7 +455,7 @@ struct WorkerContext {
     if(bytes>stagingLimit||used>stagingLimit-bytes) throw std::runtime_error("media-staging-budget-full");
     const auto tick=GetTickCount64();
     if(!diskAt||tick-diskAt>=1000) {
-      std::error_code ec;const auto space=fs::space(root,ec);
+      std::error_code ec;const auto space=fs::space(custom_steam_library::ioPath(root),ec);
       if(ec) throw std::runtime_error("media-storage-unavailable");
       available=space.available;sinceDisk=0;diskAt=tick;
     }
@@ -457,6 +473,8 @@ class Worker {
   std::string token_;
   HANDLE parent_;
   std::shared_ptr<WorkerContext> context_;
+  std::shared_ptr<sleeppower::task::Permit> sharedPower_;
+  int64_t taskSessionDeadline_=0;
   std::string key_;
   std::unique_ptr<InternetHandle> session_;
   std::set<std::string> localAliases_;
@@ -478,8 +496,11 @@ class Worker {
   uint64_t started_ = GetTickCount64(), taskStarted_ = 0, taskProgressAt_ = 0, lastReport_ = 0,
            lastCheck_ = 0;
   uint64_t bytes_ = 0, taskBudget_ = automaticAttemptMs;
+  TimeoutStage timeoutStage_ = TimeoutStage::unreported;
   std::string lastPhase_;
   void check(bool force=false) {
+    if(!sharedPower_||!sharedPower_->current())throw std::runtime_error(sleeppower::task::paused);
+    if(taskSessionDeadline_&&now()>=taskSessionDeadline_)throw std::runtime_error("media-task-timeout");
     const auto tick=GetTickCount64();
     if(context_->cancelled.load()||WaitForSingleObject(parent_,0)!=WAIT_TIMEOUT) throw std::runtime_error("media-download-cancelled");
     if(taskStarted_&&tick-taskStarted_>=taskBudget_)throw std::runtime_error("media-task-time-budget");
@@ -592,39 +613,39 @@ class Worker {
     if(body.empty()) throw std::runtime_error("media-download-empty");return body;
   }
   void discard(const fs::path &part) {
-    std::error_code ec;const auto bytes=fs::file_size(part,ec);ec.clear();
-    if(fs::remove(part,ec)&&!ec) context_->release(bytes);
-    ec.clear();fs::remove(resumeMetadata(part),ec);
+    std::error_code ec;const auto bytes=fs::file_size(custom_steam_library::ioPath(part),ec);ec.clear();
+    if(fs::remove(custom_steam_library::ioPath(part),ec)&&!ec) context_->release(bytes);
+    ec.clear();fs::remove(custom_steam_library::ioPath(resumeMetadata(part)),ec);
   }
   void quarantineResume(const fs::path& part) {
     // Renaming keeps the exact original bytes without needing a second asset's
     // worth of free space. Refuse the retry if preservation itself fails.
     for(const auto& path:{resumeMetadata(part),part}) {
-      std::error_code ec;const auto status=fs::symlink_status(path,ec);
+      std::error_code ec;const auto status=fs::symlink_status(custom_steam_library::ioPath(path),ec);
       if(status.type()==fs::file_type::not_found||ec==std::errc::no_such_file_or_directory)continue;
       if(ec||!fs::is_regular_file(status)||fs::is_symlink(status))throw std::runtime_error("media-cache-file-unsafe");
       auto backup=path;backup+=L".corrupt."+wide(randomId());
-      if(!MoveFileExW(path.c_str(),backup.c_str(),MOVEFILE_WRITE_THROUGH))throw std::runtime_error("media-cache-resume-preserve-failed");
+      if(!MoveFileExW(custom_steam_library::ioPath(path).c_str(),custom_steam_library::ioPath(backup).c_str(),MOVEFILE_WRITE_THROUGH))throw std::runtime_error("media-cache-resume-preserve-failed");
     }
   }
-  bool retained(const fs::path& part,const std::string& identity){return retainedResume(part,identity,key_);}
+  bool retained(const fs::path& part,const std::string& identity){bool unavailable=false;const bool valid=retainedResume(part,identity,key_,&unavailable);if(unavailable)throw std::runtime_error("media-storage-unavailable");return valid;}
   void saveResume(const fs::path& path,const Json& metadata) {
     // Check the on-disk version again at the write boundary. A newer owner may
     // have installed a future checkpoint since this transfer began.
     try{checkpoint::read(path,64*1024,1,"resumeProtocol");}
-    catch(const checkpoint::UpgradeRequired&){throw;}catch(...){checkpoint::preserve(path);}
+    catch(const checkpoint::UpgradeRequired&){throw;}catch(const checkpoint::ReadUnavailable&){throw std::runtime_error("media-storage-unavailable");}catch(...){checkpoint::preserve(path);}
     checkpoint::write(path,metadata);
   }
   fs::path downloadFile(const std::string &source,const std::string &binding,uint64_t cap,bool segmented) {
     const auto identity=binding+"\n"+source;
     const auto hex=[](std::string v){return std::string(16-v.size(),'0')+v;};
     const auto id=hex(digestKey(identity))+hex(digestKey("resume:"+identity));
-    const auto folder=queue_.root()/L"cache"/L"jobs"/L"game-media";fs::create_directories(folder);
+    const auto folder=queue_.root()/L"cache"/L"jobs"/L"game-media";fs::create_directories(custom_steam_library::ioPath(folder));
     const auto part=folder/wide(id+".part");const auto metadataPath=resumeMetadata(part);
     std::error_code ec;
-    if(fs::is_symlink(fs::symlink_status(part,ec))) throw std::runtime_error("media-cache-file-unsafe");
-    Json metadata;try{metadata=checkpoint::read(metadataPath,64*1024,1,"resumeProtocol");}catch(const checkpoint::UpgradeRequired&){throw;}catch(...){metadata=Json::object();}
-    ec.clear();auto offset=fs::file_size(part,ec);if(ec) offset=0;
+    if(fs::is_symlink(fs::symlink_status(custom_steam_library::ioPath(part),ec))) throw std::runtime_error("media-cache-file-unsafe");
+    Json metadata;try{metadata=checkpoint::read(metadataPath,64*1024,1,"resumeProtocol");}catch(const checkpoint::UpgradeRequired&){throw;}catch(const checkpoint::ReadUnavailable&){throw std::runtime_error("media-storage-unavailable");}catch(...){metadata=Json::object();}
+    ec.clear();auto offset=fs::file_size(custom_steam_library::ioPath(part),ec);if(ec) offset=0;
     if(!retained(part,identity)||offset>cap) {quarantineResume(part);metadata=Json::object();offset=0;}
     queue_.trackTemporary(token_,utf8(part.filename().wstring()),true);
     const auto before=bytes_;bool restarted=false,reported=false;
@@ -679,7 +700,7 @@ class Worker {
         metadata.update(Json{{"resumeProtocol",1},{"identity",identity},{"finalSource",reply->source},
           {"validatorType",type},{"validator",validator},{"validatorDate",reply->header(WINHTTP_QUERY_DATE)},{"expectedSize",total},{"complete",false},{"updatedAt",now()}});
         saveResume(metadataPath,metadata);
-        std::ofstream output(part,std::ios::binary|(offset?std::ios::app:std::ios::trunc));
+        std::ofstream output(custom_steam_library::ioPath(part),std::ios::binary|(offset?std::ios::app:std::ios::trunc));
         if(!output) throw std::runtime_error("media-write-failed");
         progress("downloading",before+offset,segmented?0:total,true);
         uint64_t received=0;char buffer[64*1024];
@@ -696,7 +717,7 @@ class Worker {
         offset+=received;
         if(expected&&received!=expected) throw std::runtime_error("media-download-truncated");
         if(!offset) throw std::runtime_error("media-download-empty");
-        metadata["complete"]=total&&offset==total;metadata["updatedAt"]=now();saveResume(metadataPath,metadata);
+        metadata["expectedSize"]=total?total:offset;metadata["complete"]=!total||offset==total;metadata["updatedAt"]=now();saveResume(metadataPath,metadata);
         if(reply->status==206&&offset<total) continue;
         bytes_=before+offset;progress("downloading",bytes_,segmented?0:total,true);
         queue_.releaseTemporary(token_,utf8(part.filename().wstring()));return part;
@@ -705,8 +726,12 @@ class Worker {
     } catch(const std::exception &e) {
       const std::string reason=e.what();
       if(reason=="media-download-checkpoint-upgrade-required")throw;
-      if(!retained(part,identity))quarantineResume(part);
-      else if(reason=="media-size-invalid"||reason=="media-http-range-invalid")discard(part);
+      // Unreadable authority is neither corrupt nor permission to erase bytes.
+      // Preserve the original transfer error if cleanup alone cannot observe it.
+      if(reason!="media-storage-unavailable")try{
+        if(!retained(part,identity))quarantineResume(part);
+        else if(reason=="media-size-invalid"||reason=="media-http-range-invalid")discard(part);
+      }catch(const std::exception& error){if(std::string(error.what())!="media-storage-unavailable")throw;}
       try{queue_.releaseTemporary(token_,utf8(part.filename().wstring()));}catch(...){}
       throw;
     }
@@ -724,6 +749,7 @@ class Worker {
       const auto isHls=url.substr(0,url.find_first_of("?#")).ends_with(".m3u8");
       fs::path source;
       if(!isHls) {
+        timeoutStage_=TimeoutStage::transfer;
         source=downloadFile(url,binding,capacity::maxAssetBytes,false);parts.push_back(source);
       } else {
         // At most three official quality choices: preferred, <=720, <=480.
@@ -732,6 +758,7 @@ class Worker {
         std::set<std::string> attempted;
         int ceiling=0;
         for(int qualityAttempt=0;qualityAttempt<3;++qualityAttempt) {
+          timeoutStage_=TimeoutStage::metadata;
           std::string current=url,playlistIdentity;HlsPlan plan;uint64_t bandwidth=0;
           selectedHeight=0;
           for(int depth=0;depth<3;++depth) {
@@ -747,10 +774,11 @@ class Worker {
             if(hlsExceedsLimit(plan,bandwidth,capacity::maxAssetBytes))throw std::runtime_error("media-size-invalid");
             const auto segmentBinding=binding+"\nhls:"+digestKey(playlistIdentity);
             uint64_t total=0;
+            timeoutStage_=TimeoutStage::transfer;
             for(const auto &segment:plan.segments) {
               if(total>=capacity::maxAssetBytes)throw std::runtime_error("media-size-invalid");
               const auto file=downloadFile(segment,segmentBinding,capacity::maxAssetBytes-total,true);
-              parts.push_back(file);total+=fs::file_size(file);
+              parts.push_back(file);total+=fs::file_size(custom_steam_library::ioPath(file));
             }
             break;
           } catch(const std::exception &e) {
@@ -763,12 +791,13 @@ class Worker {
             progress("resolving",0,0,true);
           }
         }
+        timeoutStage_=TimeoutStage::assembly;
         const auto folder=queue_.root()/L"cache"/L"jobs"/L"game-media";
         assembled=folder/wide(randomId()+".part");queue_.trackTemporary(token_,utf8(assembled.filename().wstring()));
-        std::ofstream output(assembled,std::ios::binary|std::ios::trunc);
+        std::ofstream output(custom_steam_library::ioPath(assembled),std::ios::binary|std::ios::trunc);
         char buffer[128*1024];
         for(const auto &part:parts) {
-          std::ifstream input(part,std::ios::binary);if(!input) throw std::runtime_error("media-resume-cache-unreadable");
+          std::ifstream input(custom_steam_library::ioPath(part),std::ios::binary);if(!input) throw std::runtime_error("media-resume-cache-unreadable");
           while(input) {
             check();input.read(buffer,sizeof buffer);const auto count=input.gcount();if(!count) break;
             context_->reserve(queue_.root(),count);output.write(buffer,count);
@@ -778,15 +807,29 @@ class Worker {
         }
         output.flush();output.close();if(!output) throw std::runtime_error("media-write-failed");source=assembled;
       }
-      if(slot=="dynamic") validateDownloadedVideo(source);
+      if(slot=="dynamic") {
+        timeoutStage_=TimeoutStage::validation;
+        validateDownloadedVideo(source);
+        check();
+      }
       lease["slot"]=slot;lease["verified"]=true;if(slot=="dynamic"){lease["videoQualityPolicy"]=videoQualityPolicy;if(selectedHeight>0)lease["selectedHeight"]=selectedHeight;else lease.erase("selectedHeight");}
+      timeoutStage_=TimeoutStage::publication;
       progress("publishing",bytes_,bytes_,true);check(true);
-      auto published=Store(queue_.root()).publish(lease,source,false);
+      Json published;
+      {
+        // Inventory must not observe our new asset revision as a new request
+        // before the same owned queue claim records that publication.
+        Lock publication(queue_.root());
+        published=Store(queue_.root()).publish(lease,source,false);
+        queue_.advancePublishedBinding(token_,key_,lease,published);
+      }
       clearAssembly();for(const auto &part:parts) discard(part);return published;
     } catch(const std::exception &e) {
       const std::string reason=e.what();
       if(powerPolicy::blocked()||reason=="media-download-power-paused")throw; // Retain parts/assembly for AC recovery.
       clearAssembly();
+      // A local HLS segment read failure belongs to the shared storage backoff.
+      if(reason=="media-write-failed"||reason=="media-publish-failed"||reason=="media-resume-cache-unreadable"||reason=="media-storage-unavailable")throw std::runtime_error("media-storage-unavailable");
       const bool invalid=reason=="media-size-invalid"||reason.find("slot-container")!=std::string::npos||reason.find("unsupported-container")!=std::string::npos||
         reason.find("video-structure")!=std::string::npos||reason.find("video-incomplete")!=std::string::npos||
         reason.find("stale")!=std::string::npos;
@@ -795,21 +838,24 @@ class Worker {
         try{const auto metadata=checkpoint::read(resumeMetadata(part),64*1024,1,"resumeProtocol");
           keep=!invalid&&usableValidator(stringField(metadata,"validator"))&&
             (reason!="media-video-truncated"||metadata.value("expectedSize",uint64_t{0})==0);
-        }catch(const checkpoint::UpgradeRequired&){continue;}catch(...){quarantineResume(part);continue;}
+        }catch(const checkpoint::UpgradeRequired&){continue;}catch(const checkpoint::ReadUnavailable&){continue;}catch(...){quarantineResume(part);continue;}
         if(!keep) discard(part);
       }
       throw;
     }
   }
   void prepare(const Json &target) {
+    timeoutStage_=TimeoutStage::unreported;
     check();
     Store store(queue_.root());
     auto requestTarget = target;
     requestTarget["demandConsumer"] = "background";
     const auto intent=queue_.snapshot();
     const auto manualRequest=intent.value("session",std::string{})==token_&&manualRun(intent)&&manualTarget(intent,stringField(target,"key"))?stringField(intent,"manualRequestId"):std::string{};
-    auto lease = store.begin(requestTarget,manualRequest);
-    if (!lease.value("acquired", false)) {
+    Json lease=Json::object();bool acquired=false,staticUnavailable=false,videoUnavailable=false;
+    try {
+    lease = store.begin(requestTarget,manualRequest);acquired=lease.value("acquired",false);
+    if (!acquired) {
       const auto resolved = store.resolve(target);
       if (complete(resolved, now()) || resolved.value("deleted", false))
         queue_.result(token_, target["key"], true);
@@ -819,35 +865,56 @@ class Worker {
                                  lease.value("leaseUntil", int64_t{0})));
       return;
     }
-    try {
+      const auto slots = lease.value("taskSlots", Json::array());
+      const bool dynamicNeeded =
+               std::find(slots.begin(), slots.end(), "dynamic") != slots.end(),
+           staticNeeded =
+               std::find(slots.begin(), slots.end(), "static") != slots.end();
       const auto appId = target.value("appId", int64_t{0});
-      Json document;
-      // Some verified games are unavailable in a storefront region. Only an
-      // explicit success=false allows a bounded alternate-region metadata read;
-      // malformed, mismatched or non-game data still fails the original gates.
-      for(const auto *region:{"us","cn","jp"}) {
-        document=Json::parse(request("https://store.steampowered.com/api/appdetails?appids="+
-            std::to_string(appId)+"&l=english&cc="+region));
-        const auto key=std::to_string(appId);const auto found=document.find(key);
-        if(found==document.end()||!found->is_object()||!found->contains("success")||
-            !(*found)["success"].is_boolean()||(*found)["success"].get<bool>())break;
-      }
+      timeoutStage_=TimeoutStage::metadata;
+      const auto document=custom_steam_library::network_policy::wallpaperAppDetails(std::to_string(appId),
+          [&](const std::string& url){return Json::parse(request(url));}).first;
       auto entry = document.value(std::to_string(appId), Json::object());
       auto data = entry.value("data", Json::object());
       if(entry.contains("success")&&entry["success"].is_boolean()&&!entry["success"].get<bool>()){
-        if(pendingMediaRefresh(lease,"dynamic")&&!lease.value("selectedVideo",Json::object()).empty())throw std::runtime_error("media-video-selection-expired");
-        lease["videoUnavailable"]=true;lease["staticUnavailable"]=true;store.finish(lease);queue_.result(token_,target["key"],true,"store-unavailable");return;
+        if(dynamicNeeded&&pendingMediaRefresh(lease,"dynamic")&&!lease.value("selectedVideo",Json::object()).empty())throw std::runtime_error("media-video-selection-expired");
+        lease["videoUnavailable"]=dynamicNeeded;lease["staticUnavailable"]=staticNeeded;store.finish(lease);queue_.result(token_,target["key"],true,"store-unavailable");return;
       }
       if(!entry.value("success",false)||data.value("steam_appid",int64_t{0})!=appId)throw std::runtime_error("media-identity-unconfirmed");
-      if(data.value("type",std::string{})!="game"){
-        if(pendingMediaRefresh(lease,"dynamic")&&!lease.value("selectedVideo",Json::object()).empty())throw std::runtime_error("media-video-selection-expired");
-        lease["videoUnavailable"]=true;lease["staticUnavailable"]=true;store.finish(lease);queue_.result(token_,target["key"],true,"not-game-or-no-video");return;
+      const auto appType=data.value("type",std::string{});
+      if(appType!="game"&&appType!="demo"){
+        if(dynamicNeeded&&pendingMediaRefresh(lease,"dynamic")&&!lease.value("selectedVideo",Json::object()).empty())throw std::runtime_error("media-video-selection-expired");
+        lease["videoUnavailable"]=dynamicNeeded;lease["staticUnavailable"]=staticNeeded;store.finish(lease);queue_.result(token_,target["key"],true,"not-game-or-no-video");return;
       }
       lease["name"] = data.value("name", target.value("name", std::string{}));
       if(target.value("catalogSource",std::string{})=="popular")queue_.update(token_,[&](Json &j){
         const auto key=target.value("key",std::string{});if(j["jobs"].contains(key))j["jobs"][key]["name"]=lease["name"];
         if(j["active"].contains(key))j["active"][key]["name"]=lease["name"];
       });
+      // A video-only metadata/page failure must not withhold a valid poster.
+      // Each slot uses only its requested metadata; publication still carries
+      // the original lease and queue transaction before later failures settle.
+      std::string failure,staticFailure;
+      if (staticNeeded) {
+        auto poster =
+            data.value("background_raw", std::string{});
+        if (poster.empty()) poster = data.value("background", std::string{});
+        if (poster.empty()) {
+          auto screenshots = data.value("screenshots", Json::array());
+          if (!screenshots.empty())
+            poster = screenshots.front().value("path_full", std::string{});
+        }
+        staticUnavailable = poster.empty();
+        if (!poster.empty())
+          try {
+            lease = install(lease, decodeMediaUrl(poster), "static");
+          } catch (const std::exception &e) {
+            staticFailure = failure = e.what();
+            if (failure.find("stale") != std::string::npos ||
+                failure.find("cancelled") != std::string::npos || sharedFailure(failure) || workerTaskTimeout(failure))
+              throw;
+          }
+      }
       std::vector<std::string> videos;
       const auto selected=lease.value("selectedVideo",Json::object());
       const auto selectedUrl=decodeMediaUrl(selected.value("url",std::string{}));bool selectedOffered=false;
@@ -865,30 +932,21 @@ class Worker {
         if (std::find(videos.begin(), videos.end(), url) == videos.end())
           videos.push_back(url);
       };
-      const auto movies=data.value("movies",Json::array());
-      for(const auto& movie:movies) {
-        add(movie.value("hls_h264",std::string{}));add(movie.value("hlsManifest",std::string{}));
-        for(const auto* quality:{"720","480","1080","max"})for(const auto* format:{"mp4","webm"})
-          add(movie.value(format,Json::object()).value(quality,std::string{}));
+      if (dynamicNeeded) {
+        const auto movies=data.value("movies",Json::array());
+        for(const auto& movie:movies) {
+          add(movie.value("hls_h264",std::string{}));add(movie.value("hlsManifest",std::string{}));
+          for(const auto* quality:{"720","480","1080","max"})for(const auto* format:{"mp4","webm"})
+            add(movie.value(format,Json::object()).value(quality,std::string{}));
+        }
+        if (videos.empty()) {
+          timeoutStage_=TimeoutStage::metadata;
+          auto page = request("https://store.steampowered.com/app/" +
+                                  std::to_string(appId) + "/?l=english",
+                              4 * 1024 * 1024);
+          for(const auto& url:fallbackPageVideos(page,appId))add(url);
+        }
       }
-      if (videos.empty()) {
-        auto page = request("https://store.steampowered.com/app/" +
-                                std::to_string(appId) + "/?l=english",
-                            4 * 1024 * 1024);
-        for(const auto& url:fallbackPageVideos(page,appId))add(url);
-      }
-      std::string poster =
-          data.value("background_raw", data.value("background", std::string{}));
-      if (poster.empty()) {
-        auto screenshots = data.value("screenshots", Json::array());
-        if (!screenshots.empty())
-          poster = screenshots.front().value("path_full", std::string{});
-      }
-      const auto slots = lease.value("taskSlots", Json::array());
-      bool dynamicNeeded =
-               std::find(slots.begin(), slots.end(), "dynamic") != slots.end(),
-           staticNeeded =
-               std::find(slots.begin(), slots.end(), "static") != slots.end();
       // The acquired store lease is authoritative if a newer selection won
       // after this queue item was claimed. Static-only work ignores video expiry.
       if(dynamicNeeded&&!selected.empty()){
@@ -896,16 +954,7 @@ class Worker {
         if(selected.value("appId",int64_t{0})!=appId||!selectedOffered)throw std::runtime_error("media-video-selection-expired");
         videos={choice};
       }
-      std::string failure;
-      if (staticNeeded && !poster.empty())
-        try {
-          lease = install(lease, decodeMediaUrl(poster), "static");
-        } catch (const std::exception &e) {
-          failure = e.what();
-          if (failure.find("stale") != std::string::npos ||
-              failure.find("cancelled") != std::string::npos)
-            throw;
-        }
+      videoUnavailable = dynamicNeeded && videos.empty();
       bool published = !dynamicNeeded;
       if (dynamicNeeded)
         for (size_t i = 0; i < (std::min)(size_t{16}, videos.size()); ++i) {
@@ -916,33 +965,37 @@ class Worker {
           } catch (const std::exception &e) {
             failure = e.what();
             if (failure.find("stale") != std::string::npos ||
-                failure.find("cancelled") != std::string::npos)
+                failure.find("cancelled") != std::string::npos || sharedFailure(failure) || workerTaskTimeout(failure))
               throw;
           }
         }
       if (!published && !videos.empty())
         throw std::runtime_error(failure.empty() ? "media-download-failed"
                                                  : failure);
-      lease["videoUnavailable"] = videos.empty();
-      lease["staticUnavailable"] = poster.empty();
+      // A retained image is a fallback, never a receipt for its replacement.
+      // Settle the failed slot before finish() clears the owned error/debt.
+      if(!staticFailure.empty())throw std::runtime_error(staticFailure);
+      lease["videoUnavailable"] = videoUnavailable;
+      lease["staticUnavailable"] = staticUnavailable;
       store.finish(lease);
-      if (!failure.empty() &&
-          !store.resolve(target).value("staticReady", false) && !poster.empty())
-        throw std::runtime_error(failure);
       queue_.result(token_, target["key"], true,
-                    videos.empty() ? "no-dynamic-video" : "");
+                    dynamicNeeded && videos.empty() ? "no-dynamic-video" : "");
     } catch (const std::exception &e) {
       auto reason = std::string(e.what());
+      if(reason=="media-write-failed"||reason=="media-publish-failed"||reason=="media-index-unreadable")reason="media-storage-unavailable";
       if (reason == "media-download-cancelled" ||
           reason == "media-download-power-paused"||reason=="wallpaper-on-battery"||
-          reason=="wallpaper-power-unknown"||reason=="media-stale-wallpaper-power") {
-        store.cancel(lease);
+          reason=="wallpaper-power-unknown"||reason=="media-stale-wallpaper-power"||reason==sleeppower::task::paused) {
+        if(acquired)store.cancel(lease);
         throw;
       }
-      lease["reason"] = reason;
-      auto failed = store.fail(lease);
+      // Even a refusal before Store.begin acquired a lease belongs to this
+      // claimed game. It must enter the original retry budget, not abort all
+      // lanes and restart the whole worker with unchanged attempts.
+      Json failed=Json::object();
+      if(acquired){lease["videoUnavailable"]=videoUnavailable;lease["staticUnavailable"]=staticUnavailable;lease["reason"]=reason;try{failed=store.fail(lease);}catch(const std::exception& failure){const std::string detail=failure.what();if(detail=="media-write-failed"||detail=="media-publish-failed"||detail=="media-index-unreadable")reason="media-storage-unavailable";else throw;}}
       queue_.result(token_, target["key"], false, reason,
-                    failed.value("retryAt", int64_t{0}));
+                    failed.value("retryAt", int64_t{0}), {}, {}, {}, timeoutStage_);
       if(reason.find("media-disk-")==0||reason.find("media-cache-")==0||
           reason.find("media-staging-")==0||reason=="media-storage-unavailable") {
         std::lock_guard lock(context_->gate);context_->cancelled.store(true);
@@ -953,10 +1006,11 @@ class Worker {
   }
 
 public:
-  Worker(fs::path root,std::string token,HANDLE parent,std::shared_ptr<WorkerContext> context={},IdentityPorts identity={},Limits limits={})
+  Worker(fs::path root,std::string token,HANDLE parent,std::shared_ptr<WorkerContext> context={},IdentityPorts identity={},Limits limits={},std::shared_ptr<sleeppower::task::Permit> sharedPower={})
       : queue_(root),identity_(std::move(identity)),limits_(limits),token_(std::move(token)),parent_(parent),
-        context_(context?std::move(context):std::make_shared<WorkerContext>(root)) {}
+        context_(std::move(context)),sharedPower_(std::move(sharedPower)) {}
   int run() {
+    if(!sharedPower_||!sharedPower_->current()){try{queue_.end(token_,"paused",sleeppower::task::paused);}catch(...){return 14;}return 0;}
     const auto mutexName = eventName(queue_.root(), L"worker-lock");
     HANDLE mutex = CreateMutexW(nullptr, FALSE, mutexName.c_str());
     if (!mutex)
@@ -972,7 +1026,13 @@ public:
     if (locked != WAIT_OBJECT_0 && locked != WAIT_ABANDONED)
       return 13;
     try {
+      if(!sharedPower_->current())throw std::runtime_error(sleeppower::task::paused);
+      const auto bound=queue_.document();const auto issued=bound.value("sessionIssuedAt",int64_t{0}),deadline=bound.value("sessionDeadlineAt",int64_t{0});
+      if(issued<=0||now()<issued||deadline<=now()||deadline-issued>int64_t(sessionMs))throw std::runtime_error("media-task-timeout");
+      limits_.session=(std::min)(limits_.session,static_cast<uint64_t>(deadline-now()));
+      if(!context_)context_=std::make_shared<WorkerContext>(queue_.root());
       check(true);
+      if(!context_->failure.empty())throw std::runtime_error(context_->failure);
       queue_.cleanupTemporary();
       // The generic age collector does not understand sidecar versions. Keep
       // checkpoint-bearing data until this consumer can validate its protocol.
@@ -998,10 +1058,11 @@ public:
         std::vector<std::thread> &lanes;std::shared_ptr<WorkerContext> context;
         ~JoinLanes(){context->cancelled.store(true);context->wakeLanes();for(auto &lane:lanes)if(lane.joinable())lane.join();}
       } join{lanes,context_};
-      for(int n=0;n<parallel;++n) lanes.emplace_back([this] {
+      for(int n=0;n<parallel;++n) lanes.emplace_back([this,deadline] {
         SetThreadPriority(GetCurrentThread(),THREAD_MODE_BACKGROUND_BEGIN);
         SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_IDLE);
-        Worker lane(queue_.root(),token_,parent_,context_,identity_,limits_);
+        Worker lane(queue_.root(),token_,parent_,context_,identity_,limits_,sharedPower_);
+        lane.taskSessionDeadline_=deadline;
         try {
           for (;;) {
             if(GetTickCount64()-lane.started_>=limits_.session) break;
@@ -1010,13 +1071,25 @@ public:
               const auto state=queue_.snapshot();if(state.value("activeCount",size_t{0})==0){const auto due=state.value("nextDueAt",int64_t{-1});if(state.value("remaining",size_t{0})>0&&due>=0&&due<=now())continue;break;}
               std::unique_lock lock(context_->waitGate);context_->changed.wait(lock,[&]{return context_->cancelled.load()||context_->revision!=observed;});continue;
             }
-            lane.key_=target.value("key",std::string{});lane.taskStarted_=GetTickCount64();lane.taskProgressAt_=0;lane.taskBudget_=(std::min)(limits_.attempt,target.value("attemptBudgetMs",uint64_t(automaticAttemptMs)));
+            lane.key_=target.value("key",std::string{});
+            lane.taskSessionDeadline_=(std::min)(deadline,target.value("sessionDeadlineAt",deadline));
+            lane.taskStarted_=GetTickCount64();lane.taskProgressAt_=0;lane.taskBudget_=(std::min)(limits_.attempt,target.value("attemptBudgetMs",uint64_t(automaticAttemptMs)));
             if(target.value("identityPending",false)) {
+              std::string identityStamp;try{identityStamp=identityPrerequisites((identity_.appRoot.empty()?identityAppRoot():identity_.appRoot)/L"SteamArtworkLab.exe",stringField(target,"executable")).stamp;}catch(...){}
               try{identifyShortcut(queue_.root(),target,identity_,[&]{lane.progress("identifying",0,0,true);});lane.check();
-                if(!identity_.current(target))throw std::runtime_error("media-shortcut-no-longer-current");
+                identity_.requireCurrent(target);
                 if(!queue_.promoteIdentity(token_,target))throw std::runtime_error("media-identity-unconfirmed");
-              }catch(const std::exception& error){const std::string reason=error.what();if(reason.find("cancelled")!=std::string::npos||reason.find("power-paused")!=std::string::npos)throw;queue_.result(token_,lane.key_,false,reason);}
-            } else {if(stringField(target,"catalogSource")=="steam-shortcut"&&!identity_.current(target))queue_.result(token_,lane.key_,false,"media-shortcut-no-longer-current");else lane.prepare(target);}lane.taskStarted_=0;context_->wakeLanes();
+              }catch(const ShortcutMembershipRejected& error){queue_.result(token_,lane.key_,false,error.what(),0,identityStamp,error.observation);}
+              catch(const IdentityLookupRejected& error){queue_.result(token_,lane.key_,false,error.what(),0,identityStamp,Json{},error.observation);}
+              catch(const std::exception& error){const std::string reason=error.what();if(reason.find("cancelled")!=std::string::npos||reason.find("power-paused")!=std::string::npos||reason=="wallpaper-on-battery"||reason=="wallpaper-power-unknown"||reason=="media-stale-wallpaper-power"||reason==sleeppower::task::paused)throw;if(reason=="media-identity-helper-unavailable"||reason=="media-identity-target-unavailable")identityStamp=reason;
+                queue_.result(token_,lane.key_,false,reason,0,identityStamp);}
+            } else {
+              try{if(stringField(target,"catalogSource")=="steam-shortcut"&&!queue_.currentManualVideoSelection(token_,target))identity_.requireCurrent(target);lane.prepare(target);}
+              catch(const ShortcutMembershipRejected& error){queue_.result(token_,lane.key_,false,error.what(),0,{},error.observation);}
+              catch(const std::exception& error){const std::string reason=error.what();if(reason!="media-storage-unavailable"&&reason!="media-steam-facts-unavailable")throw;queue_.result(token_,lane.key_,false,reason);}
+            }
+            // A continuation can expire before this worker's own session.
+            lane.taskStarted_=0;lane.taskSessionDeadline_=deadline;context_->wakeLanes();
           }
         } catch(const std::exception &e) {
           std::lock_guard lock(context_->gate);
@@ -1032,9 +1105,10 @@ public:
       return 0;
     } catch (const std::exception &e) {
       const auto reason = std::string(e.what());
+      const bool sharedPaused=reason==sleeppower::task::paused;
       const bool powerPaused=reason=="media-download-power-paused"||reason=="wallpaper-on-battery"||reason=="wallpaper-power-unknown"||reason=="media-stale-wallpaper-power";
-      try{queue_.end(token_, powerPaused?"paused":"deferred",powerPaused?"download-paused":reason,reason=="media-stale-wallpaper-power");}catch(...){return 14;}
-      return powerPaused || reason == "media-download-cancelled" ||
+      try{queue_.end(token_, (powerPaused||sharedPaused)?"paused":"deferred",powerPaused?"download-paused":reason,reason=="media-stale-wallpaper-power");}catch(...){return 14;}
+      return sharedPaused||powerPaused || reason == "media-download-cancelled" ||
              reason.find("media-disk-")==0 || reason.find("media-cache-")==0 ||
              reason.find("media-staging-")==0 || reason=="media-storage-unavailable" ? 0 : 14;
     }
@@ -1053,8 +1127,9 @@ inline std::optional<int> backgroundEntrypoint(const fs::path &appRoot) {
   } free{argv};
   if (argc < 2 || std::wstring_view(argv[1]) != L"--media-background")
     return std::nullopt;
-  if (argc != 5)
-    return 10;
+  const bool sourceArguments=argc==13&&std::wstring_view(argv[5])==ymcc::steaminfo::transfer::argument;
+  const int powerSlot=sourceArguments?11:5;
+  if((argc!=7&&!sourceArguments)||std::wstring_view(argv[powerSlot])!=sleeppower::task::argument)return 10;
   wchar_t *end = nullptr;
   const auto parentPid = wcstoul(argv[2], &end, 10);
   if (!parentPid || !end || *end)
@@ -1077,7 +1152,17 @@ inline std::optional<int> backgroundEntrypoint(const fs::path &appRoot) {
     // The parent HANDLE and birth are verified above. Bind its physical source
     // before any queue gate; an opted-in cold worker otherwise sees unknown.
     ymcc::powerSource::channel::Consumer parentPower;
-    parentPower.attach(parent, std::stoull(birth));
+    const bool directParentProven=parentPower.attach(parent, std::stoull(birth));
+    HANDLE powerMapping=nullptr;if(!ymcc::steaminfo::transfer::parseHandle(argv[powerSlot+1],powerMapping))return 17;
+    const bool trustedPair=ymcc::steaminfo::transfer::trustedWallpaperParent(parent,parentPid,std::stoull(birth),appRoot,directParentProven);
+    auto sharedPermit=sleeppower::task::import(powerMapping,parent,token,trustedPair);if(!sharedPermit)return 17;
+    IdentityPorts identity;
+    if(sourceArguments){
+      std::array<HANDLE,5> inherited{};
+      for(unsigned i=0;i<5;++i)if(!ymcc::steaminfo::transfer::parseHandle(argv[6+i],inherited[i]))return 11;
+      identity.source=ymcc::steaminfo::transfer::importWallpaper(inherited,parent,parentPid,std::stoull(birth),appRoot,directParentProven);
+      if(!identity.source)return 11;
+    }
     ymcc::powerSource::channel::Binding powerBinding(parentPower);
     if (!Queue(root).allowed(token))
       return 11;
@@ -1086,7 +1171,7 @@ inline std::optional<int> backgroundEntrypoint(const fs::path &appRoot) {
     // Reassert Idle after entering that mode, preserving its IO/memory hints.
     SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
-    return Worker(root, token, parent).run();
+    return Worker(root, token, parent,{},std::move(identity),{},std::move(sharedPermit)).run();
   } catch (...) {
     return 15;
   }

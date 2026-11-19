@@ -1,0 +1,17 @@
+# 队列完成通知注册异常的原线程收尾
+
+已写入主线，尚未导出部署。本轮仅改screen_touchpad_input_channel.h一个上下文，正式fixture/main/UI/监控/Steam/公共睡眠及自动修复额度不改，没有新增闲置poll、timer、线程或刷新率。
+
+真实原生负例：给原ShutdownQueueAsync返回的同一action预设一次实际Completed，原setter自然拒绝0x80000018。原worker已退出但State仍queue/action引用，closed=false/error=0；原shutdown失败，负例COM债显式park到进程退出，没有计作产品归还。7检查中3必要FAIL原件保留；输入桌面未变、隐藏桌面归还。
+
+现仅在原Completed setter局部捕获实际错误，CAS只替换原S_OK，保留已有失败；仍等待并验证同一个原action的Status/GetResults，在原worker STA释放action、queue和delegate后再确认退役。通知注册失败与队列资源实际退役分开记录；原先其他清理失败的cleaned=false不被重置，未完成关闭仍不确认成功。没有重调ShutdownQueueAsync或创建新queue。
+
+候选8检查通过，原始State实际保留0x80000018，queue/action/completion为空，原shutdown第一次确认资源退役，未park COM。相同EXE的正常参数8检查通过，error=0，复用原编译图而没有重新编译。原正式consumer的手动恢复17和满UI消息队列退场11在同最终产品通过，选择名与既有原回执逐项同。
+
+后继只增强私有对照、不改产品：预设回调不发唤醒消息，另排入一项真实DispatcherQueue工作。实际action初态Started，原MsgWait循环进入1次、工作与无通知回调各执行1次，同一次action关闭并清空COM，11检查通过。私有附加观察和原端口全头逆除同最终产品；不是靠原预设回调的PostThreadMessage收尾。
+
+共5实际编译图/6实际Job，全部在关闭前观察活动进程0；负例business=false及具体root/自然/准确工具收尾原样分列，不能将负例进程退出当COM归还。四原组与无通知后继分epoch，不拼默认完整父门。独审一个hunk范围内无阻塞，未编译/运行；完整起止未独立计量，不声称120/180秒内完成。无通知后继为父侧核收，产品字节与独审同。
+
+1target+22dep全部share0同持53.3859ms/23HANDLE归还，整头正逆及导后23源同实编候选。官方检索/打开未得到可用正文，未作为此错误或Win5原因依据；上述数字来自实际Windows API与原始native输出。
+
+UI任务已补主线ended/SurfaceRestore异常的presentation lease归还，本侧只读核契约，不并行改显示生命周期。本轮修复不是Win5原0x8000FFFF内部原因的认定。ShutdownQueueAsync/Status/GetResults其他异常、永久OS停滞及自有STA最终归还仍OPEN；下一自然匹配Native/runtime/source-PDB及实体全屏/捕获/睡眠反馈，长期CPU未测，持续修复ACTIVE。

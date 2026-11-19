@@ -2,6 +2,9 @@
 #include "gamepad_backend_cost.h"
 #include <utility>
 namespace ymcc::input::backendCost {
+inline constexpr char kWindowSchema[] = "ymcc-gamepad-backend-cost-v2";
+inline constexpr unsigned kEmptyRouteToken = 0;
+
 template<class Json> Json snapshotJson(const Snapshot& s) {
     Json value = Json::object();
     value["n"] = s.n;
@@ -23,9 +26,17 @@ template<class Json> Json snapshotJson(const Snapshot& s) {
     value["lastOtherCodeU32"] = s.otherCodeCount ? Json(s.lastOtherCode) : Json(nullptr);
     return value;
 }
+template<class Json> Json compactSnapshotJson(const Snapshot& s) {
+    // The counters drain independently: n == 0 alone does not make a route empty.
+    if (s.n || s.sumUs || s.maxUs || s.success || s.nonSuccess || s.otherCodeCount)
+        return snapshotJson<Json>(s);
+    for (const auto& row : s.resultCodes)
+        if (row.n) return snapshotJson<Json>(s);
+    return Json(kEmptyRouteToken);
+}
 template<class Json> Json windowJson(Counters& counters) {
     Json value = Json::object();
-    value["schema"] = "ymcc-gamepad-backend-cost-v1";
+    value["schema"] = kWindowSchema;
     value["measurement"] = "steady_clock elapsed around calls; not thread CPU or pure hardware I/O";
     value["windowSemantics"] = "enabled observations since preceding drain; gate gaps may exist; independent atomic counters may straddle emissions";
     value["resultCodeCapacityPerRoute"] = kResultCodeCapacity;
@@ -39,16 +50,16 @@ template<class Json> Json windowJson(Counters& counters) {
         Json byPurpose = Json::object();
         for (std::size_t p = 0; p < kPurposeCount; ++p) {
             Json apis = Json::object();
-            apis["canonical"] = snapshotJson<Json>(counters.xinput[Counters::route(src, p, false)].drain());
-            apis["ordinal100"] = snapshotJson<Json>(counters.xinput[Counters::route(src, p, true)].drain());
+            apis["canonical"] = compactSnapshotJson<Json>(counters.xinput[Counters::route(src, p, false)].drain());
+            apis["ordinal100"] = compactSnapshotJson<Json>(counters.xinput[Counters::route(src, p, true)].drain());
             byPurpose[purposes[p]] = std::move(apis);
         }
         xinput[sources[src]] = std::move(byPurpose);
     }
     value["xinputWrappers"] = std::move(xinput);
-    value["system32Diagnostic"] = snapshotJson<Json>(counters.system32.drain());
-    value["msiPoll"] = snapshotJson<Json>(counters.msiPoll.drain());
-    value["msiGetDeviceState"] = snapshotJson<Json>(counters.msiGetDeviceState.drain());
+    value["system32Diagnostic"] = compactSnapshotJson<Json>(counters.system32.drain());
+    value["msiPoll"] = compactSnapshotJson<Json>(counters.msiPoll.drain());
+    value["msiGetDeviceState"] = compactSnapshotJson<Json>(counters.msiGetDeviceState.drain());
     return value;
 }
 } // namespace ymcc::input::backendCost

@@ -10,6 +10,9 @@ import { createServer } from 'node:http';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 assert(process.argv[2], 'Pass a fresh evidence directory');
 const out = path.resolve(process.argv[2]), baseline = process.argv.includes('--baseline');
+const selectedIndex=process.argv.indexOf('--case'),persistenceSelected=selectedIndex>=0&&process.argv[selectedIndex+1]==='feedback-persistence',ayaVibrationSelected=selectedIndex>=0&&!persistenceSelected;
+const manualVibrationSelected=ayaVibrationSelected&&process.argv[selectedIndex+1]==='manual-vibration';
+if(selectedIndex>=0)assert(['aya-vibration','manual-vibration','feedback-persistence'].includes(process.argv[selectedIndex+1])&&!baseline,'Unknown or baseline-only selected feedback case');
 const sourceOverrides = new Map();
 for (const [option, relative] of [['--card-source', 'src/components/ControllerFeedbackCapabilitiesCard.vue'], ['--artwork-source', 'src/components/ControllerVectorArtwork.ts'], ['--visualizer-source', 'src/components/GamepadVisualizer.vue']]) {
   const index = process.argv.indexOf(option);
@@ -38,8 +41,8 @@ window.__emit=(name,state)=>{for(const fn of listeners.get(name)||[])fn(state)};
 window.__listenerCount=()=>[...listeners.values()].reduce((n,set)=>n+set.size,0);
 export async function invoke(cmd,args={}){window.f.calls.push({cmd,args:structuredClone(args)});
 if(cmd==='gamepad.feedbackCapabilities')return structuredClone(window.f.caps);
-if(cmd==='gamepad.vibrate'){window.f.vibrations.push(args.strength);return {ok:true}};
-if(cmd==='gamepad.setLed')throw Error('Unexpected hardware lighting request');
+if(cmd==='gamepad.vibrate'){window.f.vibrations.push(args.strength);const reply=window.f.vibrationReplies?.shift();if(reply?.deferred)return await new Promise((resolve,reject)=>window.f.pendingVibrations.push({resolve,reject}));if(reply?.reject)throw Error('MEMORY_IPC_TIMEOUT');return structuredClone(reply?.result??reply??{ok:true})};
+if(cmd==='gamepad.setLed'){if(!window.f.persistenceTest)throw Error('Unexpected hardware lighting request');window.f.applies.push(structuredClone(args));return {ok:true,ownershipRequestCompleted:args.ownership==='oem',physicalEffectVerified:false}};
 if(cmd==='clipboard.writeText')return {};throw Error('Unexpected IPC: '+cmd)};
 export function emitNativeEvent(name,args){window.f.calls.push({cmd:name,args})};`;
 const mocks = {
@@ -49,8 +52,11 @@ const mocks = {
   '@/bridge/yeman': `export async function summonGet(){return {enabled:true}};`,
   '@/robust/frontendDiagnostics': `export function reportFrontendTrace(){};`,
   '@/bridge/settingsRepository': `export async function loadSettings(){return structuredClone(window.f.settings)};
-export async function saveSettingsSection(section,value){window.f.saved.push({section,value:JSON.parse(JSON.stringify(value))});window.f.settings[section]=JSON.parse(JSON.stringify(value))};`,
+export async function saveSettingsSection(section,value){const state=window.f,snapshot=JSON.parse(JSON.stringify(value));state.saved.push({section,value:snapshot});const reply=state.saveReplies?.shift();if(reply?.deferred)await new Promise((resolve,reject)=>state.pendingSaves.push({resolve,reject}));if(reply?.reject)throw Error('MEMORY_SETTINGS_WRITE_UNCONFIRMED');state.settings[section]=snapshot;state.committed.push({section,value:snapshot})};`,
 };
+const feedbackReportArg=process.argv.indexOf('--native-feedback-report');
+const nativeFeedback=feedbackReportArg>=0?JSON.parse(source(path.resolve(process.argv[feedbackReportArg+1]))):null;
+if(ayaVibrationSelected)assert(nativeFeedback?.schemaVersion===1&&nativeFeedback.hardwareIo===false&&Object.keys(nativeFeedback.models).length>=6,'Actual native receipt producer report required');
 const nativeReportArg=process.argv.indexOf('--native-oem-report');
 const nativeCatalogs=nativeReportArg>=0?JSON.parse(source(path.resolve(process.argv[nativeReportArg+1]))).modelCatalogs:null;
 const entry = `import {createApp,h,ref,nextTick,KeepAlive} from 'vue';
@@ -67,8 +73,8 @@ function count(nodes){for(const node of nodes){const attrs=node.attrs;Object.def
 for(const model of Object.values(CONTROLLER_DIAGRAMS))count(model.nodes);
 let app;window.__tick=nextTick;window.__tdpRepeat=EDIT_REPEAT_BASE_MS;
 window.unmount=async()=>{app?.unmount();app=null;await nextTick()};
-window.mount=async(mode,persona='steamdeck',keepAlive=false)=>{await window.unmount();
-window.f={calls:[],vibrations:[],saved:[],caps:{ledAvailable:false,brightnessAvailable:false,ledEffects:[],vibrationAvailable:true,physicalPrimarySlot:0},settings:{gamepad:{feedback:{vibrationStrength:30,lighting:{enabled:false,off:false,mode:'solid',presetId:'',color:'#2ea6ff',color2:'#9d7cff',speed:55,brightness:65}}}}};
+window.mount=async(mode,persona='steamdeck',keepAlive=false,feedback={})=>{await window.unmount();
+window.f={calls:[],vibrations:[],vibrationReplies:[],pendingVibrations:[],saved:[],committed:[],saveReplies:[],pendingSaves:[],applies:[],persistenceTest:feedback.persistenceTest===true,caps:{machineFamily:feedback.family,deviceClass:feedback.deviceClass,ledAvailable:feedback.led===true,brightnessAvailable:feedback.led===true,ledEffects:feedback.led?['solid']:[],oemRestoreAvailable:feedback.oemRestore===true,vibrationAvailable:true,physicalPrimarySlot:0},settings:{gamepad:{feedback:{vibrationStrength:feedback.strength??30,lighting:{enabled:false,off:false,mode:'solid',presetId:'',color:'#2ea6ff',color2:'#9d7cff',speed:55,brightness:65}}}}};
 const shown=ref(true),active=ref(true),reference=ref(30),highlight=ref([]),oem=ref(OEM_EMPTY_SNAPSHOT);window.highlight=async v=>{highlight.value=v;await nextTick()};window.catalog=async v=>{oem.value=normalizeOemKeysSnapshot(v);await nextTick()};window.show=async value=>{shown.value=value;await nextTick()};window.present=async value=>{active.value=value;await nextTick()};
 app=createApp({setup(){return()=>{const card=()=>h(Card);return mode==='card'?(keepAlive?h(KeepAlive,null,()=>shown.value?card():null):card()):mode==='preview'?h(Visualizer,{settings:{},persona,presentationActive:active.value,showTestMode:false,minimumPressFeedback:true,matchSteamDeckHeight:true,highlightButtons:highlight.value,oemKeys:oem.value}):h(Slider,{modelValue:reference.value,'onUpdate:modelValue':v=>reference.value=v,min:0,max:100,step:1,label:'TDP reference',accelerate:true,repeatIntervalMs:EDIT_REPEAT_BASE_MS})}}});
 app.mount('#app');await nextTick();await nextTick()};
@@ -121,6 +127,7 @@ try {
     await page.evaluate(async args => window.mount(...args), [mode, persona, keepAlive]);
     if (mode === 'card') await page.getByRole('slider', { name: '震动强度', exact: true }).waitFor({ state: 'visible' });
   }
+  if(!ayaVibrationSelected&&!persistenceSelected){
   for (const height of [720, 800]) {
     await page.setViewportSize({ width: 1280, height });
     await mount('reference');
@@ -130,6 +137,7 @@ try {
     await mount('card');
     const slider = page.getByRole('slider', { name: '震动强度', exact: true });
     await page.waitForFunction(() => !document.querySelector('.rumble-row input').disabled && document.querySelector('.rumble-row input').value === '30');
+    check(await page.evaluate(() => window.f.vibrations.length) === 0, 'mount and capability discovery never request test vibration @' + height);
     check(await slider.getAttribute('data-gp-repeat-interval-ms') === String(await page.evaluate(() => window.__tdpRepeat)), 'rumble uses the TDP repeat interval @' + height);
     await slider.evaluate(input => {
       window.__strengthKeyup = null;
@@ -160,6 +168,7 @@ try {
     check(pointerSaved.length === saved.length + 1 && pointerSaved.at(-1).value.feedback.vibrationStrength === 90, 'pointer release commits final value once @' + height, { writes: pointerSaved.length });
     await slider.evaluate(async el => { el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 8 })); el.value = '15'; el.dispatchEvent(new Event('input', { bubbles: true })); await window.__tick(); el.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 8 })); await window.__tick(); });
     check(await slider.inputValue() === '90' && await page.evaluate(() => window.f.saved.length) === pointerSaved.length, 'pointer cancellation restores the committed strength @' + height);
+    check(await page.evaluate(() => window.f.vibrations.length) === 0, 'keyboard, pointer strength edits and cancellation never request test vibration @' + height);
     await page.getByRole('button', { name: '立即震动', exact: true }).click(); await page.waitForTimeout(180);
     check(JSON.stringify(await page.evaluate(() => window.f.vibrations)) === '[90,90]', 'explicit test retains both pulses at final strength @' + height);
     await page.screenshot({ path: path.join(out, 'rumble-' + height + '.png') });
@@ -183,6 +192,7 @@ try {
       window.__engine.command('confirm'); await window.__tick();
     });
     check(await gamepadSlider.inputValue() === '31' && await page.evaluate(() => window.f.saved.length === 1 && window.f.saved[0].value.feedback.vibrationStrength === 31), 'production engine A commits the final strength once @' + height);
+    check(await page.evaluate(() => window.f.vibrations.length) === 0, 'gamepad focus, edit, cancel and commit never request test vibration @' + height);
     await mount('card', 'steamdeck', true);
     const cached = page.getByRole('slider', { name: '震动强度', exact: true });
     await cached.focus(); await page.keyboard.down('ArrowRight'); await page.waitForTimeout(120); await page.evaluate(() => window.show(false));
@@ -190,6 +200,7 @@ try {
     check(await page.evaluate(() => window.f.saved.length) === before, 'deactivation cancels repeat without late writes @' + height);
     check(await page.evaluate(() => window.f.calls.filter(c => c.cmd === 'gamepad.slider-edit').at(-1)?.args.active === false), 'deactivation releases the native slider cadence hint @' + height);
     await page.evaluate(() => window.show(true)); await cached.focus();
+    check(await page.evaluate(() => window.f.vibrations.length) === 0, 'cached page reactivation and capability refresh never request test vibration @' + height);
     await page.evaluate(async () => { window.__engine.reset(); window.__engine.command('confirm'); window.__engine.command('slider-increase'); await window.__tick(); await window.show(false); });
     check(await page.evaluate(() => !window.__engine.editing() && window.f.saved.length === 0 && window.f.calls.filter(c => c.cmd === 'gamepad.slider-edit').at(-1)?.args.active === false), 'cached page cancels engine ownership and draft @' + height);
     await mount('card'); await gamepadSlider.focus();
@@ -247,7 +258,7 @@ try {
       const subscriptions = window.__listenerCount();
       await window.highlight([0]);
       await window.present(false); await window.__tick();
-      const pausedAnimations = svg.getAnimations({subtree:true}).map(animation=>animation.playState);
+      const pausedAnimations = svg.closest('.device-diagram').getAnimations({subtree:true}).map(animation=>animation.playState);
       const before = coords(); let mutations = 0;
       const observer = new MutationObserver(entries => mutations += entries.length);
       observer.observe(svg, { attributes: true, childList: true, subtree: true });
@@ -263,7 +274,7 @@ try {
         const m = n.transform.baseVal.consolidate()?.matrix;
         return { stick: +n.dataset.stick, x: m?.e, y: m?.f };
       });
-      const resumedAnimations = svg.getAnimations({subtree:true}).map(animation=>animation.playState);
+      const resumedAnimations = svg.closest('.device-diagram').getAnimations({subtree:true}).map(animation=>animation.playState);
       const live = [...svg.querySelectorAll('[data-fill-for~="a"]')].some(n => n.getAttribute('data-fill-live') === 'true');
       return { before, frozen, mutations, latest, resumed, live, pausedAnimations, resumedAnimations, sameSvg: svg === document.querySelector('.device-vector'), subscriptions, resumedSubscriptions: window.__listenerCount() };
     });
@@ -367,6 +378,112 @@ try {
     await page.evaluate(()=>window.unmount());
     check(await page.evaluate(()=>window.__listenerCount())===0,model+' family receipt unsubscribes');
   }
+
+  }else if(persistenceSelected){
+    const models=[['onexplayer','OneXPlayerApex',true],['onexplayer','OneXPlayerX1',true],['asus-rog-ally-x','XboxROGAllyX',true],['msi-claw','ClawCG3EM',true],['ayanero','AYANEOAIRPlusAMD',true],['gpd','GPDWin5',false]];
+    const mountSave=async([family,model,led],height=720,keepAlive=false)=>{
+      await page.setViewportSize({width:1280,height});
+      await page.evaluate(async args=>window.mount('card','steamdeck',args.keepAlive,{family:args.family,deviceClass:'HandheldCompanion.Devices.'+args.model,led:args.led,persistenceTest:true,oemRestore:args.family==='ayanero'}),{family,model,led,keepAlive});
+      await page.waitForFunction(()=>document.querySelector('.rumble-row input')?.value==='30'&&!document.querySelector('.vibrate-button')?.disabled);
+    };
+    const commitStrength=async value=>{
+      const count=await page.evaluate(()=>window.f.saved.length);
+      await page.locator('.rumble-row input').evaluate((input,value)=>{input.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:71}));input.value=String(value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:71}));input.dispatchEvent(new Event('change',{bubbles:true}))},value);
+      await page.waitForFunction(count=>window.f.saved.length>count,count);await page.evaluate(async()=>{await window.__tick();await window.__tick()});
+    };
+    const saveText=async()=>(await page.locator('.feedback-save-receipt').allTextContents()).join(' ');
+    for(const model of models)for(const height of [720,800]){
+      const label=model[1]+' @'+height;await mountSave(model,height);
+      await page.evaluate(()=>window.f.saveReplies=[{reject:true}]);await commitStrength(70);
+      check(await page.evaluate(()=>window.f.committed.length)===0&&/保存失败/.test(await saveText())&&/未确认/.test(await saveText()),'strength persistence failure stays visible and unconfirmed '+label);
+      await page.locator('.vibrate-button').click();await page.waitForTimeout(260);
+      check(await page.evaluate(()=>window.f.vibrations.length)===2&&/保存失败/.test(await saveText())&&/实际震感仍需手动确认/.test((await page.locator('.vibration-test-receipt').allTextContents()).join(' ')),'motor request acceptance cannot erase failed settings save '+label);
+      await commitStrength(80);
+      check(await page.evaluate(()=>window.f.committed.at(-1)?.value.feedback.vibrationStrength)===80&&await saveText()==='','a confirmed later save clears its own persistence warning '+label);
+      if(model[2]){
+        await page.evaluate(()=>window.f.saveReplies=[{reject:true}]);
+        await page.getByRole('switch',{name:'启用控制',exact:true}).click();
+        await page.waitForFunction(()=>window.f.applies.length===1);
+        check(/保存失败/.test(await saveText())&&/实体效果仍需手动确认/.test((await page.locator('.feedback-status').allTextContents()).join(' ')),'best-effort LED apply reports request and save outcomes separately '+label);
+        check(await page.evaluate(()=>window.f.applies[0].enabled===true&&window.f.committed.at(-1).value.feedback.lighting.enabled===false),'failed save cannot be presented as a committed lighting policy '+label);
+      }
+      check(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),'persistence feedback fits the handheld width '+label);
+      if(model[0]==='onexplayer')await page.screenshot({path:path.join(out,model[1]+'-save-unconfirmed-'+height+'.png')});
+    }
+    await mountSave(models[0]);await page.evaluate(()=>window.f.saveReplies=[{deferred:true}]);await commitStrength(40);
+    await commitStrength(60);await page.evaluate(()=>window.f.pendingSaves.shift().reject(Error('RETIRED_SAVE_FAILURE')));await page.waitForTimeout(30);
+    check(await saveText()===''&&await page.evaluate(()=>window.f.committed.at(-1).value.feedback.vibrationStrength)===60,'older save rejection cannot override a newer confirmed save');
+    await mountSave(models[0],720,true);await page.evaluate(()=>window.f.saveReplies=[{deferred:true}]);await commitStrength(40);
+    await page.evaluate(async()=>{await window.show(false);await window.show(true)});
+    check(/保存结果.*未确认/.test(await saveText()),'leaving with a pending save retains an honest unknown receipt on return');
+    await commitStrength(60);await page.evaluate(()=>window.f.pendingSaves.shift().reject(Error('RETIRED_PAGE_SAVE_FAILURE')));await page.waitForTimeout(30);
+    check(await saveText()==='','old activation save result cannot pollute a newly saved page');
+    await mountSave(models[4]);await page.evaluate(()=>window.f.saveReplies=[{reject:true}]);
+    await page.locator('.ownership-field .dd-trigger').click();await page.getByRole('option',{name:'原厂显示',exact:true}).click();
+    await page.waitForFunction(()=>window.f.saved.length===1);await page.waitForTimeout(40);
+    check(await page.evaluate(()=>window.f.applies.length)===0&&(await page.locator('.ownership-field .dd-trigger').innerText()).includes('YMCC 灯效'),'failed OEM ownership save still blocks the hardware request and restores selection');
+    check(/保存失败/.test((await page.locator('.feedback-status').allTextContents()).join(' ')),'strict ownership save rejection stays explicit');
+    await page.locator('.ownership-field .dd-trigger').click();await page.getByRole('option',{name:'原厂显示',exact:true}).click();await page.waitForFunction(()=>window.f.applies.length===1);
+    check(await page.evaluate(()=>window.f.applies[0].ownership==='oem')&&await saveText()==='','confirmed ownership save clears prior persistence failure and uses original OEM request');
+    await page.evaluate(()=>window.unmount());check(await page.evaluate(()=>window.__listenerCount())===0,'persistence feedback releases existing subscriptions');
+  }else{
+    const models=Object.entries(nativeFeedback.models).filter(([,row])=>manualVibrationSelected||row.family==='ayanero');
+    check(models.length===(manualVibrationSelected?7:3),'selected native manual receipt model set present');
+    const receiptText=async()=> (await page.locator('.vibration-test-receipt').allTextContents()).join(' ');
+    const click=async()=>page.locator('.vibrate-button').evaluate(button=>button.click());
+    const configure=async replies=>page.evaluate(value=>{window.f.vibrationReplies=structuredClone(value)},replies);
+    const mountAya=async(model,height=720,keepAlive=false,strength=30)=>{
+      await page.setViewportSize({width:1280,height});
+      await page.evaluate(async args=>window.mount('card','steamdeck',args.keepAlive,{family:args.family,deviceClass:args.model,strength:args.strength}),{model,keepAlive,strength,family:nativeFeedback.models[model].family});
+      await page.waitForFunction(expected=>document.querySelector('.rumble-row input')?.value===String(expected)&&!document.querySelector('.vibrate-button')?.disabled,strength);
+    };
+    for(const [model,row]of models)for(const height of [720,800]){
+      const pending=row.receipts.find(r=>r.ok===false&&r.reason==='no-xinput-physical-source'),ok=row.receipts.find(r=>r.ok===true&&r.backend==='xinput-physical');
+      check(Boolean(pending&&ok),'actual native physical success/refusal receipts available '+model);
+      await mountAya(model,height);await configure([pending]);await click();await page.waitForTimeout(260);
+      check(await page.evaluate(()=>window.f.vibrations.length)===1&&/未就绪/.test(await receiptText()),'Manual first refusal is visible and suppresses second pulse '+model+' @'+height);
+      check(await page.locator('.vibration-test-receipt.failed').count()===1,'Manual refusal stays failed '+model+' @'+height);
+      check((await page.locator('.rumble-bubble .availability-chip').textContent()).includes('未完成')&&(await page.locator('.state-chip').textContent()).includes('接口可用'),'Manual refusal does not retain a misleading ready/test-success badge '+model+' @'+height);
+      await page.screenshot({path:path.join(out,model.split('.').at(-1)+'-refused-'+height+'.png')});
+      await mountAya(model,height);await configure([ok,ok]);await click();await page.waitForTimeout(300);
+      check(JSON.stringify(await page.evaluate(()=>window.f.vibrations))==='[30,30]'&&/实际震感仍需手动确认/.test(await receiptText()),'Manual accepted requests retain two pulses without claiming motor success '+model+' @'+height);
+      check(await page.locator('.vibration-test-receipt.failed').count()===0&&!(await page.locator('.vibrate-button').isDisabled()),'Manual accepted test releases busy owner '+model+' @'+height);
+      check(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),'Manual feedback fits width '+model+' @'+height);
+    }
+    const [model,row]=manualVibrationSelected?models.find(([,record])=>record.family==='onexplayer'):models[0],ok=row.receipts.find(r=>r.ok===true&&r.backend==='xinput-physical'),changed=row.receipts.find(r=>r.ok===false&&r.reason==='source-changed');
+    await mountAya(model);await configure([ok,changed]);await click();await page.waitForTimeout(300);
+    check(await page.evaluate(()=>window.f.vibrations.length)===2&&/后段请求未完成/.test(await receiptText())&&/来源已变化/.test(await receiptText()),'Manual second refusal cannot become test success');
+    await mountAya(model);await configure([{reject:true}]);await click();await page.waitForTimeout(200);
+    check(await page.evaluate(()=>window.f.vibrations.length)===1&&/未取得震动回执/.test(await receiptText()),'Manual transport exception remains unconfirmed and is not retried');
+    await mountAya(model);await configure([{}]);await click();await page.waitForTimeout(200);
+    check(await page.evaluate(()=>window.f.vibrations.length)===1&&/未被确认/.test(await receiptText()),'Manual malformed receipt cannot invent success or a second pulse');
+    await mountAya(model);await configure([{deferred:true},ok]);await click();await page.waitForFunction(()=>window.f.pendingVibrations.length===1);
+    await page.locator('.vibrate-button').evaluate(button=>button.dispatchEvent(new MouseEvent('click',{bubbles:true})));
+    check(await page.evaluate(()=>window.f.vibrations.length)===1&&await page.locator('.vibrate-button').isDisabled(),'Manual overlapping click cannot enqueue another test');
+    await page.locator('.rumble-row input').evaluate(input=>{input.value='70';input.dispatchEvent(new Event('input',{bubbles:true}))});
+    await page.evaluate(value=>window.f.pendingVibrations.shift().resolve(value),ok);await page.waitForTimeout(300);
+    check(JSON.stringify(await page.evaluate(()=>window.f.vibrations))==='[30,30]','Manual both pulses keep click-time strength despite later slider edits');
+    await mountAya(model,720,true);await configure([ok,ok]);await click();await page.waitForTimeout(45);await page.evaluate(()=>window.show(false));await page.waitForTimeout(230);
+    check(await page.evaluate(()=>window.f.vibrations.length)===1,'Manual leaving page during gap cancels second pulse');
+    await page.evaluate(()=>window.show(true));check(await page.locator('.vibration-test-receipt').count()===0,'Manual cached page clears stale receipt');
+    await mountAya(model,720,true);await configure([{deferred:true}]);await click();await page.waitForFunction(()=>window.f.pendingVibrations.length===1);
+    await page.evaluate(async()=>{await window.show(false);await window.show(true)});await configure([{deferred:true},ok]);await click();await page.waitForFunction(()=>window.f.pendingVibrations.length===2);
+    await page.evaluate(value=>window.f.pendingVibrations.shift().resolve(value),ok);await page.waitForTimeout(45);
+    check(await page.locator('.vibrate-button').isDisabled(),'Manual retired response cannot clear a newer test busy state');
+    await page.evaluate(value=>window.f.pendingVibrations.shift().resolve(value),ok);await page.waitForTimeout(300);
+    check(await page.evaluate(()=>window.f.vibrations.length)===3&&/实际震感仍需手动确认/.test(await receiptText()),'Manual current activation alone completes its test');
+    await mountAya(model,720,false,0);await configure([ok,ok]);await click();await page.waitForTimeout(300);
+    check(JSON.stringify(await page.evaluate(()=>window.f.vibrations))==='[0,0]'&&/强度为 0/.test(await receiptText()),'Manual zero strength cannot be mistaken for a motor failure');
+    for(const [other,record]of Object.entries(nativeFeedback.models).filter(([,value])=>value.family!=='ayanero')){
+      await page.evaluate(async args=>window.mount('card','steamdeck',false,{family:args.family,deviceClass:args.model}),{family:record.family,model:other});
+      await page.waitForFunction(()=>!document.querySelector('.vibrate-button')?.disabled);
+      const refusal=record.receipts.find(r=>r.ok===false&&r.reason==='no-xinput-physical-source');await configure([refusal,refusal]);await click();await page.waitForTimeout(300);
+      check(await page.evaluate(()=>window.f.vibrations.length)===1&&await page.locator('.vibration-test-receipt.failed').count()===1,'other-family refusal is visible and stops the second pulse '+other);
+    }
+    await mountAya(model);await configure([ok,ok]);await click();await page.waitForTimeout(300);await page.screenshot({path:path.join(out,'aya-accepted-unverified.png')});
+    await page.evaluate(()=>window.unmount());check(await page.evaluate(()=>window.__listenerCount())===0,'Manual feedback unmount retains no IPC subscriptions');
+  }
+
   check(errors.length === 0, 'no browser errors', errors);
 } catch (error) { failure = error.stack || String(error); }
 finally {
@@ -376,7 +493,7 @@ finally {
   const bindings = [...sources].map(([file, hash]) => ({ path: path.relative(repo, file).replaceAll('\\', '/'), sha256: hash, unchanged: fs.existsSync(file) && sha(fs.readFileSync(file)) === hash }));
   const inputsUnchanged = bindings.every(item => item.unchanged);
   const pass = !failure && errors.length === 0 && inputsUnchanged && checks.every(item => item.pass);
-  const result = { pass, baseline, inputsUnchanged, hardwareIo: false, checks, measurements, errors, failure, boundaries: ['Memory IPC/settings only; no installed application or physical controller is operated.', 'Consumer timings measure JavaScript/Vue flushes. Paced frame intervals and DevTools Paint traces cover this browser fixture; neither establishes native packet cadence, installed WebView or physical latency.', 'The TDP reference uses the actual Slider and shared cadence constant; the full page/gamepad engine release gate is separate.'] };
+  const result = { pass, baseline, selectedCases:selectedIndex>=0?process.argv[selectedIndex+1]:"default", nativeFeedbackModels:ayaVibrationSelected?Object.keys(nativeFeedback.models):[], inputsUnchanged, hardwareIo: false, checks, measurements, errors, failure, boundaries: ['Memory IPC/settings only; no installed application or physical controller is operated.', 'Consumer timings measure JavaScript/Vue flushes. Paced frame intervals and DevTools Paint traces cover this browser fixture; neither establishes native packet cadence, installed WebView or physical latency.', 'The TDP reference uses the actual Slider and shared cadence constant; the full page/gamepad engine release gate is separate.'] };
   fs.writeFileSync(path.join(out, 'source-bindings.json'), JSON.stringify(bindings, null, 2));
   fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify({ pass, baseline, inputsUnchanged, checks: checks.length, failures: checks.filter(c => !c.pass).map(c => c.name), measurements, failure, out }, null, 2));

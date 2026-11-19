@@ -195,14 +195,15 @@ export function invoke<T = unknown>(
   );
 }
 
-export function on<T = unknown>(event: string, handler: (data: T) => void): () => void {
+export function on<T = unknown>(event: string, handler: (data: T, dispatch?: CustomEvent<T>) => void, includeDispatch = false): () => void {
   let active = true;
   let replayPending = event === 'gamepad.state' && hasLastGamepadState;
   const listener = ((e: CustomEvent<T>) => {
     if (!active) return;
     // A live snapshot supersedes a not-yet-delivered cached replay.
     replayPending = false;
-    handler(e.detail);
+    if (includeDispatch) handler(e.detail, e);
+    else handler(e.detail);
   }) as EventListener;
   window.addEventListener(`ipc:${event}`, listener);
   if (replayPending) {

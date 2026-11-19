@@ -34,19 +34,23 @@ check('logout/switch revokes the old account even if a stale settings object rem
 // Execute the exact native lifecycle mutation expression as well. Ownership
 // checked in a previous CDP read can change before the mutation is evaluated.
 const watchSource=fs.readFileSync(path.join(root,'native/decky_sidebar_bootstrap_watch.h'),'utf8');
-const teardownLine=watchSource.split('\n').find(row=>row.includes('for(const method of'));
-const teardownBegin=teardownLine.indexOf('"(() => {');
-const teardownEnd=teardownLine.indexOf('},{"contextId"',teardownBegin);
-const teardownNative=teardownLine.slice(teardownBegin,teardownEnd<0?undefined:teardownEnd).trim().replace(/;$/,'');
-const teardownToken=/"(?:\\.|[^"\\])*"|Json\(runId\)\.dump\(\)/g;
+const teardownNative=/const std::string teardownExpression=([^\r\n]+);/.exec(watchSource)?.[1];
+assert.ok(teardownNative,'Original teardown expression missing');
+const teardownToken=/"(?:\\.|[^"\\])*"|Json\((?:runId|fatal)\)\.dump\(\)/g;
 const teardownParts=teardownNative.match(teardownToken);assert(teardownParts?.length);
 assert.equal(teardownNative.replace(teardownToken,'').replace(/[+\s]/g,''),'');
-const teardownExpression=teardownParts.map(part=>part[0]==='"'?JSON.parse(part):JSON.stringify(a.runId)).join('');
-function teardownAt(mirror){
- const calls=[],events=[],host={__YMCC_DECKY_MIRROR__:mirror,dispatchEvent:event=>events.push(event.type),DeckyPluginLoader:{dismountAll:()=>calls.push('dismountAll'),deinit:()=>calls.push('deinit')}};
+assert.deepEqual(teardownParts.filter(part=>part[0]!=='"'),['Json(fatal).dump()','Json(runId).dump()']);
+function teardownAt(mirror,{fatal='decky-render-failed',health='decky-render-failed',loader=true}={}){
+ const teardownExpression=teardownParts.map(part=>part[0]==='"'?JSON.parse(part):JSON.stringify(part==='Json(fatal).dump()'?fatal:a.runId)).join('');
+ const calls=[],events=[],host={__YMCC_DECKY_MIRROR__:mirror,dispatchEvent:event=>events.push(event.type),__YMCC_DECKY_HEALTH__:{read(){if(health instanceof Error)throw health;return health;}}};
+ if(loader)host.DeckyPluginLoader={dismountAll:()=>calls.push('dismountAll'),deinit:()=>calls.push('deinit')};
  const result=vm.runInNewContext(teardownExpression,{window:host,Event:class{constructor(type){this.type=type;}}},{timeout:500});return {result,calls,events};
 }
 check('exact current native teardown mutates the verified current binding once',()=>{const v=teardownAt(a);assert.equal(v.result,true);assert.deepEqual(v.calls,['dismountAll','deinit']);assert.deepEqual(v.events,['ymcc-decky-health-stop']);});
 check('account revoked after prior read prevents actual lifecycle mutation',()=>{const v=teardownAt({runId:a.runId,revoked:true});assert.equal(v.result,false);assert.deepEqual(v.calls,[]);assert.deepEqual(v.events,[]);});
 check('binding replaced after prior read prevents actual lifecycle mutation',()=>{const v=teardownAt(b);assert.equal(v.result,false);assert.deepEqual(v.calls,[]);assert.deepEqual(v.events,[]);});
+for(const [name,options] of [['late render recovery',{health:''}],['late Loader recovery',{fatal:'decky-frontend-incompatible'}],['unavailable health read',{health:new Error('read unavailable')}],['unclassified failure',{fatal:'network-unavailable'}]]){
+ check(name+' declines the original teardown expression',()=>assert.deepEqual(teardownAt(a,options),{result:false,calls:[],events:[]}));
+}
+check('current incompatible frontend with no Loader emits only the stop event',()=>assert.deepEqual(teardownAt(a,{fatal:'decky-frontend-incompatible',loader:false}),{result:true,calls:[],events:['ymcc-decky-health-stop']}));
 fs.writeFileSync(path.resolve(task,'validation/BOOTSTRAP-EXPRESSION-SELFTEST.json'),JSON.stringify({project:'YMCC Decky 侧边栏',cases:cases.length,results:cases,actualSteam:false,sourceExtracted:true},null,2));console.log(`Bootstrap expression tests passed: ${cases.length}`);

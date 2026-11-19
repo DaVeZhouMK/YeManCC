@@ -1,6 +1,12 @@
 // Browser IO is a closed memory boundary. Actual Vue controls and gamepad engine stay intact.
 export * from './runtimePorts';
 import {calls,record,copy,settings,state} from './runtimePorts';
+// The page begins after the separately exercised startup pass has disabled the shortcut.
+state.gameBarControllerWindows=0;
+export const registry={
+ async read(root:string,path:string,name:string){record('common.read.registry',{root,path,name});if(root!=='HKCU'||path!=='Software\\Microsoft\\GameBar'||name!=='UseNexusForGameBarEnabled')throw Error('Unexpected browser registry target');return state.gameBarControllerWindows;},
+ async write(root:string,path:string,name:string,value:number){record('common.write.registry',{root,path,name,value});if(root!=='HKCU'||path!=='Software\\Microsoft\\GameBar'||name!=='UseNexusForGameBarEnabled'||![0,1].includes(value))throw Error('Unexpected browser registry write');state.gameBarControllerWindows=value;return true;}
+};
 export const isNativeRuntime=true;
 export const on=(event:string,fn:any)=>{const cb=(e:any)=>fn(e.detail);window.addEventListener('ipc:'+event,cb);return()=>window.removeEventListener('ipc:'+event,cb);};
 export const emitNativeEvent=(event:string,value:any)=>record('event.'+event,value);
@@ -67,3 +73,9 @@ export async function writeHardwareGpuSchedule(enabled:boolean){record('common.w
 export async function openSearchFolder(){record('common.write.searchFolder');}
 export async function deleteAllYemanTasks(){record('common.write.deleteTasks');}
 export async function restoreAllYemanTasks(){record('common.write.restoreTasks');}
+
+// Same inert error shape as the production IPC module; browser IO remains isolated.
+export class IpcTimeoutError extends Error {
+  readonly code = 'IPC_TIMEOUT';
+  constructor(readonly command:string) { super(`IPC command timed out: ${command}`); }
+}

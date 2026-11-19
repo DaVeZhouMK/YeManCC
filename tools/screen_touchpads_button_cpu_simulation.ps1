@@ -1,6 +1,7 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$OutputDirectory,[string]$ButtonSource,[switch]$ExpectBaseline)
+param([Parameter(Mandatory=$true)][string]$OutputDirectory,[string]$ButtonSource,[switch]$ExpectBaseline,[ValidateSet("default","snapshot","snapshot-repair")][string]$CaseFilter="default")
 $ErrorActionPreference='Stop'
+if($CaseFilter -like 'snapshot*' -and $ExpectBaseline){throw 'Snapshot selection does not support button baseline expectations.'}
 $project=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $OutputDirectory=[IO.Path]::GetFullPath($OutputDirectory)
 if(Test-Path -LiteralPath (Join-Path $OutputDirectory 'receipt.json')){throw 'Use a fresh output directory.'}
@@ -21,16 +22,17 @@ try {
  Copy-Item -LiteralPath $source -Destination (Join-Path $native 'screen_touchpads_button_cpu_simulation.cpp')
  $exe=Join-Path $OutputDirectory 'button-cpu-simulation.exe';$obj=Join-Path $OutputDirectory 'button-cpu-simulation.obj'
  $cmd=Join-Path $OutputDirectory 'build.cmd'
+ $selectionDefine=if($CaseFilter -like 'snapshot*'){'/DYMCC_SCREEN_SNAPSHOT_CPU_FIXTURE=1'}else{''}
  @"
 @echo off
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul
 if errorlevel 1 exit /b 1
-cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNDEBUG /DUNICODE /D_UNICODE /I"$native" "$native\screen_touchpads_button_cpu_simulation.cpp" /Fo"$obj" /Fe"$exe" /link user32.lib gdi32.lib ole32.lib
+cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNDEBUG /DUNICODE /D_UNICODE $selectionDefine /sourceDependencies "$OutputDirectory\compile-inputs.json" /I"$native" "$native\screen_touchpads_button_cpu_simulation.cpp" /Fo"$obj" /Fe"$exe" /link user32.lib gdi32.lib ole32.lib
 "@ | Set-Content -LiteralPath $cmd -Encoding ascii
  & $cmd 2>&1 | Tee-Object -FilePath (Join-Path $OutputDirectory 'compile.log')
  if($LASTEXITCODE -ne 0){throw 'Simulation compilation failed'}
  $report=Join-Path $OutputDirectory 'simulation.json'
- if($ExpectBaseline){& $exe $report 'baseline'}else{& $exe $report}
+ if($CaseFilter -like 'snapshot*'){if($CaseFilter -eq 'snapshot-repair'){& $exe $report '--snapshot-repair-only'}else{& $exe $report '--snapshot-only'}}elseif($ExpectBaseline){& $exe $report 'baseline'}else{& $exe $report}
  if($LASTEXITCODE -ne 0){throw 'Simulation failed'}
  $result=Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
  if(!$result.ok -or $result.realInputInjected -ne 0 -or $result.realWindowsCreated -ne 0){throw 'Simulation evidence invalid'}

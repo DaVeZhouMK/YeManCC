@@ -51,9 +51,9 @@ export function getPnpAbsenceAdapters(repo=REPO,{env=process.env}={}) {
  let inputs;
  try { inputs={artifactInputs:resolveToolchain({repo,env}).artifacts}; }
  catch(error) { inputs={artifactInputs:[],blockedReason:'PNP_ABSENCE_TOOLCHAIN_UNAVAILABLE: '+error.message}; }
- return [{id:ID,domain:'controller',title:'Actual PnP absence helper: opaque observed IDs, bounded census and four compiled semantic controls',
+ return [{id:ID,domain:'controller',title:'Actual PnP absence helper: opaque observed IDs, bounded census and five compiled semantic controls',
   kind:'node',path:MODULE+'/run.mjs',args:['--out','{outDir}/pnp-absence'],timeoutMs:180000,
   profiles:['desktop','full'],scope:'behavioral-mock',evidenceInputs:INPUTS,...inputs,
   resultFiles:['pnp-absence/RESULT.json'],
-  boundary:'Source-bound production helper + fake Reader only; Release/Checked and four compiled negative controls. Actual ProductionReader ABI is compiled but never called. Field ZIP does not identify the rejected G3E ID; all sample IDs are contract inputs. No product/Host/device/driver/service execution or new hardware authority. The selftest historical status label does not describe current production integration.'}];
+  boundary:'Source-bound production helper + fake Reader only; Release/Checked and five compiled negative controls. Actual ProductionReader ABI is compiled but never called. Field ZIP does not identify the rejected G3E ID; all sample IDs are contract inputs. No product/Host/device/driver/service execution or new hardware authority. The selftest historical status label does not describe current production integration.'}];
 }

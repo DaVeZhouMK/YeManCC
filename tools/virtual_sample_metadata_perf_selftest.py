@@ -74,7 +74,9 @@ def extract(text, current):
     marker = 'static std::string g_lastSampleSelectorFp;'
     assert text.count(marker) == 1
     start = text.rfind('\n', 0, text.index(marker)) + 1
-    last_if = text.index('if (testLaneCfgFp != g_lastSampleTestLaneCfgFp)', start)
+    last_if = text.find('if (testLaneCfgFp != g_lastSampleTestLaneCfgFp)', start)
+    if last_if < 0:
+        last_if = text.index('if (!fingerprintMatches(g_lastSampleTestLaneCfgFp, testLaneFingerprintPieces))', start)
     opening = text.index('{', last_if)
     delta = text[start:matching_brace(text, opening) + 1]
     persona = ''

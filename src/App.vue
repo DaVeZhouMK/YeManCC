@@ -19,7 +19,8 @@ import { LEGACY_CCD_UNDERVOLT_ACTIVE } from '@/bridge/legacyCpuFeaturePolicy';
 import { applyTrayResident } from '@/bridge/trayResident';
 import { ensureDesktopModeStartupDefault } from '@/bridge/desktopModeStartup';
 import { ensureNetworkAccelerationStartupDefault } from '@/bridge/networkAccelerationStartup';
-import { restoreSelectedBootMode, migrateBootTrayPreference, cancelBootModeLaunches, cancelBootModeDeferredMouse, readBootModeFanIntent } from '@/bridge/bootModes';
+import { ensureGameBarControllerStartup } from '@/bridge/gameBarControllerStartup';
+import { restoreSelectedBootMode, observeBootModeRuntimeReceipts, migrateBootTrayPreference, cancelBootModeLaunches, cancelBootModeDeferredMouse } from '@/bridge/bootModes';
 import { getFloatInfo, setAutofloatPowerControlDir, invalidateFloatPowerSource } from '@/bridge/autofloat';
 import { app, fs, powerLifecycle, windowApi } from '@/bridge/api';
 import { initMusic } from '@/bridge/music';
@@ -43,8 +44,8 @@ import {
   getDynamicBackgroundConfig,
   refreshDynamicBackground,
 } from '@/bridge/dynamicBackground';
-import { detectGame, subscribeGameStatus, type DetectedGame } from '@/bridge/gamedetect';
-import { startGamePolicyRuntime, stopGamePolicyRuntime } from '@/bridge/gamePolicyRuntime';
+import { detectGame, getCurrentGame, isCurrentGameTarget, subscribeGameStatus, type DetectedGame } from '@/bridge/gamedetect';
+import { startGamePolicyRuntime, stopGamePolicyRuntime, requestGamePolicyTdpReconciliation } from '@/bridge/gamePolicyRuntime';
 import {startLosslessRuntimeOwner} from '@/bridge/losslessRuntimeState';
 let stopLosslessRuntimeOwner:(()=>void)|null=null;
 import { startGameTrainerAutoPrepare } from '@/bridge/gameTrainerAuto';
@@ -68,17 +69,19 @@ let stopSharedGameMedia:(()=>void)|null=null;
 let steamWallpaperHost:ReturnType<typeof startSteamWallpaperHost>|null=null;
 let updatePredownloadHost: ReturnType<typeof startUpdatePredownload> | null = null;
 let monitorHudHost: ReturnType<typeof startMonitorHudHost> | null = null;
+let stopBootModeReceipts: (() => void) | null = null;
 let radialHost: ReturnType<typeof startRadialTestingHost> | null = null;
 let deckyMirrorHost: ReturnType<typeof startDeckyMirrorHost> | null = null;
 let controllerShortcutRuntime: ReturnType<typeof startControllerShortcutRuntime> | null = null;
-import { startGameInputOverrideWatch, stopGameInputOverrideWatch } from '@/bridge/gameInputOverride';
+import { startGameProfileAutoMemory, stopGameProfileAutoMemory } from '@/bridge/gameProfileAutoMemory';
 import { BOOT_CONTROL_CENTER_TASK, bootMirrorExists, ensureRtssOverlayInstalled, setPowerControlDir, toggleBootMirror } from '@/bridge/yeman';
 import { getUiSetting, loadUiSettings } from '@/bridge/uiSettings';
 import { topMonitorData, type TopMonData } from '@/bridge/topmon';
-import { nextLowBatteryStatic, shouldSkipVideoReconcile } from '@/bridge/backgroundPolicy';
-import { runPowerResumeTransaction } from '@/bridge/powerResume';
+import { controllerEditorBackgroundHoldKey, nextLowBatteryStatic, shouldSkipVideoReconcile } from '@/bridge/backgroundPolicy';
+import { createPowerResumeQueue, runPowerResumeTransaction } from '@/bridge/powerResume';
 import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
 import { isUiVisible, onUiVisibilityChange, setNativeWindowVisible, startUiPowerReconciliation } from '@/bridge/uiLifecycle';
+import { onSharedPowerLifecycle, getSharedPowerLifecycle, requestSharedPowerLifecycleReadyConfirmation, isSharedPowerLifecycleAdmitted, type SharedPowerLifecycleSnapshot } from '@/bridge/powerLifecycleState';
 import { rememberPowerSourceMode, onPowerSourceNotification, startForegroundPowerSourceRefresh } from '@/bridge/powerSource';
 import { tdpRuntimeStore } from '@/bridge/tdpRuntimeState';
 import {
@@ -108,6 +111,7 @@ applyTheme(
 // Visibility gates decorative rendering only; native control/renewal remain active.
 const uiVisible = ref(isUiVisible());
 let uiPowerReconciliation: ReturnType<typeof startUiPowerReconciliation> | null = null;
+let stopSharedPowerWatch: (() => void) | null = null;
 
 const BOOT_TASK = BOOT_CONTROL_CENTER_TASK;
 const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
@@ -123,15 +127,19 @@ async function healBootTask() {
 
 // ── FAN-932：风扇「开机/休眠唤醒启动风扇」偏好（startupDesired.fanControl）的唯一自动启动编排入口 ──
 // 开机与唤醒共用本函数，不在两个事件处理器里各写一份 start/apply 规则。要求（裁决 §2.1）：
-//   1) 按 `boot` 或电源代次去重并串行执行，重复的 resume-ready / renderer 重建不重复写曲线；
+//   1) 同一电源代次去重并串行；新代不等待已退役的旧预检，底层硬件仍由 Fan 生命周期串行；
 //   2) 偏好非严格 true 立即返回（本路径只读一次设置，不启动 Host、不发 HTTP、不碰 HC）；
 //   3) 已有活动控制意图优先（崩溃接续/活动会话/唤醒已恢复的曲线），绝不用默认曲线覆盖用户曲线；
 //   4) 设备门必须同时满足 allowed && writeReady 才继续 apply；
 //   5) apply 前再次核对代次、偏好与活动意图，期间被取代就取消本次写入；
 //   6) 失败按现有失败路径记录，不改写成“已启动”，也不在同一代内无限重试。
 let fanAutoStartChain: Promise<void> = Promise.resolve();
+let fanAutoStartTransitionGeneration = -1;
 let fanBootAutoStartDone = false;
 const fanAutoStartGenerations = new Set<number>();
+// One wake delivery keeps its first cancellation receipt. A delayed duplicate
+// cannot turn an explicit OFF into a fresh automatic start for the same wake.
+let fanWakeRequest: { generation: number; cancellationRevision: number } | null = null;
 function ensureFanAutoStart(reason: 'boot' | 'resume', generation = 0): Promise<void> {
   // Explicit AI session has its own requests; do not inherit real stored on-state.
   if (aiFanMockActive) return Promise.resolve();
@@ -142,17 +150,22 @@ function ensureFanAutoStart(reason: 'boot' | 'resume', generation = 0): Promise<
     if (generation <= 0 || fanAutoStartGenerations.has(generation)) return Promise.resolve();
     fanAutoStartGenerations.add(generation);
   }
+  // Serialize this generation only. A retired read keeps its own completion
+  // but cannot delay or acquire authority from a newer Native wake.
+  const transitionGenerationAtRequest = latestResumeGeneration;
+  const predecessor = fanAutoStartTransitionGeneration === transitionGenerationAtRequest ? fanAutoStartChain : Promise.resolve();
+  fanAutoStartTransitionGeneration = transitionGenerationAtRequest;
   // This automatic request cannot inherit authority after a newer explicit OFF/Close.
   const cancellationRevision = fanHostLifecycle.controlCancellationRevision;
   const mayProceed = () => cancellationRevision === fanHostLifecycle.controlCancellationRevision
+    && transitionGenerationAtRequest === latestResumeGeneration
     && !fanHostLifecycle.hasControlIntent
     && (reason !== 'resume' || generation === latestResumeGeneration);
-  const run = fanAutoStartChain.then(async () => {
+  const run = predecessor.then(async () => {
     try {
       if (!mayProceed()) return;
       const startup = await readSettingsSection<{ fanControl?: boolean }>('startupDesired');
-      const sceneWantsFan = await readBootModeFanIntent(reason === 'boot' ? 'startup' : 'current');
-      if ((sceneWantsFan ?? startup.fanControl) !== true || !mayProceed()) return;
+      if (startup.fanControl !== true || !mayProceed()) return;
       const gate = await fanHostLifecycle.start({ manualRecovery: true, reason: 'authorized-auto-' + reason });
       if (!gate.allowed || !gate.writeReady) {
         fanDiagnosticLog('lifecycle.auto-start-blocked', {
@@ -167,8 +180,7 @@ function ensureFanAutoStart(reason: 'boot' | 'resume', generation = 0): Promise<
       }
       if (!mayProceed()) return;
       const stillOn = await readSettingsSection<{ fanControl?: boolean }>('startupDesired');
-      const stillWanted = await readBootModeFanIntent(reason === 'boot' ? 'startup' : 'current');
-      if ((stillWanted ?? stillOn.fanControl) !== true || !mayProceed()) return;
+      if (stillOn.fanControl !== true || !mayProceed()) return;
       const fanSettings = getFanFeatureSettings();
       if (fanSettings.featureEnabled !== true) return;
       // 必须使用用户保存的 preset 曲线，不得用写死的默认曲线代替。
@@ -214,6 +226,38 @@ let videoPowerProbeTimer: number | null = null;
 const documentVisible = ref(document.visibilityState === 'visible');
 const nativeWindowVisible = ref(document.visibilityState === 'visible');
 const backgroundVideoSuspended = ref(false);
+const backgroundEditorPaused = ref(false);
+const backgroundEditorHolds = new Set<symbol>();
+let backgroundEditorPauseRevision = 0;
+let backgroundPresentationDisposed = false;
+function acquireControllerEditorBackgroundHold(): () => void {
+  const owner = Symbol();
+  backgroundEditorHolds.add(owner);
+  if (!backgroundEditorPaused.value) {
+    backgroundEditorPaused.value = true;
+    ++backgroundEditorPauseRevision;
+    if (backgroundSource.value === 'dynamic') clearBackgroundRetry();
+    // Keep the current frame/source. A covered editor needs no video decoder work.
+    videoDesired.value = false;
+    backgroundVideo.value?.pause();
+  }
+  return () => {
+    if (!backgroundEditorHolds.delete(owner) || backgroundEditorHolds.size) return;
+    backgroundEditorPaused.value = false;
+    ++backgroundEditorPauseRevision;
+    if (backgroundPresentationDisposed) return;
+    const video = backgroundVideo.value;
+    if (backgroundSource.value === 'dynamic' && activeDynamicMediaAsset && video &&
+        backgroundVideoShouldPlay(video) &&
+        (video.error || (!isHlsUrl(backgroundUrl.value) && !video.getAttribute('src')))) {
+      // A covered error or a cancelled local retry is not a new decode failure.
+      onBackgroundVideoError(undefined, video, true);
+      return;
+    }
+    void reconcileBackgroundVideo();
+  };
+}
+provide(controllerEditorBackgroundHoldKey, acquireControllerEditorBackgroundHold);
 const lowBatteryStatic = ref(false);
 const videoDesired = ref(false);
 const backgroundVideoGeneration = ref(0);
@@ -225,14 +269,44 @@ let activeDynamicMediaKey='';
 let sharedMediaDirty=false;
 let activeDynamicMediaAsset:{key:string;assetId:string;bindingRevision:number;kind?:string}|null=null;
 let sharedMediaRefreshQueued=false;
+let sharedMediaPending:ReturnType<typeof refreshDynamicBackground>|null=null;
 function requestSharedBackgroundRefresh(){
-  if(!dynamicBackgroundAllowed())return;sharedMediaDirty=true;lastDynamicGameIdentity=null;
-  if(!isUiVisible()||sharedMediaRefreshQueued||!resumeLifecycleActive)return;sharedMediaRefreshQueued=true;
-  queueMicrotask(()=>{sharedMediaRefreshQueued=false;if(!resumeLifecycleActive||!isUiVisible()||!dynamicBackgroundAllowed())return;sharedMediaDirty=false;lastDynamicGameIdentity=null;void detectGame().then(onDynamicGameStatus).catch(()=>{});});
+  if(!dynamicBackgroundAllowed())return;
+  sharedMediaDirty=true;
+  queueSharedBackgroundRefresh();
+}
+function queueSharedBackgroundRefresh(){
+  if(!sharedMediaDirty||sharedMediaPending||sharedMediaRefreshQueued||!resumeLifecycleActive||!isUiVisible()||!dynamicBackgroundAllowed())return;
+  sharedMediaRefreshQueued=true;
+  queueMicrotask(async()=>{
+    try{
+      if(sharedMediaPending||!resumeLifecycleActive||!isUiVisible()||!dynamicBackgroundAllowed())return;
+      sharedMediaDirty=false;
+      const game=await detectGame();
+      if(!resumeLifecycleActive||!dynamicBackgroundAllowed())return;
+      if(sharedMediaPending||!isUiVisible()){sharedMediaDirty=true;return;}
+      if(game&&!isCurrentGameTarget(game))return;
+      lastDynamicGameIdentity=null;
+      onDynamicGameStatus(game);
+    }catch{/* The next actual game/media event can refresh the background. */}
+    finally{sharedMediaRefreshQueued=false;queueSharedBackgroundRefresh();}
+  });
+}
+async function readDynamicGameBackground(game:DetectedGame){
+  const pending=refreshDynamicBackground(game);
+  sharedMediaPending=pending;
+  try{return await pending;}
+  finally{
+    if(sharedMediaPending===pending){sharedMediaPending=null;queueSharedBackgroundRefresh();}
+  }
 }
 function onSharedMediaChanged(event:Event){
   const detail=(event as CustomEvent).detail;sharedMediaRevisions.observe(detail?.key,detail?.revision,detail?.canonicalKey);
-  if(detail?.key===activeDynamicMediaKey)requestSharedBackgroundRefresh();
+  if(detail?.key===activeDynamicMediaKey&&activeDynamicMediaKey){requestSharedBackgroundRefresh();return;}
+  // A game with no bound media still needs its first successful publication.
+  if(activeDynamicMediaKey||detail?.ready!==true||typeof detail.executable!=='string'||!detail.executable)return;
+  const game=getCurrentGame();
+  if(game?.processCreated&&game.path.replace(/\//g,'\\').toLowerCase()===detail.executable.replace(/\//g,'\\').toLowerCase())requestSharedBackgroundRefresh();
 }
 function onBackgroundVideoTimeUpdate(){const video=backgroundVideo.value,range=backgroundPlayback.value;if(video&&range)applyGameMediaRange(video,range);}
 const backgroundFallbackIndex = ref(0);
@@ -447,21 +521,29 @@ function onBackgroundPositionChanged(e: Event): void {
   if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) backgroundPosition.value = position;
 }
 
-async function reconcileBackgroundVideo(): Promise<void> {
-  await nextTick();
-  const video = backgroundVideo.value;
-  const epoch = backgroundMediaEpoch;
-  const shouldPlay = Boolean(
+function backgroundVideoShouldPlay(video = backgroundVideo.value): boolean {
+  return Boolean(
     video &&
     backgroundKind.value === 'video' &&
     backgroundUrl.value &&
     (backgroundSource.value === 'fixed' || dynamicBackgroundAllowed()) &&
     !backgroundVideoSuspended.value &&
+    !backgroundEditorPaused.value &&
+    !backgroundPresentationDisposed &&
     documentVisible.value &&
     nativeWindowVisible.value &&
     !lowBatteryStatic.value &&
     !isVideoPlaybackBlockedByPower(),
   );
+}
+
+async function reconcileBackgroundVideo(): Promise<void> {
+  await nextTick();
+  if (backgroundPresentationDisposed) return;
+  const video = backgroundVideo.value;
+  const epoch = backgroundMediaEpoch;
+  const editorRevision = backgroundEditorPauseRevision;
+  const shouldPlay = backgroundVideoShouldPlay(video);
   if (!video) {
     videoDesired.value = shouldPlay;
     return;
@@ -489,12 +571,12 @@ async function reconcileBackgroundVideo(): Promise<void> {
   video.muted = true;
   try {
     await video.play();
-    if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value ||
-        !dynamicBackgroundAllowed() && backgroundSource.value === 'dynamic') {
+    if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value || !backgroundVideoShouldPlay(video)) {
       video.pause();
     }
   } catch {
-    if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value) return;
+    if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value ||
+        editorRevision !== backgroundEditorPauseRevision || backgroundEditorPaused.value || backgroundPresentationDisposed) return;
     videoDesired.value = false;
     onBackgroundVideoError(undefined, video);
   }
@@ -513,16 +595,7 @@ function onBackgroundVideoCanPlay(): void {
 
 function onBackgroundVideoPause(): void {
   if (!videoDesired.value) return;
-  const shouldResume = Boolean(
-    backgroundKind.value === 'video' &&
-    backgroundUrl.value &&
-    (backgroundSource.value === 'fixed' || dynamicBackgroundAllowed()) &&
-    !backgroundVideoSuspended.value &&
-    documentVisible.value &&
-    nativeWindowVisible.value &&
-    !lowBatteryStatic.value &&
-    !isVideoPlaybackBlockedByPower(),
-  );
+  const shouldResume = backgroundVideoShouldPlay();
   if (shouldResume) {
     videoDesired.value = false;
     window.setTimeout(() => void reconcileBackgroundVideo(), 100);
@@ -678,8 +751,9 @@ watch([backgroundUrl, backgroundKind], () => {
 // one selected, foreground-only retry; visibility/source/OFF cleanup reuses the
 // existing retry owner, so inactive windows own neither a decoder nor a timer.
 function scheduleSharedBackgroundRetry(message: string): void {
-  if (backgroundRetryTimer !== null || !activeDynamicMediaAsset) return;
+  if (backgroundRetryTimer !== null || !activeDynamicMediaAsset || !backgroundVideoShouldPlay()) return;
   const epoch = backgroundMediaEpoch;
+  const editorRevision = backgroundEditorPauseRevision;
   const identity = JSON.stringify(activeDynamicMediaAsset);
   const source = backgroundUrl.value;
   const selected = JSON.stringify([identity, source]);
@@ -689,20 +763,16 @@ function scheduleSharedBackgroundRetry(message: string): void {
   }
   const delay = [500, 2000][sharedBackgroundRetryAttempts] ?? 60000;
   sharedBackgroundRetryAttempts = Math.min(2, sharedBackgroundRetryAttempts + 1);
+  const canRetry = () => epoch === backgroundMediaEpoch && editorRevision === backgroundEditorPauseRevision &&
+    source === backgroundUrl.value && identity === JSON.stringify(activeDynamicMediaAsset) &&
+    backgroundSource.value === 'dynamic' && backgroundVideoShouldPlay();
   const timer = window.setTimeout(() => {
     if (backgroundRetryTimer !== timer) return;
     backgroundRetryTimer = null;
-    if (epoch !== backgroundMediaEpoch || source !== backgroundUrl.value ||
-        identity !== JSON.stringify(activeDynamicMediaAsset) || backgroundSource.value !== 'dynamic' ||
-        backgroundKind.value !== 'video' || backgroundVideoSuspended.value ||
-        !documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value ||
-        isVideoPlaybackBlockedByPower() || !dynamicBackgroundAllowed()) return;
+    if (!canRetry()) return;
     backgroundVideoGeneration.value++;
     void nextTick(async () => {
-      if (epoch !== backgroundMediaEpoch || source !== backgroundUrl.value ||
-          identity !== JSON.stringify(activeDynamicMediaAsset) || backgroundVideoSuspended.value ||
-          !documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value ||
-          isVideoPlaybackBlockedByPower() || !dynamicBackgroundAllowed()) return;
+      if (!canRetry()) return;
       await setupBackgroundVideo();
       void reconcileBackgroundVideo();
     });
@@ -719,9 +789,10 @@ function onBackgroundVideoMediaError(event: Event): void {
   onBackgroundVideoError(undefined, video);
 }
 
-function onBackgroundVideoError(message = 'Steam 在线视频播放失败', failedVideo?: HTMLVideoElement): void {
+function onBackgroundVideoError(message = 'Steam 在线视频播放失败', failedVideo?: HTMLVideoElement, localRecoveryOnly = false): void {
   if (failedVideo && failedVideo !== backgroundVideo.value) return;
-  if (backgroundSource.value === 'dynamic' && !dynamicBackgroundAllowed()) return;
+  if (backgroundSource.value === 'dynamic' &&
+      (backgroundEditorPaused.value || backgroundPresentationDisposed || !dynamicBackgroundAllowed())) return;
   if (backgroundVideoSuspended.value || !documentVisible.value || !nativeWindowVisible.value ||
       lowBatteryStatic.value || isVideoPlaybackBlockedByPower() || backgroundKind.value !== 'video') return;
   videoDesired.value = false;
@@ -729,7 +800,8 @@ function onBackgroundVideoError(message = 'Steam 在线视频播放失败', fail
     if (!activeDynamicMediaAsset) return;
     const video = failedVideo || backgroundVideo.value;
     const code = video?.error?.code;
-    if (code === 3 || code === 4) {
+    // SRC_NOT_SUPPORTED also covers failed loads before any bytes reach the decoder.
+    if (code === 3 && !localRecoveryOnly) {
       invalidateBackgroundMedia();
       clearBackgroundRetry();
       const failed = activeDynamicMediaAsset;
@@ -800,7 +872,6 @@ async function syncMouseModeAtStartup(): Promise<void> {
   }
 }
 function onBackgroundVisibilityChange(): void {
-  if(document.visibilityState==='visible'&&sharedMediaDirty&&nativeWindowVisible.value){sharedMediaDirty=false;lastDynamicGameIdentity=null;void detectGame().then(onDynamicGameStatus).catch(()=>{});}
   documentVisible.value = document.visibilityState === 'visible';
   // Page visibility and native HWND visibility are independent after a
   // WebView2 controller reload. Never turn a tray-hidden window "visible"
@@ -809,6 +880,7 @@ function onBackgroundVisibilityChange(): void {
     pauseBackgroundVideoForWindow();
     return;
   }
+  queueSharedBackgroundRefresh();
   resumeBackgroundVideo();
 }
 function onBackgroundWindowHidden(): void {
@@ -818,9 +890,9 @@ function onBackgroundWindowHidden(): void {
   pauseBackgroundVideoForWindow();
 }
 function onBackgroundWindowShown(): void {
-  if(sharedMediaDirty){sharedMediaDirty=false;lastDynamicGameIdentity=null;void detectGame().then(onDynamicGameStatus).catch(()=>{});}
   nativeWindowVisible.value = true;
   setNativeWindowVisible(true);
+  queueSharedBackgroundRefresh();
   resumeBackgroundVideo();
   requestVideoPowerCheck();
 }
@@ -828,6 +900,7 @@ function powerEventGeneration(e: Event): number {
   return Number((e as CustomEvent<{ generation?: number }>).detail?.generation) || 0;
 }
 function notePowerTransitionGeneration(e: Event): number {
+  resumeQueue.invalidate();
   const generation = powerEventGeneration(e);
   if (generation > 0) {
     latestResumeGeneration = Math.max(latestResumeGeneration, generation);
@@ -868,13 +941,26 @@ function onFanPhysicalSuspending(e: Event): void {
   const generation = Number((e as CustomEvent).detail?.generation) || 0;
   if (generation <= 0 || generation < fanHostLifecycle.coordinatorSnapshot.powerGeneration) return;
   fanHostLifecycle.setPowerGeneration(generation);
-  fanHostLifecycle.observePowerBoundary('suspending', generation);
+  // This is still native-owned Close; only its explicit wake catchup keeps
+  // the current request. A genuine sleep notification always supersedes it.
+  const resumeCatchup = (e as CustomEvent).detail?.scope === 'fan-only'
+    && (e as CustomEvent).detail?.resumeCatchup === true;
+  fanHostLifecycle.observePowerBoundary(resumeCatchup ? 'manual-resume-start' : 'suspending', generation);
   setFanControlActive(false);
 }
 function onPowerResuming(e: Event): void {
   tdpRuntimeStore.invalidatePower();
   const generation = notePowerTransitionGeneration(e);
-  fanHostLifecycle.observePowerBoundary('resuming', generation);
+  // Start the same Fan wake request at the public wake boundary. An OFF
+  // before its first delayed F5 notification must still cancel that request.
+  if (Number.isSafeInteger(generation) && generation > 0 &&
+      (!fanWakeRequest || generation > fanWakeRequest.generation)) {
+    fanWakeRequest = { generation, cancellationRevision: fanHostLifecycle.controlCancellationRevision };
+  }
+  // A shared Resuming fact must not revoke this generation's independently
+  // issued Fan F5 readiness. A new generation still retires the old device work.
+  if (generation > fanHostLifecycle.coordinatorSnapshot.wakeReadyGeneration)
+    fanHostLifecycle.observePowerBoundary('resuming', generation);
   if (resumeVideoTimer !== null) {
     window.clearTimeout(resumeVideoTimer);
     resumeVideoTimer = null;
@@ -898,7 +984,19 @@ function onPowerResumeReady(generation: number | undefined): void {
  */
 function requestFanCommittedResume(generation: number): void {
   if (!Number.isSafeInteger(generation) || generation <= 0) return;
-  void fanHostLifecycle.resumeAfterCommittedPowerWake(generation).catch((error) => {
+  // A durable public Ready can replace a lost Fan-only event. Keep that
+  // request's original OFF receipt before the asynchronous continuation.
+  if (!fanWakeRequest || generation > fanWakeRequest.generation) {
+    fanWakeRequest = { generation, cancellationRevision: fanHostLifecycle.controlCancellationRevision };
+  }
+  const request = fanWakeRequest;
+  void fanHostLifecycle.resumeAfterCommittedPowerWake(generation).then(() => {
+    if (fanWakeRequest !== request || request.generation !== generation || generation !== latestResumeGeneration ||
+        request.cancellationRevision !== fanHostLifecycle.controlCancellationRevision || fanHostLifecycle.hasControlIntent) return;
+    // The retained curve already won when present. Otherwise use the same
+    // Native-checked Fan entry to consume the configured automatic preference.
+    onFanResumeReady(generation);
+  }).catch((error) => {
     fanDiagnosticLog('lifecycle.resume-committed-wake-failed', {
       generation,
       error: error instanceof Error ? error.message : String(error),
@@ -909,10 +1007,14 @@ function requestFanCommittedResume(generation: number): void {
 function onFanResumeReady(resumeGeneration: number): void {
   if (!Number.isSafeInteger(resumeGeneration) || resumeGeneration <= 0) return;
   if (resumeGeneration < fanHostLifecycle.coordinatorSnapshot.powerGeneration) return;
-  fanHostLifecycle.setPowerGeneration(resumeGeneration);
-  // F5 is the only pre-commit admission edge for the isolated FanHost. It is
-  // distinct from `resumed`, which native publishes after resumeComplete.
-  fanHostLifecycle.observePowerBoundary('resume-ready', resumeGeneration);
+  const cancellationRevision = fanHostLifecycle.controlCancellationRevision;
+  const previous = fanWakeRequest;
+  if (previous && (resumeGeneration < previous.generation ||
+      (resumeGeneration === previous.generation && cancellationRevision !== previous.cancellationRevision))) return;
+  const request = previous?.generation === resumeGeneration ? previous : { generation: resumeGeneration, cancellationRevision };
+  fanWakeRequest = request;
+  // F5 remains a device-session hint. The lifecycle reads the shared Native
+  // context before admitting it; late/unknown/pending events grant no wake.
   // HC SystemReady opens the device fire-and-forget: start the fan rebuild in
   // the background and never gate the native Ready commit on it. The fan
   // coordinator keeps the fan write gate closed until this rebuild completes;
@@ -920,14 +1022,14 @@ function onFanResumeReady(resumeGeneration: number): void {
   // FAN-932 §2.2：唤醒必须先**完成**现有 resume（含已有活动曲线的恢复），再按偏好自动启动。
   // 本事件处理器保持非阻塞（按代异步事务），不改成同步等待；resume 失败/被取代时
   // 本代**不做默认曲线 fallback**，也不覆盖用户曲线。
-  void fanHostLifecycle.resume().catch((error) => {
+  void fanHostLifecycle.resumeAfterNativeReady(resumeGeneration).catch((error) => {
     fanDiagnosticLog('lifecycle.resume-fire-and-forget-failed', {
       generation: resumeGeneration,
       error: error instanceof Error ? error.message : String(error),
     });
     return false as const;
   }).then((resumeOk) => {
-    if (resumeOk === false) return; // resume 失败：本代不自动启动
+    if (resumeOk !== true || fanWakeRequest !== request || cancellationRevision !== fanHostLifecycle.controlCancellationRevision) return;
     if (fanHostLifecycle.hasControlIntent) return; // 已有曲线已恢复：不重复写
     return ensureFanAutoStart('resume', resumeGeneration);
   });
@@ -945,6 +1047,9 @@ function onPowerResumed(e: Event): void {
   // native edge is the Fan-only compensation path; FanHost shares any already
   // running F5 promise so this never opens HC twice.
   requestFanCommittedResume(generation);
+  // The shared native Ready fact also compensates a lost resume-ready event.
+  // This queue coalesces the existing task; Fan recovery remains independent.
+  scheduleResumeTransaction(generation);
   networkAccelerationWake.schedule(generation);
   scheduleSleepPowerPlanOptimization();
   if (resumeVideoTimer !== null) window.clearTimeout(resumeVideoTimer);
@@ -1197,54 +1302,112 @@ let stopStartupPerformanceWatch: (() => void) | null = null;
 let stopDynamicBackground: (() => void) | null = null;
 let stopUiVisibility: (() => void) | null = null;
 let sleepPlanOptimizationTimer: number | null = null;
-let sleepPlanOptimizationQueue: Promise<void> = Promise.resolve();
-let sleepPlanOptimizationQueued = false;
-let sleepPlanOptimizationRunning = false;
-let sleepPlanOptimizationPending = false;
+const sleepPlanOptimizationQueue = createPowerResumeQueue();
+let sleepPlanOptimizationRequest: object | null = null;
+let sleepPlanOptimizationConfirmation: {
+  request: object; captured: SharedPowerLifecycleSnapshot; denied: boolean; stop: () => void;
+} | null = null;
 
-// 睡眠电源计划优化属于低频后台任务。串行执行，避免 AC/DC 或方案事件叠加时
-// 同时写入多个电源计划；事件处理本身不等待这个队列。
-function scheduleSleepPowerPlanOptimization(): void {
-  if (sleepPlanOptimizationRunning) {
-    sleepPlanOptimizationPending = true;
-    return;
-  }
-  if (sleepPlanOptimizationQueued) return;
-  sleepPlanOptimizationQueued = true;
-  const run = sleepPlanOptimizationQueue.then(async () => {
-    sleepPlanOptimizationQueued = false;
-    if (!(await powerLifecycleReadyForWrites())) return;
-    if (!(await getSleepPowerPlanOptimizationEnabled())) return;
-    sleepPlanOptimizationRunning = true;
-    try {
-      const result = await optimizeSleepPowerPlans();
-      if (!result.ok) console.error('[sleep power plan optimization]', result.failed[0]);
-    } catch (error) {
-      console.error('[sleep power plan optimization]', error);
-    } finally {
-      sleepPlanOptimizationRunning = false;
-      if (sleepPlanOptimizationPending) {
-        sleepPlanOptimizationPending = false;
-        window.setTimeout(() => scheduleSleepPowerPlanOptimization(), 0);
-      }
+function sameSleepPowerPlanScope(a: SharedPowerLifecycleSnapshot, b: SharedPowerLifecycleSnapshot): boolean {
+  return a.generation === b.generation && a.observedNotificationSequence === b.observedNotificationSequence;
+}
+function confirmSleepPowerPlanOptimization(request: object, captured: SharedPowerLifecycleSnapshot, ownsQueue: () => boolean): void {
+  if (!resumeLifecycleActive || !ownsQueue() || !sleepPlanOptimizationRequest || sleepPlanOptimizationConfirmation) return;
+  // Retire this attempt before asking the existing public source for a new read.
+  // A cached Ready/event never stands in for this request's confirmation.
+  sleepPlanOptimizationQueue.invalidate();
+  const confirmation = { request, captured, denied: false, stop: () => {} };
+  sleepPlanOptimizationConfirmation = confirmation;
+  confirmation.stop = requestSharedPowerLifecycleReadyConfirmation(state => {
+    if (!resumeLifecycleActive || sleepPlanOptimizationConfirmation !== confirmation) return;
+    sleepPlanOptimizationConfirmation = null;
+    if (!sleepPlanOptimizationRequest) return;
+    // An unchanged fresh Ready means an ordinary failed attempt, not a retry
+    // grant. Only a changed public scope or a newer queued request continues.
+    if (sleepPlanOptimizationRequest === request && !confirmation.denied && sameSleepPowerPlanScope(state, captured)) {
+      sleepPlanOptimizationRequest = null;
+      return;
     }
+    continueSleepPowerPlanOptimization();
   });
-  sleepPlanOptimizationQueue = run.catch(() => {});
+}
+
+// This background consumer uses the public wake queue and admission. A denied
+// owner retires permanently; its demand waits for a later admitted observation.
+function scheduleSleepPowerPlanOptimization(): void {
+  if (!resumeLifecycleActive) return;
+  sleepPlanOptimizationRequest = {};
+  continueSleepPowerPlanOptimization();
+}
+function continueSleepPowerPlanOptimization(): void {
+  const state = getSharedPowerLifecycle();
+  if (!resumeLifecycleActive || !sleepPlanOptimizationRequest || !isSharedPowerLifecycleAdmitted(state)) return;
+  const confirmation = sleepPlanOptimizationConfirmation;
+  if (confirmation) {
+    if (!confirmation.denied && sameSleepPowerPlanScope(state!, confirmation.captured)) return;
+    // A newer admitted public scope can supersede a held old read immediately.
+    sleepPlanOptimizationConfirmation = null;
+    confirmation.stop();
+  }
+  const generation = state!.generation;
+  void sleepPlanOptimizationQueue.run(generation, async ownsQueue => {
+    const request = sleepPlanOptimizationRequest;
+    const captured = getSharedPowerLifecycle();
+    const isCurrent = () => {
+      const current = getSharedPowerLifecycle();
+      return ownsQueue() && resumeLifecycleActive && isSharedPowerLifecycleAdmitted(current) &&
+        current!.generation === generation && current!.observedNotificationSequence === captured?.observedNotificationSequence;
+    };
+    if (!request || !isCurrent()) return;
+    try {
+      const enabled = await getSleepPowerPlanOptimizationEnabled();
+      if (!isCurrent()) return;
+      if (enabled) {
+        const sequence = captured?.observedNotificationSequence;
+        if (sequence === undefined) throw new Error('睡眠电源计划优化缺少公共通知序号');
+        const result = await optimizeSleepPowerPlans({ expectedPowerGeneration: generation, expectedPowerNotificationSequence: sequence, isCurrent });
+        if (!isCurrent()) return;
+        if (!result.ok && (!result.stopped || result.failed.length)) console.error('[sleep power plan optimization]', result.failed[0]);
+      }
+      if (sleepPlanOptimizationRequest === request) sleepPlanOptimizationRequest = null;
+    } catch (error) {
+      if (!ownsQueue() || !resumeLifecycleActive) return;
+      console.error('[sleep power plan optimization]', error);
+      if (captured) confirmSleepPowerPlanOptimization(request, captured, ownsQueue);
+    } finally {
+      // Metadata-only ingress updates do not fan out business callbacks. A
+      // retired read still owns demand and uses the same fresh-read channel.
+      if (captured && ownsQueue() && resumeLifecycleActive && sleepPlanOptimizationRequest && !isCurrent())
+        confirmSleepPowerPlanOptimization(request, captured, ownsQueue);
+    }
+  }, () => resumeLifecycleActive && sleepPlanOptimizationRequest !== null &&
+    isSharedPowerLifecycleAdmitted(getSharedPowerLifecycle())).catch(error => {
+    console.error('[sleep power plan optimization queue]', error);
+  });
 }
 let latestResumeGeneration = 0;
 let committedResumeGeneration = 0;
+// This consumer retains only the exact stages of its already committed wake.
+// Shared Native admission and the original queue still own every continuation.
+let resumeFollowup: {
+  generation: number; mode: 'ac' | 'dc'; completed: boolean;
+  scheme?: Promise<'yeman' | 'auto' | 'manual'>;
+  performance?: Promise<unknown>;
+  legacy?: Promise<void>;
+} | null = null;
 let resumeLifecycleActive = true;
+let resumeWorkAllowed = false;
 // Recovery notifications are normally delivered as events. WebView2 can be
 // recreated during the same window, however, and a freshly mounted page may
-// miss the one-shot `power.resume-ready` event. Serialize compensating
-// recovery attempts and let newer power generations supersede stale work.
-let resumeTransaction: Promise<void> = Promise.resolve();
+// miss the one-shot `power.resume-ready` event. Coalesce compensating
+// recovery attempts and let newer power generations supersede pending work.
+const resumeQueue = createPowerResumeQueue();
 let resumeRetryTimer: ReturnType<typeof setTimeout> | null = null;
 const resumeRetryCounts = new Map<number, number>();
 const MAX_RESUME_TRANSACTION_RETRIES = 3;
 
 function scheduleResumeRetry(generation: number, reason: string): void {
-  if (!resumeLifecycleActive || generation !== latestResumeGeneration ||
+  if (!resumeLifecycleActive || !resumeWorkAllowed || generation !== latestResumeGeneration ||
       generation <= committedResumeGeneration || resumeRetryTimer) return;
   const retryCount = (resumeRetryCounts.get(generation) ?? 0) + 1;
   resumeRetryCounts.set(generation, retryCount);
@@ -1261,8 +1424,8 @@ function scheduleResumeRetry(generation: number, reason: string): void {
 }
 
 async function powerLifecycleReadyForWrites(): Promise<boolean> {
-  const state = await powerLifecycle.get().catch(() => null);
-  return state?.phase === 'ready' && state.hardwareWritesAllowed === true;
+  const state: SharedPowerLifecycleSnapshot | null = await powerLifecycle.get().catch(() => null);
+  return state?.known !== false && state?.phase === 'ready' && state.hardwareWritesAllowed === true;
 }
 
 // AC/DC broadcasts can arrive while Windows/native are still settling the
@@ -1306,7 +1469,7 @@ function schedulePowerChangePerformanceRestore(expectedSide: 'ac' | 'dc'): void 
       // entry. Do not let the ordinary global scheduler take ownership back.
       const owner = await restorePerformanceScheduleIfConfigured(expectedSide, {
         dedicatedOnly: schemeOwner !== 'auto',
-        automaticOnly: true,
+        automaticOnly: true, restoreRemembered: true,
       });
       if (generation !== powerChangeRestoreGeneration) return;
     } catch (error) {
@@ -1322,71 +1485,85 @@ function schedulePowerChangePerformanceRestore(expectedSide: 'ac' | 'dc'): void 
 }
 
 function scheduleResumeTransaction(generation: number): void {
-  if (!resumeLifecycleActive || !Number.isFinite(generation) || generation <= 0) return;
+  if (!resumeLifecycleActive || !resumeWorkAllowed || !Number.isSafeInteger(generation) || generation <= 0) return;
   latestResumeGeneration = Math.max(latestResumeGeneration, generation);
   if (generation !== latestResumeGeneration) return;
-  if (generation <= committedResumeGeneration) return;
+  if (generation < committedResumeGeneration ||
+      generation === committedResumeGeneration && (!resumeFollowup || resumeFollowup.completed)) return;
 
-  resumeTransaction = resumeTransaction.then(async () => {
-    const targetGeneration = latestResumeGeneration;
-    if (targetGeneration <= committedResumeGeneration) return;
-    const isCurrent = () => resumeLifecycleActive && latestResumeGeneration === targetGeneration &&
-      committedResumeGeneration < targetGeneration;
+  void resumeQueue.run(generation, async (ownsQueue) => {
+    const targetGeneration = generation;
+    if (targetGeneration < committedResumeGeneration ||
+        targetGeneration === committedResumeGeneration && (!resumeFollowup || resumeFollowup.completed)) return;
+    let needsConfirmedFollowup = targetGeneration === committedResumeGeneration;
+    const ownsCurrent = () => ownsQueue() && resumeLifecycleActive && resumeWorkAllowed && latestResumeGeneration === targetGeneration
+      && (!needsConfirmedFollowup || isSharedPowerLifecycleAdmitted(getSharedPowerLifecycle()));
+    const isCurrent = () => ownsCurrent() && committedResumeGeneration < targetGeneration;
+    let followup = resumeFollowup;
 
-    const mode = await detectPowerModeStable().catch(() => 'ac' as const);
-    if (!isCurrent()) return;
-    onAcPower.value = mode === 'ac';
-    // Do not let a stalled media decoder delay the native wake commit.
-    void reconcileBackgroundVideo();
+    if (targetGeneration > committedResumeGeneration) {
+      const mode = await detectPowerModeStable().catch(() => 'ac' as const);
+      if (!isCurrent()) return;
+      onAcPower.value = mode === 'ac';
+      // Do not let a stalled media decoder delay the native wake commit.
+      void reconcileBackgroundVideo();
 
-    const daemonRequired = getFloatInfo().enabled ||
-      (await getPerformanceScheduleOwnership().catch(() => 'none' as const)) === 'auto';
-    const result = await runPowerResumeTransaction(targetGeneration, daemonRequired, {
-      // HC SystemReady is synchronous and opens the device fire-and-forget; the
-      // FanHost F5 already started from `power.resume-ready` and never gates the
-      // native Ready commit. The fan coordinator keeps the fan write gate closed
-      // until that background rebuild completes.
-      resumeDaemon: resumeTdpDaemonAfterWake,
-      completeResume: (resumeGeneration, meta) => powerLifecycle.completeResume(resumeGeneration, meta).then((result) => {
-        if (result.ok && resumeLifecycleActive && latestResumeGeneration === resumeGeneration) {
-          uiPowerReconciliation?.reconcile();
-        }
-        return result;
-      }),
-      isGenerationCurrent: isCurrent,
-      daemonAttempts: 2,
-      commitAttempts: 3,
-      daemonRetryDelayMs: 350,
-      commitRetryDelayMs: 250,
-    });
-    if (!isCurrent()) return;
-    if (!result.committed) {
-      scheduleResumeRetry(targetGeneration, result.reason ?? 'resume_commit_failed');
-      return;
+      const daemonRequired = getFloatInfo().enabled ||
+        (await getPerformanceScheduleOwnership().catch(() => 'none' as const)) === 'auto';
+      if (!isCurrent()) return;
+      const result = await runPowerResumeTransaction(targetGeneration, daemonRequired, {
+        // Fan F5 remains independent; the native Ready commit never waits for it.
+        resumeDaemon: resumeTdpDaemonAfterWake,
+        completeResume: (resumeGeneration, meta) => powerLifecycle.completeResume(resumeGeneration, meta).then((result) => {
+          if (result.ok && isCurrent()) uiPowerReconciliation?.reconcile();
+          return result;
+        }),
+        isGenerationCurrent: isCurrent,
+        daemonAttempts: 2,
+        commitAttempts: 3,
+        daemonRetryDelayMs: 350,
+        commitRetryDelayMs: 250,
+      });
+      if (!isCurrent()) return;
+      if (!result.committed) {
+        scheduleResumeRetry(targetGeneration, result.reason ?? 'resume_commit_failed');
+        return;
+      }
+
+      // Keep the confirmed commit separate from the remaining owned stages.
+      // A same-generation shared Ready can continue them without another commit.
+      committedResumeGeneration = targetGeneration;
+      followup = { generation: targetGeneration, mode, completed: false };
+      resumeFollowup = followup;
+      needsConfirmedFollowup = true;
+      networkAccelerationWake.schedule(targetGeneration);
+      resumeRetryCounts.delete(targetGeneration);
+      // The resident owner can keep healing even if a later scheme read fails.
+      requestGamePolicyTdpReconciliation(targetGeneration);
     }
-
-    // HC SystemReady does not wait for the device open; the fan rebuild runs in
-    // the background from `power.resume-ready`. The resident ten-second guard is
-    // observation-only and cannot race this generation with a second /api/resume
-    // or curve write after the coordinator admitted the rebuild.
-
-    committedResumeGeneration = targetGeneration;
-    networkAccelerationWake.schedule(targetGeneration);
-    resumeRetryCounts.delete(targetGeneration);
-    const schemeOwner = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
-    const performanceOwner = await restorePerformanceScheduleIfConfigured(mode, {
+    if (!followup || followup.generation !== targetGeneration || !ownsCurrent()) return;
+    // Keep each exact in-flight operation and its result across revocation.
+    // A successor consumes it only while the original shared queue is current.
+    followup.scheme ??= reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
+    const schemeOwner = await followup.scheme;
+    if (!ownsCurrent()) return;
+    followup.performance ??= restorePerformanceScheduleIfConfigured(followup.mode, {
       dedicatedOnly: schemeOwner !== 'auto',
-      automaticOnly: true,
+      automaticOnly: true, restoreRemembered: true, forceRemembered: true,
     }).catch(() => null);
+    await followup.performance;
+    if (!ownsCurrent()) return;
     // Retained legacy controls stay inactive even when old settings opted in.
-    if (LEGACY_CCD_UNDERVOLT_ACTIVE) await applyCpuAutostart().catch(() => {});
-  }).catch((error) => {
-    // Unexpected frontend errors must use the same bounded retry path instead
-    // of being silently swallowed while native remains in Resuming.
-    scheduleResumeRetry(
-      latestResumeGeneration,
-      error instanceof Error ? error.message : String(error),
-    );
+    if (LEGACY_CCD_UNDERVOLT_ACTIVE) {
+      followup.legacy ??= applyCpuAutostart().catch(() => {});
+      await followup.legacy;
+      if (!ownsCurrent()) return;
+    }
+    followup.completed = true;
+  }, () => resumeLifecycleActive && resumeWorkAllowed && generation === latestResumeGeneration
+    && resumeFollowup?.generation === generation && !resumeFollowup.completed
+    && isSharedPowerLifecycleAdmitted(getSharedPowerLifecycle())).catch((error) => {
+    scheduleResumeRetry(generation, error instanceof Error ? error.message : String(error));
   });
 }
 
@@ -1425,7 +1602,7 @@ function onDynamicBackgroundSettingChanged(): void {
       return;
     }
     window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `正在访问 Steam：${cleanGameTitle(game.title || game.name)}` }));
-    const result = await refreshDynamicBackground(game);
+    const result = await readDynamicGameBackground(game);
     if (generation !== dynamicBackgroundGeneration || !dynamicBackgroundAllowed() || !result) return;
     lastDynamicGameIdentity = `${game.pid}:${game.processCreated || ''}:${game.path || game.name}`;
     dynamicBackgroundActive.value = true;
@@ -1522,7 +1699,7 @@ function onDynamicGameStatus(game: DetectedGame | null): void {
     dynamicBackgroundActive.value = false;
     applyBackgroundState(lastFixedBackgroundState, 'fixed');
     try {
-      const result = await refreshDynamicBackground(game);
+      const result = await readDynamicGameBackground(game);
       if (result && generation === dynamicBackgroundGeneration && dynamicBackgroundAllowed()) {
         lastDynamicGameIdentity = gameIdentity;
         dynamicBackgroundActive.value = true;
@@ -1589,7 +1766,9 @@ onMounted(async () => {
   controllerShortcutRuntime = startControllerShortcutRuntime();
   stopDeckySafetyNotifications = startDeckySafetyNotifications();
   deckyMirrorHost = startDeckyMirrorHost();
+  deckyMirrorHost.startupPhase('native-context');
   monitorHudHost = startMonitorHudHost();
+  stopBootModeReceipts = observeBootModeRuntimeReceipts();
   radialHost = startRadialTestingHost(router);
   stopWallpaperPower=subscribeWallpaperPowerChanged(blocked=>{
     wallpaperPowerPaused.value=blocked;
@@ -1618,14 +1797,59 @@ onMounted(async () => {
   if (!aiFanMockActive && !aiCpuIsolated) void ensureNetworkAccelerationStartupDefault().catch(error => {
     console.warn('网络加速默认开机任务未完成：', error instanceof Error ? error.message : String(error));
   });
+  if (!aiFanMockActive && !aiCpuIsolated) void ensureGameBarControllerStartup().catch(error => {
+    console.warn('Game Bar 手柄入口开机设置未完成：', error instanceof Error ? error.message : String(error));
+  });
   resumeLifecycleActive = true;
   // Register the one-shot native wake events before the first awaited startup
   // operation. A controller recreated during S3 recovery can otherwise miss
   // resume-ready while settings/background initialization is still running.
-  window.addEventListener('ipc:power.suspending', onPowerSuspending as EventListener);
   window.addEventListener('ipc:fan.suspending', onFanPhysicalSuspending as EventListener);
-  window.addEventListener('ipc:power.resuming', onPowerResuming as EventListener);
-  window.addEventListener('ipc:power.resumed', onPowerResumed as EventListener);
+  let sharedPowerKey = '', sharedPowerSeen = false, sharedPowerAdmitted = false;
+  stopSharedPowerWatch = onSharedPowerLifecycle(state => {
+    if (!resumeLifecycleActive) return;
+    resumeWorkAllowed = state.known !== false && state.notificationPending !== true &&
+      (state.phase === 'ready' || state.phase === 'resuming');
+    const admitted = isSharedPowerLifecycleAdmitted(state);
+    if (!admitted) {
+      sleepPlanOptimizationQueue.invalidate();
+      if (sleepPlanOptimizationConfirmation) sleepPlanOptimizationConfirmation.denied = true;
+    }
+    else if (sleepPlanOptimizationRequest) continueSleepPowerPlanOptimization();
+    const admissionRestored = admitted && !sharedPowerAdmitted;
+    const admissionLost = !admitted && sharedPowerAdmitted;
+    sharedPowerAdmitted = admitted;
+    const key = `${state.generation}:${state.phase}:${state.known}:${state.notificationPending}`;
+    if (key === sharedPowerKey) {
+      if (admissionLost) resumeQueue.invalidate();
+      // Admission alone wakes only this retained task, not the whole wake broadcast.
+      if (admissionRestored && resumeFollowup?.generation === state.generation && !resumeFollowup.completed)
+        scheduleResumeTransaction(state.generation);
+      return;
+    }
+    const first = !sharedPowerSeen;
+    sharedPowerSeen = true; sharedPowerKey = key;
+    const event = new CustomEvent('shared:power-lifecycle', { detail: state });
+    if (state.known === false || state.notificationPending === true) {
+      resumeQueue.invalidate();
+      if (resumeRetryTimer) { clearTimeout(resumeRetryTimer); resumeRetryTimer = null; }
+      networkAccelerationWake.cancel(); tdpRuntimeStore.invalidatePower();
+      if (resumeVideoTimer !== null) window.clearTimeout(resumeVideoTimer);
+      resumeVideoTimer = null; suspendBackgroundVideo();
+      // Unknown shared context is not evidence that the Fan device lost F5.
+    } else if (state.phase === 'resuming') onPowerResuming(event);
+    else if (state.phase !== 'ready') onPowerSuspending(event);
+    else if (!first) onPowerResumed(event);
+    else {
+      // A resume-ready edge may precede this source's first known snapshot.
+      // Retain that request; ordinary cold Ready still performs no wake task.
+      if (latestResumeGeneration > 0 && state.generation === latestResumeGeneration)
+        scheduleResumeTransaction(state.generation);
+      if (backgroundVideoSuspended.value) resumeBackgroundVideo();
+    }
+    // Cold Ready is not a new wake. Existing mount/device receipts below keep
+    // their own recovery; subsequent same-gen Ready corrects any private hold.
+  });
   window.addEventListener('fan:guard-state', onFanGuardState as EventListener);
   stopResumeWatch = on<{ generation?: number }>('power.resume-ready', ({ generation }) => {
     onPowerResumeReady(generation);
@@ -1634,9 +1858,7 @@ onMounted(async () => {
     onFanResumeReady(Number(generation) || 0);
   });
   const lifecycleAtMountPromise = powerLifecycle.get().catch(() => null);
-  uiPowerReconciliation = startUiPowerReconciliation(
-    () => powerLifecycle.get(1500), lifecycleAtMountPromise,
-  );
+  uiPowerReconciliation = startUiPowerReconciliation();
   const fanLifecycleAtMountPromise = powerLifecycle.getForFan().catch(() => null);
   try {
     const isolation = await app.aiCpuIsolatedSession() as any;
@@ -1663,9 +1885,18 @@ onMounted(async () => {
   } catch { /* fixed formal path remains the compatibility fallback */ }
   // Validate and warm the shared TDP session once at shell startup. No polling
   // or hardware set is performed here; high-frequency callers reuse its handles.
-  if (!aiCpuIsolated) void primeTdpSession(lifecycleAtMountPromise).catch((error) => {
+  if (!aiCpuIsolated) void primeTdpSession().catch((error) => {
     store.pushLog({ cmd: 'tdp.startup-session', args: {}, ok: false, error: String(error) });
   });
+  // Restore performance ownership before optional Fan/media initialization can
+  // delay it. Keep the same resident writer and boot receipt across later hooks.
+  let startupPerformanceIntent = '';
+  let startupPerformanceResumeGeneration = latestResumeGeneration;
+  stopStartupPerformanceWatch = onContinuousPerformanceApplied(signature => {
+    startupPerformanceIntent = signature;
+    startupPerformanceResumeGeneration = latestResumeGeneration;
+  }, () => { startupPerformanceIntent = ''; });
+  startGamePolicyRuntime();
   // Provision the RTSS bridge at every main YMCC startup, not just when
   // monitoring is enabled. This optional repair must not delay UI readiness,
   // start/restart RTSS, or change the user's currently selected template.
@@ -1676,6 +1907,7 @@ onMounted(async () => {
   // Fan settings must load only after the native-resolved PowerControl path is
   // installed; otherwise a child NavRail mount could write defaults to the
   // compatibility path before native startup finishes resolving directories.
+  deckyMirrorHost?.startupPhase('fan-settings');
   await initializeFanFeature();
 
   // FanHost handshake is optional hardware discovery and must not delay the
@@ -1694,6 +1926,7 @@ onMounted(async () => {
   // Finish settings and background initialization before the optional
   // FanHost handshake. The native splash waits for this signal, so the first
   // visible frame is already in its normal background state.
+  deckyMirrorHost?.startupPhase('ui-settings');
   await loadUiSettings();
   // Wallpaper only needs its persisted switch/appearance and the existing
   // shared media owner. Do not wait for unrelated background, controls or
@@ -1704,6 +1937,7 @@ onMounted(async () => {
   backgroundVideoAutoPause.value = getUiSetting('videoBatteryPause');
   windowPlacement.value = getUiSetting('windowPlacement');
   // Await saved placement before signalling first-paint readiness; never place using defaults first.
+  deckyMirrorHost?.startupPhase('placement');
   await applyWindowPlacement().catch(reportWindowPlacementError);
   window.addEventListener('ui-settings:changed', onWindowPlacementSettingsChanged);
   window.addEventListener('ui-settings:loaded', onWindowPlacementSettingsChanged);
@@ -1720,6 +1954,7 @@ onMounted(async () => {
   // 唤起（托盘呼出）时按设置项对齐主窗口位置。
   window.addEventListener('ipc:window.summoned', onWindowPlacementSummoned);
   document.addEventListener('visibilitychange', onBackgroundVisibilityChange);
+  deckyMirrorHost?.startupPhase('background-state');
   const initialWindowState = await windowApi.getState().catch(() => null);
   if (initialWindowState) {
     nativeWindowVisible.value = Boolean(initialWindowState.visible && !initialWindowState.minimized);
@@ -1729,17 +1964,7 @@ onMounted(async () => {
   lastFixedBackgroundState = initialBackgroundState;
   applyBackgroundState(initialBackgroundState, 'fixed');
   startDynamicBackgroundWatch();
-  // 专属配置的「选择手柄 / 陀螺仪开关」覆盖：常驻订阅，不随窗口可见性暂停，
-  // 否则游戏运行时窗口隐藏会让覆盖无法下发/恢复。
-  startGameInputOverrideWatch();
-  // A startup-local receipt joins Boot and the resident owner without caching hardware state.
-  let startupPerformanceIntent = '';
-  let startupPerformanceResumeGeneration = latestResumeGeneration;
-  stopStartupPerformanceWatch = onContinuousPerformanceApplied(signature => {
-    startupPerformanceIntent = signature;
-    startupPerformanceResumeGeneration = latestResumeGeneration;
-  }, () => { startupPerformanceIntent = ''; });
-  startGamePolicyRuntime();
+  startGameProfileAutoMemory();
   stopLosslessRuntimeOwner=startLosslessRuntimeOwner();
   if (!aiFanMockActive && !aiCpuIsolated) stopGameTrainerAutoPrepare = startGameTrainerAutoPrepare();
   stopUiVisibility = onUiVisibilityChange(({ visible }) => {
@@ -1755,12 +1980,14 @@ onMounted(async () => {
   window.addEventListener('dynamic-background:settings-changed', onDynamicBackgroundSettingChanged);
   window.addEventListener('dynamic-background:loaded', onDynamicBackgroundLoaded as EventListener);
   window.addEventListener('ipc:game.rules.changed', onGameRulesChanged as EventListener);
+  deckyMirrorHost?.startupPhase('power-source');
   const initialPowerMode = await detectPowerModeReliable();
   if (initialPowerMode) {
     rememberPowerSourceMode(initialPowerMode);
     applyVideoPowerMode(initialPowerMode, true);
   }
   else onAcPower.value = (await detectPowerMode().catch(() => 'dc')) === 'ac';
+  deckyMirrorHost?.startupPhase('background-media');
   await reconcileBackgroundVideo();
   window.dispatchEvent(new CustomEvent('app-startup-ready'));
 
@@ -1839,10 +2066,12 @@ onMounted(async () => {
   // Compensate for a one-shot resume event that was emitted while WebView2
   // was being recreated.  The native lifecycle remains `resuming` until the
   // same commit path succeeds, so querying it is safe and idempotent.
+  deckyMirrorHost?.startupPhase('wake-state');
   const lifecycleAtMount = await lifecycleAtMountPromise;
-  if (lifecycleAtMount?.phase === 'resuming' && lifecycleAtMount.resumeReady === true) {
+  const lifecycleAtMountKnown = (lifecycleAtMount as { known?: boolean } | null)?.known !== false;
+  if (lifecycleAtMountKnown && lifecycleAtMount?.phase === 'resuming' && lifecycleAtMount.resumeReady === true) {
     onPowerResumeReady(Number(lifecycleAtMount.generation));
-  } else if (lifecycleAtMount?.phase === 'ready' && lifecycleAtMount.resumeReady === true) {
+  } else if (lifecycleAtMountKnown && lifecycleAtMount?.phase === 'ready' && lifecycleAtMount.resumeReady === true) {
     // The durable native state can outlive the one-shot resume-ready event
     // when the renderer is recreated after the native commit.  Rebind the
     // Fan-local generation and let the idempotent committed-wake path restore
@@ -1853,6 +2082,7 @@ onMounted(async () => {
       fanHostLifecycle.setPowerGeneration(committedGeneration);
       fanHostLifecycle.observePowerBoundary('resumed', committedGeneration);
       requestFanCommittedResume(committedGeneration);
+      scheduleResumeTransaction(committedGeneration);
       networkAccelerationWake.schedule(committedGeneration);
     }
   } else if (lifecycleAtMount?.phase === 'resuming') {
@@ -1865,6 +2095,7 @@ onMounted(async () => {
   // FAN-927 §5（2026-09-27 用户批准）：渲染器重建 / 主程序非正常退出后重开的**唯一**事件入口。
   // 依据完全来自 native 活动记录：本 run 已确认的意图只接上已有会话（不重开 HC、不重发曲线）；
   // 崩溃前仍有效的记录才做一次有界恢复；无依据时零动作（不启动 Host、不发 HTTP）。
+  deckyMirrorHost?.startupPhase('fan-owner');
   const fanLifecycleAtMount = await fanLifecycleAtMountPromise;
   if (fanLifecycleAtMount?.resumeReady === true
       && (fanLifecycleAtMount.phase === 'ready' || fanLifecycleAtMount.phase === 'resuming')) {
@@ -1882,6 +2113,7 @@ onMounted(async () => {
   // Boot scenes apply once per Windows boot; app/renderer restart and wake never replay next-boot scenes.
   // The original Fan resume ownership decision completes before any scene curve can be requested.
   await fanReattach;
+  deckyMirrorHost?.startupPhase('boot-mode');
   if (!aiFanMockActive && !aiCpuIsolated && await powerLifecycleReadyForWrites()) {
     await restoreSelectedBootMode().catch((error) => {
       console.warn('开机模式部分配置未完成，请在开机模式页检查：', error instanceof Error ? error.message : String(error));
@@ -1902,20 +2134,21 @@ onMounted(async () => {
         globalRefreshKey.value++;
         const performanceOwner = await restorePerformanceScheduleIfConfigured(undefined, {
           dedicatedOnly: schemeOwner !== 'auto',
-          automaticOnly: true,
+          automaticOnly: true, restoreRemembered: true,
         }).catch(() => null);
       })
       .catch(() => {});
   });
   // A freshly recreated page can mount while native is still Resuming. Do not
   // let normal boot restoration race the gated wake transaction; the latter
-  // restores the current automatic bank after commit; manual banks stay static.
+  // restores the current saved bank after commit, including remembered manual limits.
+  deckyMirrorHost?.startupPhase('performance');
   try {
     if (!aiCpuIsolated && await powerLifecycleReadyForWrites()) {
       const schemeOwnerAtBoot = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
       const performanceOwnerAtBoot = await restorePerformanceScheduleIfConfigured(undefined, {
         dedicatedOnly: schemeOwnerAtBoot !== 'auto',
-        automaticOnly: true,
+        automaticOnly: true, restoreRemembered: true,
         completedStartupIntent: () => startupPerformanceResumeGeneration === latestResumeGeneration ? startupPerformanceIntent : '',
       }).catch(() => null);
       if (performanceOwnerAtBoot === 'auto' && schemeOwnerAtBoot === 'auto') {
@@ -1935,6 +2168,7 @@ onMounted(async () => {
   }
 
   // ── 任务栏常驻偏好：启动期按持久化套用（默认不常驻，由设置/总闸驱动）──
+  deckyMirrorHost?.startupPhase('tray');
   if (!aiFanMockActive && !aiCpuIsolated) await migrateBootTrayPreference().catch(() => {});
   applyTrayResident().catch(() => {});
   // ── 音乐播放：启动期恢复已配置的音乐目录（不自动播放）──
@@ -1956,11 +2190,14 @@ onMounted(async () => {
   if (!aiFanMockActive && !aiCpuIsolated) { deckyMirrorHost?.ready(); monitorHudHost?.ready(); updatePredownloadHost = startUpdatePredownload(); }
 });
 onUnmounted(() => {
+  backgroundPresentationDisposed = true;
   stopUndervoltRuntime();
   cancelBootModeLaunches();
   cancelBootModeDeferredMouse();
+  stopBootModeReceipts?.(); stopBootModeReceipts = null;
   uiPowerReconciliation?.stop();
   uiPowerReconciliation = null;
+  stopSharedPowerWatch?.(); stopSharedPowerWatch = null;
   updatePredownloadHost?.stop(); updatePredownloadHost = null;
   controllerShortcutRuntime?.stop(); controllerShortcutRuntime = null;
   window.removeEventListener('game-media:changed',onSharedMediaChanged);
@@ -1984,6 +2221,11 @@ onUnmounted(() => {
     dynamicBackgroundNoGameTimer = null;
   }
   resumeLifecycleActive = false;
+  resumeQueue.invalidate();
+  sleepPlanOptimizationQueue.invalidate();
+  sleepPlanOptimizationRequest = null;
+  sleepPlanOptimizationConfirmation?.stop();
+  sleepPlanOptimizationConfirmation = null;
   networkAccelerationWake.dispose();
   if (resumeRetryTimer) {
     clearTimeout(resumeRetryTimer);
@@ -2005,7 +2247,7 @@ onUnmounted(() => {
   }
   invalidateBackgroundMedia();
   stopDynamicBackgroundWatch();
-  stopGameInputOverrideWatch();
+  stopGameProfileAutoMemory();
   stopLosslessRuntimeOwner?.();stopLosslessRuntimeOwner=null;
   stopGamePolicyRuntime();
   stopGameTrainerAutoPrepare?.();
@@ -2028,10 +2270,7 @@ onUnmounted(() => {
   window.removeEventListener('ipc:window.maximized', onBackgroundWindowShown as EventListener);
   window.removeEventListener('ipc:window.summoned', onBackgroundWindowShown as EventListener);
   window.removeEventListener('background:video-battery-pause-changed', onBackgroundVideoPauseChanged as EventListener);
-  window.removeEventListener('ipc:power.suspending', onPowerSuspending as EventListener);
   window.removeEventListener('ipc:fan.suspending', onFanPhysicalSuspending as EventListener);
-  window.removeEventListener('ipc:power.resuming', onPowerResuming as EventListener);
-  window.removeEventListener('ipc:power.resumed', onPowerResumed as EventListener);
   window.removeEventListener('fan:guard-state', onFanGuardState as EventListener);
   window.removeEventListener('ui-settings:loaded', onUiSettingsLoaded as EventListener);
   window.removeEventListener('ui-settings:changed', onUiSettingsLoaded as EventListener);
@@ -2101,6 +2340,7 @@ onUnmounted(() => {
   <div class="app-root">
     <video
       v-if="backgroundUrl && backgroundKind === 'video' && !backgroundVideoSuspended"
+      v-show="!backgroundEditorPaused"
       :key="backgroundVideoGeneration"
       ref="backgroundVideo"
       class="user-background-video"

@@ -1,0 +1,95 @@
+#define NOMINMAX
+#include <windows.h>
+#include <Xinput.h>
+#include <array>
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include <iostream>
+#include <stdexcept>
+#include <string_view>
+#include "sleep_power_state.h"
+#include "touch_haptic_dispatch.h"
+#include "input_host_diagnostic_dispatch.h"
+#include "@@JSON_HEADER@@"
+#include "xinput_identity_refresh_policy.h"
+using json=nlohmann::json;
+static std::atomic<bool> g_exitRequested{false};
+enum class PowerLifecycle{Ready,Suspended};
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static bool g_padConnected=true,g_xinputPhysicalSourceLocked=false;
+static DWORD g_xinputPrimarySlot=0,g_xinputConnectedMask=1,g_xinputVirtualEndpointMask=0,g_xinputSlotUnknownMask=0,g_xinputPhysicalSourceMask=1;
+static std::atomic<DWORD> g_xinputSlotReprobeMask{0};
+static std::atomic<std::uint64_t> g_xinputTopologyEpoch{2},g_xinputSlotIdentityEpoch{3};
+static std::uint64_t power=1;
+static std::uint64_t currentPowerGeneration(){return power;}
+static std::array<unsigned,4> g_xinputSlotIdentityResolvedEpoch{3,0,0,0};
+static std::array<std::shared_ptr<const std::string>,4> g_axisCalibrationXinputKeys;
+static std::array<ymcc::input::identityRefresh::Slot,4> g_xinputFeedbackIdentity;
+@@ACTUAL_SNAPSHOT@@
+using Snapshot=InputCaptureGamepadSnapshot;
+static Snapshot g_inputCaptureGamepadSnapshot;
+static XINPUT_GAMEPAD g_curPad{};static WORD g_curW=0;
+static std::atomic<bool> g_inputReleaseRequired{false};
+static bool g_gamepadAxisNeutralAdmissionRequired=false;
+static std::mutex g_gamepadReadMx;
+static bool enabled=true,fse=true;
+static bool gameOverlayEnabled(){return enabled;}
+struct Carrier {bool shown=false;bool active()const{return shown;}};
+static Carrier g_gameOverlay;
+namespace ymcc::bootmode {struct Platform {bool activeKnown=true,active=true;};static Platform readPlatform(){return {true,fse};}}
+static std::wstring U2W(const std::string& s){return {s.begin(),s.end()};}
+static std::string W2U(const std::wstring& s){std::string out;for(wchar_t c:s)out.push_back(static_cast<char>(c));return out;}
+static std::vector<json> logs;
+static bool diagnosticEnabled=true;
+static std::string throwDiagnosticEvent;
+static unsigned diagnosticThrowAttempts=0;
+static unsigned newDiagnosticAttempts=0,newDiagnosticWithoutScope=0;
+[[maybe_unused]] static bool domainLogEnabled(const char* name){if(std::string_view(name)!="virtual")throw std::runtime_error("wrong diagnostic domain");return diagnosticEnabled;}
+static void appendNativeLifecycleLog(const char* event,const json& j){
+    if(std::string_view(event)=="gamepad-common-hid-inspection"||std::string_view(event)=="gamepad-common-hid-observation") {
+        ++newDiagnosticAttempts;if(!ymcc::inputHost::diagnostics::Scope::active())++newDiagnosticWithoutScope;
+    }
+    if(throwDiagnosticEvent==event){++diagnosticThrowAttempts;SetLastError(4321);throw std::runtime_error("injected diagnostic failure");}
+    logs.push_back({{"event",event},{"data",j}});
+}
+static XINPUT_GAMEPAD inputCanonicalizeGamepad(XINPUT_GAMEPAD p){return p;}
+static unsigned evaluations=0;
+static void gamepadEval();
+#include <initguid.h>
+#include <devpkey.h>
+#include "common_hid_os_leaves.inc"
+static HWND g_rawInputSinkHwnd=reinterpret_cast<HWND>(static_cast<std::uintptr_t>(1706608));
+static HWND g_hwnd=reinterpret_cast<HWND>(static_cast<std::uintptr_t>(1706610));
+@@ACTUAL_REGISTRATION_EVIDENCE@@
+#include "background_controller_ui_runtime.h"
+#pragma comment(lib,"user32.lib")
+#pragma comment(lib,"hid.lib")
+#pragma comment(lib,"cfgmgr32.lib")
+static unsigned checks=0;
+static void check(bool value,const char* text){++checks;if(!value)throw std::runtime_error(text);}
+#include "common_hid_runtime_cases.inc"
+int main(int argc,char** argv)try {
+    [[maybe_unused]] const auto originalBackgroundCapture=&backgroundControllerUiCapture;
+    if(argc!=2||(std::string_view(argv[1])!="--inspect-only"&&std::string_view(argv[1])!="--observation-only"&&std::string_view(argv[1])!="--business-only"&&std::string_view(argv[1])!="--inspection-early"&&std::string_view(argv[1])!="--inspection-early-business"&&std::string_view(argv[1])!="--off-fse"&&std::string_view(argv[1])!="--source-binding"))throw std::runtime_error("explicit runtime projection required");
+    g_inputCaptureGamepadSnapshot.inputSource="xinput";
+    g_inputCaptureGamepadSnapshot.readContextStable=true;
+    g_inputCaptureGamepadSnapshot.readPowerGeneration=1;
+    g_inputCaptureGamepadSnapshot.readTopologyGeneration=2;
+    g_inputCaptureGamepadSnapshot.readIdentityGeneration=3;
+    g_axisCalibrationXinputKeys[0]=std::make_shared<const std::string>("\\\\?\\usb#actual-selected-source");
+    using namespace ymcc::input::identityRefresh;
+    g_xinputFeedbackIdentity[0].observe({true,true,false,false,L"actual-selected-source",Kind::Physical,3,3,1,1});
+    runtimeBusinessOnly=std::string_view(argv[1])=="--business-only"||std::string_view(argv[1])=="--inspection-early-business";
+    commonRuntimeCases(std::string_view(argv[1])=="--source-binding"?"source-binding":std::string_view(argv[1])=="--off-fse"?"off-fse":std::string_view(argv[1]).starts_with("--inspection-early")?"inspection-early":std::string_view(argv[1])=="--observation-only"?"observation-only":"inspect-only");
+    if(!runtimeBusinessOnly)check(newDiagnosticAttempts>0&&!newDiagnosticWithoutScope&&!ymcc::inputHost::diagnostics::Scope::active(),"both new diagnostic sites use real deferred Scope and restore TLS after exceptions");
+    std::cout<<json{{"checks",checks},{"cases",runtimeProjectionCases},{"projection","common-hid-runtime"},
+        {"originalCanonicalId","controller.unified-standard-input"},{"physicalInput",false},
+        {"actualInspect",true},{"actualCaptureReadLane",true},{"legacy211Executed",false},
+        {"businessTrace",runtimeBusinessTrace},{"newDiagnosticAttempts",newDiagnosticAttempts},{"newDiagnosticWithoutScope",newDiagnosticWithoutScope},
+        {"rawInputLeafCalls",fakeOs.rawCalls},{"hidLeafCalls",fakeOs.hidCalls},{"cfgLeafCalls",fakeOs.cfgCalls}}.dump()<<'\n';
+    return 0;
+}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}

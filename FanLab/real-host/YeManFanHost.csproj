@@ -33,6 +33,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\..\native\ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
+    <Compile Include="..\..\native\SharedSleepPower\RemotePowerContracts.cs" Link="SharedSleepPower\RemotePowerContracts.cs" />
+    <Compile Include="..\..\native\SharedSleepPower\RemoteNativePowerClient.cs" Link="SharedSleepPower\RemoteNativePowerClient.cs" />
     <Compile Include="..\DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
     <Compile Include="..\RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />
   </ItemGroup>

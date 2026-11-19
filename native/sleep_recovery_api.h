@@ -7,6 +7,7 @@ using namespace ymcc::sleeprecovery;
 struct Ticket {
     std::string id;
     ULONGLONG issued=0,generation=0,inputEpoch=0;
+    std::shared_ptr<ymcc::inputHost::sharedPower::Scope> repairPower;
     std::vector<SgWakeRecoveryEntry> entries;
     bool stale=false,inputAllowed=false;
     json report;
@@ -96,10 +97,15 @@ static bool inputAllowed(const json& i,ULONGLONG generation,ULONGLONG epoch) {
         flag(i,"quarantined"),flag(i,"transportFault"),generation,currentPowerGeneration(),epoch,number(i,"epoch")) &&
         inputBindingAllowed(number(i,"boundGeneration"),generation,number(i,"powerBindingProofGeneration"))&&!flag(i,"faultHold");
 }
+static bool repairPowerCurrent(const Ticket& t) noexcept {
+    return t.repairPower&&t.repairPower->power().generation==t.generation&&t.repairPower->current();
+}
 static std::string gate(const Ticket& t,const Leases& now,bool confirmed,bool tokenKnown) {
-    return repairGate(confirmed,g_aiFanMockSession.isolated,g_exitRequested.load(),
+    auto refusal=repairGate(confirmed,g_aiFanMockSession.isolated,g_exitRequested.load(),
         g_powerLifecycle.load()==PowerLifecycle::Ready,hardwareWriteAllowed(),sgSleepRetryActive(),
         g_sgWakeRecoveryPending.load(),tokenKnown,t.issued,GetTickCount64(),t.generation,currentPowerGeneration(),sameLeases(now,t));
+    if(refusal.empty()&&!repairPowerCurrent(t))return "power-admission-revoked";
+    return refusal;
 }
 static json inspect(const json& a) {
     json ids=json::array();
@@ -107,7 +113,9 @@ static json inspect(const json& a) {
         const auto id=number(a,"appid");if(!id||id>MAXDWORD)throw std::runtime_error("invalid-steam-appid");ids.push_back(id);
     }
     std::lock_guard<std::mutex> lock(mx);Ticket t;
-    t.generation=currentPowerGeneration();t.id="sleep-check-"+std::to_string(GetTickCount64())+"-"+std::to_string(++serial);
+    t.repairPower=ymcc::inputHost::sharedPower::Scope::create(&readSharedSystemPower,g_sharedPowerRevocations,false);
+    t.generation=t.repairPower?t.repairPower->power().generation:currentPowerGeneration();
+    t.id="sleep-check-"+std::to_string(GetTickCount64())+"-"+std::to_string(++serial);
     json state,games=json::array(),input;Leases leases;
     {
         std::lock_guard<std::mutex> op(g_sgOpMtx);leases=readLeases();t.entries=leases.entries;
@@ -136,8 +144,21 @@ static json inspect(const json& a) {
     if(flag(tail.meta,"truncated"))std::getline(stream,line);
     while(std::getline(stream,line)){if(lines.size()==4096)lines.erase(lines.begin());lines.push_back(line);}
     {std::lock_guard<std::mutex> fact(g_sgFactMx);for(const auto& row:g_sgFacts)lines.push_back(row);}
-    DWORD account=0;sofRegDWORD(HKEY_CURRENT_USER,L"Software\\Valve\\Steam\\ActiveProcess",L"ActiveUser",&account);
-    json steam=steamLiveRequest(account,{{"operation","sleep.inspect"},{"appids",ids}});
+    // Consume the sole publisher; an unreadable/zero account is Unknown.
+    const auto identityView=g_steamSettingsObserver.identityReadView();
+    const auto identity=identityView.identitySnapshot();
+    const auto identityCurrent=[&] {
+        const auto now=identityView.identitySnapshot();
+        return identity&&now&&now->presence==1&&now->processEpoch==identity->processEpoch&&
+            now->accountEpoch==identity->accountEpoch&&now->session==identity->session&&
+            now->accountReadError==ERROR_SUCCESS;
+    };
+    json steam={{"ok",false},{"reason","steam-session-starting"},{"mutated",false},{"requestDispatched",false}};
+    if(identity&&identity->presence==1&&identity->accountReadError==ERROR_SUCCESS&&
+        identity->session.account&&identityCurrent()) {
+        steam=steamLiveRequest(identity->session.account,{{"operation","sleep.inspect"},{"appids",ids}});
+        if(!identityCurrent())steam={{"ok",false},{"reason","steam-session-changed"},{"mutated",false}};
+    }
     state["steamAvailable"]=flag(steam,"ok");state["steamTargetKnown"]=false;state["steamMismatch"]=false;
     // An explicit AppID is operator supplied, NOT a proven association with an OS PID.
     if(flag(steam,"ok")&&!ids.empty()&&steam.contains("overviews")&&steam["overviews"].is_array())
@@ -152,6 +173,7 @@ static json inspect(const json& a) {
         for(const auto& e:t.entries)if(sgMarkerIsSuspended(SG_MANUAL_DIR,e.pid))refusal="manual-pause-protected";
     }
     if(refusal.empty()&&t.entries.empty()&&!t.stale&&!t.inputAllowed)refusal="no-safe-action";
+    if(!refusal.empty())t.repairPower.reset();
     state["generation"]=t.generation;state["inputEpoch"]=t.inputEpoch;
     const auto findings=checks(state,lines);
     t.report={{"ok",true},{"inspectionToken",t.id},{"expiresInMs",30000},{"generation",t.generation},
@@ -164,9 +186,10 @@ static json inspect(const json& a) {
         {"limits",json::array({"No Steam restart/game launch/AppID spoofing/target recreation.",
             "Steam AppID is operator supplied; game input and Big Picture continue state need manual verification.",
             "Bounded log tail, current process/thread snapshot; no automatic upload."})}};
-    latest=t;sgRecordFact("sleep-recovery-inspected",{{"inspectionToken",t.id},{"generation",t.generation},
+    sgRecordFact("sleep-recovery-inspected",{{"inspectionToken",t.id},{"generation",t.generation},
         {"leaseCount",leases.count},{"repairAllowed",refusal.empty()},{"healthVerified",false}});
-    return t.report;
+    latest=std::move(t);
+    return latest.report;
 }
 static json repair(const json& a,unsigned long long autoEpoch=0) {
     std::lock_guard<std::mutex> lock(mx);std::lock_guard<std::mutex> op(g_sgOpMtx);
@@ -178,14 +201,23 @@ static json repair(const json& a,unsigned long long autoEpoch=0) {
     const auto input=inputSnapshot();
     if(refusal.empty()&&(!g_inputReady.load()||number(input,"epoch")!=latest.inputEpoch))refusal="state-changed";
     if(refusal.empty()&&(!latest.report.contains("repair")||!flag(latest.report["repair"],"allowed")))refusal="inspection-not-repairable";
-    if(!refusal.empty())return {{"ok",false},{"accepted",false},{"reason",refusal},{"healthVerified",false}};
+    if(refusal.empty()&&!repairPowerCurrent(latest))refusal="power-admission-revoked";
+    if(!refusal.empty()){
+        if(known&&(refusal=="inspection-expired"||!repairPowerCurrent(latest)))latest.repairPower.reset();
+        return {{"ok",false},{"accepted",false},{"reason",refusal},{"healthVerified",false}};
+    }
     const std::string id=latest.id;latest.id.clear(); // single use; ambiguous IPC never retries a repair
-    const bool queued=!latest.entries.empty()&&sgBeginUserSleepGameRecoveryUnlocked(latest.generation,latest.entries,id,autoEpoch);
+    const auto admission=std::move(latest.repairPower);
+    const auto powerCurrent=[&]{return admission&&admission->current();};
+    const bool queued=!latest.entries.empty()&&powerCurrent()&&
+        sgBeginUserSleepGameRecoveryUnlocked(latest.generation,latest.entries,id,autoEpoch,admission);
     bool reconciled=false;
-    if(latest.entries.empty()&&latest.stale&&!now.owner&&now.count==0){sgReconcileSleepGameFlagsAfterRecoveryCancel("user-inspected-repair");reconciled=true;}
+    if(latest.entries.empty()&&latest.stale&&!now.owner&&now.count==0&&powerCurrent()){
+        sgReconcileSleepGameFlagsAfterRecoveryCancel("user-inspected-repair");reconciled=true;
+    }
     const bool refreshed=latest.inputAllowed&&inputAllowed(input,latest.generation,latest.inputEpoch)&&
-        inputHostQueueLifecycleWork(((autoEpoch?"sleep-auto-input:":"sleep-repair-input:")+std::to_string(latest.generation)+":"+
-            std::to_string(latest.inputEpoch)+(autoEpoch?":"+std::to_string(autoEpoch):std::string())).c_str());
+        powerCurrent()&&inputHostQueueSleepRepair(((autoEpoch?"sleep-auto-input:":"sleep-repair-input:")+std::to_string(latest.generation)+":"+
+            std::to_string(latest.inputEpoch)+(autoEpoch?":"+std::to_string(autoEpoch):std::string())).c_str(),admission);
     const bool accepted=queued||reconciled||refreshed;
     json result={{"ok",accepted},{"accepted",accepted},{"requestId",id},{"gameQueued",queued},{"flagsReconciled",reconciled},
         {"inputQueued",refreshed},{"reason",accepted?"accepted-not-health-verified":"state-changed"},{"healthVerified",false}};
@@ -221,10 +253,12 @@ static json exportFeedback(const json& a) {
     manifest["files"].push_back({{"file","diagnosis.json"},{"saved",diagnosisSaved}});
     manifest["files"].push_back({{"file","operator-feedback.json"},{"saved",feedbackSaved}});
     const auto data=yemancc_data_dir();
-    std::vector<std::pair<std::wstring,std::wstring>> logs={{L"sleep-facts.log",SG_FACT_LOG},{L"sleep-facts.log.1",SG_FACT_LOG+L".1"},
+    std::vector<std::pair<std::wstring,std::wstring>> logs={{L"sleep-facts.log",SG_FACT_LOG},{L"sleep-facts.log.previous",SG_FACT_LOG+L".previous"},{L"sleep-facts.log.1",SG_FACT_LOG+L".1"},
         {L"native-lifecycle.log",data+L"\\native-lifecycle.log"},{L"virtual-gamepad.log",data+L"\\virtual-gamepad.log"},
         {L"input-host-xbox-sdk.log",data+L"\\input-host-xbox-sdk.log"},{L"focus-trace.log",data+L"\\focus-trace.log"}};
-    const auto root=sofRegSZ(HKEY_CURRENT_USER,L"Software\\Valve\\Steam",L"SteamPath");
+    // Installation metadata remains readable when Steam has no running process.
+    const auto identity=g_steamSettingsObserver.identityReadView().identitySnapshot();
+    const auto root=identity&&identity->rootReadError==ERROR_SUCCESS?identity->registryRoot:std::wstring{};
     if(!root.empty()){logs.push_back({L"steam-gameprocess.log",root+L"\\logs\\gameprocess_log.txt"});
         logs.push_back({L"steam-controller.log",root+L"\\logs\\controller.txt"});}
     else {

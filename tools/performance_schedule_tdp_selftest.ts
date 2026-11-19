@@ -1,5 +1,6 @@
 import { reactive } from 'vue';
-import './mock-shell';
+import { emitMockIpcEvent } from './mock-shell';
+import { startForegroundPowerSourceRefresh } from '../src/bridge/powerSource';
 import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -7,6 +8,7 @@ import { automaticCpuControls } from '../src/bridge/performanceControls';
 import { installFixtureClock } from './ymcc_sim/global/tdp-schedule-consumer/fixture-clock';
 
 const YEMAN = '1cb8b882-a900-4b9f-9bac-99d151e64441';
+startForegroundPowerSourceRefresh(() => {});
 const CPU_MAX_STATE = 'bc5038f7-23e0-4960-96da-33abaf5935ec';
 const CPU_FREQ0 = '75b0ae3f-bce0-45a7-8c89-c9611c25e100';
 const CPU_BOOST = 'be337238-0d82-4146-a960-4f3749d470c7';
@@ -383,7 +385,7 @@ async function main(): Promise<void> {
       return powerValues.get(`${args?.name}|${setting}`) ?? 0;
     }
     if (cmd === 'power.schemeExists') return {ok:true,exists:true,code:0};
-    if (cmd === 'power.sourceSnapshot') return {known:true,acLine:0};
+    if (cmd === 'power.sourceSnapshot') return {known:true,acLine:0,generation:1};
     if (cmd === 'fs.readTextRange' && /game-custom\.json/i.test(String(args?.path))) {
       const content=readFileSync(args.path,'utf8'),size=new TextEncoder().encode(content).byteLength;
       return {content:size>args.maxBytes?'':content,offset:0,size};
@@ -568,6 +570,7 @@ async function main(): Promise<void> {
       if (cmd === 'game.detect') return fixtureGame ? {pid:9876,name:fixtureGame,path:'C:\\Fixture\\'+fixtureGame,title:'Fixture',processCreated:'12345'} : null;
       if (cmd === 'sys.info') return { cpuName: 'Intel(R) Arc(TM) G3 Extreme', physicalCores: 16, logicalProcs: 16, totalMemoryBytes: 1, acLine: oemPowerSide === 'ac' ? 1 : 0, powerMode: oemPowerSide, hasBattery: true };
       if (cmd === 'power.lifecycle') return { ...previousResponder(cmd, args), generation: nativeGeneration };
+      if (cmd === 'power.sourceSnapshot') return { known: true, acLine: oemPowerSide === 'ac' ? 1 : 0, generation: nativeGeneration };
       if (cmd === 'tdpMsi.set') {
         assert(Number.isInteger(args.watts) && args.watts >= 8 && args.watts <= 200, 'every OEM request is an application packet value, not a CPU/model ceiling');
         assert(args.generation === nativeGeneration, 'every OEM write must use the current native generation');
@@ -594,7 +597,7 @@ async function main(): Promise<void> {
     await (await import('../src/bridge/gamedetect')).refreshGameStatusStrict();
     yeman.setPowerControlDir(dir);
     circuit.resetTdpCapabilityState();
-    runtime.tdpRuntimeStore.powerMode('dc');
+    emitMockIpcEvent('power.sourceChanged', { known: true, acLine: 0, generation: nativeGeneration });
     assert(await yeman.setTdp('ac', 20, { apply: true, save: false, vendor: 'amd', source: 'ui' }), 'G3E uses native actual vendor, not stale saved AMD');
     assert(oemCalls.length === 1 && oemCalls[0].watts === 20 && oemCalls[0].generation === 1, 'same native OEM request contains watts and live epoch');
     assert(oemCalls[0].explicitRetry === false, 'diagnostic source ui is not a retry authorization');
@@ -619,6 +622,16 @@ async function main(): Promise<void> {
       const receipt = observations.filter(r => r.event === 'tdp.target-resolved').pop();
       assert(receipt.requestedW === intent && receipt.effectiveW === Math.max(8, intent) && runtime.tdpRuntimeStore.get().watts === effective, 'offered intent and OEM-accepted setting stay separate');
     }
+    const beforeCachedCeiling = oemCalls.length;
+    for (const maximum of [null, NaN, 0, 15]) {
+      let rejected = false;
+      try { await yeman.setTdp('ac', 25, { apply: true, save: false, source: 'autofloat', maxWatts: 55, currentMaxWatts: () => maximum }); }
+      catch { rejected = true; }
+      assert(rejected && oemCalls.length === beforeCachedCeiling, 'cached current ceiling rejects bad/stale floating envelope before hardware');
+    }
+    let ceilingReads = 0;
+    try { await yeman.setTdp('ac', 25, { apply: true, save: false, source: 'autofloat', maxWatts: 55, currentMaxWatts: () => ++ceilingReads < 3 ? 55 : 15 }); } catch { /* superseded before final dispatch */ }
+    assert(ceilingReads >= 3 && oemCalls.length === beforeCachedCeiling, 'final scalar check blocks a lowered slider after async admission');
     assert(yeman.formatTdpTarget(120) === '120W', 'unknown machine maximum does not introduce a waiting-status label into the existing frontend');
     for (const strategy of ['none', 'small', 'medium', 'large', 'aggressive'] as const) {
       const target = autofloat.getTdpTarget(120, strategy);
@@ -636,7 +649,7 @@ async function main(): Promise<void> {
       oemPowerSide = side;
       // Deliver the same source receipt and revocation as App's native event binding.
       // Changing sys.info alone no longer changes the event-owned execution side.
-      runtime.tdpRuntimeStore.powerMode(side);
+      emitMockIpcEvent('power.sourceChanged', { known: true, acLine: side === 'ac' ? 1 : 0, generation: nativeGeneration });
       autofloat.invalidateFloatPowerSource(side);
       assert(await schedule.applyPerformanceSchedule(side, 'balanced', modelConfig), 'each canonical AC/DC bank can cold/hot switch');
       const saved = await schedule.loadPerformanceSchedule();
@@ -674,7 +687,8 @@ async function main(): Promise<void> {
       fixtureMonitor = true;
       autofloat.setAutofloatPowerControlDir(dir);
       const floatBank = schedule.continuousControlsFromSchedule(await schedule.loadPerformanceSchedule()).dc;
-      floatBank.tdp = 35; floatBank.auto.saving = 'aggressive'; floatBank.auto.bias = 25;
+      // The 30s rollback contract is for an ordinary saving trial; aggressive backoff uses 5s.
+      floatBank.tdp = 35; floatBank.auto.saving = 'medium'; floatBank.auto.bias = 25;
       await settle('enable', autofloat.enableContinuousFloat(floatBank, 'dc', 60, async () => true, async () => {}, { requested: 120, accepted: 35 }));
       await settle('save-portable-intent', yeman.saveTdp('dc', 120));
       await waitForApplied('first-admitted-TDP-trial', w => w >= 8 && w < 35);
@@ -755,9 +769,14 @@ async function main(): Promise<void> {
     const acceptedBeforeHotkey = Math.min(firmwareAcceptedCeiling, oemCalls.at(-1).watts);
     assert(acceptedBeforeHotkey > 8 && acceptedBeforeHotkey < 35 && runtime.tdpRuntimeStore.get().watts === acceptedBeforeHotkey,
       'disabled float preserves its last accepted limit for the next explicit hotkey');
-    assert(await yeman.adjustTdp(-1) === acceptedBeforeHotkey - 1 && oemCalls.at(-1).watts === acceptedBeforeHotkey - 1 && await yeman.readTdp('dc') === 120,
-      'manual hotkey decreases from current effective limit, not from old 120W intent');
-    assert(await yeman.setTdpCurrentMode(120) === 35, 'manual explicit target returns actual admitted watts');
+    const beforeHotkey = await schedule.getContinuousPerformanceSnapshot('effective');
+    const selectedNext = beforeHotkey.bank!.tdp - 1;
+    assert(await yeman.adjustTdp(-1) === selectedNext && oemCalls.at(-1).watts === selectedNext &&
+      (await schedule.getContinuousPerformanceSnapshot('effective')).bank!.tdp === selectedNext,
+      'compatibility hotkey updates the saved effective bank through the sole consumer');
+    assert(await yeman.setTdpCurrentMode(120) === null, 'saved high target with different OEM receipt must not report exact hardware application');
+    assert(await yeman.setTdpCurrentMode(18) === 18 && (await schedule.getContinuousPerformanceSnapshot('effective')).bank!.tdp === 18,
+      'current-mode TDP saves the global/dedicated owner and confirms its own accepted value');
     assert(nonOemCalls.length === 0, 'full model flow never starts a helper/daemon or replays MSR');
     nativeGeneration = 1;
     oemCapability = validOemCapability;

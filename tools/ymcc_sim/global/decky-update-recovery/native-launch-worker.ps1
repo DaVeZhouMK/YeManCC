@@ -104,7 +104,7 @@ try {
  Need ($parent.StartTime.ToUniversalTime().Ticks.ToString() -ceq $r.parent.birthTicks -and $parent.MainModule.FileName -ieq $r.parent.image -and (Parent-Alive)) 'EXACT_MAIN_PARENT_IDENTITY'
  $stopTask=$controlReader.ReadLineAsync()
  $changes=@(Validate-Pins);Need ($changes.Count -eq 0) 'SOURCE_OR_TOOL_CHANGED_BEFORE_COMPILE'
- Need ((Sha $r.packageManifest.path) -ceq '2ba2e58c4c1367375cd265192972a371e993544880623f4b51ca412cfe85746a') 'ORIGINAL_PACKAGE_MANIFEST_PIN'
+ Need ((Sha $r.packageManifest.path) -ceq '1d11f644c53635da9ba0c660a0f8f0f515915c8f430289a1124572ed83a37074') 'ORIGINAL_PACKAGE_MANIFEST_PIN'
  $authority=Get-YmccPackageFixtureToolAuthority $r.packageManifest.path
  Need ($authority.files.Count -eq 42) 'ORIGINAL_42_COMPILER_TOOLS'
  foreach($row in $authority.files){Need ((Sha $row.path) -ceq $row.sha256) ('COMPILER_TOOL_PIN:'+ $row.path)}

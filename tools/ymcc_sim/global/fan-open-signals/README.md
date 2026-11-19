@@ -24,6 +24,6 @@ Only those four flags are accepted. Unknown flags, positional arguments, missing
 
 The fixture preserves actual `IDevice.Open`, `ClawA1M.Open`, A2VM/CG3EM overrides, BZ2EM block 82, and relevant helpers. WMI, HID, UEFI, waits, release and disposal remain inert and counted. The original harness rejects parent opcode/call sequence drift and a base-only model.
 
-`node --test tools/ymcc_sim/global/fan-open-signals/entry.test.mjs` checks portable baseline/Cecil discovery, strict CLI rejection, static descriptors, hard-pinned identity failures, and real BLOCKED receipts. Set `YMCC_FAN_OPEN_TEST_ROOT` to retain scratch evidence in a chosen workspace.
+`node --test tools/ymcc_sim/global/fan-open-signals/entry.test.mjs` checks portable baseline/Cecil discovery, strict CLI rejection, static descriptors, hard-pinned identity failures, and real BLOCKED receipts. By default, the test creates and returns an owned directory under the simulation Workspace only when a case needs it. Set `YMCC_FAN_OPEN_TEST_ROOT` to retain that run's scratch evidence under a chosen parent.
 
 A PASS proves the bounded software consumers and complete source-derived parent model. Physical EC, firmware, HID, WMI and fan RPM behavior remain unverified. The entry does not start Host Main or install the candidate.

@@ -50,7 +50,7 @@ static void after(){
  reset({{100,L"HWiNFO64.exe"}});osfacts::s.rows[0].openFail=true;osfacts::s.mode=osfacts::QueryMode::unsupported;require(focus_after::focusIsBackgroundMonitorWindow(hwnd(100))&&osfacts::s.snapshots==1,"complete centralized old-system fallback retains monitor rejection");returned();
  reset({{100,L"HWiNFO64.exe"}});require(!focus_after::focusIsBackgroundMonitorWindow(nullptr)&&!focus_after::focusIsBackgroundMonitorWindow(hwnd(101))&&osfacts::s.opens==0&&osfacts::s.queryCalls==0,"invalid windows never discover processes");
  reset({{100,L"Unrelated.exe"},{101,L"Game.exe"}});require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==101,"path finder returns exact live game");require(osfacts::s.opens==1&&windowfacts::finds==1,"basename shortlist avoids unrelated path handles");returned();
- osfacts::s.rows[1].path=LR"(Q:\Else\Game.exe)";require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==0&&osfacts::s.queryCalls==2,"fresh0 discovery does not reuse old path success");returned();
+ osfacts::s.rows[1].path=LR"(Q:\Else\Game.exe)";require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==0&&osfacts::s.queryCalls==1,"cached topology still rechecks the live exact path");returned();
  reset({{100,L"Game.exe"},{101,L"GAME.EXE"}});osfacts::s.rows[0].path=LR"(Q:\Games\Game.exe)";osfacts::s.rows[1].path=LR"(Q:\GAMES\GAME.EXE)";require(focus_after::focusFindProcessByPath(LR"(q:\games\game.exe)")==100,"case-insensitive original first exact matching row preserved");
  windowfacts::missing.insert(100);require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==101,"same path without eligible window skips to next exact instance");
  reset({{100,L"Game.exe"},{101,L"Game.exe"}});osfacts::s.rows[0].session=8;require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==101,"foreign session skipped before exact path admission");
@@ -64,6 +64,23 @@ static void after(){
  reset();osfacts::s.rows[0].path=LR"(\\server\share\Game.exe)";require(focus_after::focusFindProcessByPath(LR"(\\server\share\Game.exe)")==100,"UNC filename and exact path semantics preserved");
  reset();osfacts::s.rows[0].path=LR"(\\?\Q:\Games\Game.exe)";require(focus_after::focusFindProcessByPath(LR"(\\?\Q:\Games\Game.exe)")==100,"extended Windows path basename semantics retained");
  reset();windowfacts::beforeOpen=[](DWORD){osfacts::s.rows[0].path=LR"(Q:\Other\Other.exe)";};require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==0,"post-topology image replacement still fails exact live path gate");returned();
+ // Compare the actual candidate with the same function using fresh0. No window
+ // can be returned until the live identity/window gates succeed.
+ reset();windowfacts::missing.insert(100);
+ for(unsigned i=0;i<20;++i){require(focus_uncached::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==0,"uncached missing-window control stays unresolved");osfacts::s.tick+=50;}
+ require(osfacts::s.queryCalls==20,"fresh0 control proves one full discovery per 50ms retry");returned();
+ reset();windowfacts::missing.insert(100);
+ for(unsigned i=0;i<20;++i){require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==0,"cached missing-window retries never manufacture a target");osfacts::s.tick+=50;}
+ require(osfacts::s.queryCalls==4,"50ms retry train coalesces discovery to four reads per second");returned();
+ reset();windowfacts::missing.insert(100);require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==0,"missing window initially unresolved");
+ osfacts::s.tick+=50;windowfacts::missing.clear();require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==100&&osfacts::s.queryCalls==1,"new live window on known PID resolves without a new topology read");returned();
+ reset({});require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==0,"empty topology is only an unresolved candidate set");
+ osfacts::s.rows.push_back({100,L"Game.exe"});osfacts::s.rows[0].path=LR"(Q:\Games\Game.exe)";windowfacts::windows.emplace(hwnd(100),100);
+ osfacts::s.tick+=249;require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==0&&osfacts::s.queryCalls==1,"new PID is not invented inside bounded topology cache");
+ ++osfacts::s.tick;require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==100&&osfacts::s.queryCalls==2,"new process appears at original 250ms cache boundary");returned();
+ reset();require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==100,"success before fresh failure control");osfacts::s.tick+=250;osfacts::s.mode=osfacts::QueryMode::failed;
+ require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==0&&osfacts::s.queryCalls==2,"fresh topology failure never revives earlier success");returned();
+ osfacts::s.mode=osfacts::QueryMode::complete;ymcc::processInventory::invalidate();require(focus_after::focusFindProcessByPath(LR"(Q:\Games\Game.exe)")==100&&osfacts::s.queryCalls==3,"explicit owner invalidation observes recovery immediately");returned();
  std::cout<<nlohmann::json{{"passed",true},{"checks",checks},{"actualOriginalFunctions",true},{"actualOwner",true},{"realWindowsOrProcesses",false}}.dump()<<"\n";
 }
 int main(int argc,char**argv){try{if(argc!=2)throw std::runtime_error("selection required");if(!strcmp(argv[1],"--before"))before();else if(!strcmp(argv[1],"--after"))after();else throw std::runtime_error("unknown selection");return 0;}catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<"\n";return 1;}}

@@ -17,15 +17,25 @@
 param(
   [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,
   [string]$InstallRoot = 'C:\SOFT\YeMan\YeManCC',
+  # Bind product bytes to their original frozen source; tools may be repaired later.
+  [Alias('ProductRoot')][string]$SourceProjectRoot = '',
+  [string]$SteamGuardSuccessorReceipt = '',
   # 203 (2026-09-22 Gate C decision): verify the deployment on an explicit ISOLATED copy.
   [switch]$IsolatedRoot
 )
 
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'ymcc-shared-runtime\shared-runtime.ps1')
-. (Join-Path $PSScriptRoot 'hc-device-runtime\verify-runtime.ps1')
-. (Join-Path $PSScriptRoot 'lighting-build-contract.ps1')
-. (Join-Path $PSScriptRoot 'settings-baseline-contract.ps1')
+if($SteamGuardSuccessorReceipt){
+  if(-not $SourceProjectRoot){throw 'EXPORT_GUARD_SUCCESSOR_EXPLICIT_PRODUCT_REQUIRED'}
+  . (Join-Path $PSScriptRoot 'export-steam-guard-successor.ps1')
+  if(-not $WorkspaceRoot){$WorkspaceRoot=[IO.Path]::GetFullPath((Join-Path $SourceProjectRoot '../..'))}
+  $null=New-YmccSteamGuardSuccessorContext $SteamGuardSuccessorReceipt $SourceProjectRoot $WorkspaceRoot
+}
+$SourceToolRoot = if ($SourceProjectRoot) { Join-Path ([IO.Path]::GetFullPath($SourceProjectRoot)) 'tools' } else { $PSScriptRoot }
+. (Join-Path $SourceToolRoot 'ymcc-shared-runtime\shared-runtime.ps1')
+. (Join-Path $SourceToolRoot 'hc-device-runtime\verify-runtime.ps1')
+. (Join-Path $SourceToolRoot 'lighting-build-contract.ps1')
+. (Join-Path $SourceToolRoot 'settings-baseline-contract.ps1')
 
 # Called only after the existing complete Assert-ExportBuildIdentity gate.
 # Native is deployed later in this script: validate its planned source here.
@@ -109,6 +119,42 @@ function Copy-InstalledLightingPayload {
     throw $failure
   }
   return $installed
+}
+
+function Get-InstalledExportAdmission([string]$WorkspaceRoot, $BuildIdentity) {
+  $completeRoot = Join-Path $WorkspaceRoot 'Build\Package\CompleteRoot'
+  $marker = Join-Path $completeRoot 'YeManCC\test-export.json'
+  $archive = Join-Path $WorkspaceRoot 'Release\Packages\YeManCC.zip'
+  if (Test-Path -LiteralPath $marker -PathType Leaf) {
+    Assert-ExportArchiveIdentity -Zip $archive -Root $completeRoot -BuildIdentity $BuildIdentity | Out-Null
+    $declaration = Get-Content -LiteralPath $marker -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($declaration.schemaVersion -ne 1 -or $declaration.kind -cne 'mainline-local-test-export' -or
+        $declaration.formalReleaseAccepted -isnot [bool] -or $declaration.formalReleaseAccepted -ne $false -or
+        $declaration.fixtureValidation -cne 'NOT_RUN' -or $declaration.gitPublished -isnot [bool] -or $declaration.gitPublished -ne $false) {
+      throw 'TEST_EXPORT_DEPLOY_DECLARATION_INVALID'
+    }
+    return 'local-test'
+  }
+  $manifestPath = Join-Path $WorkspaceRoot 'Release\version.json'
+  if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return 'full-acceptance' }
+  $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($manifest.releaseMode -cne 'fast') { return 'full-acceptance' }
+  $native = @($BuildIdentity.payload | Where-Object path -CEQ 'YeManCC/YeManCC.exe')
+  if ($manifest.fixtureValidation -cne 'NOT_RUN' -or
+      [string]$manifest.version -cne [string]$BuildIdentity.version -or
+      [string]$manifest.buildId -cne [string]$BuildIdentity.buildId -or
+      [string]$manifest.buildId -cnotmatch '^[a-f0-9]{64}$' -or
+      $native.Count -ne 1 -or [string]$native[0].sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+      [string]$manifest.nativeSha256 -ine [string]$native[0].sha256 -or
+      [string]$manifest.sha256 -cnotmatch '^[a-fA-F0-9]{64}$' -or
+      [string]$manifest.package -cne 'Packages/YeManCC.zip' -or
+      ($manifest.PSObject.Properties['formalReleaseAccepted'] -and
+       ($manifest.formalReleaseAccepted -isnot [bool] -or $manifest.formalReleaseAccepted -ne $false))) {
+    throw 'FAST_RELEASE_DEPLOY_DECLARATION_INVALID'
+  }
+  if ((Get-Sha256 $archive) -ine [string]$manifest.sha256) { throw 'FAST_RELEASE_DEPLOY_ARCHIVE_HASH_MISMATCH' }
+  Assert-ExportArchiveIdentity -Zip $archive -Root $completeRoot -BuildIdentity $BuildIdentity | Out-Null
+  return 'fast'
 }
 
 function Get-FullPath([string]$Path) {
@@ -425,9 +471,10 @@ function Assert-ExportIsFresh([string]$ProjectRoot, [string]$WorkspaceRoot) {
   return $true
 }
 
-$ProjectRoot = Get-FullPath (Split-Path -Parent $PSScriptRoot)
-. (Join-Path $PSScriptRoot 'monitor-hud-export.ps1')
-. (Join-Path $PSScriptRoot 'release-export-identity.ps1')
+$ProjectRoot = if ($SourceProjectRoot) { Get-FullPath $SourceProjectRoot } else { Get-FullPath (Split-Path -Parent $PSScriptRoot) }
+$SourceToolRoot = Join-Path $ProjectRoot 'tools'
+. (Join-Path $SourceToolRoot 'monitor-hud-export.ps1')
+if(-not $SteamGuardSuccessorReceipt){. (Join-Path $SourceToolRoot 'release-export-identity.ps1')}
 if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
   $WorkspaceRoot = Get-FullPath (Join-Path $ProjectRoot '..\..')
 } else {
@@ -435,6 +482,9 @@ if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
 }
 
 $WebBuild = Join-Path $WorkspaceRoot 'Build\App\Web'
+if($SteamGuardSuccessorReceipt){
+  . (Join-Path $PSScriptRoot 'release-export-identity.ps1') -SteamGuardSuccessorReceipt $SteamGuardSuccessorReceipt -GuardProductRoot $ProjectRoot -GuardWorkspaceRoot $WorkspaceRoot
+}
 $DeckyBuild = Join-Path $WorkspaceRoot 'Build\App\Decky\plugins\ymcc-sidebar'
 $NativeExe = Join-Path $WorkspaceRoot 'Build\App\Native\YeManCC.exe'
 $RecoveryService = Join-Path $WorkspaceRoot 'Build\App\Native\YeManRecoveryService.exe'
@@ -449,7 +499,7 @@ $tdpRuntimeManifestSourceRoot = Get-YmccTdpManifestSourcePayloadRoot $ProjectRoo
 $tdpRuntimeManifestPlan = Assert-YmccTdpRuntimeManifestPayload -ManifestPath (Join-Path $sourcePowerControl 'pawnio\tdp-runtime-manifest.json') -PayloadRoot $tdpRuntimeManifestSourceRoot -SourceFile (Join-Path $ProjectRoot 'PowerControl\pawnio\YeManTdpCtl.py') -RecipeFile (Join-Path $ProjectRoot 'PowerControl\pawnio\YeManTdpCtl.spec')
 # END TDP_RUNTIME_MANIFEST_DEPLOY_PREFLIGHT
 # Validate the complete appearance payload before any installed files are moved or copied.
-. (Join-Path $PSScriptRoot 'steam-appearance-export.ps1')
+. (Join-Path $SourceToolRoot 'steam-appearance-export.ps1')
 Get-SteamAppearanceExportFiles $sourcePowerControl | Out-Null
 $FeatureAssetsSource = Join-Path $ProjectRoot 'PowerControl\feature-assets'
 $HcRuntimeSource = Join-Path $ProjectRoot 'PowerControl\handheldcompanion-runtime'
@@ -497,31 +547,26 @@ foreach ($required in @($WebBuild, (Join-Path $WebBuild 'index.html'), (Join-Pat
 # Assert-ExportIsFresh for the QPC/0910-17 regression this prevents).
 Assert-ExportIsFresh $ProjectRoot $WorkspaceRoot | Out-Null
 $exportBuildIdentity = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
-# Ordinary local test exports deliberately have no formal fixture receipts.
-# Admit only the declaration already bound to the complete verified archive.
+# FastRelease has no local-test marker and does not claim formal acceptance.
 $testExportRoot = Join-Path $WorkspaceRoot 'Build\Package\CompleteRoot'
 $testExportMarker = Join-Path $testExportRoot 'YeManCC\test-export.json'
-if (Test-Path -LiteralPath $testExportMarker -PathType Leaf) {
-  Assert-ExportArchiveIdentity -Zip (Join-Path $WorkspaceRoot 'Release\Packages\YeManCC.zip') -Root $testExportRoot -BuildIdentity $exportBuildIdentity | Out-Null
-  $testDeclaration = Get-Content -LiteralPath $testExportMarker -Raw -Encoding UTF8 | ConvertFrom-Json
-  if ($testDeclaration.schemaVersion -ne 1 -or $testDeclaration.kind -cne 'mainline-local-test-export' -or
-      $testDeclaration.formalReleaseAccepted -isnot [bool] -or $testDeclaration.formalReleaseAccepted -ne $false -or
-      $testDeclaration.fixtureValidation -cne 'NOT_RUN' -or $testDeclaration.gitPublished -isnot [bool] -or $testDeclaration.gitPublished -ne $false) {
-    throw 'TEST_EXPORT_DEPLOY_DECLARATION_INVALID'
-  }
+$deploymentAdmission = Get-InstalledExportAdmission $WorkspaceRoot $exportBuildIdentity
+if($SteamGuardSuccessorReceipt -and $deploymentAdmission -cne 'local-test'){throw 'EXPORT_GUARD_SUCCESSOR_ORDINARY_DEPLOY_REQUIRED'}
+if($exportGuardSuccessorContext){$completedPrerequisites=Assert-YmccGuardCompletedPrerequisites $exportGuardSuccessorContext $exportBuildIdentity}
+if ($deploymentAdmission -in @('local-test','fast')) {
   $env:YEMAN_TEST_EXPORT = '1'
-  Write-Output 'TEST_EXPORT_DEPLOY: formal Decky Build/Package fixture receipts NOT_RUN; source, complete archive and payload identity verified.'
+  Write-Output ($deploymentAdmission + '_DEPLOY: formal fixtures NOT_RUN; source, complete archive and payload identity verified.')
 } else {
   $env:YEMAN_TEST_EXPORT = '0'
-  & (Join-Path $PSScriptRoot 'decky_update_release_gate.ps1') -Stage Verify -WorkspaceRoot $WorkspaceRoot
+  & (Join-Path $SourceToolRoot 'decky_update_release_gate.ps1') -Stage Verify -WorkspaceRoot $WorkspaceRoot
 }
 Assert-MonitorHudWebExport $WebBuild | Out-Null
 Assert-MonitorHudDeckyExport $DeckyBuild | Out-Null
-& node (Join-Path $PSScriptRoot 'build-decky-sidebar-plugin.mjs') --out $DeckyBuild --check
+& node (Join-Path $SourceToolRoot 'build-decky-sidebar-plugin.mjs') --out $DeckyBuild --check
 if ($LASTEXITCODE -ne 0) { throw "Decky sidebar build identity rejected: exit=$LASTEXITCODE" }
 # Fail before any target file or process is touched; never silently preserve stale V2 bytes.
-& (Join-Path $PSScriptRoot 'fan_host_path_gate.ps1') -ProjectRoot $ProjectRoot -SourceOnly | Out-Null
-. (Join-Path $PSScriptRoot 'fan-host-layout.ps1')
+& (Join-Path $SourceToolRoot 'fan_host_path_gate.ps1') -ProjectRoot $ProjectRoot -SourceOnly | Out-Null
+. (Join-Path $SourceToolRoot 'fan-host-layout.ps1')
 Assert-FanHostExistingExport (Join-Path $sourcePowerControl 'fan-host') (Join-Path (Split-Path -Parent $InstallRoot) 'PowerControl\fan-host-v2') | Out-Null
 
 # ================================================================
@@ -688,7 +733,7 @@ New-Item -ItemType Directory -Force -Path $installedPowerControl | Out-Null
 # Preserve the ACTUAL previous installed plugin before ordinary assets can overwrite it.
 Move-MonitorHudDeckyBackup $installedPowerControl $BackupRoot
 Copy-InstalledPowerControlMainAssets $sourcePowerControl $installedPowerControl
-. (Join-Path $PSScriptRoot 'steam-appearance-export.ps1')
+. (Join-Path $SourceToolRoot 'steam-appearance-export.ps1')
 Assert-SteamAppearanceExport $sourcePowerControl $installedPowerControl | Out-Null
 # Source-tree dist is not authoritative: install the verified matching task build.
 Copy-MonitorHudDeckyExport $DeckyBuild $installedPowerControl
@@ -731,8 +776,13 @@ $installedRedist = Join-Path $installedPowerControl 'redist'
 $redistBackup = Join-Path $BackupRoot 'PowerControl\redist'
 New-Item -ItemType Directory -Force -Path $installedRedist | Out-Null
 # GP-PREREQ-2: same public first-install assets as normal complete export.
-& (Join-Path $PSScriptRoot 'build-gamepad-prerequisites.ps1') -ProjectRoot $ProjectRoot
-if ($LASTEXITCODE -ne 0) { throw 'First-install setup build failed.' }
+if($exportGuardSuccessorContext){
+  $completedPrerequisites=Assert-YmccGuardCompletedPrerequisites $exportGuardSuccessorContext $exportBuildIdentity
+  Write-Output 'GAMEPAD_PREREQUISITES=VERIFIED_COMPLETED_PACKAGE_TUPLE; producer NOT_RUN'
+}else{
+  & (Join-Path $SourceToolRoot 'build-gamepad-prerequisites.ps1') -ProjectRoot $ProjectRoot
+  if ($LASTEXITCODE -ne 0) { throw 'First-install setup build failed.' }
+}
 $setupRedistFiles = @('HIDMaestroSetup.exe','HIDMaestroSetup.dll','HIDMaestroSetup.deps.json','HIDMaestroSetup.runtimeconfig.json','HIDMaestroSetup.manifest.json') | ForEach-Object { Join-Path $ProjectRoot ("PowerControl\redist\" + $_) }
 foreach ($redistFile in (@($hidHideInstallerFile, $hidHideCliFile) + $setupRedistFiles)) {
   if (-not $redistFile) { continue }
@@ -799,6 +849,13 @@ foreach ($item in Get-ChildItem -LiteralPath $WebBuild -Force) {
     Copy-WithBackup $item.FullName $destination $BackupRoot
   }
 }
+# The sealed identity is part of this exact native build, not an installer
+# timestamp. Validate before replacing either file; the archive/install identity
+# gate below verifies both as one payload. Normal minimized startup records the
+# executing literal in the permanent recovery history, including old updaters.
+$nativeBuildReceipt=Join-Path (Split-Path -Parent $NativeExe) 'native-build-identity.json'
+$null=Get-YmccNativeBuildIdentity $NativeExe $nativeBuildReceipt
+Copy-WithBackup $nativeBuildReceipt (Join-Path $InstallRoot 'native-build-identity.json') $BackupRoot
 Copy-WithBackup $NativeExe (Join-Path $InstallRoot 'YeManCC.exe') $BackupRoot
 Copy-WithBackup $RecoveryService (Join-Path $InstallRoot 'YeManRecoveryService.exe') $BackupRoot
 Copy-WithBackup $ControllerVisibilityProbe (Join-Path $InstallRoot 'YeManControllerVisibilityProbe.exe') $BackupRoot

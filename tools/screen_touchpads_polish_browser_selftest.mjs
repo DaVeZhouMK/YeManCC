@@ -13,8 +13,9 @@ const {build}=req('esbuild'),{parse,compileScript,compileStyle}=req('vue/compile
 const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';
 const {chromium}=createRequire(path.join(runtime,'_screen-touchpads-polish.cjs'))('playwright');
 const out=process.env.YEMAN_SCREEN_TOUCHPADS_POLISH_VALIDATION?path.resolve(process.env.YEMAN_SCREEN_TOUCHPADS_POLISH_VALIDATION):path.resolve(root,'../../Build/Validation/ScreenTouchpads-Polish');fs.mkdirSync(out,{recursive:true});
-const selected=process.argv.includes('--auto-hide-relative-only');
-if(process.argv.slice(2).some(arg=>arg!=='--auto-hide-relative-only'))throw Error('Unknown screen touchpad case selection');
+const selected=process.argv.includes('--auto-hide-relative-only'),steamAllOnly=process.argv.includes('--steam-all-only'),presetOnly=process.argv.includes('--preset-defaults-only');
+if([selected,steamAllOnly,presetOnly].filter(Boolean).length>1)throw Error('Select exactly one screen scope');
+if(process.argv.slice(2).some(arg=>arg!=='--auto-hide-relative-only'&&arg!=='--steam-all-only'&&arg!=='--preset-defaults-only'))throw Error('Unknown screen touchpad case selection');
 const css=[fs.readFileSync(path.join(root,'src/styles/tokens.css'),'utf8')],cases=[],errors=[];
 const mocks={
  '@/router':`export const ROUTES=[];`,
@@ -38,16 +39,16 @@ const mocks={
 };
 const fixture=`<script setup lang="ts">
 import {ref} from 'vue';import Steam from './src/components/SteamDeckMouseSensitivity.vue';import Pads from './src/components/ScreenTouchpadsSettings.vue';import Slider from './src/components/Slider.vue';
-const disabled=ref(false),regular=ref(50),persona=ref('steamdeck'),targetEnabled=ref(true);window.__disableSteam=v=>disabled.value=v;
+const disabled=ref(false),regular=ref(50),persona=ref('steamdeck'),targetEnabled=ref(true);const preset=ref();window.__setPreset=(p,c)=>{preset.value=c;window.__setPersona(p,false)};function savePreset(c){window.__fixture.presetUpdates.push({persona:persona.value,config:structuredClone(c)});preset.value=c;}window.__disableSteam=v=>disabled.value=v;
 window.__setPersona=(p,on=true)=>{window.__fixture.currentPersona=p;window.__fixture.targetEnabled=on;persona.value=p;targetEnabled.value=on;};
-</script><template><section><Steam :disabled="disabled"/><Pads :key="persona" :persona="persona" :steam-deck-enabled="persona==='steamdeck' && targetEnabled" :ps5-enabled="['dualsense-edge','dualsense','dualshock4'].includes(persona) && targetEnabled"/><Slider v-model="regular" label="普通滑条" :min="0" :max="100" :step="5"/></section></template>`;
+</script><template><section><Steam :disabled="disabled"/><Pads :preset-config="preset" @preset-update="savePreset" :key="persona" :persona="persona" :steam-deck-enabled="persona==='steamdeck' && targetEnabled" :ps5-enabled="['dualsense-edge','dualsense','dualshock4'].includes(persona) && targetEnabled"/><Slider v-model="regular" label="普通滑条" :min="0" :max="100" :step="5"/></section></template>`;
 function compile(source,filename,resolveDir){const {descriptor,errors}=parse(source,{filename});assert.equal(errors.length,0);const id='data-v-'+createHash('sha256').update(filename).digest('hex').slice(0,8);let script=compileScript(descriptor,{id,inlineTemplate:true}).content;for(const style of descriptor.styles){const c=compileStyle({source:style.content,id,scoped:style.scoped});assert.equal(c.errors.length,0);css.push(c.code)}script=script.replace('export default','const _component=')+`\n_component.__scopeId=${JSON.stringify(id)};export default _component;`;return {contents:script,loader:'ts',resolveDir};}
 const entry=compile(fixture,'screen-touchpads-polish.vue',root);
 const bundle=await build({stdin:{...entry,contents:entry.contents.replace('export default _component;',`
 import {createApp} from 'vue';import {startGamepad} from './src/gamepad/engine.ts';import {screenTouchpadDefaults} from './src/bridge/screenTouchpads.ts';
-window.__fixture={steam:{ok:true,available:true,percent:100,pending:false,steamRunning:true,liveAvailable:true},pads:{...screenTouchpadDefaults('steamdeck'),ok:true,available:true,visible:true},savedSteam:[],savedPads:[],currentPersona:'steamdeck',targetEnabled:true};
+window.__fixture={steam:{ok:true,available:true,percent:100,pending:false,steamRunning:true,liveAvailable:true},pads:{...screenTouchpadDefaults('steamdeck'),ok:true,available:true,visible:true},savedSteam:[],savedPads:[],presetUpdates:[],currentPersona:'steamdeck',targetEnabled:true};
 window.__fixture.padProfiles=Object.fromEntries(['disabled','steamdeck','dualsense-edge','elite'].map(p=>[p,screenTouchpadDefaults(p)]));
-createApp(_component).mount('#app');startGamepad({router:{currentRoute:{value:{path:'/button-mapping'}},push:async()=>{}}});`)},bundle:true,write:false,format:'iife',platform:'browser',loader:{'.svg':'dataurl','.png':'dataurl'},alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'actual-screen-touchpads-controls',setup(b){b.onResolve({filter:/.*/},args=>{const key=args.path==='./ipc' && /src[/\\]bridge[/\\]/.test(args.importer)?'@/bridge/ipc':args.path;return mocks[key]?{path:key,namespace:'mock'}:undefined});b.onLoad({filter:/.*/,namespace:'mock'},args=>({contents:mocks[args.path],loader:'ts',resolveDir:root}));b.onLoad({filter:/\.vue$/},args=>compile(fs.readFileSync(args.path,'utf8'),args.path,path.dirname(args.path)));}}]});
+createApp(_component).mount('#app');startGamepad({router:{currentRoute:{value:{path:'/button-mapping'}},push:async()=>{}}});`)},bundle:true,write:false,format:'iife',platform:'browser',loader:{'.svg':'dataurl','.png':'dataurl'},alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'actual-screen-touchpads-controls',setup(b){b.onResolve({filter:/.*/},args=>{const key=args.path==='./ipc' && /src[/\\]bridge[/\\]/.test(args.importer)?'@/bridge/ipc':args.path;return mocks[key]?{path:key,namespace:'mock'}:undefined});b.onLoad({filter:/.*/,namespace:'mock'},args=>({contents:mocks[args.path],loader:'ts',resolveDir:root}));b.onLoad({filter:/\.vue$/},args=>compile(fs.readFileSync(args.path===path.join(root,'src/components/ScreenTouchpadsSettings.vue')&&process.env.YMCC_SCREEN_TOUCHPAD_COMPONENT_SOURCE?process.env.YMCC_SCREEN_TOUCHPAD_COMPONENT_SOURCE:args.path,'utf8'),args.path,path.dirname(args.path)));}}]});
 const html=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><style>${css.join('\n')}body{margin:0;padding:20px;background:var(--bg-solid);color:var(--text);font-family:system-ui}section{max-width:520px}button.focused,input.focused{outline:2px solid var(--accent)}</style><div id="app"></div><script src="/fixture.js"></script></html>`;
 const server=createServer((r,res)=>{res.setHeader('Content-Type',r.url==='/fixture.js'?'text/javascript':'text/html;charset=utf-8');res.end(r.url==='/fixture.js'?bundle.outputFiles[0].text:html)});await new Promise(r=>server.listen(0,'127.0.0.1',r));
 let browser;
@@ -61,16 +62,16 @@ try{browser=await chromium.launch({headless:true,executablePath:process.env.YMCC
  // Default and option persistence use the real dropdown, config validator and bridge.
  const hideLabel='触摸板和专用按键自动隐藏';
  for(const persona of ['disabled','steamdeck','dualsense-edge','elite']){
-  await switchPersona(persona);assert.equal(await controlValue('YMCC呼出位置'),'对侧【左侧】呼出');
+  await switchPersona(persona);assert.equal(await controlValue('呼出YeManCC控制中心位置'),'对侧【左侧】呼出');
   cases.push({name:persona+'-summon-default-opposite-left',ok:true});
  }
  await page.evaluate(()=>{window.__windowPlacement='left';window.dispatchEvent(new Event('ui-settings:changed'));});
- assert.equal(await controlValue('YMCC呼出位置'),'对侧【右侧】呼出');
- await chooseControl('YMCC呼出位置','同侧【左侧】呼出');
+ assert.equal(await controlValue('呼出YeManCC控制中心位置'),'对侧【右侧】呼出');
+ await chooseControl('呼出YeManCC控制中心位置','同侧【左侧】呼出');
  assert.equal(await page.evaluate(()=>window.__fixture.padProfiles.elite.summonPosition),'same');
  await page.evaluate(()=>{window.__windowPlacement='right';window.dispatchEvent(new Event('ui-settings:changed'));});
- assert.equal(await controlValue('YMCC呼出位置'),'同侧【右侧】呼出');
- await chooseControl('YMCC呼出位置','对侧【左侧】呼出');
+ assert.equal(await controlValue('呼出YeManCC控制中心位置'),'同侧【右侧】呼出');
+ await chooseControl('呼出YeManCC控制中心位置','对侧【左侧】呼出');
  cases.push({name:'same-and-opposite-labels-follow-global-window-side',ok:true});
 
  for(const persona of ['disabled','steamdeck','dualsense-edge','elite']){
@@ -86,7 +87,61 @@ try{browser=await chromium.launch({headless:true,executablePath:process.env.YMCC
   cases.push({name:'auto-hide-'+seconds+'-seconds-persists-across-persona-switch',ok:true});
  }
  }
- if(selected){
+ if(presetOnly){
+  for(const height of [720,800]){
+   await page.setViewportSize({width:1280,height});await page.addStyleTag({content:'section{margin-left:auto;width:520px}'});
+   for(const persona of ['disabled','steamdeck','dualsense-edge','elite']){
+    const base={summonPosition:'opposite',summonPlacementVersion:1,summonEnabled:true,autoHideSeconds:15};
+    const native=persona==='disabled'?{standaloneSpecialMode:'ps5'}:{standaloneSpecialMode:'off',specialMask:persona==='dualsense-edge'?3:1,specialEnabled:true};
+    const nativeLabel=persona==='disabled'||persona==='dualsense-edge'?'开启PS5全部':persona==='elite'?'开启Xbox按键':'只开启 Steam';
+    const variants=[['missing',{},'开启Steam全部'],['explicit-off',{standaloneSpecialMode:'off',specialMask:0,specialEnabled:false},'关闭'],['mask-off',{specialMask:0},'关闭'],['flag-off',{specialEnabled:false},'关闭'],['Steam-zero',{standaloneSpecialMode:'steamdeck',specialMask:0,specialEnabled:false},'开启Steam全部'],['disabled-and-zero',{masterEnabled:false,standaloneSpecialMode:'off',specialMask:0,specialEnabled:false,autoHideSeconds:0,transparency:0,summonPosition:'off',summonEnabled:false},'关闭'],['native-choice',native,nativeLabel],['legacy-enabled',{enabled:true},'开启Steam全部']];
+    for(const [variant,patch,expected]of variants){
+     const saved={...base,...patch};await page.evaluate(([p,c])=>window.__setPreset(p,c),[persona,saved]);await page.waitForTimeout(70);
+     assert.equal(await controlValue('专用按键组合'),expected,'preset '+persona+' '+variant+' special selection');
+     assert.equal(await controlValue('屏幕触摸板布局'),variant==='legacy-enabled'?'双触摸板':'关闭','preset layout matches native compatibility');
+     if(variant==='disabled-and-zero'){assert.equal(await page.getByRole('switch',{name:'触控板总开关',exact:true}).getAttribute('aria-checked'),'false');assert.equal(await controlValue('触摸板和专用按键自动隐藏'),'关闭');}
+     cases.push({name:persona+'-preset-'+variant+'-1280x'+height,ok:true});
+    }
+    await page.evaluate(([p,c])=>window.__setPreset(p,c),[persona,base]);await page.waitForTimeout(70);
+    const before=await page.evaluate(()=>window.__fixture.presetUpdates.length);await chooseControl('触摸板和专用按键自动隐藏','30秒');
+    const writes=await page.evaluate(()=>window.__fixture.presetUpdates);assert.equal(writes.length,before+1);assert.deepEqual(writes.at(-1),{persona,config:{...base,autoHideSeconds:30}},'editing a partial preset must not persist synthesized defaults');
+    await page.waitForFunction(()=>document.querySelectorAll('.dd-menu').length===0);
+    const key=page.getByRole('button',{name:'专用按键组合',exact:true});await key.focus();await action('confirm');await page.getByRole('listbox').waitFor();await action('back');await page.waitForFunction(()=>document.querySelectorAll('.dd-menu').length===0);assert.equal(await key.evaluate(el=>el===document.activeElement),true);
+    assert.equal(await page.evaluate(()=>window.__fixture.presetUpdates.length),before+1);cases.push({name:persona+'-partial-edit-and-B-preserve-intent-1280x'+height,ok:true});
+   }
+   await page.screenshot({path:path.join(out,'partial-presets-'+height+'.png')});
+  }
+  assert.equal(await page.evaluate(()=>window.__fixture.savedPads.length),0);assert.deepEqual(errors,[]);
+  fs.writeFileSync(path.join(out,'browser-verification.json'),JSON.stringify({ok:true,selection:'preset-defaults-only',cases,errors,realGamepadEngine:true,realVueComponents:true,steamModified:false},null,2));console.log(`SCREEN_PRESET_DEFAULTS_OK ${cases.length}`);
+ }else if(steamAllOnly){
+  for(const height of [700,720,800]){
+   await page.setViewportSize({width:1280,height});await page.addStyleTag({content:'section{margin-left:auto;width:520px}'});
+   for(const persona of ['disabled','steamdeck','dualsense-edge','elite']){
+    await switchPersona(persona,false);
+    assert.equal(await controlValue('专用按键组合'),'开启Steam全部');
+    assert.equal(await controlValue('呼出YeManCC控制中心位置'),'对侧【左侧】呼出');
+    assert.equal(await page.getByText('呼出YeManCC控制中心',{exact:true}).count(),1);
+    const special=page.getByRole('button',{name:'专用按键组合',exact:true}),summon=page.getByRole('button',{name:'呼出YeManCC控制中心位置',exact:true});
+    await special.focus();await action('confirm');await page.getByRole('listbox').waitFor();
+    assert.equal(await page.getByRole('option',{name:'开启Steam全部',exact:true}).count(),1);
+    if(persona==='dualsense-edge')assert.equal(await page.getByRole('option',{name:'开启PS5全部',exact:true}).count(),1);
+    if(persona==='elite')assert.equal(await page.getByRole('option',{name:'开启Xbox按键',exact:true}).count(),1);
+    await action('back');assert.equal(await special.evaluate(el=>el===document.activeElement),true);
+    await summon.focus();await action('nav-right');assert.equal(await special.evaluate(el=>el===document.activeElement),true,'same-row right navigation '+persona);
+    await action('nav-left');assert.equal(await summon.evaluate(el=>el===document.activeElement),true,'same-row left navigation '+persona);
+    cases.push({name:persona+'-default-Steam-pair-opposite-summon-and-gamepad-1280x'+height,ok:true});
+   }
+   for(const [persona,label,mask]of [['dualsense-edge','开启PS5全部',3],['elite','开启Xbox按键',1]]){
+    await switchPersona(persona);await chooseControl('专用按键组合',label);
+    const stored=await page.evaluate(p=>window.__fixture.padProfiles[p],persona);assert.equal(stored.standaloneSpecialMode,'off');assert.equal(stored.specialMask,mask);
+    await switchPersona('disabled');await switchPersona(persona);assert.equal(await controlValue('专用按键组合'),label);
+    await chooseControl('专用按键组合','开启Steam全部');assert.equal(await page.evaluate(p=>window.__fixture.padProfiles[p].standaloneSpecialMode,persona),'steamdeck');
+    cases.push({name:persona+'-native-choice-preserved-and-return-to-Steam-1280x'+height,ok:true});
+   }
+   await page.screenshot({path:path.join(out,'steam-all-profiles-'+height+'.png')});
+  }
+  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'browser-verification.json'),JSON.stringify({ok:true,selection:'steam-all-only',cases,errors,realGamepadEngine:true,realVueComponents:true,steamModified:false},null,2));console.log(`STEAM_ALL_PROFILES_OK ${cases.length}`);
+ }else if(selected){
   await runAutoHideRelative();
   for(const height of [720,800]){
    await page.setViewportSize({width:1280,height});
@@ -96,7 +151,7 @@ try{browser=await chromium.launch({headless:true,executablePath:process.env.YMCC
    assert.equal(await page.locator('.dd-menu:visible').count(),1);await action('nav-down');await action('confirm');await page.waitForTimeout(100);
    assert.equal(await controlValue('触摸板和专用按键自动隐藏'),'1秒');
    assert.equal(await page.evaluate(()=>window.__fixture.padProfiles.steamdeck.autoHideSeconds),1);
-   const summon=page.locator('button[aria-label="YMCC呼出位置"]');await summon.focus();await action('confirm');
+   const summon=page.locator('button[aria-label="呼出YeManCC控制中心位置"]');await summon.focus();await action('confirm');
    assert.equal(await page.locator('.dd-menu:visible').count(),1);await action('back');await page.locator('.dd-menu').waitFor({state:'hidden'});assert.equal(await page.locator('.dd-menu:visible').count(),0);
    cases.push({name:'production-gamepad-dropdown-save-and-cancel-1280x'+height,ok:true});
    await page.screenshot({path:path.join(out,'touch-controls-'+height+'.png')});
@@ -246,7 +301,7 @@ try{browser=await chromium.launch({headless:true,executablePath:process.env.YMCC
  assert.equal(await page.evaluate(()=>window.__fixture.padProfiles['dualsense-edge'].leftMode),'wasd');assert.equal(await page.evaluate(()=>window.__fixture.padProfiles['dualsense-edge'].rightMode),'dualsense');
  cases.push({name:'PS-dual-custom-mappings-survive-off-single-dual-layout-switches',ok:true});
  await switchPersona('dualsense-edge',true);
- const controlDropdownLabels=['YMCC呼出位置','专用按键组合','背部按键组合'];
+ const controlDropdownLabels=['呼出YeManCC控制中心位置','专用按键组合','背部按键组合'];
  for(const label of controlDropdownLabels)assert.equal(await page.locator(`button[aria-label="${label}"]`).count(),1);
  cases.push({name:'screen-controls-use-three-dropdowns',ok:true});
  await switchPersona('steamdeck',true);await setLayout('关闭');
@@ -255,7 +310,7 @@ try{browser=await chromium.launch({headless:true,executablePath:process.env.YMCC
  async function verifyRearMenu(labels,file,name){await page.locator('button[aria-label="背部按键组合"]').click();const menu=page.locator('.dd-menu:visible').last();assert.equal(await menu.getByRole('option').count(),4);assert.deepEqual((await menu.getByRole('option').allTextContents()).map(label=>label.trim()),labels);await page.waitForFunction(()=>{const menu=document.querySelector('.dd-menu');return menu&&Number(getComputedStyle(menu).opacity)===1});await page.screenshot({path:path.join(out,file),animations:'disabled'});await page.keyboard.press('Escape');cases.push({name,ok:true})}
  await verifyRearMenu(['L5+R5','L4+R4','全开启','全关闭'],'sd-rear-combinations-dropdown.png','SD-rear-menu-has-only-four-real-name-choices');
  await page.evaluate(()=>{window.__fixture.padProfiles.steamdeck.rearMask=2;window.__fixture.padProfiles.steamdeck.rearEnabled=true});await switchPersona('elite',true);await switchPersona('steamdeck',true);assert.equal(await controlValue('背部按键组合'),'选择组合');assert.equal(await page.evaluate(()=>window.__fixture.padProfiles.steamdeck.rearMask),2);await chooseControl('背部按键组合','L5+R5');assert.equal(await page.evaluate(()=>window.__fixture.padProfiles.steamdeck.rearMask),10);cases.push({name:'legacy-single-key-mask-preserved-until-a-four-choice-pair-is-selected',ok:true});
- for(const [option,expected] of [['关闭','关闭'],['对侧【左侧】呼出','对侧【左侧】呼出'],['同侧【右侧】呼出','同侧【右侧】呼出']]){await chooseControl('YMCC呼出位置',option);const cfg=await page.evaluate(()=>window.__fixture.padProfiles.steamdeck);assert.equal(cfg.summonPosition,option==='对侧【左侧】呼出'?'opposite':option==='同侧【右侧】呼出'?'same':'off');assert.equal(cfg.summonEnabled,option!=='关闭');assert.equal(await controlValue('YMCC呼出位置'),expected);cases.push({name:'summon-position-dropdown-'+option,ok:true})}
+ for(const [option,expected] of [['关闭','关闭'],['对侧【左侧】呼出','对侧【左侧】呼出'],['同侧【右侧】呼出','同侧【右侧】呼出']]){await chooseControl('呼出YeManCC控制中心位置',option);const cfg=await page.evaluate(()=>window.__fixture.padProfiles.steamdeck);assert.equal(cfg.summonPosition,option==='对侧【左侧】呼出'?'opposite':option==='同侧【右侧】呼出'?'same':'off');assert.equal(cfg.summonEnabled,option!=='关闭');assert.equal(await controlValue('呼出YeManCC控制中心位置'),expected);cases.push({name:'summon-position-dropdown-'+option,ok:true})}
  await switchPersona('dualsense-edge',true);await setLayout('关闭');
  for(const [option,mask] of [['关闭',0],['只开启 PS',1],['只开启静音',2],['都开启',3]]){await chooseControl('专用按键组合',option);const cfg=await page.evaluate(()=>window.__fixture.padProfiles['dualsense-edge']);assert.equal(cfg.specialMask,mask);assert.equal(cfg.specialEnabled,mask!==0);cases.push({name:'ps-special-dropdown-'+mask,ok:true})}
  for(const [option,mask] of [['LFN+RFN',5],['LB+RB',10],['全开启',15],['全关闭',0]]){await chooseControl('背部按键组合',option);const cfg=await page.evaluate(()=>window.__fixture.padProfiles['dualsense-edge']);assert.equal(cfg.rearMask,mask);assert.equal(cfg.rearEnabled,mask!==0);assert.equal(await controlValue('背部按键组合'),option);cases.push({name:'ps-rear-dropdown-'+mask,ok:true})}
@@ -267,7 +322,7 @@ try{browser=await chromium.launch({headless:true,executablePath:process.env.YMCC
  await switchPersona('disabled',false);
  assert.equal(await page.locator('button[aria-label="专用按键组合"]').isDisabled(),false);
  assert.equal(await page.locator('button[aria-label="背部按键组合"]').isDisabled(),true);
- assert.equal(await page.locator('button[aria-label="YMCC呼出位置"]').isDisabled(),false);
+ assert.equal(await page.locator('button[aria-label="呼出YeManCC控制中心位置"]').isDisabled(),false);
  cases.push({name:'disabled-output-special-dropdown-remains-actionable-with-rear-gate-unchanged',ok:true});
  await page.locator('button[aria-label="专用按键组合"]').click();
  assert.deepEqual((await page.locator('.dd-menu:visible').last().getByRole('option').allTextContents()).map(s=>s.trim()),['关闭','开启Steam全部','开启PS5全部']);
@@ -289,8 +344,8 @@ try{browser=await chromium.launch({headless:true,executablePath:process.env.YMCC
  await chooseControl('专用按键组合','关闭');
  await switchPersona('steamdeck',true);await page.locator('button[aria-label="专用按键组合"]').focus();await action('confirm');assert.equal(await page.locator('.dd-menu:visible').last().getByRole('option',{name:'只开启 Steam',exact:true}).count(),1);await page.keyboard.press('Escape');cases.push({name:'gamepad-opens-special-dropdown',ok:true});
  await page.locator('button[aria-label="背部按键组合"]').focus();await action('confirm');assert.equal(await page.locator('.dd-menu:visible').last().getByRole('option',{name:'L5+R5',exact:true}).count(),1);await page.keyboard.press('Escape');cases.push({name:'gamepad-opens-rear-dropdown',ok:true});
- await setLayout('关闭');await chooseControl('YMCC呼出位置','关闭');await chooseControl('专用按键组合','关闭');await chooseControl('背部按键组合','全关闭');assert.equal(await scale.count(),0);assert.equal(await page.locator('input[aria-label="触摸板显示透明度"]').count(),0);cases.push({name:'all-dropdown-overlays-off-hide-shared-sliders',ok:true});
- await chooseControl('YMCC呼出位置','同侧【右侧】呼出');assert.equal(await scale.count(),1);assert.equal(await page.locator('input[aria-label="触摸板显示透明度"]').count(),1);cases.push({name:'summon-only-mode-retains-shared-sliders',ok:true});
+ await setLayout('关闭');await chooseControl('呼出YeManCC控制中心位置','关闭');await chooseControl('专用按键组合','关闭');await chooseControl('背部按键组合','全关闭');assert.equal(await scale.count(),0);assert.equal(await page.locator('input[aria-label="触摸板显示透明度"]').count(),0);cases.push({name:'all-dropdown-overlays-off-hide-shared-sliders',ok:true});
+ await chooseControl('呼出YeManCC控制中心位置','同侧【右侧】呼出');assert.equal(await scale.count(),1);assert.equal(await page.locator('input[aria-label="触摸板显示透明度"]').count(),1);cases.push({name:'summon-only-mode-retains-shared-sliders',ok:true});
 await page.screenshot({path:path.join(out,'touchpad-off-independent-buttons.png')});
  const body=await page.locator('body').innerText();assert.ok(!body.includes('屏幕双触摸板'));for(const removed of ['模拟触摸自测','键盘模式按区域中心判断方向','左右区域已显示','底部点击条'])assert.ok(!body.includes(removed),removed);assert.equal(await page.locator('.screen-touchpad-test').count(),0);cases.push({name:'removed-explanations-and-public-selftest',ok:true});
  await page.screenshot({path:path.join(out,'controller-settings.png')});await page.evaluate(()=>window.__disableSteam(true));assert.equal(await steam.isDisabled(),true);cases.push({name:'disabled-slider-stays-disabled',ok:true});assert.deepEqual(errors,[]);

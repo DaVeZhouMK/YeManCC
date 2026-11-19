@@ -1,3 +1,8 @@
+import type { InjectionKey } from 'vue';
+
+// A local Vue presentation lease. It never changes saved media or power state.
+export const controllerEditorBackgroundHoldKey: InjectionKey<() => () => void> = Symbol('controller-editor-background-hold');
+
 export const LOW_BATTERY_STATIC_PERCENT = 20;
 export const LOW_BATTERY_RESUME_PERCENT = 25;
 

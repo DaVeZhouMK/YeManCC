@@ -36,15 +36,24 @@ inline bool gameIdMatches(std::uint64_t gameId,std::uint32_t appid) {
 inline bool verifiedDiskProfile(const Context& c,const Module& m,const FileStamp& stamp,const HashFile& hash,ymcc::steamappstate::ProfileId* selected=nullptr,std::string* actualHash=nullptr,ymcc::steamcompat::Qualification* qualified=nullptr) {
     struct Cache {DWORD pid=0;std::uint64_t birth=0,base=0,size=0;std::wstring path;FileStamp stamp;bool accepted=false;std::string sha256;ymcc::steamcompat::Qualification compatibility;ymcc::steamappstate::ProfileId profile=ymcc::steamappstate::ProfileId::Legacy1791918634;};
     static std::mutex mx;static Cache cache;std::lock_guard<std::mutex> lock(mx);
-    if(cache.pid==c.steamPid&&cache.birth==c.steamBirth&&cache.base==m.base&&cache.size==m.size&&cache.path==pathKey(m.path)&&cache.stamp==stamp){if(cache.accepted&&selected)*selected=cache.profile;if(actualHash)*actualHash=cache.sha256;if(qualified)*qualified=cache.compatibility;return cache.accepted;}
+    if(cache.pid==c.steamPid&&cache.birth==c.steamBirth&&cache.base==m.base&&cache.size==m.size&&cache.path==pathKey(m.path)&&cache.stamp==stamp){
+        const bool accepted=cache.accepted&&ymcc::steamcompat::referenceBindingCurrent(cache.compatibility);
+        if(accepted&&selected)*selected=cache.profile;
+        if(actualHash)*actualHash=cache.sha256;
+        if(qualified)*qualified=cache.compatibility;
+        return accepted;
+    }
     // Retain the legacy callback argument for source compatibility. The
     // authoritative digest now shares the exact qualified file buffer.
     (void)hash;
     const auto compatibility=ymcc::steamcompat::qualifyFile(m.path,ymcc::steamcompat::ModuleKind::Ui);
     const auto& digest=compatibility.sha256;if(digest.size()!=64)return false;
-    const auto profile=compatibility.layout ? std::optional<ymcc::steamappstate::ProfileId>(
-        *compatibility.layout==ymcc::steamcompat::Layout::Public ? ymcc::steamappstate::ProfileId::Public1792618285 :
-        ymcc::steamappstate::ProfileId::Legacy1791918634) : std::nullopt;
+    const auto profile=compatibility.layout && ymcc::steamcompat::validLayout(*compatibility.layout) &&
+        ymcc::steamcompat::referenceBindingCurrent(compatibility)
+        ? std::optional<ymcc::steamappstate::ProfileId>(
+            *compatibility.layout==ymcc::steamcompat::Layout::OwnerScoped ? ymcc::steamappstate::ProfileId::OwnerScoped :
+            *compatibility.layout==ymcc::steamcompat::Layout::Public ? ymcc::steamappstate::ProfileId::Public1792618285 :
+            ymcc::steamappstate::ProfileId::Legacy1791918634) : std::nullopt;
     FileStamp qualifiedStamp;if(!fileStamp(m.path,qualifiedStamp)||!(qualifiedStamp==stamp))return false;
     const bool accepted=profile.has_value();
     cache={c.steamPid,c.steamBirth,m.base,m.size,pathKey(m.path),stamp,accepted,digest,compatibility,
@@ -96,9 +105,9 @@ inline Json observeImpl(const Context& c,std::uint32_t appid,const HashFile& has
         if(GetTickCount64()-readingBegan>maximumReadMs||!readableRegion(steam.h,address,bytes))return false;
         SIZE_T got=0;return ReadProcessMemory(steam.h,reinterpret_cast<const void*>(static_cast<std::uintptr_t>(address)),destination,bytes,&got)&&got==bytes;
     };
-    const auto compatibleRead=ymcc::steamcompat::adaptProcessRead(compatibility,m.base,m.size,read);
+    const auto readViews=ymcc::steamcompat::makeProcessReadViews(compatibility,m.base,m.size,read);
     Json result;
-    try{result=ymcc::steamappstate::observe({m.base,ymcc::steamcompat::referenceImageSize(compatibility,m.size),appid,true,profile},compatibleRead,stable);}
+    try{result=ymcc::steamappstate::observeWithReadViews({m.base,ymcc::steamcompat::referenceImageSize(compatibility,m.size),appid,true,profile},readViews,stable);}
     catch(...){result=unavailable("native-ui-read-unavailable");}
     result["profile"]=ymcc::steamappstate::profileVersion(profile);
     result["diskSha256"]=actualHash;

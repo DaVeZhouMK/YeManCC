@@ -1,7 +1,7 @@
 import {verifyExpandedCurrentCaseShape} from './current-case-shape.mjs';
 import {mutateXinputSourceFault} from './fault-mutation.mjs';
 import {runXinputFaults} from './fault-scheduler.mjs';
-import {inspectCurrentStage,requireCurrentStageRecorded} from './stage-evidence.mjs';
+import {requireCurrentStageRecorded} from './stage-evidence.mjs';
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {fileURLToPath} from 'node:url';
 import {REPO,MODULE,CASE_ID,PRODUCER,BASELINE_SHA256,moduleSources,productSources,toolFiles} from './adapter.mjs';
 import {sourcePath,runProcess} from '../runner.mjs';
@@ -17,12 +17,12 @@ export function validateCurrentStage(root,execution,{negative=false,expectedChec
  const run=stageRoot(root),ranges=read(path.join(run,'source-ranges.json'));need(path.resolve(ranges.currentFile)===path.resolve(sourceRoot,'native/main.cpp')&&path.resolve(processProof.arguments[1])===path.resolve(sourceRoot,'native/main.cpp'),'ORIGINAL_CURRENT_SOURCE_PATH_NOT_THE_RECORDED_SNAPSHOT');need(ranges.mode==='production'&&ranges.currentFileSha256===hash(path.join(sourceRoot,'native/main.cpp'))&&ranges.headerSha256===hash(path.join(sourceRoot,'native/xinput_identity_refresh_policy.h')),'ORIGINAL_CURRENT_SOURCE_IDENTITY_INVALID');
  for(const name of ['CURRENT','STOP','FINISH','READY','START','SCHEDULE','DISCONNECT','CLASSIFICATION','POLICY_HELPER'])need(/^[a-f0-9]{64}$/.test(ranges.parts?.[name]??''),'ACTUAL_CURRENT_CONSUMER_NOT_EXTRACTED:'+name);
  need(hash(path.join(root,'original/baseline-fragments.json'))===BASELINE_SHA256,'HISTORICAL_BASELINE_CHANGED');need(!fs.existsSync(path.join(root,'original/main-integration.patch')),'CANDIDATE_PATCH_MODE_NOT_ADMITTED');
- const stageEvidence=inspectCurrentStage(run,{negative});write(path.join(root,'original-stage-evidence.json'),stageEvidence);requireCurrentStageRecorded(run,{negative});
+ const stageEvidence=requireCurrentStageRecorded(run,{negative,onInspect:evidence=>write(path.join(root,'original-stage-evidence.json'),evidence)});
  const recorded=[];
- for(const label of ['old-off','old-on','fixed-off',...(negative?[]:['fixed-on'])]){
-  const compile=read(path.join(run,label+'-build.command.json'));need(compile.status===0&&!compile.error&&!compile.signal&&!compile.timedOut,'COMPILER_FAILURE_IS_NOT_SEMANTIC_XINPUT_EVIDENCE');
-  need(fs.existsSync(path.join(run,label+'-execute.command.json')),'ORIGINAL_XINPUT_EXECUTION_NOT_REACHED:'+label);
-  const execute=read(path.join(run,label+'-execute.command.json'));need(!execute.error&&!execute.signal&&!execute.timedOut,'ORIGINAL_XINPUT_EXECUTION_PROCESS_ERROR:'+label);
+ for(const {label,build:{receipt:compile},execute:{receipt:execute}} of stageEvidence.stages){
+  need(compile.status===0&&!compile.error&&!compile.signal&&!compile.timedOut,'COMPILER_FAILURE_IS_NOT_SEMANTIC_XINPUT_EVIDENCE');
+  need(execute,'ORIGINAL_XINPUT_EXECUTION_NOT_REACHED:'+label);
+  need(!execute.error&&!execute.signal&&!execute.timedOut,'ORIGINAL_XINPUT_EXECUTION_PROCESS_ERROR:'+label);
   const report=read(path.join(run,label+'-execute.stdout.txt'));need(report.actualStartStopFinishAndScheduleExtracted===true&&report.deviceHostSdkExecuted===false&&report.caseCount>=35&&report.checks>=report.caseCount&&Array.isArray(report.cases)&&report.cases.length===report.caseCount,'ORIGINAL_XINPUT_BUSINESS_REPORT_MISSING');
   if(!negative&&!label.startsWith('old'))verifyExpandedCurrentCaseShape(report,sourceRoot);
   const failed=report.cases.filter(row=>row.passed===false);need(failed.length===report.failedCases,'ORIGINAL_XINPUT_FAILURE_SUMMARY_MISMATCH');

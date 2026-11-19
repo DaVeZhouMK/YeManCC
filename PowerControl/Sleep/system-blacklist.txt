@@ -244,6 +244,9 @@ NVIDIA App.exe
 NVIDIA Overlay.exe
 NVIDIA Share.exe
 RadeonSoftware.exe
+# Intel Graphics Command Center
+IGCC.exe
+IGCCTray.exe
 iCUE.exe
 ArmouryCrate.UserSessionHelper.exe
 SignalRgb.exe

@@ -65,6 +65,9 @@ export interface FanHostDeploymentIo {
   sha256File(path: string): Promise<string>;
   /** 完整验证（新装/更新/回滚/修复/无记录首次开启）。只允许在记录未命中时调用。 */
   runInstaller(config: FanHostConfig, fanStateDirectory: string): Promise<void>;
+  /** Only scoped startup validates in the child and commits its record natively. */
+  ownerScope?: string;
+  publishRecord?(path: string, content: string, expectedRaw: string | null): Promise<void>;
 }
 
 
@@ -81,7 +84,7 @@ async function bounded<T>(operation: Promise<T>, timeout = DEPLOYMENT_IO_MS): Pr
   finally { if (timer !== undefined) clearTimeout(timer); }
 }
 const invalid = (message: string): never => { throw new FanHostDeploymentFault('invalid', message); };
-function deploymentJson(raw: unknown, maximum: number): Record<string, any> {
+function deploymentJson(raw: unknown, maximum: number, members?: Map<string, string>): Record<string, any> {
   if (typeof raw !== 'string' || raw.length > maximum) return invalid('Fan Host 部署文档超限');
   let bytes = 0;
   for (const c of raw) { const n = c.codePointAt(0)!; if (n >= 0xd800 && n <= 0xdfff) return invalid('Fan Host 部署编码无效'); bytes += n < 128 ? 1 : n < 2048 ? 2 : n < 65536 ? 3 : 4; }
@@ -100,7 +103,7 @@ function deploymentJson(raw: unknown, maximum: number): Record<string, any> {
     if (c === '{' || c === '[') {
       if (depth > 16) return invalid('Fan Host 部署JSON过深'); const end = c === '{' ? '}' : ']'; ++at; space(); if (text[at] === end) { ++at; return; }
       const keys = new Set<string>();
-      for (;;) { if (c === '{') { const name = string(); if (keys.has(name)) return invalid('Fan Host 部署字段重复'); keys.add(name); space(); if (text[at++] !== ':') return invalid('Fan Host 部署JSON无效'); } value(depth + 1); space(); const n = text[at++]; if (n === end) return; if (n !== ',') return invalid('Fan Host 部署JSON无效'); }
+      for (;;) { space(); const memberStart=at; let memberName: string | undefined; if (c === '{') { const name = string(); memberName=name; if (keys.has(name)) return invalid('Fan Host 部署字段重复'); keys.add(name); space(); if (text[at++] !== ':') return invalid('Fan Host 部署JSON无效'); } value(depth + 1); if (depth===0 && memberName!==undefined) members?.set(memberName,text.slice(memberStart,at)); space(); const n = text[at++]; if (n === end) return; if (n !== ',') return invalid('Fan Host 部署JSON无效'); }
     }
     if (c === '"') { string(); return; }
     const token = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(text.slice(at))?.[0];
@@ -194,7 +197,7 @@ const deploymentRuns = new Map<string, DeploymentRun>();
 export function resolveFanHostDeployment(config: FanHostConfig, fanStateDirectory: string, io: FanHostDeploymentIo): Promise<FanHostDeploymentDecision> {
   const selected = { ...config };
   if (!absoluteDirectory(fanStateDirectory)) return Promise.reject(new FanHostDeploymentFault('invalid', 'Fan Host 状态目录未知'));
-  const recordPath = joinWindowsPath(fanStateDirectory, FAN_HOST_DEPLOYMENT_RECORD_FILE), key = normalizeDeploymentPath(recordPath), signature = JSON.stringify([selected.hostDirectory,selected.hcRuntimeDirectory]);
+  const recordPath = joinWindowsPath(fanStateDirectory, FAN_HOST_DEPLOYMENT_RECORD_FILE), key = normalizeDeploymentPath(recordPath), signature = JSON.stringify([selected.hostDirectory,selected.hcRuntimeDirectory,io.ownerScope??null]);
   const previous = deploymentRuns.get(key);
   if (previous) return previous.signature === signature ? previous.task : Promise.reject(new FanHostDeploymentFault('changed', 'Fan Host 同目录仍有另一部署确认，未启动第二 writer'));
   const run: DeploymentRun = {signature,task:Promise.resolve('record-hit'),installing:false,finished:false};
@@ -218,6 +221,37 @@ export function resolveFanHostDeployment(config: FanHostConfig, fanStateDirector
     const installer = Promise.resolve().then(() => io.runInstaller(selected, fanStateDirectory));
     void installer.finally(() => {run.installing=false;release();}).catch(() => {});
     await bounded(installer, 60000);
+    if (io.publishRecord) {
+      // The scoped child never writes this record. Preserve its original
+      // preimage and unknown fields, and verify both manifests again before
+      // handing publication to the existing native owner/file transaction.
+      const publicationPreimage = await readDeploymentRecord(io, recordPath);
+      if (publicationPreimage.raw !== preimage.raw)
+        throw new FanHostDeploymentFault('changed','Fan Host 部署原件在校验中已更替，未覆盖');
+      const publicationIdentity = await currentDeploymentIdentity(io, selected);
+      if (publicationIdentity.payloadText !== identity.payloadText || publicationIdentity.runtimeText !== identity.runtimeText ||
+          publicationIdentity.payloadManifestSha256 !== identity.payloadManifestSha256 ||
+          publicationIdentity.runtimeManifestSha256 !== identity.runtimeManifestSha256 ||
+          config.hostDirectory !== selected.hostDirectory || config.hcRuntimeDirectory !== selected.hcRuntimeDirectory)
+        throw new FanHostDeploymentFault('changed','Fan Host 校验期间包代已更替，未发布部署记录');
+      const nextRecord = validateRecord({
+        schemaVersion:FAN_HOST_DEPLOYMENT_RECORD_SCHEMA,validationRulesVersion:FAN_HOST_VALIDATION_RULES_VERSION,
+        payloadRoot:identity.payloadRoot,runtimeRoot:identity.runtimeRoot,
+        payloadManifestSha256:identity.payloadManifestSha256,runtimeManifestSha256:identity.runtimeManifestSha256,runtimeId:identity.runtimeId,
+        payloadFileCount:deploymentJson(identity.payloadText,DEPLOYMENT_MANIFEST_BYTES).files.length,
+        runtimeFileCount:deploymentJson(identity.runtimeText,DEPLOYMENT_MANIFEST_BYTES).files.length,
+        result:'ok',deployedAtUtc:new Date().toISOString(),
+      });
+      const preserved=new Map<string,string>();
+      if(preimage.raw!==null)deploymentJson(preimage.raw,64*1024,preserved);
+      const unknown=[...preserved].filter(([name])=>!Object.prototype.hasOwnProperty.call(nextRecord,name)).map(([,raw])=>raw);
+      const content=JSON.stringify(nextRecord).slice(0,-1)+(unknown.length?','+unknown.join(','):'')+'}';
+      validateRecord(deploymentJson(content,64*1024));
+      run.installing=true;
+      const publication=Promise.resolve().then(()=>io.publishRecord!(recordPath,content,preimage.raw));
+      void publication.finally(()=>{run.installing=false;release();}).catch(()=>{});
+      await bounded(publication,15000);
+    }
     const confirmed = await readDeploymentRecord(io, recordPath);
     const after = await currentDeploymentIdentity(io, selected);
     if (!confirmed.record || !deploymentRecordMatches(confirmed.record, identity) || !deploymentRecordMatches(confirmed.record, after) || after.payloadText !== identity.payloadText || after.runtimeText !== identity.runtimeText || config.hostDirectory !== selected.hostDirectory || config.hcRuntimeDirectory !== selected.hcRuntimeDirectory) throw new FanHostDeploymentFault('changed', 'Fan Host 部署/当前包代未确认，拒绝启动，请显式重试');

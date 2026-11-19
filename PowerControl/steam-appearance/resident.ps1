@@ -1,6 +1,7 @@
 ﻿# A single same-user/session backend survives bounded helpers and YMCC exit.
 # No periodic search, kill/restart fallback, Steam launch, or focus operation.
-$script:AppearanceProcessQueryProtocol=2
+$script:AppearanceProcessQueryProtocol=3
+$script:AppearanceListenerQueryProtocol=1
 function Initialize-ResidentAppearanceInterop {
     if('Ymcc.CssResidentProcess' -as [type]){return}
     Add-Type -TypeDefinition @"
@@ -36,6 +37,52 @@ namespace Ymcc {
   [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle,uint timeout);
   [StructLayout(LayoutKind.Sequential)] struct Basic { public IntPtr reserved,peb,reserved2,reserved3,pid,parent; }
   [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr process,int kind,ref Basic basic,int size,out int returned);
+  [DllImport("iphlpapi.dll")] static extern uint GetExtendedTcpTable(IntPtr table,ref int size,bool sort,int family,int kind,uint reserved);
+  public sealed class TcpListener {
+   public string LocalAddress {get;private set;}
+   public uint OwningProcess {get;private set;}
+   public int LocalPort {get;private set;}
+   internal TcpListener(string address,uint pid,int port){LocalAddress=address;OwningProcess=pid;LocalPort=port;}
+  }
+  static TcpListener[] DecodeTcpListeners(IntPtr table,int size,int family,int port) {
+   if(table==IntPtr.Zero||size<4||(family!=2&&family!=23))throw new InvalidOperationException("Appearance listener table is invalid");
+   int width=family==2?24:56;
+   uint count=unchecked((uint)Marshal.ReadInt32(table));
+   if(count>(uint)((size-4)/width))throw new InvalidOperationException("Appearance listener table is truncated");
+   var rows=new System.Collections.Generic.List<TcpListener>();
+   for(int i=0;i<(int)count;i++) {
+    var row=IntPtr.Add(table,4+i*width);int portOffset=family==2?8:20;
+    int localPort=(Marshal.ReadByte(row,portOffset)<<8)|Marshal.ReadByte(row,portOffset+1);
+    if(localPort!=port)continue;
+    int stateOffset=family==2?0:48,pidOffset=family==2?20:52;
+    if(Marshal.ReadInt32(row,stateOffset)!=2)throw new InvalidOperationException("Appearance listener state changed");
+    var address=new byte[family==2?4:16];Marshal.Copy(IntPtr.Add(row,family==2?4:0),address,0,address.Length);
+    var ip=family==2?new System.Net.IPAddress(address):new System.Net.IPAddress(address,unchecked((uint)Marshal.ReadInt32(row,16)));
+    rows.Add(new TcpListener(ip.ToString(),unchecked((uint)Marshal.ReadInt32(row,pidOffset)),localPort));
+   }
+   return rows.ToArray();
+  }
+  static TcpListener[] ReadTcpListeners(int family,int port) {
+   int size=0;uint status=GetExtendedTcpTable(IntPtr.Zero,ref size,false,family,3,0);
+   if(status!=0&&status!=122)throw new Win32Exception((int)status,"Appearance listener query failed");
+   for(int attempt=0;attempt<3;attempt++) {
+    if(size<4||size>8388608)throw new InvalidOperationException("Appearance listener table size is invalid");
+    int allocated=size;var table=Marshal.AllocHGlobal(allocated);
+    try {
+     status=GetExtendedTcpTable(table,ref size,false,family,3,0);
+     if(status==122)continue;
+     if(status!=0)throw new Win32Exception((int)status,"Appearance listener query failed");
+     if(size>allocated)throw new InvalidOperationException("Appearance listener table grew unexpectedly");
+     return DecodeTcpListeners(table,size,family,port);
+    }finally{Marshal.FreeHGlobal(table);}
+   }
+   throw new InvalidOperationException("Appearance listener table changed repeatedly");
+  }
+  public static TcpListener[] Listeners(int port) {
+   if(port<1||port>65535)throw new ArgumentOutOfRangeException("port");
+   var rows=new System.Collections.Generic.List<TcpListener>(ReadTcpListeners(2,port));
+   rows.AddRange(ReadTcpListeners(23,port));return rows.ToArray();
+  }
   public static string[] Identity(uint pid,long expectedBirth) {
    var handle=OpenProcess(0x101000,false,pid);IntPtr token=IntPtr.Zero;
    if(handle==IntPtr.Zero)throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -51,7 +98,8 @@ namespace Ymcc {
     return new string[]{path.ToString(),sid,basic.parent.ToInt64().ToString(),birth.ToString()};
    }finally{if(token!=IntPtr.Zero)CloseHandle(token);CloseHandle(handle);}
   }
-  public static uint[] Inventory(string name) {
+  static uint[] Exchange(string name,string request,out string response) {
+   response=null;
    using(var gate=System.Threading.Mutex.OpenExisting(name+".lock")) {
     bool locked=false;
     try {
@@ -61,22 +109,38 @@ namespace Ymcc {
      using(var view=map.CreateViewAccessor())
      using(var query=System.Threading.EventWaitHandle.OpenExisting(name+".query"))
      using(var reply=System.Threading.EventWaitHandle.OpenExisting(name+".reply")) {
-      if(view.ReadUInt32(0)!=0x59435049||view.ReadUInt32(4)!=1)throw new InvalidOperationException("YMCC shared process protocol mismatch");
+      if(view.ReadUInt32(0)!=0x59435049||view.ReadUInt32(4)!=2)throw new InvalidOperationException("YMCC shared process protocol mismatch");
+      uint owner=view.ReadUInt32(56);long ownerBirth=((long)view.ReadUInt32(64)<<32)|view.ReadUInt32(60);
+      var parent=new Basic();int returned;
+      using(var self=System.Diagnostics.Process.GetCurrentProcess()) {
+       if(NtQueryInformationProcess(self.Handle,0,ref parent,Marshal.SizeOf(parent),out returned)!=0||parent.parent.ToInt64()!=owner)throw new InvalidOperationException("YMCC shared request parent mismatch");
+      }
+      var host=OpenProcess(0x101000,false,owner);
+      if(host==IntPtr.Zero)throw new Win32Exception(Marshal.GetLastWin32Error());
+      try {long born,exited,kernel,user;if(!GetProcessTimes(host,out born,out exited,out kernel,out user)||born!=ownerBirth||WaitForSingleObject(host,0)!=258)throw new InvalidOperationException("YMCC shared owner identity changed");}finally{CloseHandle(host);}
       uint serial=(view.ReadUInt32(8)%2147483646)+1;
-      reply.Reset();view.Write(8,serial);System.Threading.Thread.MemoryBarrier();query.Set();
+      byte[] input=request==null?new byte[0]:new System.Text.UTF8Encoding(false,true).GetBytes(request);
+      if(input.Length>65536)throw new InvalidOperationException("YMCC shared request is too large");
+      reply.Reset();view.Write(40,request==null?0u:1u);view.Write(44,(uint)input.Length);view.Write(48,0u);
+      if(input.Length!=0)view.WriteArray<byte>(2688,input,0,input.Length);
+      view.Write(8,serial);System.Threading.Thread.MemoryBarrier();query.Set();
       var watch=System.Diagnostics.Stopwatch.StartNew();
-      while(watch.ElapsedMilliseconds<5000) {
-       if(!reply.WaitOne((int)Math.Max(1,5000-watch.ElapsedMilliseconds)))break;
+      while(watch.ElapsedMilliseconds<10000) {
+       if(!reply.WaitOne((int)Math.Max(1,10000-watch.ElapsedMilliseconds)))break;
        if(view.ReadUInt32(12)!=serial)continue;
-       System.Threading.Thread.MemoryBarrier();var result=new uint[16+128*5];view.ReadArray<uint>(0,result,0,result.Length);
-       if(result[3]!=serial||result[4]!=1||result[5]>128)throw new InvalidOperationException("YMCC shared process state is unknown ("+result[9]+")");
+       System.Threading.Thread.MemoryBarrier();var result=new uint[32+128*5];view.ReadArray<uint>(0,result,0,result.Length);
+       if(result[3]!=serial||result[4]!=1||result[5]>128||result[12]>65536||result[14]!=owner||(((long)result[16]<<32)|result[15])!=ownerBirth)throw new InvalidOperationException("YMCC shared process state is unknown ("+result[9]+")");
+       if(result[12]!=0){var output=new byte[result[12]];view.ReadArray<byte>(68224,output,0,output.Length);response=new System.Text.UTF8Encoding(false,true).GetString(output);}
        return result;
       }
+      if(view.ReadUInt32(8)==serial){view.Write(8,(serial%2147483646)+1);System.Threading.Thread.MemoryBarrier();}
       throw new InvalidOperationException("YMCC shared process request timed out");
      }
     }finally{if(locked)gate.ReleaseMutex();}
    }
   }
+  public static uint[] Inventory(string name){string ignored;return Exchange(name,null,out ignored);}
+  public static string SharedSteam(string name,string request){string response;Exchange(name,request,out response);if(String.IsNullOrEmpty(response))throw new InvalidOperationException("YMCC shared Steam response is empty");return response;}
   public static uint Start(string executable,string directory) {
    var startup=new Startup();startup.cb=Marshal.SizeOf(startup);startup.flags=1;startup.show=0;
    Info child;
@@ -151,13 +215,36 @@ function Update-AppearanceProcessInventory {
     $reply=[Ymcc.CssResidentProcess]::Inventory($ProcessQuery)
     $rows=@()
     for($index=0;$index -lt [int]$reply[5];$index++){
-        $offset=16+$index*5
+        $offset=32+$index*5
         $birth=([uint64]$reply[$offset+3] -shl 32) -bor [uint64]$reply[$offset+2]
         $rows+=,[pscustomobject]@{pid=[uint32]$reply[$offset];parent=[uint32]$reply[$offset+1];birth=[string]$birth;kind=[uint32]$reply[$offset+4]}
     }
     $steamBirth=([uint64]$reply[8] -shl 32) -bor [uint64]$reply[7]
     $script:AppearanceProcessReceipt=[pscustomobject]@{rows=$rows;steamPid=[uint32]$reply[6];steamBirth=[string]$steamBirth}
     $script:AppearanceProcessReceipt
+}
+function Test-AppearanceDocumentRecheck([string]$Reason,[switch]$FinalReadOnly) {
+    # Native still owns a refreshed target set; the discarded batch is not a style proof.
+    ($Reason -cin @('render-shared-steam-live-busy','render-shared-steam-document-main-unavailable','render-shared-steam-document-replaced','render-shared-steam-document-targets-refreshed')) -or
+        ($FinalReadOnly -and $Reason -ceq 'render-shared-steam-document-transport-unavailable')
+}
+function Invoke-AppearanceSharedSteam($Request) {
+    if($ProcessQuery -cnotmatch '^Local\\YMCC\.CssInventory\.[a-f0-9]{32}$'){throw 'YMCC shared Steam channel unavailable; update the matching native component'}
+    Initialize-ResidentAppearanceInterop
+    $requestText=$Request|ConvertTo-Json -Depth 12 -Compress
+    $text=[Ymcc.CssResidentProcess]::SharedSteam($ProcessQuery,$requestText)
+    $result=$text|ConvertFrom-Json
+    if(!$result -or $result.ok -isnot [bool]){throw 'YMCC shared Steam response invalid'}
+    # Preserve only the typed document reasons eligible for a bounded recheck.
+    if(!$result.ok -and $Request.operation -ceq 'documents' -and $result.reason -is [string]){
+        $reason='render-shared-steam-'+$result.reason
+        if($result.reason -ceq 'document-targets-refreshed' -and (
+            $result.mutated -isnot [bool] -or $result.mutated -or $result.complete -isnot [bool] -or $result.complete -or
+            $result.documents -isnot [array] -or $result.documents.Count)) {throw 'render-shared-receipt-invalid'}
+        if(Test-AppearanceDocumentRecheck $reason -FinalReadOnly){throw $reason}
+    }
+    if(!$result.ok){throw ('YMCC shared Steam observation unconfirmed: '+[string]$result.reason)}
+    return $result
 }
 function Get-AppearanceProcessCandidates([int]$Kind,[switch]$Refresh) {
     if($Refresh -or !$script:AppearanceProcessReceipt){$null=Update-AppearanceProcessInventory}
@@ -178,7 +265,7 @@ function Get-AppearanceBackendCandidates {
     # observations, including the PyInstaller child which appears after startup.
     $pids=@()
     if($script:AppearanceStartedPid){$pids+=,[uint32]$script:AppearanceStartedPid}
-    foreach($listener in @(Get-NetTCPConnection -State Listen -LocalPort 35821 -ErrorAction SilentlyContinue)){$pids+=,[uint32]$listener.OwningProcess}
+    foreach($listener in @(Get-AppearanceTcpListeners -LocalPort 35821)){$pids+=,[uint32]$listener.OwningProcess}
     foreach($processId in @($pids|Select-Object -Unique)){
         if($known.ContainsKey($processId)){continue}
         $process=Get-Process -Id $processId -ErrorAction SilentlyContinue

@@ -19,8 +19,37 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#ifdef YMCC_FIXTURE_OEM_AFTER_OFF
+#include <mutex>
+static std::recursive_mutex fixtureOemLogMx;
+static std::atomic<unsigned> fixtureOemKeyboardActions{0},fixtureOemDesktopActions{0},fixtureOemActionTid{0};
+static unsigned fixtureOemHookInstalls=0,fixtureOemHookRemoves=0;
+static std::atomic<unsigned> fixtureOemJournalMutexRequests{0};
+static HHOOK fixtureOemSetHook(int kind,HOOKPROC,HINSTANCE,DWORD){++fixtureOemHookInstalls;return reinterpret_cast<HHOOK>(kind==WH_KEYBOARD_LL?0x701:0x702);}
+static BOOL fixtureOemUnhook(HHOOK){++fixtureOemHookRemoves;return TRUE;}
+static LRESULT fixtureOemCallNextHook(HHOOK,int,WPARAM,LPARAM){return 0;}
+#endif
+#ifdef YMCC_GPD_PERSONA_MUTEX_PROBES
+#include <mutex>
+#include <condition_variable>
+// POD TLS only. The generated TU wraps configured-persona reads solely around
+// the wake header include; its real getter and both helper bodies stay intact.
+static thread_local void (*fixtureGpdPersonaMutexObserver)(bool,void*)=nullptr;
+static thread_local void* fixtureGpdPersonaMutexObserverContext=nullptr;
+#endif
 #include "json.hpp"
 #include "virtual_target_return_record.h"
+static bool fixtureSerialFailCreation=false;
+static unsigned fixtureSerialCreationAttempts=0;
+template<class F>static std::thread fixtureSerialCreateThread(F&& body){
+    ++fixtureSerialCreationAttempts;
+    if(fixtureSerialFailCreation){fixtureSerialFailCreation=false;throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));}
+    return std::thread(std::forward<F>(body));
+}
+static void fixtureSerialAfterClosingRead();
+static std::atomic<bool> fixtureSerialClaimRaceArmed{false};
+static void fixtureSerialEntryInstallTerminateObserver() noexcept;
+static std::atomic<unsigned> fixtureSerialKillCommands{0};
 static unsigned forbiddenIo=0,inertXinputReads=0;
 static unsigned fixtureExcludedSteamWallpaperNotifications=0;
 static void fixtureObserveWallpaperNotification() noexcept;
@@ -28,10 +57,21 @@ static void fixtureCountForbiddenIo(const char* reason) noexcept;
 // Explicit read-only OS capability/monotonic-clock leaves. Defaults preserve
 // every existing case; PC wake cases advance real time without freezing IO.
 static bool fixturePcPowerCapabilities=false;
+static bool fixtureModernStandbyCapabilities=false;
 static ULONGLONG fixturePowerClockOffset=0;
 // Controlled preemption at the existing read-only OS clock boundary. Disabled
 // for every other case; production producer/worker bodies remain unchanged.
 static std::function<void()> fixtureMonotonicInterleave;
+// Scoped observer for the explicit kept-source case only. The generated
+// adapter retains the actual source projection and its original snapshot lock.
+static std::function<void()> fixtureWakeAfterSourceQuery;
+// Exact helper return observation: preserve its value and borrowed locks.
+static std::function<void(bool)> fixtureSourceReconfirmAfterProof;
+static std::function<void()> fixtureSourceReconfirmAfterReconfirmedLog;
+static bool fixtureSourceReconfirmObserveProof(bool value){
+ if(fixtureSourceReconfirmAfterProof){auto observer=std::move(fixtureSourceReconfirmAfterProof);fixtureSourceReconfirmAfterProof={};observer(value);}
+ return value;
+}
 static thread_local bool fixtureInsideMonotonicInterleave=false;
 static ULONGLONG fixtureOneXTick();
 static ULONGLONG fixtureMonotonicTick(){
@@ -44,6 +84,7 @@ static ULONGLONG fixtureMonotonicTick(){
  return ::GetTickCount64()+fixturePowerClockOffset;
 }
 static BOOLEAN fixtureGetPwrCapabilities(PSYSTEM_POWER_CAPABILITIES caps){
+ if(fixtureModernStandbyCapabilities){if(!caps)return FALSE;*caps={};caps->AoAc=TRUE;caps->SystemS3=FALSE;return TRUE;}
  if(fixturePcPowerCapabilities){if(!caps)return FALSE;*caps={};caps->SystemS3=TRUE;caps->AoAc=FALSE;return TRUE;}
  return ::GetPwrCapabilities(caps);
 }
@@ -59,6 +100,28 @@ static std::uint64_t startProtectionClock=100000;
 static const char* throwLogEvent=nullptr;
 static std::vector<nlohmann::json> fixtureEvents;
 static bool fixtureFullPipe=false;
+#ifdef YMCC_PREPARE_REJECTION_COLD_CASE
+static bool fixturePrepareRejectionCapture=false;
+static nlohmann::json fixturePrepareRejectionWire=nlohmann::json::array();
+#endif
+static bool fixturePrepareRejectionSelector(const std::wstring& selectedCase){
+#ifdef YMCC_PREPARE_REJECTION_COLD_CASE
+ return selectedCase==L"case:prepare-rejection-cold";
+#else
+ (void)selectedCase;
+ return false;
+#endif
+}
+static bool fixtureMsiOwnedMetadata=false;
+static std::function<void()> fixtureMsiRuntimeProofEdges;
+static bool fixtureMsiExactUsbRoot(const wchar_t* path,std::wstring& out){
+ if(!fixtureMsiOwnedMetadata){++forbiddenIo;throw std::logic_error("unadmitted-MSI-USB-identity-leaf");}
+ const std::wstring value=path?path:L"";
+ if(value==L"\\\\?\\HID#VID_0DB0&PID_1902#OFFLINE_MSI_COMMAND"){out=L"USB\\VID_0DB0&PID_1902\\7&OWNED&0&3";return true;}
+ if(value==L"\\\\?\\HID#VID_0DB0&PID_1901#OFFLINE_MSI_RETURN"){out=L"USB\\VID_0DB0&PID_1901\\7&OWNED&0&3";return true;}
+ out.clear();return false;
+}
+
 
 // OneX directed helper scope only. These seven explicit OS/dispatch leaves do
 // not replace Current, MayIssue, the helper, source admission or final outcomes.
@@ -131,6 +194,7 @@ static bool fixtureRogPartialSnapshot(HidHideVisibilitySnapshot&);
 // Switch-recovery only: actual Start supplies the transaction to this hide I/O leaf.
 static bool fixtureSwitchOwnedHideSeed=false;
 static std::function<void()> fixtureSwitchSourceAtEnsure;
+static std::function<void()> fixtureGpdTransferSourceAtEnsure;
 static std::string fixtureRogDeferredCycleResult="success";
 static nlohmann::json fixtureRogDeferredHideRecords=nlohmann::json::array();
 static nlohmann::json fixtureRogDeferredCycles=nlohmann::json::array();
@@ -167,12 +231,34 @@ namespace ymcc::targetReturn::process { struct Probe; }
 namespace ymcc::targetReturn::pnpAbsence { struct Result; }
 static ymcc::targetReturn::process::Probe fixtureColdWriter(const ymcc::targetReturn::ProcessIdentity&);
 static ymcc::targetReturn::pnpAbsence::Result fixtureColdAbsence(const std::vector<std::string>&);
+static ymcc::targetReturn::pnpAbsence::Result fixturePsProfileAbsence();
 static void fixtureColdBeforeCreate();
+// Opt-in runtime incident OS leaves. A retained observer is the exact native
+// fixture Host event, never the Native parent or an archived/cold writer.
+static bool fixtureRuntimeRecoveryOsEnabled=false;
+static ULONGLONG fixtureClassifiedReturnReleasedEpoch=0;
+static bool fixtureRuntimeRecoveryFaultEnabled=false,fixtureRuntimeRecoveryFaultConsumed=false;
+static bool fixtureRuntimeRecoveryFirstHelloOnly=false;
+static HANDLE fixtureRuntimeRecoveryOldHost=nullptr;
+static std::optional<ymcc::targetReturn::ProcessIdentity> fixtureRuntimeRecoveryOldOwner;
+static std::string fixtureRuntimeRecoveryCensus="unknown";
+static unsigned fixtureRuntimeRecoveryFaultCalls=0,fixtureRuntimeRecoveryWriterCalls=0,fixtureRuntimeRecoveryCensusCalls=0;
+static nlohmann::json fixtureRuntimeRecoveryOsObservations=nlohmann::json::array();
+static std::function<void()> fixtureRuntimeRecoveryWriterPathCallback;
+static unsigned fixtureRuntimeRecoveryWriterPathCallbackCalls=0;
+static void fixtureRuntimeRecoveryWriterPathBoundary();
+static ymcc::targetReturn::process::Probe fixtureRuntimeRecoveryWriter(const ymcc::targetReturn::ProcessIdentity&);
+static ymcc::targetReturn::pnpAbsence::Result fixtureRuntimeRecoveryAbsence(const std::vector<std::string>&);
 // Session paths are private per independent case; never reset inside recovery.
+static bool fixtureOrdinarySwitchCliScope=false;
 static std::wstring fixtureTargetReturnPath;
 static std::uint64_t fixtureTargetReturnCaseSerial=0;
+static std::function<void(const nlohmann::json&)> fixtureTargetReturnAfterReservation;
 static nlohmann::json fixtureTargetReturnObservations=nlohmann::json::array();
 static std::wstring fixtureTargetReturnRecordPath();
+static std::wstring fixtureFullPipeCliRecordPath();
+static ymcc::targetReturn::process::Probe fixtureFullPipeOwnedWriter(const ymcc::targetReturn::ProcessIdentity&);
+static ymcc::targetReturn::pnpAbsence::Result fixtureFullPipeTargetAbsence(const std::vector<std::string>&);
 static std::optional<ymcc::targetReturn::ProcessIdentity> fixtureTargetReturnCaptureOwner(HANDLE);
 static void fixtureTargetReturnWireObserve(void*,DWORD);
 static void fixtureTargetReturnAckLostObserve(const nlohmann::json&);
@@ -221,6 +307,7 @@ static BOOL fixturePsEnum(HDEVINFO,PSP_DEVINFO_DATA,const GUID*,DWORD,PSP_DEVICE
 static BOOL fixturePsDetail(HDEVINFO,PSP_DEVICE_INTERFACE_DATA,PSP_DEVICE_INTERFACE_DETAIL_DATA_W,DWORD,PDWORD,PSP_DEVINFO_DATA);
 static BOOL fixturePsDestroy(HDEVINFO);
 static CONFIGRET fixturePsDeviceId(DEVINST,PWSTR,ULONG,ULONG);
+static CONFIGRET fixturePsLocate(PDEVINST,PWSTR,ULONG);
 static CONFIGRET fixturePsParent(PDEVINST,DEVINST,ULONG);
 static unsigned fullPipeRecreateCommands();
 struct _XINPUT_STATE;
@@ -240,17 +327,100 @@ static CONFIGRET fixtureXboxStatus(PULONG,PULONG,DEVINST,ULONG);
 static BOOL fixtureOwnedHostExitCode(HANDLE,LPDWORD);
 static void ymStartSeamTrace(const std::string&);
 static bool fixtureGpdPostHideFullStart=false;
+static std::atomic<bool> fixtureGpdFullCycleObserving{false};
+static std::mutex fixtureGpdFullCycleObservationMx;
+static nlohmann::json fixtureGpdFullCycleSourceReads=nlohmann::json::array();
 static bool fixtureGpdPostHideApplied=false;
 struct HidHideVisibilitySnapshot;
 struct HidHidePhysicalIdentity;
 static bool fixtureGpdPostHideApply(const std::string&,bool);
+static HidHidePhysicalIdentity fixtureGpdPostHideSource();
 static bool fixtureGpdPostHideSnapshot(HidHideVisibilitySnapshot&);
 static bool fixtureGpdPostHidePhysicalIdentities(std::vector<HidHidePhysicalIdentity>&);
 #define GetExitCodeProcess fixtureOwnedHostExitCode
 #define YMCC_FOCUS_RECOVERY_PORTS
 #include "focus_recovery_cases.inc"
 #undef YMCC_FOCUS_RECOVERY_PORTS
+static bool fixtureOwnedCliBoundary=false;
+static std::function<void()> fixtureOwnedCliAfterDevList;
+static std::vector<std::wstring> fixtureOwnedCliCommands,fixtureOwnedCliHidden;
+static unsigned fixtureOwnedCliCallbacks=0,fixtureOwnedCliPhysicalQueries=0,fixtureOwnedCliFullQueries=0,fixtureOwnedCliWrites=0;
+static std::vector<HidHidePhysicalIdentity> fixtureOwnedCliPhysical;
+static bool fixtureOwnedCliRead(const std::wstring&,std::string*,DWORD*);
+
+#if defined(YMCC_FIXTURE_SD_OFF_SOURCE_LOST)
+static bool fixtureSdOffSourceLostActive();
+static bool fixtureSdOffSourceLostCli(const std::wstring&,std::string*,DWORD*);
+static bool fixtureSdOffSourceLostSnapshot(HidHideVisibilitySnapshot&);
+static ymcc::targetReturn::physicalPath::Result fixtureSdOffSourceLostPath(const std::string&,const std::string&);
+static void fixtureSdOffSourceLostObserve(const char*,const nlohmann::json&);
+static void fixtureSdOffSharedPowerEdge(const std::string&);
+static std::vector<std::string> fixtureSdOffSourceLostVariantNames();
+static bool fixtureSdOffSourceLostSelector(const std::wstring& value){
+ if(value==L"case:sd-off-source-lost")return true;
+ const std::wstring prefix=L"case:sd-off-source-lost:";
+ if(value.rfind(prefix,0)!=0||value.size()==prefix.size())return false;
+ std::string selected;for(const auto c:value.substr(prefix.size())){if(c>127)return false;selected.push_back(static_cast<char>(c));}
+ const auto variants=fixtureSdOffSourceLostVariantNames();
+ return std::find(variants.begin(),variants.end(),selected)!=variants.end();
+}
+#else
+static bool fixtureSdOffSourceLostSelector(const std::wstring&){return false;}
+#endif
+
+#if defined(YMCC_FIXTURE_GPD_PENDING_BEFORE_HIDE)
+static void fixturePreHidePipe(const char*);
+static void fixturePreHideGetterReturn();
+static bool fixturePreHideActive();
+static bool fixturePreHideSleep(DWORD);
+static bool fixturePreHideApply(const std::string&,bool);
+#endif
+
 #include "main.inert.cpp"
+
+#if defined(YMCC_FIXTURE_SD_OFF_SOURCE_LOST)
+static void fixtureSdOffSharedPowerEdge(const std::string& edge){
+ static ymcc::sleeppower::Dispatch::Receipt pending;
+ if(edge=="ready"){
+  if(pending){g_sleepPowerDispatch.complete(pending,GetTickCount64());pending={};}
+  g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;g_inputHostPowerAdmissionRevoked=false;
+  ymcc::sleeppower::SharedPowerV1 power;
+  if(!captureSharedPowerLifecycle(power)||!sharedPowerLifecycleCurrent(power))throw std::logic_error("sd-off-public-power-not-ready");
+  return;
+ }
+ ymcc::sleeppower::SharedPowerV1 before;
+ if(!captureSharedPowerLifecycle(before)||!sharedPowerLifecycleCurrent(before))throw std::logic_error("sd-off-edge-requires-current-public-capture");
+ if(edge=="notification"){
+  if(pending)throw std::logic_error("sd-off-notification-already-pending");
+  pending=g_sleepPowerDispatch.window(PBT_APMSUSPEND,GetTickCount64());
+  if(!pending||sharedPowerLifecycleCurrent(before))throw std::logic_error("sd-off-notification-did-not-retire-public-capture");
+ }else if(edge=="generation"){
+  const auto value=g_powerGeneration.load(std::memory_order_acquire);
+  if(value==~decltype(value){0})throw std::logic_error("sd-off-generation-overflow");
+  g_powerGeneration.store(value+1,std::memory_order_release);
+  if(sharedPowerLifecycleCurrent(before))throw std::logic_error("sd-off-generation-did-not-retire-public-capture");
+ }else if(edge=="publication"){
+  g_sharedPowerPublicationRevision.fetch_add(1,std::memory_order_acq_rel);
+  if(!sharedPowerLifecycleCurrent(before))throw std::logic_error("sd-off-publication-cancelled-healthy-power");
+ }else throw std::invalid_argument("unknown-sd-off-shared-power-edge");
+}
+#endif
+static bool fixtureOwnedCliRead(const std::wstring& command,std::string* output,DWORD* code){
+ fixtureOwnedCliCommands.push_back(command);if(output)output->clear();if(code)*code=ERROR_SUCCESS;
+ if(command==L"--dev-list"){
+  if(output)for(const auto& hidden:fixtureOwnedCliHidden)*output+="--dev-hide \""+W2U(hidden)+"\"\n";
+  auto callback=std::move(fixtureOwnedCliAfterDevList);fixtureOwnedCliAfterDevList={};
+  if(callback){++fixtureOwnedCliCallbacks;callback();}
+ }else if(command==L"--cloak-state"){if(output)*output="--cloak-on\n";}
+ else if(command.rfind(L"--dev-hide \"",0)==0){
+  ++fixtureOwnedCliWrites;
+  const auto start=std::wstring(L"--dev-hide \"").size();
+  const auto target=command.substr(start,command.size()-start-1);
+  fixtureOwnedCliHidden.push_back(target);
+ }else{++forbiddenIo;throw std::logic_error("unexpected-owned-cli-query:"+W2U(command));}
+ return true;
+}
+
 #undef GetExitCodeProcess
 
 // Read-only copy of the sample actually published by the synchronous owner below.
@@ -323,6 +493,9 @@ static ULONGLONG fixtureOneXTick(){
 // Yield to the real canonical reader after the helper released its Host mutex
 // and suspended scoped write permissions. Discovery itself never samples.
 static void WINAPI fixtureOneXSleep(DWORD millis){
+#if defined(YMCC_FIXTURE_GPD_PENDING_BEFORE_HIDE)
+ if(fixturePreHideSleep(millis))return;
+#endif
  if(fixtureOneXEnabled && fixtureOneXShape=="initial-pending" && !fixtureOneXReturned && g_inputHostProcess && g_inputHostHello &&
     !g_inputHostPrepared && !g_inputHostPrepareMayHaveReachedHost && !g_inputHostActive &&
     !g_inputHostMx.ownedByCurrentThread() && !g_hidHideVisibilityJournal.active && !t_inputHostOneXStartWrite){
@@ -849,7 +1022,12 @@ static bool fixtureGpdPostHideApply(const std::string& transactionId,bool powerC
    value.started=value.completed=GetTickCount64();value.power=currentPowerGeneration();
    value.topology=g_xinputTopologyEpoch.load(std::memory_order_acquire);
    value.identity=g_xinputSlotIdentityEpoch.load(std::memory_order_acquire);
-   value.live=true;value.stable=true;value.route=Route::XInput;value.incarnation=1;value.continuity=1;return value;
+   value.live=true;value.stable=true;value.route=Route::XInput;value.incarnation=1;value.continuity=1;
+   if(fixtureGpdFullCycleObserving.load(std::memory_order_acquire)){std::lock_guard<std::mutex> observation(fixtureGpdFullCycleObservationMx);
+    fixtureGpdFullCycleSourceReads.push_back({{"sequence",value.sequence},{"started",value.started},{"completed",value.completed},
+     {"power",value.power},{"topology",value.topology},{"identity",value.identity},{"live",value.live},{"stable",value.stable},
+     {"hello",g_inputHostHello},{"prepared",g_inputHostPrepared}});}
+   return value;
  };
  // The real readmit guards/mask-reset path is exercised in the dedicated
  // native regression; this full lifecycle consumer uses only its final
@@ -865,6 +1043,88 @@ static BOOL fixtureOwnedHostExitCode(HANDLE process,LPDWORD exitCode){
   *exitCode=STILL_ACTIVE;return TRUE;
  }
  return ::GetExitCodeProcess(process,exitCode);
+}
+static ymcc::targetReturn::process::Probe fixtureRuntimeRecoveryWriter(const ymcc::targetReturn::ProcessIdentity& owner){
+ using namespace ymcc::targetReturn;
+ if(!fixtureRuntimeRecoveryOsEnabled || !fixtureRuntimeRecoveryOldHost || !fixtureRuntimeRecoveryOldOwner ||
+    !detail::sameProcess(owner,*fixtureRuntimeRecoveryOldOwner)){
+  ++forbiddenIo;throw std::logic_error("runtime-return-probe-not-exact-owned-Host");
+ }
+ ++fixtureRuntimeRecoveryWriterCalls;
+ const auto wait=WaitForSingleObject(fixtureRuntimeRecoveryOldHost,0);
+ fixtureRuntimeRecoveryOsObservations.push_back({{"leaf","exact-old-Host-exit"},{"pid",owner.pid},
+  {"birth",owner.creationTime},{"wait",wait},{"nativeParentDeclaredDead",false}});
+ if(wait==WAIT_OBJECT_0)return {process::State::Dead,process::Reason::MatchingExited};
+ if(wait==WAIT_TIMEOUT)return {process::State::Alive,process::Reason::MatchingRunning};
+ return {process::State::Unknown,process::Reason::WaitFailed,GetLastError()};
+}
+static ymcc::targetReturn::pnpAbsence::Result fixtureRuntimeRecoveryAbsence(const std::vector<std::string>& ids){
+ namespace proof=ymcc::targetReturn::pnpAbsence;
+ if(!fixtureRuntimeRecoveryOsEnabled){++forbiddenIo;throw std::logic_error("runtime-PnP-leaf-not-enabled");}
+ // The original complete-census parser decides absent/present/unknown. Only
+ // SetupAPI/CM results are controlled; no Session/proven/ledger field is changed.
+ struct Reader {
+  DWORD lastError=ERROR_SUCCESS;unsigned enumerations=0,properties=0,closes=0;
+  bool physicalXbox=false;
+  HDEVINFO getClassDevs(const GUID*,PCWSTR,HWND,DWORD flags){
+   if(flags!=(DIGCF_PRESENT|DIGCF_ALLCLASSES))throw std::logic_error("runtime-PnP-census-flags");
+   return reinterpret_cast<HDEVINFO>(std::uintptr_t(0x31));
+  }
+  BOOL enumerate(HDEVINFO,DWORD index,PSP_DEVINFO_DATA data){
+   ++enumerations;
+   if(fixtureRuntimeRecoveryCensus=="unknown" && index==1){lastError=ERROR_ACCESS_DENIED;return FALSE;}
+   if(index>=2){lastError=ERROR_NO_MORE_ITEMS;return FALSE;}
+   data->DevInst=index+1;return TRUE;
+  }
+  BOOL destroy(HDEVINFO){++closes;return TRUE;}
+  CONFIGRET deviceId(DEVINST node,PWCHAR out,ULONG chars,ULONG){
+   const auto id=physicalXbox&&node==1?std::wstring(L"USB\\VID_045E&PID_028E\\FIXTURE-SD-OFF-111700"):L"ROOT\\FIXTURE_RUNTIME_NODE\\"+std::to_wstring(node);
+   if(id.size()+1>chars)return CR_BUFFER_SMALL;
+   std::copy(id.begin(),id.end(),out);out[id.size()]=0;return CR_SUCCESS;
+  }
+  CONFIGRET hardwareIds(DEVINST node,const DEVPROPKEY*,DEVPROPTYPE* type,PBYTE out,PULONG bytes,ULONG){
+   ++properties;*type=DEVPROP_TYPE_STRING_LIST;
+   std::wstring value=physicalXbox&&node==1?L"USB\\VID_045E&PID_028E":node==2 && fixtureRuntimeRecoveryCensus=="present"?L"ROOT\\HIDMaestroXUSB":L"PCI\\UNRELATED";
+   value.push_back(0);value.push_back(0);const auto size=static_cast<ULONG>(value.size()*sizeof(wchar_t));
+   if(*bytes<size){*bytes=size;return CR_BUFFER_SMALL;}
+   std::memcpy(out,value.data(),size);*bytes=size;return CR_SUCCESS;
+  }
+  DWORD error(){return lastError;}
+ } reader;
+#if defined(YMCC_FIXTURE_SD_OFF_SOURCE_LOST)
+ reader.physicalXbox=fixtureSdOffSourceLostActive();
+#endif
+ ++fixtureRuntimeRecoveryCensusCalls;const auto result=proof::verify(ids,reader);
+ fixtureRuntimeRecoveryOsObservations.push_back({{"leaf","complete-runtime-target-census"},
+  {"input",fixtureRuntimeRecoveryCensus},{"state",proof::stateName(result.state)},
+  {"reason",proof::reasonName(result.reason)},{"enumerations",reader.enumerations},
+  {"properties",reader.properties},{"closes",reader.closes},{"physicalXboxNodeIncluded",reader.physicalXbox},{"ledgerMutatedByFixture",false}});
+ if(reader.closes!=1)throw std::logic_error("runtime-PnP-owned-set-not-closed");
+ return result;
+}
+static void fixtureRuntimeRecoveryWriterPathBoundary(){
+ if(!fixtureRuntimeRecoveryOsEnabled || !fixtureRuntimeRecoveryWriterPathCallback ||
+    !fixtureRuntimeRecoveryCensusCalls)return;
+ const auto& incident=ymcc::inputHost::runtimeRecovery::state;
+ const auto& ledger=ymcc::inputHost::targetReturnRuntime::state;
+ if(!incident.pending || !incident.stopInvoked || !ledger.session || !ledger.session->ready())return;
+ const auto* record=ledger.session->record();if(!record)return;
+ const auto old=[&](const auto& origin){return origin.runId==incident.runId && origin.epoch==incident.hostEpoch;};
+ if(std::any_of(record->obligations.begin(),record->obligations.end(),[&](const auto& item){return old(item.origin);}) ||
+    std::any_of(ledger.targets.begin(),ledger.targets.end(),[&](const auto& item){return old(item.origin);}) ||
+    std::any_of(ledger.proven.begin(),ledger.proven.end(),old))return;
+ // Only the last real current()->physicalWritersQuiescent()->writer open
+ // boundary after the real Session commit is eligible. Do not fake its result.
+ auto callback=std::move(fixtureRuntimeRecoveryWriterPathCallback);fixtureRuntimeRecoveryWriterPathCallback={};
+ ++fixtureRuntimeRecoveryWriterPathCallbackCalls;
+ const auto power=currentPowerGeneration(),intent=g_inputHostVirtualIntentRevision.load();
+ callback();
+ fixtureRuntimeRecoveryOsObservations.push_back({{"leaf","runtime-writer-path-after-target-commit"},
+  {"calls",fixtureRuntimeRecoveryWriterPathCallbackCalls},{"censusCalls",fixtureRuntimeRecoveryCensusCalls},
+  {"oldRunId",incident.runId},{"oldEpoch",incident.hostEpoch},{"oldTargetObligations",0},
+  {"powerBefore",power},{"powerAfter",currentPowerGeneration()},
+  {"intentBefore",intent},{"intentAfter",g_inputHostVirtualIntentRevision.load()},
+  {"quiescentReadAndDecisionReplaced",false}});
 }
 static unsigned checks=0;static json failures=json::array(),cases=json::array();
 // Evidence-only, explicit bounded OFF mode. Each row is flushed before the
@@ -925,6 +1185,21 @@ static std::wstring fixtureTargetReturnRecordPath(){
  if(fixtureTargetReturnPath.empty())fixtureTargetReturnIndependentCase();
  return fixtureTargetReturnPath;
 }
+static std::wstring fixtureFullPipeCliRecordPath(){
+ if(!fixtureFullPipe && !fixtureOrdinarySwitchCliScope)throw std::logic_error("ordinary-full-pipe-cli-scope-required");
+ if(fixtureOrdinarySwitchCliScope && (fixtureFullPipe || fixtureColdArchive || fixtureRuntimeRecoveryOsEnabled))
+  throw std::logic_error("ordinary-native-switch-cli-role-conflict");
+ const auto record=fspath::path(fixtureTargetReturnRecordPath());
+ const auto root=fspath::path(g_yemanccDataDir)/L"target-return-private";
+ const auto exact=root/(L"case-"+std::to_wstring(fixtureTargetReturnCaseSerial));
+ const auto attrs=GetFileAttributesW(exact.c_str());
+ if(!record.is_absolute()||attrs==INVALID_FILE_ATTRIBUTES||!(attrs&FILE_ATTRIBUTE_DIRECTORY)||
+    (attrs&FILE_ATTRIBUTE_REPARSE_POINT)||
+    normalizeWindowsPathForCompare(record.parent_path().wstring())!=normalizeWindowsPathForCompare(exact.wstring())||
+    record.filename().wstring()!=L"record.json")
+  throw std::logic_error("ordinary-full-pipe-cli-private-record-identity");
+ return record.wstring()+(fixtureOrdinarySwitchCliScope?L".native-switch-cli":L".full-pipe-cli");
+}
 static std::optional<ymcc::targetReturn::ProcessIdentity> fixtureTargetReturnCaptureOwner(HANDLE process){
  if(fixtureFullPipe||process==GetCurrentProcess())return ymcc::targetReturn::process::capture(process);
  // Native-only existing fixture uses an event as Host. This is explicitly a
@@ -947,6 +1222,12 @@ static void fixtureResetSwitchAudit(){
  audit.throttledCount=0;audit.settleLoggedReason.clear();audit.throttleLoggedWindow=0;
 }
 static void seed(){
+ fixtureRuntimeRecoveryOsEnabled=false;fixtureRuntimeRecoveryFaultEnabled=false;fixtureRuntimeRecoveryFaultConsumed=false;
+ fixtureRuntimeRecoveryOldHost=nullptr;fixtureRuntimeRecoveryOldOwner.reset();fixtureRuntimeRecoveryCensus="unknown";
+ fixtureRuntimeRecoveryFaultCalls=fixtureRuntimeRecoveryWriterCalls=fixtureRuntimeRecoveryCensusCalls=0;
+ fixtureRuntimeRecoveryOsObservations=nlohmann::json::array();
+ fixtureRuntimeRecoveryWriterPathCallback={};fixtureRuntimeRecoveryWriterPathCallbackCalls=0;
+ ymcc::inputHost::runtimeRecovery::state={};g_inputHostRuntimeRecoveryPending=false;
  fixtureOneXEnabled=false;fixtureOneXShape.clear();fixtureOneXLocationsReads=fixtureOneXDispatchCalls=fixtureOneXIssues=0;
  fixtureOneXReplayAdmitted=false;fixtureOneXInitialForeign=false;fixtureOneXForeignSlot=1;fixtureOneXMayIssueCalls=0;
  fixtureOneXStaleClockObserving=false;fixtureOneXStaleTraceBegin=0;fixtureOneXStaleSequence=0;fixtureOneXStaleOwnerSample={};
@@ -960,7 +1241,7 @@ static void seed(){
  fixtureOneXReturnedGuardProven=fixtureOneXExternalSourceRejected=fixtureOneXExternalTargetRejected=false;
  inputHostDeferredPhysicalHideClear(); // fresh fixture process; never used as evidence of physical return
  fixtureRogInitialIdentityEnabled=false;fixtureRogInitialDiscoveryComplete=true;fixtureRogInitialDiscoveryReads=0;fixtureRogInitialDiscoveryCallback={};fixtureRogInitialShape="valid";
- fixtureSwitchOwnedHideSeed=false;fixtureSwitchSourceAtEnsure={};
+ fixtureSwitchOwnedHideSeed=false;fixtureSwitchSourceAtEnsure={};fixtureGpdTransferSourceAtEnsure={};
  fixtureRogDeferredJournalSeed=fixtureRogDeferredCycleEnabled=false;fixtureRogDeferredCycleResult="success";
  fixtureRogPartialEnabled=false;fixtureRogPartialShape="valid";fixtureRogPartialStage=fixtureRogPartialSnapshotReads=0;fixtureRogPartialAfterFirst={};fixtureRogPartialDuringRetry={};fixtureRogPartialDuringSnapshot={};
  fixtureRogDeferredHideRecords=json::array();fixtureRogDeferredCycles=json::array();
@@ -975,14 +1256,22 @@ static void seed(){
  fixturePsReturnManualTopology=false;
  fixturePrepareAckLoss=fixturePrepareAckLossConsumed=false;fixturePrepareAckOriginal=nullptr;
  fixturePipeBudgetEnabled=fixturePipeBudgetActive=fixturePipeBudgetAdvanced=false;fixturePipeBudgetStages.clear();fixturePipeBudgetDeadline=fixturePipeBudgetAdvanceMs=0;fixturePipeBudgetAdvancePhase.clear();fixturePipeBudgetCommand="RECREATE_TARGET";fixturePipeBudgetCurrentCommand.clear();
- fixtureHealthInventoryRead=false;fixtureWakeBeforeHideReturn={};fixturePcPowerCapabilities=false;fixturePowerClockOffset=0;fixtureWakeBlockingSleeps=0;
+ fixtureHealthInventoryRead=false;fixtureWakeBeforeHideReturn={};fixtureWakeAfterSourceQuery={};fixturePcPowerCapabilities=false;fixtureModernStandbyCapabilities=false;fixturePowerClockOffset=0;fixtureWakeBlockingSleeps=0;
  {std::lock_guard<std::mutex> lock(ymcc::inputHost::wakeExecutionRuntime::mx);ymcc::inputHost::wakeExecutionRuntime::episode={};ymcc::inputHost::wakeExecutionRuntime::returnWait={};ymcc::inputHost::wakeExecutionRuntime::sourceWait={};}
  g_wakeRescanRequested=false;g_wakeRescanGeneration=0;g_wakeRescanArmTick=0;g_wakeHotReplaceRetryAfterTick=0;g_wakeKeptTargetGeneration=0;g_inputHostRecreatedWakePowerProof={};g_msiVirtualWakeGeneration=0;g_msiVirtualWakeArmTick=0;g_msiVirtualWakeStartAttempts=0;g_msiVirtualWakeRearmedGeneration=0;
  g_psEndpointOwnership.clear();g_inputHostPsEndpointFault={};g_inputHostTupleFault={};g_inputHostDeferredTuple={};g_inputHostTupleAccepted={};g_psWakeProtectedRequestId=0;g_psWakeRequestHostEpoch=0;g_psWakeRequestCycleId=0;fixtureWireCapture=false;fixtureWireFaultConsumed=false;fixtureWirePrevious.clear();fixtureWireFault.clear();fixtureWireOriginal=nullptr;fixtureWireInjected=nullptr;
  // Each case is process-equivalent; preserve budgets inside, not across cases.
  g_inputHostRecoveryEpisodeAttempts=0;g_inputHostRecoveryLastStartTick=0;g_inputHostRecoveryDeferredUntil=0;g_inputHostRecoveryPending=false;g_inputHostRecoveryTerminalLogged=false;g_inputHostRecoveryRolling[0]=0;g_inputHostRecoveryRolling[1]=0;g_inputHostRecoveryRollingNext=0;g_inputHostRecoveryIntentReset=false;g_inputHostHealthySinceTick=0;g_inputHostRecoveryHealth.clear();g_inputHostRecoveryHealthWasTracking=false;g_inputHostRecoveryFallbackState=0;g_inputHostTupleHealPending=false;
  ymcc::inputHost::switchExecutionReturnRuntime::state={};g_inputHostSwitchExecutionReturnPending=false;
- g_virtualStartProtection.~VirtualStartProtection();new (&g_virtualStartProtection) ymcc::VirtualStartProtection();startProtectionClock=100000;g_inputHostStartProtectionBoundTicket=0;g_inputHostSwitchVerificationPending=false;ymcc::inputHost::switchVerificationRuntime::lastFinalRequestId=0;ymcc::inputHost::switchVerificationRuntime::observation={};g_inputHostSwitchRecovery={};g_inputHostSwitchRecoveryPending=false;g_inputHostSwitchRecoveryStartDeadline=0;g_inputHostSwitchRecoveryStartRequestId=0;g_inputHostSwitchRecoveryStartPower=0;g_inputHostSwitchRecoveryTransportError=ERROR_SUCCESS;fixtureStartupTransportError=ERROR_SUCCESS;fixtureFrameFirstAck=false;
+ g_virtualStartProtection.~VirtualStartProtection();new (&g_virtualStartProtection) ymcc::VirtualStartProtection();startProtectionClock=100000;g_inputHostStartProtectionBoundTicket=0;g_inputHostSwitchVerificationPending=false;ymcc::inputHost::switchVerificationRuntime::lastFinalRequestId=0;ymcc::inputHost::switchVerificationRuntime::observation={};
+ // A seed is a new process-equivalent case. Production intentionally retains
+ // ROG return lineage across Stop/wake; independent cases must not inherit it.
+ // Never call this reset from a within-case return or recovery helper.
+ ymcc::inputHost::switchVerificationRuntime::acceptedSource={};
+ ymcc::inputHost::switchVerificationRuntime::rogReturnBaseline={};
+ ymcc::inputHost::switchVerificationRuntime::rogOffSuccessReceipt={};
+ ymcc::inputHost::switchVerificationRuntime::rogOffSignal={};
+g_inputHostSwitchRecovery={};g_inputHostSwitchRecoveryPending=false;g_inputHostSwitchRecoveryStartDeadline=0;g_inputHostSwitchRecoveryStartRequestId=0;g_inputHostSwitchRecoveryStartPower=0;g_inputHostSwitchRecoveryTransportError=ERROR_SUCCESS;fixtureStartupTransportError=ERROR_SUCCESS;fixtureFrameFirstAck=false;
  g_machineIdentity={};g_machineIdentity.attempted=true;g_machineIdentity.resolved=true;g_machineIdentity.family=YmccFamily::MsiClaw;g_machineIdentity.manufacturer="MICRO-STAR INTERNATIONAL CO., LTD.";g_machineIdentity.product="MS-1T91";
  g_startEntrySeam=YmccStartEntrySeam{};g_startEntrySeam.active=true;g_startEntrySeam.modeWriteOk=true;g_startEntrySeam.confirmRouteAfterEnsure=true;
  g_realStickTest.enabled=true;g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="steamdeck";
@@ -1011,13 +1300,16 @@ static void rollbackCases(){
  }
  seed();cases.push_back({{"name","normal-start-stop-and-repeat"}});{const auto f=failures.size();for(int i=0;i<3;++i){check(inputHostStart(),"real complete start returns success");check(g_inputHostPrepared&&g_inputHostNeutralized,"real start publishes prepared and neutralized");inputHostStop("virtual-target-disabled");check(!g_inputHostProcess&&!g_inputHostPrepared&&!g_inputHostNeutralized,"real OFF stop completes local release");}cases.back()["trace"]=g_startEntrySeam.trace;cases.back()["passed"]=failures.size()==f;}
 }
+// Observe the existing queue item's reason without copying its ownership payload.
+// The same fixture can also be paired with a frozen pre-struct string queue.
+static std::string_view fixtureLifecycleWorkReason(const auto& work) noexcept {return std::string_view{work};}
 static void queuedExceptionCase(bool common=false){
  seed();if(common){g_machineIdentity.family=YmccFamily::AsusRogAllyX;g_machineIdentity.manufacturer="ASUSTEK COMPUTER INC.";g_machineIdentity.product="ROG Ally X";g_msiDinput.enabled=false;g_msiDinput.mainInterfaceMatched=false;g_msiDinput.productId=0;g_msiDinputSourceValid=false;}g_startupInputState=ymcc::StartupInputState::Ready;g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
  {std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);g_inputHostLifecycleWorkQueue.clear();g_inputHostLifecycleWorkRequested=false;g_inputHostLifecycleWorkInFlight=false;}
  cases.push_back({{"name",common?"common-ready-partial-start-exception":"msi-ready-partial-start-exception"}});const auto before=failures.size();g_startEntrySeam.pipeThrowCommand="HELLO";
  check(inputHostQueueLifecycleWork("persona-transition"),"real user transition request queued");inputHostRunQueuedLifecycleWork();
  cases.back()["afterFailure"]=state();cases.back()["startupStateAfterFailure"]=static_cast<int>(g_startupInputState.load());cases.back()["traceAfterFailure"]=g_startEntrySeam.trace;
- bool cleanupQueued=false;{std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);cases.back()["queueAfterFailure"]=g_inputHostLifecycleWorkQueue;for(const auto& reason:g_inputHostLifecycleWorkQueue)if(reason.rfind("fault-stop:",0)==0)cleanupQueued=true;}
+ bool cleanupQueued=false;{std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);cases.back()["queueAfterFailure"]=g_inputHostLifecycleWorkQueue;for(const auto& work:g_inputHostLifecycleWorkQueue)if(fixtureLifecycleWorkReason(work).rfind("fault-stop:",0)==0)cleanupQueued=true;}
  check(cleanupQueued||(!g_inputHostProcess&&!g_inputHostPrepared&&!g_hidHideVisibilityJournal.active&&!g_msiDinputRouteDinputArmed.load()),"partially-owned start exception retains or completes cleanup outside startup Waiting state");check(!g_inputHostLifecycleWorkInFlight,"failed whole dispatcher releases serial work claim");
  g_startEntrySeam.pipeThrowCommand.clear();inputHostRunQueuedLifecycleWork();cases.back()["afterNextOwnerPass"]=state();cases.back()["traceAfterNextOwnerPass"]=g_startEntrySeam.trace;
  check(!g_inputHostProcess&&!g_inputHostPrepared&&!g_inputHostNeutralized,"next real owner pass completes partial-start cleanup");
@@ -1027,7 +1319,7 @@ static void healthyDiagnosticExceptionCase(){
  seed();g_startupInputState=ymcc::StartupInputState::Ready;g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
  {std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);g_inputHostLifecycleWorkQueue.clear();g_inputHostLifecycleWorkRequested=false;g_inputHostLifecycleWorkInFlight=false;}
  cases.push_back({{"name","completed-target-survives-final-diagnostic-exception"}});const auto before=failures.size();throwLogEvent="input-host-started";check(inputHostQueueLifecycleWork("persona-transition"),"real healthy-start request queued");inputHostRunQueuedLifecycleWork();
- cases.back()["afterFailure"]=state();bool faultStop=false;{std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);cases.back()["queueAfterFailure"]=g_inputHostLifecycleWorkQueue;for(const auto& r:g_inputHostLifecycleWorkQueue)if(r.rfind("fault-stop:",0)==0)faultStop=true;}
+ cases.back()["afterFailure"]=state();bool faultStop=false;{std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);cases.back()["queueAfterFailure"]=g_inputHostLifecycleWorkQueue;for(const auto& work:g_inputHostLifecycleWorkQueue)if(fixtureLifecycleWorkReason(work).rfind("fault-stop:",0)==0)faultStop=true;}
  check(g_inputHostProcess&&g_inputHostPrepared&&g_inputHostNeutralized&&!g_inputHostReleaseQuarantined,"accepted prepared and neutralized target retained after optional final log failure");check(!faultStop,"healthy target does not receive exception cleanup request");check(!g_inputHostLifecycleWorkInFlight,"diagnostic exception releases owner claim");cases.back()["trace"]=g_startEntrySeam.trace;cases.back()["passed"]=failures.size()==before;cases.back()["manualFixtureTeardown"]=cleanup();
 }
 static json targetDocument(const std::string& persona,int revision){return json{{"schemaVersion",1},{"input",{{"revision",revision},{"outputTarget",{{"persona",persona},{"buttonMappingEnabled",persona!="disabled"},{"gyroEnabled",false}}}}}};}
@@ -1112,7 +1404,7 @@ static void recoveryProtectionCases(){
   check(g_virtualStartProtection.view(startProtectionClock).locked==beforeReturn.locked,"policy return never resets or prematurely releases user protection");
   check(g_realStickTest.virtualTargetEnabled&&g_sleepRecoveryOutputWanted,"single real return refresh restores requested operational target");
   const auto restored=g_virtualStartProtection.view(startProtectionClock);check(restored.requestId==before.requestId,"policy restore does not create a new30second protection episode");
-  if(g_realStickTest.virtualTargetEnabled){const bool started=inputHostStart();check(started,"same-intent recovery can execute its serialized real start during user cooldown");check(g_virtualStartProtection.view(startProtectionClock).requestId==before.requestId,"recovery start inherits request ownership without renewing timer");cases.back()["cleanup"]=cleanup();}
+  if(g_realStickTest.virtualTargetEnabled){const bool started=inputHostStart();cases.back()["startEvents"]=fixtureEvents;cases.back()["startTrace"]=g_startEntrySeam.trace;check(started,"same-intent recovery can execute its serialized real start during user cooldown");check(g_virtualStartProtection.view(startProtectionClock).requestId==before.requestId,"recovery start inherits request ownership without renewing timer");cases.back()["cleanup"]=cleanup();}
  }
  seed();g_inputShortcutRuntime.clear();g_externalPriorityVirtualSuspended=false;g_realStickTest.virtualTargetEnabled=false;reg_fs();cases.push_back({{"name","explicit-OFF-during-policy-pause-cannot-auto-resurrect"}});
  auto base=targetDocument("disabled",0);check(sgWriteFileAtomic(YM_SETTINGS_FILE,base.dump()),"explicit cancellation private base seeded");auto on=targetDocument("steamdeck",1);check(writeTarget(base,on).value("ok",false),"user ON accepted before policy pause");const auto ticket=g_virtualStartProtection.view(startProtectionClock).requestId;
@@ -1159,6 +1451,10 @@ static void recordReadCases(){
 #include "tuple_recovery_cases.inc"
 #include "target_return_cases.inc"
 #include "persona_lifecycle_cases.inc"
+#ifdef YMCC_PREPARE_REJECTION_COLD_CASE
+#include "prepare_rejection_on_edge.inc"
+#include "prepare_rejection_cases.inc"
+#endif
 #include "cold_archive_cases.inc"
 #include "cold_msi_archive_cases.inc"
 #define YMCC_LATE_HIDE_PENDING_FULL_TU 1
@@ -1168,7 +1464,12 @@ static void recordReadCases(){
 #include "recovery_cost_cases.inc"
 #include "worker_cost_cases.inc"
 
-static void switchRecoveryCases(){
+static void switchRecoveryCases(int cliBoundaryOnly=0){
+ struct OrdinarySwitchCliScope {
+  bool previous=fixtureOrdinarySwitchCliScope;
+  OrdinarySwitchCliScope(){if(fixtureFullPipe || fixtureColdArchive || fixtureRuntimeRecoveryOsEnabled)throw std::logic_error("ordinary-switch-cli-scope-role");fixtureOrdinarySwitchCliScope=true;}
+  ~OrdinarySwitchCliScope(){fixtureOrdinarySwitchCliScope=previous;}
+ } ordinarySwitchCliScope;
  const auto prepare=[&](const std::string& persona="steamdeck"){
   seed();g_machineIdentity.family=YmccFamily::AsusRogAllyX;g_machineIdentity.manufacturer="ASUSTEK COMPUTER INC.";g_machineIdentity.product="ROG Ally X";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;
   g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_externalPriorityVirtualSuspended=false;g_shortcutRecordingActive=false;
@@ -1194,7 +1495,7 @@ static void switchRecoveryCases(){
  const auto stopCount=[](){return static_cast<unsigned>(std::count_if(g_startEntrySeam.trace.begin(),g_startEntrySeam.trace.end(),[](const auto& v){return v.rfind("stop:",0)==0;}));};
  const auto createCount=[](){return static_cast<unsigned>(std::count(g_startEntrySeam.trace.begin(),g_startEntrySeam.trace.end(),"create-process"));};
  const auto queuedRecoveryCount=[](){std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);
-  return static_cast<unsigned>(std::count_if(g_inputHostLifecycleWorkQueue.begin(),g_inputHostLifecycleWorkQueue.end(),[](const auto& reason){return reason.rfind("switch-recovery:",0)==0;}));};
+  return static_cast<unsigned>(std::count_if(g_inputHostLifecycleWorkQueue.begin(),g_inputHostLifecycleWorkQueue.end(),[](const auto& work){return fixtureLifecycleWorkReason(work).rfind("switch-recovery:",0)==0;}));};
  const auto timeline=[&](const char* stage){const auto view=g_virtualStartProtection.view(startProtectionClock);const auto& request=g_inputHostSwitchRecovery;
   cases.back()["timeline"].push_back({{"stage",stage},{"tick",startProtectionClock},{"requestId",view.requestId},{"phase",view.phase},
    {"elapsedMs",view.elapsedMs},{"remainingMs",view.remainingMs},{"verificationRemainingMs",view.verificationRemainingMs},
@@ -1269,6 +1570,75 @@ static void switchRecoveryCases(){
  };
  const auto finishLocalCase=[&](){cases.back()["events"]=fixtureEvents;cases.back()["trace"]=g_startEntrySeam.trace;cases.back()["cleanup"]=cleanup();
   cases.back()["controlledIoObservation"]={{"forbiddenIoThroughCase",forbiddenIo},{"scope","cumulative fixture rejection counter; not device IO or hardware proof"}};fixtureFrameFirstAck=false;};
+if(cliBoundaryOnly && cliBoundaryOnly!=4){
+ for(const std::string variant:(cliBoundaryOnly==2?std::vector<std::string>{"current-owner"}:cliBoundaryOnly==3?std::vector<std::string>{"host-journal"}:std::vector<std::string>{"host-journal","power"})){
+  const auto failuresBefore=failures.size();
+  cases.push_back({{"name",std::string(variant=="current-owner"?"owned-readback-cli-current/":"owned-readback-cli-boundary/")+variant}});
+  const auto request=startLocalOwned();const auto old=captureLocalReadback();
+  const auto oldJournal=g_hidHideVisibilityJournal;const auto oldBoundPower=g_inputHostBoundPowerGeneration;
+  const auto oldCapability=g_inputHostHidHideStateQuery;const auto oldFault=g_inputHostTransportFault;
+  const auto oldSeam=g_startEntrySeam.active;const auto commands=g_inputHostSequence;
+  fixtureOwnedCliBoundary=true;fixtureOwnedCliCommands.clear();fixtureOwnedCliHidden=variant=="current-owner"?old.targets:std::vector<std::wstring>{};fixtureOwnedCliCallbacks=0;
+  fixtureOwnedCliPhysical={oldJournal.physical};fixtureOwnedCliPhysicalQueries=fixtureOwnedCliFullQueries=fixtureOwnedCliWrites=0;
+  g_inputHostHidHideStateQuery=false;g_inputHostTransportFault=true;g_startEntrySeam.active=false;
+  g_hidHideVisibilityJournal.admittedTick=0;g_inputHostLastPhysicalIdentityCheckTick=0;
+  g_inputHostReapplyHideEpisodeKey="successor-repair-budget-sentinel";
+  g_inputHostReapplyHideRepairs=2;g_inputHostReapplyHideExhausted=false;g_inputHostReapplyHideLastTick=0;
+  g_hidHideOwnedGameRepairProgress={};g_hidHideOwnedGameRepairProgress.key="successor-discovery-sentinel";
+  const auto budgetKey=g_inputHostReapplyHideEpisodeKey;const auto repairs=g_inputHostReapplyHideRepairs;
+  const auto repairProgressKey=g_hidHideOwnedGameRepairProgress.key;
+  InputHostOwnedVisibilityReadback newer;
+  fixtureOwnedCliAfterDevList=[&](){
+   {
+    std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+    if(variant=="host-journal"){
+     ++g_inputHostEpoch;g_inputHostRunId+="-replacement";g_inputHostHostInstanceId+="-replacement";
+     g_hidHideVisibilityJournal.transactionId=g_inputHostRunId;
+     g_hidHideVisibilityJournal.hiddenByUs.push_back(L"HID\\CLI_BOUNDARY_NEW_OWNER");
+    }else if(variant=="power"){g_powerGeneration=old.power+1;g_inputHostBoundPowerGeneration=old.power+1;}
+    newer=inputHostCaptureOwnedVisibilityReadbackLocked();
+   }
+   check(newer.requestId&&inputHostPublishOwnedVisibilityReadback(newer,true,newer.targets,true,GetTickCount64()),
+    "successor current contract publishes positive authority during actual CLI read");
+  };
+  inputHostReconcilePhysicalSourceOnLifecycleThread();
+  g_startEntrySeam.active=oldSeam;fixtureOwnedCliBoundary=false;
+  check(fixtureOwnedCliCallbacks==1&&fixtureOwnedCliCommands.size()>=2&&fixtureOwnedCliCommands[0]==L"--dev-list"&&fixtureOwnedCliCommands[1]==L"--cloak-state",
+   "actual callback interleaves exactly two unlocked CLI queries");
+  check(fixtureOwnedCliCommands==std::vector<std::wstring>{L"--dev-list",L"--cloak-state"},
+   "actual reconcile old CLI read sends only the original two query commands");
+  check(fixtureOwnedCliWrites==0,"actual reconcile old CLI read cannot issue hide writes for successor owner");
+  check(fixtureOwnedCliPhysicalQueries==0&&fixtureOwnedCliFullQueries==0,
+   "actual reconcile refuses stale observation before repair discovery or full readback");
+  check(variant=="current-owner" ?
+   (g_inputHostReapplyHideRepairs==0&&!g_inputHostReapplyHideExhausted&&g_hidHideOwnedGameRepairProgress.key.empty()) :
+   (g_inputHostReapplyHideEpisodeKey==budgetKey&&g_inputHostReapplyHideRepairs==repairs&&g_inputHostReapplyHideLastTick==0&&g_hidHideOwnedGameRepairProgress.key==repairProgressKey),
+   variant=="current-owner"?"actual current owner two-query healthy reconcile clears repair episode from two to zero":
+   "actual reconcile old CLI read cannot reset or charge successor repair budget");
+  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+   check(g_inputHostOwnedVisibilityReadback.hostEpoch==newer.hostEpoch&&g_inputHostOwnedVisibilityReadback.power==newer.power&&
+    g_inputHostOwnedVisibilityReadback.transactionId==newer.transactionId&&!g_inputHostOwnedVisibilityReadback.targetsMissing,
+    "old query cannot overwrite successor authority");
+   check(inputHostSwitchLocalFaultCurrentLocked(request.requestId)==InputHostSwitchLocalFault::None,"old missing-target query supplies no current recovery fault");
+   inputHostSwitchRecoveryOfferLocked(request.requestId,currentPowerGeneration(),ERROR_SUCCESS,false,InputHostSwitchLocalFault::OwnedHiddenTargetMissing);
+   inputHostSwitchRecoveryMaintenanceLocked();}
+  check(g_inputHostSequence==commands,"old CLI consumption sends no Host command");
+  noRecovery("old CLI observation causes no queue Stop Start reservation or charge");
+  std::vector<std::string> actualCommands;for(const auto& command:fixtureOwnedCliCommands)actualCommands.push_back(W2U(command));
+  cases.back()["cliBoundary"]={{"variant",variant},{"callbackCount",fixtureOwnedCliCallbacks},{"firstCommands",{"--dev-list","--cloak-state"}},
+   {"commands",actualCommands},{"actualReconcile",true},{"physicalQueries",fixtureOwnedCliPhysicalQueries},{"fullQueries",fixtureOwnedCliFullQueries},{"writes",fixtureOwnedCliWrites},
+   {"repairKeyBefore",budgetKey},{"repairKeyAfter",g_inputHostReapplyHideEpisodeKey},{"repairAttemptsBefore",repairs},{"repairAttemptsAfter",g_inputHostReapplyHideRepairs},
+   {"commandSequenceBefore",commands},{"commandSequenceAfter",g_inputHostSequence},
+   {"oldEpoch",old.hostEpoch},{"newEpoch",newer.hostEpoch},{"oldPower",old.power},{"newPower",newer.power},
+   {"oldTransaction",old.transactionId},{"newTransaction",newer.transactionId}};
+  g_inputHostEpoch=old.hostEpoch;g_inputHostRunId=old.runId;g_inputHostHostInstanceId=old.hostInstanceId;
+  g_powerGeneration=old.power;g_inputHostBoundPowerGeneration=oldBoundPower;g_hidHideVisibilityJournal=oldJournal;
+  g_inputHostHidHideStateQuery=oldCapability;g_inputHostTransportFault=oldFault;
+  cases.back()["passed"]=failures.size()==failuresBefore;finishLocalCase();
+ }
+ return;
+}
+
  struct LocalDeferredWriteScope {
   const InputHostDeferredPhysicalHide* previous=t_inputHostDeferredPhysicalHideWrite;
   bool refreshIssue=t_inputHostDeferredPhysicalHideRefreshIssueActive;
@@ -1300,6 +1670,7 @@ static void switchRecoveryCases(){
   cases.back()["normalConfigurationSnapshots"]=fixtureRogDeferredSnapshots;
   return candidate;
  };
+ if(cliBoundaryOnly!=4){
  {
  cases.push_back({{"name","central-switch-lifecycle-version-and-single-fallback-clock"}});
  using Cycle=ymcc::VirtualStartProtection;Cycle cycle;const Cycle::Tick admittedAt=100000,candidateAt=admittedAt+2500;
@@ -1416,11 +1787,11 @@ static void switchRecoveryCases(){
  }
  cases.push_back({{"name","actual-focus-neutral-current-source-verifies-without-health-credit"}});prepare();fixtureFrameFirstAck=true;
  {
-  // This existing cached UI-owner route makes gamepadUiInputEligible return
-  // before any HWND/window checks. Never show/close the radial UI or send input.
-  struct CachedRadialOwnerScope{bool previous=g_radialUiOwnsInput.exchange(true,std::memory_order_acq_rel);~CachedRadialOwnerScope(){g_radialUiOwnsInput.store(previous,std::memory_order_release);}} radialOwner;
-  check(radialHasInputOwner()&&gamepadUiInputEligible(),"cached radial ownership supplies actual foreground-neutral eligibility without window operations");
+  // Establish the actual Host first, then acquire the existing cached isolation
+  // owner bound to that Host epoch/source/power. No HWND/UI or input operations.
   check(inputHostStart(),"foreground-neutral scenario establishes its actual owned Host");
+  struct CachedRadialOwnerScope{CachedRadialOwnerScope(){radialInputIsolationOwnership(true);}~CachedRadialOwnerScope(){radialInputIsolationInvalidate();}} radialOwner;
+  check(radialHasInputOwner()&&gamepadUiInputEligible(),"cached radial ownership supplies actual foreground-neutral eligibility without window operations");
   json neutralFrames=json::array();
   for(int n=0;n<kInputHostFreshNeutralFramesRequired+1;++n){auto sample=readVerifiedCurrent();if(n==kInputHostFreshNeutralFramesRequired)sample.pad.wButtons=XINPUT_GAMEPAD_A;neutralFrames.push_back(fullPipeSubmitSource(sample,true,true));}
   const auto focusCandidate=g_virtualStartProtection.view(startProtectionClock);const auto focusSequence=g_inputHostSequence;const auto focusEpoch=g_inputHostEpoch;
@@ -1656,7 +2027,9 @@ static void switchRecoveryCases(){
   check(g_virtualStartProtection.view(startProtectionClock).requestId==request.requestId&&g_virtualStartProtection.view(startProtectionClock).remainingMs==request.remainingMs-ymcc::VirtualStartProtection::settleMs,"held recovery safety cleanup cannot renew the player deadline");timeline("guarded-execution-cleanup-after-inspection");
   cases.back()["events"]=fixtureEvents;g_shortcutRecordingActive=false;cases.back()["cleanup"]=cleanup();fixtureFrameFirstAck=false;
  }
+ }
  for(const int family:{1,2,0})for(const std::string condition:{"resume","return-hook-guards","stale-request-at-return","stale-power-at-return","deadline-at-return","recording","external-priority","power-not-ready","input-not-ready","queued-recording","queued-external-priority","queued-power-not-ready","queued-stale-request","queued-stale-power","queued-deadline","pause-to-deadline"}){
+ if(cliBoundaryOnly==4 && (family!=0 || condition!="resume"))continue;
  if(family!=1&&condition!="resume")continue;
  cases.push_back({{"name",family==1?"ROG/normal-persona-transition-retains-timed-out-old-host":family==2?"GPD/normal-persona-transition-retains-timed-out-old-host":"MSI/normal-persona-transition-retains-timed-out-old-host"}});
  if(condition!="resume")cases.back()["name"]=cases.back()["name"].get<std::string>()+"/"+condition;
@@ -1847,6 +2220,7 @@ static void switchRecoveryCases(){
  fixtureFrameFirstAck=false;
  }
  // Bounded common-self-heal cases extend this original mode only.
+ if(cliBoundaryOnly!=4){
  {
  cases.push_back({{"name","actual-local-owned-hidden-missing-single-fallback"}});
  const auto candidate=startLocalOwned();const auto ticket=candidate.requestId;const auto power=currentPowerGeneration();
@@ -1983,7 +2357,9 @@ static void switchRecoveryCases(){
  {
  cases.push_back({{"name","actual-owned-readback-older-query-and-start-freshness"}});
  const auto candidate=startLocalOwned();const auto older=captureLocalReadback();
- ++fixturePowerClockOffset;const auto newer=captureLocalReadback();auto hidden=newer.targets;hidden.erase(hidden.begin());
+ ++fixturePowerClockOffset;const auto newer=captureLocalReadback();auto hidden=newer.targets;
+ if(hidden.empty())throw std::runtime_error("owned-readback-newer-query-targets-missing");
+ hidden.erase(hidden.begin());
  check(inputHostPublishOwnedVisibilityReadback(newer,true,hidden,true,GetTickCount64()),"newer actual query publishes missing owned targets");
  check(!inputHostPublishOwnedVisibilityReadback(older,true,older.targets,true,GetTickCount64()),"late healthy old query cannot overwrite newer missing-target authority");
  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
@@ -2125,6 +2501,7 @@ static void switchRecoveryCases(){
   "spent original ticket cannot replay takeover or retire a fresh replacement normal stage");
  timeline("owned-root-single-fallback-final");finishLocalCase();
  }
+ }
  {
  cases.push_back({{"name","actual-owned-root-refresh-ordinary-repair-revokes-unspent-offer"}});
  const auto candidate=startRootRefreshStage();const auto ticket=candidate.requestId;const auto deadline=startProtectionClock+candidate.remainingMs;
@@ -2156,6 +2533,7 @@ static void switchRecoveryCases(){
  check(g_inputHostSwitchRecovery.resolved&&!g_inputHostSwitchRecovery.spent,"resolved root offer cannot be renewed by later same-ticket configuration progress");
  noRecovery("ordinary repair and resolved replay use zero fallback queues Stops Starts and recovery budget");finishLocalCase();
  }
+ if(cliBoundaryOnly!=4){
  for(const std::string condition:{"refresh-issued","refresh-result-unknown","configuration-unapplied","configuration-not-ready","continuation-retired",
   "refresh-not-required","unknown-readback","cloak-off","stale-readback","foreign-readback","stage-targets-changed","stage-root-changed","stage-identity-changed",
   "journal-targets-changed","journal-root-changed","journal-owner-changed","journal-source-count","journal-source-mismatch",
@@ -2323,6 +2701,7 @@ static void switchRecoveryCases(){
   g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,"old queued recovery cannot borrow a newer ticket after its original period");
  finishLocalCase();
  }
+ }
  cases.push_back({{"name","actual-unique-OFF-verification-exit"}});prepare();
  startProtectionClock+=30000;g_virtualStartProtection.admit("disabled",startProtectionClock);g_realStickTest.virtualTargetEnabled=false;g_realStickTest.virtualTargetPersona="disabled";
  inputHostStop("virtual-target-disabled");const auto closing=g_virtualStartProtection.view(startProtectionClock);
@@ -2337,8 +2716,985 @@ static void switchRecoveryCases(){
  check(finals==1,"same request has exactly one final result observation");cases.back()["events"]=fixtureEvents;
  fixtureXinputSourceLive=false;g_inputHostSwitchRecovery={};g_inputHostSwitchRecoveryPending=false;
 }
+
+// Explicit parameters of the existing queued-exception consumer. All Start,
+// exception compensation, queue dispatch and Stop bodies remain production.
+
+// Parameters of the existing native preflight consumer, all I/O leaves inert.
+// A controlled native lease is not proof of a field scheduler interleaving.
+
+// Waiting-state parameters of the original queued exception consumer.
+// All Start/exception/Stop bodies are production; alternate successor ordering
+// is controlled and is not a claim that this ordering occurred in field logs.
+
+
+
+static void fixtureSerialAfterClosingRead(){if(fixtureSerialClaimRaceArmed.exchange(false)){g_exitRequested.store(true,std::memory_order_release);}}
+
+static constexpr const char* serialPowerActionVariants[]={"legacy-kill","ymcc-factory","scope-unwind","nested-retired"};
+static unsigned long long fixtureCurrentActionPower(){
+#ifdef YMCC_FIXTURE_CURRENT_POWER_ACTION
+ return g_gamepadSerialActionPower;
+#else
+ return 0;
+#endif
+}
+static bool fixtureSubmitCurrentPower(std::function<void()> job){
+#ifdef YMCC_FIXTURE_CURRENT_POWER_ACTION
+ return gamepadSerialSubmitCurrentPower(std::move(job));
+#else
+ return gamepadSerialSubmit(std::move(job)); // exact old generic action route, not a substitute guarded helper
+#endif
+}
+static void fixtureQueueLegacyKill(){/*ACTUAL_LEGACY_KILL_QUEUE*/}
+static void serialPowerActionCases(){
+ for(const char* name:serialPowerActionVariants){
+  seed();const auto before=failures.size();const std::string variant=name;cases.push_back({{"name",std::string("serial-power-action/")+name}});
+  check(!g_gamepadSerialThread.joinable()&&!g_gamepadSerialStarted,"previous actual worker returned before isolated action scenario");
+  g_exitRequested=false;g_gamepadSerialStopping=false;g_powerGeneration=7000;g_shortcutRecordingActive=false;fixtureSerialKillCommands=0;
+  std::atomic<unsigned> oldWrites{0},freshWrites{0},returnWrites{0},scopeMismatches{0};
+  std::promise<DWORD> complete;auto ready=complete.get_future();
+  HANDLE entered=CreateEventW(nullptr,TRUE,FALSE,nullptr),go=CreateEventW(nullptr,TRUE,FALSE,nullptr);check(entered&&go,"private action latch handles created");
+  check(gamepadSerialSubmit([entered,go]{SetEvent(entered);WaitForSingleObject(go,5000);}),"real serial worker accepts controlled predecessor");
+  check(WaitForSingleObject(entered,2000)==WAIT_OBJECT_0,"real predecessor entered private latch");
+  if(variant=="legacy-kill")fixtureQueueLegacyKill();
+  else if(variant=="ymcc-factory")check(nativeYmccShortcutSubmit([&]{++oldWrites;}),"actual native shortcut factory accepts pre-bound user action");
+  else if(variant=="scope-unwind")check(fixtureSubmitCurrentPower([&]{if(fixtureCurrentActionPower()!=7000)++scopeMismatches;throw std::runtime_error("controlled-action-exception");}),"guarded action accepts exception-unwind scenario");
+  else check(fixtureSubmitCurrentPower([&]{
+   if(fixtureCurrentActionPower()!=7000)++scopeMismatches;
+   g_powerGeneration=7001;
+   fixtureSubmitCurrentPower([&]{++oldWrites;});
+   gamepadSerialSubmit([&]{complete.set_value(GetCurrentThreadId());});
+  }),"guarded action accepts controlled in-flight nested scenario");
+  if(variant=="legacy-kill"||variant=="ymcc-factory")g_powerGeneration=7001;
+  check(gamepadSerialSubmit([&]{++returnWrites;if(fixtureCurrentActionPower()!=0)++scopeMismatches;}),"original generic return/observation job stays admitted");
+  if(variant!="nested-retired")check(fixtureSubmitCurrentPower([&]{++freshWrites;if(fixtureCurrentActionPower()!=currentPowerGeneration())++scopeMismatches;}),"new current-power action accepted");
+  if(variant!="nested-retired")check(gamepadSerialSubmit([&]{complete.set_value(GetCurrentThreadId());}),"original serial completion barrier accepted");
+  SetEvent(go);const bool ran=ready.wait_for(std::chrono::seconds(2))==std::future_status::ready;check(ran,"actual serial worker reaches original completion barrier");
+  DWORD worker=ran?ready.get():0;const bool joined=gamepadSerialStop(2000);
+  check(joined&&!g_gamepadSerialThread.joinable()&&!g_gamepadSerialStarted&&worker&&worker!=GetCurrentThreadId(),"original Stop joins the actual separate worker");
+  check(CloseHandle(go)&&CloseHandle(entered),"private action latch handles close after actual worker return");
+  if(variant=="legacy-kill")check(fixtureSerialKillCommands==0,"actual legacy queued kill cannot run after a newer power generation");
+  if(variant=="ymcc-factory"||variant=="nested-retired")check(oldWrites==0,"retired user action cannot borrow a newer power generation");
+  check(returnWrites==1,"physical return and observation work is not cancelled by user-action fencing");
+  if(variant!="nested-retired")check(freshWrites==1,"fresh action after the synthetic resume executes exactly once");
+#ifdef YMCC_FIXTURE_CURRENT_POWER_ACTION
+  check(scopeMismatches==0,"actual action scope stamps and restores original power even across throw/nested queue");
+#endif
+  cases.back()["actualWorkerThreadId"]=worker;cases.back()["fakeShellCalls"]=fixtureSerialKillCommands.load();cases.back()["returnJobs"]=returnWrites.load();
+  cases.back()["syntheticPowerOnly"]=true;cases.back()["actualWindowsSleep"]=false;cases.back()["passed"]=failures.size()==before;
+ }
+}
+
+
+static constexpr const char* serialConfigActionVariants[]={"legacy-kill","default-rule","write-pending","parse-gap","nested-retired","failed-write","source-epoch"};
+#ifdef YMCC_FIXTURE_ACTION_CONFIGURATION
+using FixtureActionConfigurationWrite=GamepadSerialEvent::ConfigurationWrite;
+static void fixtureConfigurationReset(){GamepadSerialEvent::ConfigurationRevision=1;GamepadSerialEvent::ConfigurationWriters=0;GamepadSerialEvent::RulesRequired=0;GamepadSerialEvent::RulesApplied=0;GamepadSerialEvent::BoundRevision=0;}
+static void fixtureConfigurationPublished(){GamepadSerialEvent::rulesPublished();}
+static void fixtureConfigurationParsed(){GamepadSerialEvent::RulesApplied.store(GamepadSerialEvent::RulesRequired.load());}
+static bool fixtureConfigurationBound(){return GamepadSerialEvent::BoundRevision!=0;}
+static unsigned fixtureConfigurationWriters(){return GamepadSerialEvent::ConfigurationWriters.load();}
+#else
+// Before source has no configuration fence. These external facts do not add a
+// replacement guard to the original helper/worker, so actual stale writes remain.
+struct FixtureActionConfigurationWrite{explicit FixtureActionConfigurationWrite(bool){}};
+static void fixtureConfigurationReset(){}
+static void fixtureConfigurationPublished(){}
+static void fixtureConfigurationParsed(){}
+static bool fixtureConfigurationBound(){return false;}
+static unsigned fixtureConfigurationWriters(){return 0;}
+#endif
+static void serialConfigActionCases(){
+ for(const char* name:serialConfigActionVariants){
+  seed();const auto failedBefore=failures.size();const std::string variant=name;cases.push_back({{"name",std::string("serial-config-action/")+name}});
+  check(!g_gamepadSerialThread.joinable()&&!g_gamepadSerialStarted,"previous actual worker returned before configuration case");
+  fixtureConfigurationReset();g_exitRequested=false;g_gamepadSerialStopping=false;g_powerGeneration=9000;g_oemShortcutEdgeEpoch=1;g_shortcutRecordingActive=false;fixtureSerialKillCommands=0;
+  std::atomic<unsigned> oldWrites{0},freshWrites{0},returnWrites{0},boundReturns{0};
+  HANDLE entered=CreateEventW(nullptr,TRUE,FALSE,nullptr),release=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+  check(entered&&release,"owned configuration latch handles created");
+  check(gamepadSerialSubmit([&]{SetEvent(entered);WaitForSingleObject(release,4000);}),"real predecessor admitted");
+  check(WaitForSingleObject(entered,2000)==WAIT_OBJECT_0,"real predecessor holds queue before cancellation");
+  std::promise<bool> finished;auto ready=finished.get_future();
+  if(variant=="legacy-kill")fixtureQueueLegacyKill();
+  else if(variant=="nested-retired"){
+   check(gamepadSerialSubmitCurrentPower([&]{
+    {FixtureActionConfigurationWrite changed(true);}
+    (void)gamepadSerialSubmitCurrentPower([&]{++oldWrites;});
+    // Parent queues its own barrier AFTER its possible child. Stop cannot erase
+    // an unobserved stale child and turn this assertion green.
+    gamepadSerialSubmit([&]{finished.set_value(true);});
+   }),"actual helper accepts parent before configuration cancellation");
+  }else check(nativeYmccShortcutSubmit([&]{++oldWrites;}),"actual shortcut factory accepts original action");
+  std::optional<FixtureActionConfigurationWrite> pending;
+  if(variant=="write-pending"){
+   pending.emplace(true);
+   check(!gamepadSerialSubmitCurrentPower([&]{++oldWrites;}),"configuration write cannot stamp a new admitted action");
+  }else if(variant=="parse-gap"){
+   fixtureConfigurationPublished();
+   check(!gamepadSerialSubmitCurrentPower([&]{++oldWrites;}),"committed rules without parsed ownership reject newly stamped actions");
+  }else if(variant=="failed-write"){
+   try{FixtureActionConfigurationWrite changed(true);throw std::runtime_error("controlled-failed-setting-write");}catch(...){}
+  }else if(variant=="source-epoch")++g_oemShortcutEdgeEpoch;
+  else if(variant!="nested-retired"){
+   {FixtureActionConfigurationWrite off(true);}
+   {FixtureActionConfigurationWrite on(true);} // Same final enabled value, distinct withdrawal history.
+  }
+  check(gamepadSerialSubmit([&]{++returnWrites;if(fixtureConfigurationBound())++boundReturns;}),"generic return remains admitted across configuration mutation");
+  if(variant!="nested-retired")check(gamepadSerialSubmit([&]{finished.set_value(true);}),"observation barrier queued after old action");
+  SetEvent(release);const bool observed=ready.wait_for(std::chrono::seconds(3))==std::future_status::ready;
+  check(observed,"actual worker reaches post-action observation before Stop");
+  check(oldWrites==0&&fixtureSerialKillCommands==0,"same-power withdrawn action produces no old side effect");
+  check(returnWrites==1&&boundReturns==0,"generic return executes once outside action TLS");
+  pending.reset();if(variant=="parse-gap")fixtureConfigurationParsed();
+  std::promise<bool> freshFinished;auto freshReady=freshFinished.get_future();
+  check(nativeYmccShortcutSubmit([&]{++freshWrites;}),"new current action admitted after actual ownership is ready");
+  check(gamepadSerialSubmit([&]{freshFinished.set_value(true);}),"fresh action barrier admitted");
+  check(freshReady.wait_for(std::chrono::seconds(2))==std::future_status::ready&&freshWrites==1,"new action actually executes after withdrawal");
+  check(gamepadSerialStop(2000)&&!g_gamepadSerialThread.joinable(),"original Stop joins actual serial worker");
+  check(!fixtureConfigurationWriters(),"configuration mutation leaves no writer responsibility");
+  check(g_powerGeneration.load()==9000,"case never changes actual power generation or performs Windows sleep");
+  if(entered)CloseHandle(entered);if(release)CloseHandle(release);
+  cases.back()["passed"]=failures.size()==failedBefore;cases.back()["actualSerialWorker"]=true;
+  cases.back()["realSettingsIo"]=false;cases.back()["syntheticConfigurationFacts"]=true;
+  cases.back()["returnJobs"]=returnWrites.load();cases.back()["oldWrites"]=oldWrites.load()+fixtureSerialKillCommands.load();
+ }
+}
+
+static constexpr const char* serialExitOwnerVariants[]={"actual-worker-return"};
+#ifndef YMCC_FIXTURE_HAS_SERIAL_EXIT_OWNER
+static bool gamepadSerialExitOwnershipReleased(){return false;} // old source has no proof; never substitutes a candidate body
+#endif
+template<class F>static bool fixtureSerialStopResult(F&& call){if constexpr(std::is_same_v<std::invoke_result_t<F>,bool>)return call();else{call();return false;}}
+static void serialExitOwnerCases(){
+ seed();const auto before=failures.size();cases.push_back({{"name","serial-exit-owner/actual-worker-return"}});
+ const auto begin=GetTickCount64();unsigned actualWorkers=0;
+ auto reset=[](){check(!g_gamepadSerialThread.joinable()&&!g_gamepadSerialStarted,"prior actual worker returned before isolated serial reset");g_exitRequested=false;g_gamepadSerialStopping=false;};
+ auto duplicate=[](){HANDLE h=nullptr;check(DuplicateHandle(GetCurrentProcess(),reinterpret_cast<HANDLE>(g_gamepadSerialThread.native_handle()),GetCurrentProcess(),&h,0,FALSE,DUPLICATE_SAME_ACCESS)!=0,"observer duplicates the actual owned worker handle");return h;};
+ auto close=[](HANDLE h){check(h&&CloseHandle(h),"private observer handle closes after actual thread observation");};
+ reset();HANDLE release=CreateEventW(nullptr,TRUE,FALSE,nullptr);std::promise<void> entered;auto ready=entered.get_future();std::atomic<unsigned> late{0};
+ check(gamepadSerialSubmit([&]{entered.set_value();WaitForSingleObject(release,3000);}),"blocked actual job accepted");++actualWorkers;
+ check(ready.wait_for(std::chrono::seconds(2))==std::future_status::ready,"actual worker entered private latch");HANDLE observer=duplicate();
+ check(gamepadSerialSubmit([&]{++late;}),"second job queued before terminal stop");
+ const bool stopped=fixtureSerialStopResult([](){return gamepadSerialStop(15);});
+ check(!stopped&&WaitForSingleObject(observer,0)==WAIT_TIMEOUT,"finite Stop cannot report completion while actual worker is blocked");
+ check(g_gamepadSerialThread.joinable()&&g_gamepadSerialStarted,"finite timeout retains the exact actual std thread owner");
+ const auto proofBegin=GetTickCount64();check(!gamepadSerialExitOwnershipReleased(),"retained worker vetoes UI completion");
+ check(GetTickCount64()-proofBegin<100,"UI completion predicate returns without waiting for the blocked job");
+ check(!gamepadSerialSubmit([]{}),"terminal Stop seals later player jobs");
+ SetEvent(release);check(WaitForSingleObject(observer,2000)==WAIT_OBJECT_0,"observer sees actual kernel thread return after original job release");
+ gamepadSerialStop(2000);check(!g_gamepadSerialThread.joinable()&&!g_gamepadSerialStarted,"original product thread joins after delayed return");
+ check(gamepadSerialExitOwnershipReleased()&&late==0,"only actual joined owner permits completion and canceled queued work never runs");
+ close(observer);close(release);
+ reset();release=CreateEventW(nullptr,TRUE,FALSE,nullptr);std::promise<void> entered2;auto ready2=entered2.get_future();late=0;
+ check(gamepadSerialSubmit([&]{entered2.set_value();WaitForSingleObject(release,3000);}),"terminal-fence scenario owns a new actual worker");++actualWorkers;
+ check(ready2.wait_for(std::chrono::seconds(2))==std::future_status::ready,"terminal-fence worker entered latch");observer=duplicate();
+ check(gamepadSerialSubmit([&]{++late;}),"pre-fence queue contains an unclaimed job");g_exitRequested=true;SetEvent(release);
+ const auto terminalWait=WaitForSingleObject(observer,100);gamepadSerialStop(2000);
+ check(late==0,"exit intent prevents an already queued unclaimed generic job from running before backend Stop");
+#ifdef YMCC_FIXTURE_SERIAL_EXIT_PROOF
+ check(terminalWait==WAIT_OBJECT_0,"worker honors terminal exit even before backend Stop reaches it");
+ reset();std::promise<bool> self;auto selfResult=self.get_future();
+ check(gamepadSerialSubmit([&]{self.set_value(gamepadSerialStop(0));}),"self-stop scenario owns actual worker");++actualWorkers;
+ check(selfResult.wait_for(std::chrono::seconds(2))==std::future_status::ready&&!selfResult.get(),"worker self-stop refuses self wait and retains original owner");
+ gamepadSerialStop(2000);check(gamepadSerialExitOwnershipReleased(),"external owner joins the self-stopped worker");
+ reset();HANDLE release3=CreateEventW(nullptr,TRUE,FALSE,nullptr);std::promise<void> entered3;auto ready3=entered3.get_future();
+ check(gamepadSerialSubmit([&]{entered3.set_value();WaitForSingleObject(release3,3000);}),"concurrent-stop scenario owns actual worker");++actualWorkers;
+ check(ready3.wait_for(std::chrono::seconds(2))==std::future_status::ready,"concurrent-stop worker entered latch");
+ std::atomic<bool> joined{false};std::thread owner([&]{joined=gamepadSerialStop(2000);});
+ const auto until=GetTickCount64()+1000;bool stopping=false;while(GetTickCount64()<until){{std::lock_guard<std::mutex> lock(g_gamepadSerialMx);stopping=g_gamepadSerialStopping;}if(stopping)break;Sleep(1);}
+ check(stopping,"first real retirement owner entered Stop");const auto otherBegin=GetTickCount64();
+ check(!gamepadSerialStop(0)&&!gamepadSerialExitOwnershipReleased(),"competing Stop and UI probe retain rather than double join current owner");
+ check(GetTickCount64()-otherBegin<100,"competing Stop and UI probe do not block on retirement mutex");
+ SetEvent(release3);owner.join();check(joined&&gamepadSerialExitOwnershipReleased(),"one retirement owner joins the actual worker and publishes final completion");close(release3);
+#endif
+ close(observer);close(release);
+#ifdef YMCC_FIXTURE_SERIAL_EXIT_PROOF
+ reset();HANDLE release4=CreateEventW(nullptr,TRUE,FALSE,nullptr);std::promise<void> entered4;auto ready4=entered4.get_future();std::atomic<unsigned> racedJob{0};
+ check(gamepadSerialSubmit([&]{entered4.set_value();WaitForSingleObject(release4,3000);}),"claim-race scenario owns actual worker");++actualWorkers;
+ check(ready4.wait_for(std::chrono::seconds(2))==std::future_status::ready,"claim-race worker entered latch");HANDLE observer4=duplicate();
+ check(gamepadSerialSubmit([&]{++racedJob;}),"claim-race has one unclaimed queued job");fixtureSerialClaimRaceArmed=true;SetEvent(release4);
+ check(WaitForSingleObject(observer4,2000)==WAIT_OBJECT_0,"exit published after cached closing read still terminates actual worker");
+ gamepadSerialStop(2000);check(!fixtureSerialClaimRaceArmed&&g_exitRequested&&racedJob==0&&gamepadSerialExitOwnershipReleased(),"actual claim CAS rejects exit published after cached closing read");close(observer4);close(release4);
+#endif
+ g_exitRequested=true;bool revived=false;{std::lock_guard<std::mutex> lock(g_gamepadSerialMx);revived=gamepadSerialStartLocked();check(!revived,"eager late start cannot revive terminal serial lane");}
+ if(revived)gamepadSerialStop(2000); // a deliberately broken old eager guard still needs fixture cleanup
+
+ cases.back()["actualWorkers"]=actualWorkers;cases.back()["elapsedMs"]=GetTickCount64()-begin;cases.back()["passed"]=failures.size()==before;
+}
+
+static constexpr const char* serialEntryDiagnosticVariants[]={"role-log-throw"};
+static std::wstring fixtureSerialEntryTerminatePath;
+static DWORD fixtureSerialEntryMainThread=0;
+static void fixtureSerialEntryTerminate() noexcept {
+ try {
+  std::string detail="unknown";const auto exception=std::current_exception();
+  if(exception)try{std::rethrow_exception(exception);}catch(const std::exception& e){detail=e.what();}catch(...){detail="non-standard";}
+  const auto thread=GetCurrentThreadId();
+  const json marker={{"schema","actual-serial-entry-terminate.v1"},{"event","actual-std-thread-uncaught-optional-role-log"},
+   {"processId",GetCurrentProcessId()},{"mainThreadId",fixtureSerialEntryMainThread},{"terminateThreadId",thread},
+   {"onWorkerThread",thread!=fixtureSerialEntryMainThread},{"exceptionDetail",detail},{"handlerExitCode",78},
+   {"normalFixtureCompleted",false},{"physicalDeviceIo",false}};
+  std::ofstream file{fspath::path(fixtureSerialEntryTerminatePath)};file<<marker.dump(2);file.flush();
+ }catch(...){}
+ std::_Exit(78); // this private native test process only; avoid a WER/dialog prompt
+}
+static void fixtureSerialEntryInstallTerminateObserver() noexcept { std::set_terminate(fixtureSerialEntryTerminate); }
+static void serialEntryDiagnosticCases(){
+ seed();cases.push_back({{"name","serial-entry-diagnostic/role-log-throw"}});const auto beforeFailures=failures.size();
+ check(!g_gamepadSerialStarted&&!g_gamepadSerialThread.joinable()&&g_gamepadSerialQ.empty(),"entry diagnostic scenario begins without a prior worker");
+ fixtureSerialEntryTerminatePath=(fspath::path(g_yemanccDataDir)/L"serial-entry-terminate.json").wstring();fixtureSerialEntryMainThread=GetCurrentThreadId();
+ SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);const auto previous=std::set_terminate(fixtureSerialEntryTerminate);
+ g_exitRequested=false;g_gamepadSerialStopping=false;throwLogEvent="thread-role";
+ std::promise<DWORD> complete;auto ready=complete.get_future();unsigned jobs=0;
+ const bool accepted=gamepadSerialSubmit([&]{++jobs;complete.set_value(GetCurrentThreadId());});
+ check(accepted,"real serial queue accepts the current job after thread construction");
+ const bool ran=ready.wait_for(std::chrono::seconds(2))==std::future_status::ready;
+ check(ran,"optional worker role log exception cannot prevent the current job from running");
+ DWORD worker=ran?ready.get():0;gamepadSerialStop();
+ check(worker&&worker!=fixtureSerialEntryMainThread&&jobs==1,"current job executes exactly once on an actual separate std thread");
+ check(throwLogEvent==nullptr,"actual diagnostic failure endpoint was consumed by the worker");
+ check(!g_gamepadSerialThread.joinable()&&!g_gamepadSerialStarted,"actual Stop joins the worker after the isolated optional exception");
+ std::set_terminate(previous);cases.back()["actualWorker"]={{"mainThreadId",fixtureSerialEntryMainThread},{"jobThreadId",worker},{"jobs",jobs},{"joined",!g_gamepadSerialThread.joinable()}};
+ cases.back()["passed"]=failures.size()==beforeFailures;
+}
+
+static constexpr const char* serialThreadStartVariants[]={"eager","generic","deadline","frame","haptic"};
+template<class F>static bool fixtureSerialInvokeStart(F&& call){if constexpr(std::is_same_v<std::invoke_result_t<F>,bool>)return call();else {call();return true;}}
+static void serialThreadStartCases(){
+ for(const char* label:serialThreadStartVariants){
+  seed();const std::string variant=label;const auto beforeFailures=failures.size();cases.push_back({{"name",std::string("serial-thread-start/")+variant}});
+  {std::lock_guard<std::mutex> lock(g_gamepadSerialMx);check(!g_gamepadSerialThread.joinable()&&!g_gamepadSerialStarted&&g_gamepadSerialQ.empty(),"serial scenario starts with no owned worker or queued job");g_gamepadSerialStopping=false;}
+  g_exitRequested=false;g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_inputHostFaultHoldsStart=false;g_hardwareWriteGate=true;
+  g_msiFeedbackSourceGeneration=0;g_xinputPrimarySlot=0;g_xinputPhysicalSourceLocked=true;g_xinputPhysicalSourceMask=1;g_xinputConnectedMask=1;
+  g_xinputVirtualEndpointMask=0;g_xinputSlotUnknownMask=0;g_xinputSlotReprobeMask=0;g_feedbackSlotGeneration[0]=1;
+  const auto identity=g_xinputSlotIdentityEpoch.load();const auto power=currentPowerGeneration();g_xinputSlotIdentityResolvedEpoch[0]=identity;
+  (void)g_xinputFeedbackIdentity[0].observe({true,true,false,false,L"YMCC#SERIAL-OFFLINE-PHYSICAL",ymcc::input::identityRefresh::Kind::Physical,identity,identity,power,power});
+  fixtureSerialCreationAttempts=0;fixtureSerialFailCreation=true;unsigned rejectedJobRuns=0,currentJobRuns=0;bool accepted=true,threw=false;
+  InputFrameSubmission frame;
+  if(variant=="frame"){
+   g_inputHostEpoch=17;g_inputHostEpochMirror=17;g_inputHostGameMotorBindingGeneration=1;
+   auto source=fullPipeReadNow(1);frame.sample=inputHostFrameSubmissionSample(&source);frame.ticket={g_inputHostEpoch,currentPowerGeneration(),g_inputHostVirtualIntentRevision.load(),false};
+   frame.sourcePower=source.sharedPower;
+   {std::lock_guard<InputHostMutex> powerLock(g_inputHostMx);
+    frame.powerScope=g_inputHostInputPowerCache.acquire(&readSharedSystemPower,g_sharedPowerRevocations,sgShouldKeepInputDuringStandby());}
+   frame.physicalSourceAdmitted=true;frame.feedbackSource={ymcc::touchhaptic::Backend::XInput,1,identity,power,0,g_xinputTopologyEpoch.load()};
+   frame.gameMotorReply=ymcc::game_feedback::fromWords({1,1,0x12,0xA5,1,1},0x3f);
+   check(nativeGameFeedbackFrameCurrent({frame.ticket,frame.sample,frame.feedbackSource,frame.gameMotorReply,true}),"serial motor case reaches actual current-frame admission before thread failure");
+  }
+  if(variant=="haptic")check(nativePhysicalFeedbackReady().ready(),"touch upstream has an admitted inert physical source before request");
+  try{
+   if(variant=="eager"){std::lock_guard<std::mutex> lock(g_gamepadSerialMx);accepted=fixtureSerialInvokeStart([](){return gamepadSerialStartLocked();});}
+   else if(variant=="generic")accepted=gamepadSerialSubmit([&]{++rejectedJobRuns;});
+   else if(variant=="deadline")accepted=gamepadSerialScheduleFeedbackStop(1,10);
+   else if(variant=="frame")nativeSubmitGameFeedbackFrame(frame,true);
+   else nativeScreenTouchpadHapticPulse(1,true,ymcc::touchhaptic::kStrengthPercent);
+  }catch(...){threw=true;}
+  check(fixtureSerialCreationAttempts==1&&!g_gamepadSerialThread.joinable(),"actual first serial constructor boundary failed without creating an OS thread");
+  check(!threw,"serial constructor failure is isolated at worker creation instead of escaping its caller");
+  check(!g_gamepadSerialStarted&&g_gamepadSerialQ.empty()&&!g_gamepadSerialHaptic&&!g_gamepadSerialFeedbackStop,"failed constructor publishes no worker or admitted serial mailbox ownership");
+  if(variant=="eager"||variant=="generic"||variant=="deadline")check(!accepted,"actual serial caller rejects unstarted execution");
+  if(variant=="frame"){
+   check(!g_gamepadSerialGameFeedback.snapshot().desired&&!g_gamepadSerialGameInterested,"failed optional motor submission leaves no orphan serial demand");
+   gamepadSerialRevokeGameFeedback(); // actual return of old-source control state before the isolated recovery job
+  }
+  if(variant=="haptic"){
+   const auto next=g_touchHapticDispatch.request(1,true,GetTickCount64(),currentPowerGeneration(),ymcc::touchhaptic::kStrengthPercent);
+   check(next.has_value(),"real touch caller returns failed ticket so next pulse is not blocked by pending");if(next)g_touchHapticDispatch.finish(*next);
+  }
+  cases.back()["afterConstructorFailure"]={{"escaped",threw},{"accepted",accepted},{"started",g_gamepadSerialStarted},{"constructorAttempts",fixtureSerialCreationAttempts}};
+  std::promise<void> complete;auto ready=complete.get_future();
+  const bool nextAccepted=gamepadSerialSubmit([&]{++currentJobRuns;complete.set_value();});
+  const bool ran=ready.wait_for(std::chrono::seconds(2))==std::future_status::ready;
+  check(nextAccepted&&ran&&fixtureSerialCreationAttempts==2,"new current job creates one real worker and runs after construction pressure is removed");
+  gamepadSerialStop();
+  check(!g_gamepadSerialThread.joinable()&&!g_gamepadSerialStarted&&g_gamepadSerialQ.empty()&&currentJobRuns==1&&rejectedJobRuns==0,"actual Stop joins the owned worker and rejected job is never replayed");
+  cases.back()["actualThreadRecovery"]={{"currentJobRuns",currentJobRuns},{"rejectedJobRuns",rejectedJobRuns},{"constructorAttempts",fixtureSerialCreationAttempts},{"threadJoinableAfterStop",g_gamepadSerialThread.joinable()}};
+  cases.back()["passed"]=failures.size()==beforeFailures;
+ }
+}
+
+static constexpr const char* startupExceptionOwnerVariants[]={"healthy-waiting","incomplete-current","incomplete-retired"};
+static void startupExceptionOwnerCases(){
+ for(const char* raw:startupExceptionOwnerVariants){
+  const std::string variant=raw;seed();fixtureFullPipe=false;
+  g_startupInputState=ymcc::StartupInputState::Waiting;g_startupInputAttempted=false;g_startupInputStartSucceeded=false;
+  g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
+  g_machineIdentity.family=YmccFamily::Unknown;g_machineIdentity.manufacturer="PC";g_machineIdentity.product="unregistered-desktop";
+  g_msiDinput.enabled=false;g_msiDinput.mainInterfaceMatched=false;g_msiDinputSourceValid=false;g_xinputAdmittedMask=1;fixturePcPowerCapabilities=true;reg_fs();
+  cases.push_back({{"name",std::string("startup-exception-owner/")+variant}});const auto beforeFailures=failures.size();
+  const auto base=targetDocument("disabled",0),on=targetDocument("steamdeck",1);
+  check(sgWriteFileAtomic(YM_SETTINGS_FILE,base.dump())&&writeTarget(base,on).value("ok",false),"startup exception uses actual private player setting admission");inputCaptureRefreshRealStickSettings(true);
+  if(variant=="healthy-waiting")throwLogEvent="input-host-started";
+  else {g_startEntrySeam.pipeThrowCommand="HELLO";g_startEntrySeam.hostExitWait=WAIT_TIMEOUT;}
+  check(inputHostQueueLifecycleWork("persona-transition"),"Waiting-state request is consumed through actual dispatcher");inputHostRunQueuedLifecycleWork();
+  std::vector<std::string> cleanupReasons;{std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);for(const auto& work:g_inputHostLifecycleWorkQueue){const auto reason=fixtureLifecycleWorkReason(work);if(reason.rfind("fault-stop:",0)==0)cleanupReasons.emplace_back(reason);}}
+  cases.back()["afterException"]=state();cases.back()["startupAttempted"]=g_startupInputAttempted;cases.back()["startupSucceeded"]=g_startupInputStartSucceeded;cases.back()["cleanupReasons"]=cleanupReasons;cases.back()["failureTrace"]=g_startEntrySeam.trace;
+  throwLogEvent=nullptr;g_startEntrySeam.pipeThrowCommand.clear();g_startEntrySeam.hostExitWait=WAIT_OBJECT_0;
+  if(variant=="healthy-waiting"){
+   check(g_inputHostProcess&&g_inputHostPrepared&&g_inputHostNeutralized&&!g_inputHostTransportFault&&!g_inputHostReleaseQuarantined,"completed target remains ready after its optional final diagnostic throws");
+   check(g_startupInputAttempted&&g_startupInputStartSucceeded&&!g_inputHostFaultHoldsStart,"startup receipt uses accepted target state instead of the diagnostic exception");
+   check(cleanupReasons.empty(),"Waiting-state healthy target receives no unrelated startup cleanup");
+   fullPipeDrainQueuedLifecycle();check(g_inputHostProcess&&g_inputHostPrepared&&g_inputHostNeutralized,"later worker pass cannot Stop an accepted target for optional startup diagnostics");
+   cleanup();
+  }else{
+   check(g_inputHostProcess&&!g_inputHostPrepared&&g_inputHostTransportFault,"incomplete Waiting-state Start retains the actual old Host when exit is unproven");
+   const auto expected=ymcc::inputHost::partialStartCleanup::bind(g_inputHostEpoch,g_inputHostRunId);
+   check(cleanupReasons==std::vector<std::string>{expected},"startup fallback preserves one original typed cleanup instead of adding a bare second Stop");
+   if(variant=="incomplete-current"){
+    fullPipeDrainQueuedLifecycle();check(!g_inputHostProcess&&!g_inputHostPrepared&&!g_inputHostReleaseQuarantined,"current Waiting-state partial Start still returns its original owner");
+   }else{
+    const auto oldEpoch=g_inputHostEpoch;const auto oldRun=g_inputHostRunId;
+    cleanup();check(!g_inputHostProcess&&!g_inputHostReleaseQuarantined,"controlled alternate return settles old Host before replacement");
+    startProtectionClock+=ymcc::VirtualStartProtection::maxMs;fixturePowerClockOffset+=ymcc::VirtualStartProtection::maxMs;
+    const auto next=targetDocument("dualsense-edge",2);
+    check(writeTarget(on,next).value("ok",false),"successor uses actual separate player admission");inputCaptureRefreshRealStickSettings(true);
+    check(inputHostStart()&&g_inputHostProcess&&g_inputHostPrepared&&g_inputHostNeutralized,"successor is created through actual Start after old owned return");
+    const auto process=g_inputHostProcess;const auto epoch=g_inputHostEpoch;const auto run=g_inputHostRunId;const auto sequence=g_inputHostSequence;const auto protection=fullPipeProtectionState();
+    check(epoch!=oldEpoch||run!=oldRun,"successor has a different actual Host tuple");
+    fullPipeDrainQueuedLifecycle();
+    check(g_inputHostProcess==process&&g_inputHostEpoch==epoch&&g_inputHostRunId==run&&g_inputHostPrepared&&g_inputHostNeutralized&&g_inputHostSequence==sequence,"Waiting-state old exception cannot send Stop commands to successor Host");
+    check(fullPipeProtectionState()==protection,"old startup exception cannot settle successor player request");
+    cases.back()["afterOldDispatch"]=state();cleanup();
+   }
+  }
+  fullPipeDrainQueuedLifecycle();check(!g_inputHostProcess&&!g_inputHostPrepared&&!g_inputHostReleaseQuarantined,"Waiting-state case returns every controlled Host using actual Stop");
+  cases.back()["nativeEvents"]=fixtureEvents;cases.back()["trace"]=g_startEntrySeam.trace;cases.back()["passed"]=failures.size()==beforeFailures;
+ }
+}
+
+static constexpr const char* partialStartPreflightVariants[]={"current-gpd","bare-gpd","retired-epoch-gpd","retired-run-gpd","malformed-gpd","retired-msi","retired-rog"};
+static void partialStartCleanupPreflightCases(){
+ for(const char* raw:partialStartPreflightVariants){
+  seed();const std::string variant=raw;const auto beforeFailures=failures.size();
+  cases.push_back({{"name",std::string("partial-start-cleanup-preflight/")+variant}});
+  g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_powerGeneration=8;
+  g_inputHostEpoch=88;g_inputHostRunId="current-preflight-run";
+  g_realStickTest.enabled=true;g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="steamdeck";
+  g_machineIdentity.resolved=true;g_machineIdentity.family=variant=="retired-msi"?YmccFamily::MsiClaw:variant=="retired-rog"?YmccFamily::AsusRogAllyX:YmccFamily::Gpd;
+  g_machineIdentity.manufacturer=variant=="retired-msi"?"MICRO-STAR INTERNATIONAL CO., LTD.":variant=="retired-rog"?"ASUSTeK COMPUTER INC.":"GPD";
+  g_machineIdentity.product=variant=="retired-msi"?"MS-1T91":variant=="retired-rog"?"RC72LA":"G1618-05";
+  const auto profile=nativeForegroundProfile();
+  const std::wstring own=L"HID\\PREFLIGHT-CURRENT-OWN-HIDE",foreign=L"HID\\PREFLIGHT-FOREIGN-HIDE";
+  std::vector<std::wstring> hidden={own,foreign};unsigned reads=0,writes=0,refreshes=0,polls=0,queues=0,cloaks=0;
+  const auto oldIo=g_msiNativeForegroundTestIo;g_msiNativeForegroundTestIo={};
+  g_msiNativeForegroundTestIo.snapshot=[&](HidHideVisibilitySnapshot& value){++reads;value={};value.valid=true;value.hidden=hidden;return true;};
+  g_msiNativeForegroundTestIo.visibility=[&](const std::wstring& path,bool hide){++writes;if(hide)hidden.push_back(path);else hidden.erase(std::remove(hidden.begin(),hidden.end(),path),hidden.end());return true;};
+  g_msiNativeForegroundTestIo.cloak=[&](bool){++cloaks;return true;};
+  g_msiNativeForegroundTestIo.durableReturn=[](const auto&){};
+  g_msiNativeForegroundTestIo.poll=[&](){++polls;return -1;};
+  g_msiNativeForegroundTestIo.cycle=[&](const auto&,const auto&,bool){++refreshes;return 2;};
+  g_msiNativeForegroundTestIo.gameRefresh=[&](const auto&,const auto&){++refreshes;return 2;};
+  g_msiNativeForegroundTestIo.xusbRefresh=[&](const auto&,const auto&){++refreshes;return 2;};
+  g_msiNativeForegroundTestIo.queue=[&](){++queues;};g_msiNativeForegroundTestIo.virtualQueue=[&](const auto&){++queues;};
+  g_msiNativeForegroundLease=MsiNativeForegroundLease{};
+  auto& lease=g_msiNativeForegroundLease;lease.profile=profile;lease.active=true;lease.owned={own};lease.before.hidden={foreign};
+  lease.root="USB\\PREFLIGHT-EXACT-ROOT";lease.power=8;lease.edge=7;lease.virtualHandoffHeld=true;
+  lease.virtualHandoffRequest=99;lease.deferredVirtualWork={"persona-transition","settings-changed"};
+  lease.syntheticCycle=true;lease.cycleIssued=true;lease.helperDiagnostic={{"owner","current-lease"}};
+  g_msiNativeForegroundCyclePending=true;g_msiNativeForegroundSourceRetryNeeded=true;
+  std::string reason=ymcc::inputHost::partialStartCleanup::bind(87,"retired-preflight-run");
+  if(variant=="current-gpd")reason=ymcc::inputHost::partialStartCleanup::bind(88,g_inputHostRunId);
+  else if(variant=="bare-gpd")reason="fault-stop:partial-start-exception";
+  else if(variant=="retired-run-gpd")reason=ymcc::inputHost::partialStartCleanup::bind(88,"retired-preflight-run");
+  else if(variant=="malformed-gpd")reason="fault-stop:partial-start-exception:bad:tuple";
+  const bool current=variant=="current-gpd"||variant=="bare-gpd";
+  check(profile!=ymcc::nativeForeground::Profile::Unsupported,"preflight case has a real enabled family consumer");
+  const bool allowed=msiNativeForegroundBeforeVirtualWork(reason);
+  cases.back()["reason"]=reason;cases.back()["observed"]={{"allowed",allowed},{"reads",reads},{"writes",writes},{"refreshes",refreshes},{"polls",polls},{"queues",queues},{"cloaks",cloaks},{"active",lease.active},{"configurationReturned",lease.configurationReturned},{"virtualHandoffHeld",lease.virtualHandoffHeld},{"virtualContinuationEnded",lease.virtualContinuationEnded},{"pending",lease.deferredVirtualWork}};
+  if(current){
+   check(!allowed&&lease.active&&lease.configurationReturned&&hidden==std::vector<std::wstring>{foreign}&&reads==3&&writes==1,"current and synchronous fault keep exact hide return while live helper remains owned");
+   check(lease.virtualContinuationEnded&&!lease.virtualHandoffHeld&&lease.virtualHandoffRequest==0&&std::none_of(lease.deferredVirtualWork.begin(),lease.deferredVirtualWork.end(),[](const auto& value){return value=="persona-transition"||value=="settings-changed";}),"current fault still cancels its own GPD handoff without replaying parked Start");
+  }else{
+   check(!allowed&&reads+writes+refreshes+polls+queues+cloaks==0&&hidden==std::vector<std::wstring>({own,foreign}),"retired partial cleanup cannot touch successor native visibility or helper I/O");
+   check(lease.active&&!lease.configurationReturned&&!lease.restorePending&&lease.virtualHandoffHeld&&!lease.virtualContinuationEnded&&lease.virtualHandoffRequest==99&&lease.deferredVirtualWork==std::vector<std::string>({"persona-transition","settings-changed"})&&g_msiNativeForegroundSourceRetryNeeded,"retired cleanup preserves successor handoff and native-only pending state");
+  }
+  check(g_msiNativeForegroundCyclePending&&lease.syntheticCycle&&lease.owned==std::vector<std::wstring>{own}&&lease.helperDiagnostic==json{{"owner","current-lease"}}&&refreshes+polls+queues+cloaks==0,"preflight never replaces unresolved helper or borrows another duty");
+  g_msiNativeForegroundLease=MsiNativeForegroundLease{};g_msiNativeForegroundCyclePending=false;g_msiNativeForegroundSourceRetryNeeded=false;g_msiNativeForegroundTestIo=oldIo;
+  g_inputHostEpoch=0;g_inputHostRunId.clear();cases.back()["passed"]=failures.size()==beforeFailures;
+ }
+}
+
+static constexpr const char* partialStartOwnerVariants[]={"current-owner","retired-owner"};
+static void partialStartCleanupOwnerCases(){
+ for(const char* variant:partialStartOwnerVariants){
+  seed();fixtureFullPipe=false;g_startupInputState=ymcc::StartupInputState::Ready;
+  g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
+  g_machineIdentity.family=YmccFamily::Unknown;g_machineIdentity.manufacturer="PC";g_machineIdentity.product="unregistered-desktop";
+  g_msiDinput.enabled=false;g_msiDinput.mainInterfaceMatched=false;g_msiDinputSourceValid=false;g_xinputAdmittedMask=1;fixturePcPowerCapabilities=true;reg_fs();
+  cases.push_back({{"name",std::string("partial-start-cleanup-owner/")+variant}});const auto beforeFailure=failures.size();
+  const auto base=targetDocument("disabled",0),on=targetDocument("steamdeck",1);
+  check(sgWriteFileAtomic(YM_SETTINGS_FILE,base.dump())&&writeTarget(base,on).value("ok",false),"partial exception test uses original private settings admission");inputCaptureRefreshRealStickSettings(true);
+  g_startEntrySeam.pipeThrowCommand="HELLO";g_startEntrySeam.hostExitWait=WAIT_TIMEOUT;
+  check(inputHostQueueLifecycleWork("persona-transition"),"actual partial Start is queued before exception");inputHostRunQueuedLifecycleWork();
+  std::string cleanupWork;{std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);for(const auto& work:g_inputHostLifecycleWorkQueue){const auto reason=fixtureLifecycleWorkReason(work);if(reason.rfind("fault-stop:partial-start-exception",0)==0)cleanupWork=reason;}}
+  cases.back()["actualQueuedCleanup"]=cleanupWork;cases.back()["afterFailure"]=state();cases.back()["failureTrace"]=g_startEntrySeam.trace;
+  check(!cleanupWork.empty()&&g_inputHostProcess&&!g_inputHostPrepared&&g_inputHostTransportFault,"actual exception producer retains its original Host and queues cleanup when exit is unproven");
+  if(cleanupWork.empty()||!g_inputHostProcess){cases.back()["passed"]=false;cleanup();continue;}
+  const auto oldEpoch=g_inputHostEpoch;const auto oldRun=g_inputHostRunId;
+  g_startEntrySeam.pipeThrowCommand.clear();g_startEntrySeam.hostExitWait=WAIT_OBJECT_0;
+  if(std::string_view(variant)=="current-owner"){
+   fullPipeDrainQueuedLifecycle();
+   check(!g_inputHostProcess&&!g_inputHostPrepared&&!g_inputHostReleaseQuarantined,"same-owner deferred partial cleanup still completes actual owned return");
+  }else{
+   // Controlled alternate return/Start ordering. This calls the existing
+   // cleanup and actual new player admission; it does not prove a field scheduler.
+   cleanup();check(!g_inputHostProcess&&!g_inputHostReleaseQuarantined,"alternate old return actually releases original ownership before replacement");
+   startProtectionClock+=ymcc::VirtualStartProtection::maxMs;fixturePowerClockOffset+=ymcc::VirtualStartProtection::maxMs;
+   const auto next=targetDocument("dualsense-edge",2);
+   check(writeTarget(on,next).value("ok",false),"replacement comes from a separately admitted real player setting");inputCaptureRefreshRealStickSettings(true);
+   check(inputHostStart()&&g_inputHostProcess&&g_inputHostPrepared&&g_inputHostNeutralized,"replacement is created through actual Start with controlled OS and SDK leaves");
+   const auto process=g_inputHostProcess;const auto epoch=g_inputHostEpoch;const auto run=g_inputHostRunId;const auto sequence=g_inputHostSequence;
+   const auto protection=fullPipeProtectionState();
+   check(epoch!=oldEpoch||run!=oldRun,"replacement differs from the original partial Start tuple");
+   inputHostRunQueuedLifecycleWork();
+   check(g_inputHostProcess==process&&g_inputHostEpoch==epoch&&g_inputHostRunId==run&&g_inputHostPrepared&&g_inputHostNeutralized&&g_inputHostSequence==sequence,
+    "retired partial-Start cleanup cannot Stop or send target commands to successor Host");
+   check(fullPipeProtectionState()==protection,"retired partial cleanup cannot settle or renew successor request");
+   cases.back()["successor"]={{"oldEpoch",oldEpoch},{"oldRun",oldRun},{"newEpoch",epoch},{"newRun",run},{"afterDispatch",state()},{"requestBefore",protection},{"requestAfter",fullPipeProtectionState()}};
+   cleanup();
+  }
+  fullPipeDrainQueuedLifecycle();
+  check(!g_inputHostProcess&&!g_inputHostPrepared&&!g_inputHostReleaseQuarantined,"partial cleanup case returns every controlled Host through actual Stop");
+  cases.back()["nativeEvents"]=fixtureEvents;cases.back()["trace"]=g_startEntrySeam.trace;cases.back()["passed"]=failures.size()==beforeFailure;
+ }
+}
+
+
+// Explicit parameter of the existing native-only coordinator fixture. Actual
+// wake/queue/Start/Session execute; OS/Host ports remain the original inert ends.
+#ifdef YMCC_GPD_WAKE_R4_BOUNDARY_PROBES
+// These component probes run only at the existing actual ensure:main seam.
+// They seed no physical source and launch no helper/managed Host. A temporarily
+// controlled lease proves Context versus Execution, never a complete Cycle.
+struct GpdWakeBorrowedHostUnlock {
+ GpdWakeBorrowedHostUnlock(){
+  if(!g_inputHostMx.ownedByCurrentThread())throw std::logic_error("GPD probe requires actual Start Host ownership");
+  g_inputHostMx.unlock();
+ }
+ ~GpdWakeBorrowedHostUnlock(){g_inputHostMx.lock();}
+ GpdWakeBorrowedHostUnlock(const GpdWakeBorrowedHostUnlock&)=delete;
+ GpdWakeBorrowedHostUnlock& operator=(const GpdWakeBorrowedHostUnlock&)=delete;
+};
+struct GpdWakeJoinedObserver {
+ std::thread thread;
+ explicit GpdWakeJoinedObserver(std::function<void()> body):thread(std::move(body)){}
+ ~GpdWakeJoinedObserver(){if(thread.joinable())thread.join();}
+ GpdWakeJoinedObserver(const GpdWakeJoinedObserver&)=delete;
+ GpdWakeJoinedObserver& operator=(const GpdWakeJoinedObserver&)=delete;
+};
+struct GpdWakeLeaseRestore {
+ MsiNativeForegroundLease previous;
+ GpdWakeLeaseRestore(){
+  std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+  previous=std::move(g_msiNativeForegroundLease);
+  g_msiNativeForegroundLease=MsiNativeForegroundLease{};
+ }
+ ~GpdWakeLeaseRestore(){
+  std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+  g_msiNativeForegroundLease=std::move(previous);
+ }
+ GpdWakeLeaseRestore(const GpdWakeLeaseRestore&)=delete;
+ GpdWakeLeaseRestore& operator=(const GpdWakeLeaseRestore&)=delete;
+};
+struct GpdWakeClockInterleaveRestore {
+ std::function<void()> previous=std::move(fixtureMonotonicInterleave);
+ ~GpdWakeClockInterleaveRestore(){fixtureMonotonicInterleave=std::move(previous);}
+};
+static void gpdFirstOnWakeFakeTlsProbe(std::uint64_t ticket,const ymcc::inputHost::wakeExecutionRuntime::Work& armed){
+ namespace wake=ymcc::inputHost::wakeExecutionRuntime;
+ std::lock_guard<InputHostMutex> hostLock(g_inputHostMx);
+ check(!wake::active,"GPD forged TLS control starts outside any actual wake Scope");
+ auto unbound=armed;unbound.gpdStartBound=false;
+ // Real Scope with an explicitly unbound Work models unrelated TLS deadlines.
+ // It cannot turn an expired player view into normal-wake authority.
+ std::uint64_t serial=999,remaining=0;
+ {wake::Scope unrelated(unbound);remaining=inputHostGpdStartRemaining(ticket,"elite",inputHostStartProtectionNow(),&serial);}
+ check(!remaining&&!serial&&!wake::active,"GPD unbound TLS deadline cannot authorize the expired first ON or publish a wake cookie");
+ cases.back()["fakeTlsProbe"]={{"remainingMs",remaining},{"wakeCookie",serial},{"scopeRestored",wake::active==nullptr}};
+}
+static void gpdFirstOnWakeHelperProbe(bool expiredOrigin,std::uint64_t ticket){
+ namespace wake=ymcc::inputHost::wakeExecutionRuntime;
+ const auto* actualScope=wake::active;
+ check(g_inputHostMx.ownedByCurrentThread()&&actualScope&&actualScope->gpdStartBound,
+   "GPD helper probe is entered by actual Start with its real bound wake Scope and Host lock");
+ if(!g_inputHostMx.ownedByCurrentThread()||!actualScope||!actualScope->gpdStartBound)return;
+ const auto originalWork=*actualScope;
+ const auto originalStartDeadline=g_inputHostSwitchRecoveryStartDeadline;
+ const auto originalStartAttempts=wake::episode.startAttempts,originalRecreateAttempts=wake::episode.recreateAttempts;
+ const auto originalPlayer=g_virtualStartProtection.view(inputHostStartProtectionNow());
+ std::uint64_t cookie=0;
+ const auto remaining=inputHostGpdStartRemaining(ticket,"elite",inputHostStartProtectionNow(),&cookie);
+ check(remaining&&cookie==originalWork.serial&&remaining<=originalWork.maxAgeMs&&
+   inputHostStartProtectionNow()+remaining<=originalStartDeadline,
+   "GPD actual Scope helper returns the captured wake cookie within the original execution deadline");
+ auto& proof=cases.back()["helperProbe"];
+ proof={{"scope","actual Start ensure:main; controlled lease component only"},{"wakeCookie",cookie},
+   {"remainingMs",remaining},{"originalStartDeadline",originalStartDeadline},
+   {"originalWakeArmedAt",originalWork.armedAt},{"originalWakeMaxAgeMs",originalWork.maxAgeMs},
+   {"physicalSourceSeeded",false},{"completeCycleProven",false}};
+ if(!remaining||!cookie)return;
+ if(!expiredOrigin){
+  // The first real monotonic read is inside retiredLocked, after the initial
+  // intent/persona reads in gpdRemainingLocked. Revoke same-persona intent at
+  // that existing read-only clock leaf; do not imitate a persona-lock wait.
+  unsigned crossings=0;std::uint64_t rejectedCookie=999,rejected=0;
+  {GpdWakeClockInterleaveRestore restore;
+   fixtureMonotonicInterleave=[&](){if(++crossings==1){InputHostVirtualIntentMutation changed;}};
+   rejected=inputHostGpdStartRemaining(ticket,"elite",inputHostStartProtectionNow(),&rejectedCookie);
+  }
+  check(crossings&& !rejected&&!rejectedCookie&&inputHostConfiguredPersona()=="elite"&&
+    g_inputHostVirtualIntentRevision.load()!=originalWork.gpdIntentRevision,
+    "GPD helper rechecks same-persona intent revoked after its initial reads without issuing a cookie");
+  proof["intentDuringHelper"]={{"clockCrossings",crossings},{"remainingMs",rejected},
+    {"cookie",rejectedCookie},{"actualPersonaLockContention",false}};
+ }else{
+  GpdWakeLeaseRestore restoreLease;
+  {
+   std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+   auto& lease=g_msiNativeForegroundLease;
+   lease.profile=ymcc::nativeForeground::Profile::Gpd;lease.power=originalWork.generation;
+   lease.postHideCycle=true;lease.postHideTicket=ticket;lease.postHidePersona="elite";
+   lease.postHideWakeSerial=cookie;lease.postHideDeadline=originalStartDeadline;
+   lease.postHideEpoch=g_inputHostEpoch;lease.postHideRunId=g_inputHostRunId;lease.postHideHostProcess=g_inputHostProcess;
+   check(msiPostHideContextCurrentLocked()&&msiPostHideExecutionCurrentLocked(),
+     "GPD real Scope permits both observation and execution for its exact controlled post-hide lease");
+   lease.postHideWakeSerial=cookie+1;
+   check(!msiPostHideContextCurrentLocked()&&!msiPostHideExecutionCurrentLocked()&&
+     !inputHostGpdPostHideWakeRemaining(ticket,"elite",inputHostStartProtectionNow(),cookie+1),
+     "GPD wrong wake cookie cannot observe or execute an existing post-hide lease");
+   lease.postHideWakeSerial=cookie;
+  }
+  bool noLockDenied=false,observerContext=false,observerExecution=true,observerTls=true;
+  std::uint64_t observerRemaining=0,foreignStart=0,foreignCookie=999;
+  std::exception_ptr observerError;
+  {
+   // Release both lease and borrowed Host ownership BEFORE joining. The
+   // observer joins before this RAII scope restores the original Host owner.
+   GpdWakeBorrowedHostUnlock releaseHost;
+   GpdWakeJoinedObserver observer([&](){try{
+    std::uint64_t deniedCookie=999;
+    noLockDenied=!inputHostGpdStartRemaining(ticket,"elite",inputHostStartProtectionNow(),&deniedCookie)&&!deniedCookie&&
+      !inputHostGpdPostHideWakeRemaining(ticket,"elite",inputHostStartProtectionNow(),cookie);
+    std::lock_guard<InputHostMutex> hostLock(g_inputHostMx);
+    std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+    observerTls=wake::active!=nullptr;
+    observerRemaining=inputHostGpdPostHideWakeRemaining(ticket,"elite",inputHostStartProtectionNow(),cookie);
+    observerContext=msiPostHideContextCurrentLocked();observerExecution=msiPostHideExecutionCurrentLocked();
+    foreignStart=inputHostGpdStartRemaining(ticket,"elite",inputHostStartProtectionNow(),&foreignCookie);
+   }catch(...){observerError=std::current_exception();}});
+  }
+  if(observerError)std::rethrow_exception(observerError);
+  check(noLockDenied,"GPD Start and observer helpers both reject a thread without current Host ownership");
+  check(!observerTls&&observerRemaining&&observerContext&&!observerExecution&&!foreignStart&&!foreignCookie,
+    "GPD foreign thread may observe the exact retained cookie but cannot borrow Scope to initiate execution");
+  check(g_inputHostMx.ownedByCurrentThread()&&wake::active==actualScope,
+    "GPD cross-thread probe restores actual Start Host ownership and leaves its TLS Scope unchanged");
+  proof["crossThread"]={{"noHostLockDenied",noLockDenied},{"activeScope",observerTls},
+    {"observerRemainingMs",observerRemaining},{"context",observerContext},{"execution",observerExecution},
+    {"foreignStartRemainingMs",foreignStart},{"foreignCookie",foreignCookie}};
+  {
+   std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+   auto& lease=g_msiNativeForegroundLease;
+   check(msiPostHideContextCurrentLocked()&&msiPostHideExecutionCurrentLocked(),
+     "GPD actual Scope still owns controlled lease execution after observer return");
+   // Expire only the shorter saved outer lease deadline while the actual
+   // observer helper runs. Its wake remainder remains positive.
+   const auto savedDeadline=lease.postHideDeadline;lease.postHideDeadline=inputHostStartProtectionNow()+1;
+   unsigned crossings=0;bool accepted=true;
+   {GpdWakeClockInterleaveRestore restore;
+    fixtureMonotonicInterleave=[&](){if(++crossings==1)personaLifecycle140::advance(2);};
+    accepted=msiPostHideContextCurrentLocked();
+   }
+   const auto stillRemaining=inputHostGpdPostHideWakeRemaining(ticket,"elite",inputHostStartProtectionNow(),cookie);
+   check(crossings&&!accepted&&stillRemaining&&inputHostStartProtectionNow()>=lease.postHideDeadline,
+     "GPD post-hide Context uses fresh time after observer helper crosses its shorter outer deadline");
+   proof["outerDeadline"]={{"clockCrossings",crossings},{"context",accepted},{"wakeRemainingMs",stillRemaining}};
+   lease.postHideDeadline=savedDeadline; // restore the original value, never extend its budget
+  }
+  // Now cross the original wake limit at a real clock read during the helper.
+  const auto before=GetTickCount64();const auto age=before>=originalWork.armedAt?before-originalWork.armedAt:originalWork.maxAgeMs;
+  const auto advanceBy=age<originalWork.maxAgeMs?originalWork.maxAgeMs-age:0;
+  unsigned crossings=0;std::uint64_t rejectedCookie=999,rejected=0;
+  {GpdWakeClockInterleaveRestore restore;
+   fixtureMonotonicInterleave=[&](){if(++crossings==1)personaLifecycle140::advance(advanceBy);};
+   rejected=inputHostGpdStartRemaining(ticket,"elite",inputHostStartProtectionNow(),&rejectedCookie);
+  }
+  {
+   std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+   check(crossings&&advanceBy&&!rejected&&!rejectedCookie&&!msiPostHideContextCurrentLocked()&&!msiPostHideExecutionCurrentLocked(),
+     "GPD helper and retained lease reject expiry of the original wake budget without minting another period");
+  }
+  proof["wakeBudgetDuringHelper"]={{"clockCrossings",crossings},{"advanceMs",advanceBy},
+    {"remainingMs",rejected},{"cookie",rejectedCookie}};
+ }
+ const auto finalPlayer=g_virtualStartProtection.view(inputHostStartProtectionNow());
+ check(finalPlayer.requestId==originalPlayer.requestId&&finalPlayer.fallbackAttempts==originalPlayer.fallbackAttempts&&
+   wake::episode.serial==originalWork.serial&&wake::episode.armedAt==originalWork.armedAt&&wake::episode.maxAgeMs==originalWork.maxAgeMs&&
+   wake::episode.startAttempts==originalStartAttempts&&wake::episode.recreateAttempts==originalRecreateAttempts&&
+   g_inputHostSwitchRecoveryStartDeadline==originalStartDeadline,
+   "GPD helper probes preserve the original request wake clocks attempt quota and Start deadline");
+}
+#endif
+
+static constexpr const char* gpdFirstOnExpiredWakeVariants[]={"pending-control","expired-first-on","off-before-start","new-power-before-start","new-request-before-start","unknown-writer","intent-before-start","wake-budget-before-start"};
+static void gpdFirstOnExpiredWakeCases(){
+ namespace wake=ymcc::inputHost::wakeExecutionRuntime;
+ const personaLifecycle140::ControlledDmi dmi={"GPD","G1618-05","HandheldCompanion.Devices.GPDWin5","/physicalModels/0"};
+ for(const std::string variant:gpdFirstOnExpiredWakeVariants){
+  const bool expiredOrigin=variant!="pending-control";
+  const bool cancelled=variant=="off-before-start"||variant=="new-power-before-start"||variant=="new-request-before-start"||variant=="intent-before-start"||variant=="wake-budget-before-start";
+  const bool unknownWriter=variant=="unknown-writer";
+  const auto beforeFailures=failures.size();
+  personaLifecycle140::prepare(2,"gpd-first-on-expired-wake/"+variant,&dmi);
+  fixtureFullPipe=false;
+  cases.back()["realManagedPipe"]=false;
+  cases.back()["selectedParameter"]="gpd-first-on-expired-wake";
+  cases.back()["acceptanceScope"]="native writer/helper/controlled lease components; no complete Cycle or managed Host";
+  g_realStickTest.virtualTargetPersona="elite";
+  const auto on=targetDocument("elite",0);
+  check(sgWriteFileAtomic(YM_SETTINGS_FILE,on.dump()),"GPD wake boundary writes only its private original ON input");
+  const auto origin=g_virtualStartProtection.admit("elite",startProtectionClock);
+  const auto originalDeadline=startProtectionClock+g_virtualStartProtection.view(startProtectionClock).remainingMs;
+  check(origin.accepted&&origin.requestId&&!g_inputHostProcess&&g_inputHostEpoch==0&&
+    !g_inputHostPrepared&&!g_inputHostHello&&fullPipeChildObservers.empty(),
+    "GPD wake boundary starts from an admitted first ON that has never owned a Host");
+  if(expiredOrigin)personaLifecycle140::advance(ymcc::VirtualStartProtection::maxMs+1);
+  const auto beforeWake=g_virtualStartProtection.view(startProtectionClock);
+  check(beforeWake.requestId==origin.requestId&&(expiredOrigin?
+    beforeWake.phase=="expired"&&!beforeWake.locked&&beforeWake.remainingMs==0:
+    beforeWake.phase=="pending"&&beforeWake.locked&&beforeWake.remainingMs>0),
+    "GPD wake boundary records the actual original protection phase before resume");
+  const std::string unknownBytes="{\"schemaVersion\":999,\"kind\":\"private-invalid-writer-observation\"}";
+  const auto writerPath=fspath::path(nativeRefreshWriterRecordPath());
+  if(unknownWriter){
+   const auto dataRoot=fspath::absolute(fspath::path(yemancc_data_dir())).lexically_normal();
+   const auto relative=fspath::absolute(writerPath).lexically_normal().lexically_relative(dataRoot);
+   check(!relative.empty()&&!relative.is_absolute()&&*relative.begin()!=L"..",
+     "GPD unknown writer record stays inside the fixture private data root");
+   fspath::create_directories(writerPath.parent_path());
+   std::ofstream output(writerPath,std::ios::binary|std::ios::trunc);output<<unknownBytes;output.flush();
+   check(output.good(),"GPD unknown writer boundary publishes only its owned malformed input record");
+  }
+  const auto generation=currentPowerGeneration()+1;g_powerGeneration=generation;
+  g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;g_inputHostPowerAdmissionRevoked=false;
+  inputHostRequestWakeRescan(generation);
+  const auto armed=wake::episode;
+  cases.back()["beforeWake"]={{"requestId",beforeWake.requestId},{"phase",beforeWake.phase},
+    {"remainingMs",beforeWake.remainingMs},{"originalDeadline",originalDeadline},
+    {"nativeHostEpoch",g_inputHostEpoch},{"wakeSerial",armed.serial},{"wakePower",armed.generation},
+    {"protectedPlayer",armed.protectedPlayer},{"playerDeadline",armed.playerDeadline},{"maxAgeMs",armed.maxAgeMs}};
+  check(armed.serial&&armed.generation==generation&&armed.requestId==origin.requestId,
+    "GPD wake boundary arms the real new-power episode with the original ticket identity");
+  check(!expiredOrigin||(!armed.protectedPlayer&&armed.playerDeadline==0),
+    "GPD expired first ON resumes as normal wake without reopening the old player period");
+  personaLifecycle140::advance(kWakeHandshakeWaitMs+1);
+  inputHostConsumeWakeRescan();
+  check(g_inputHostLifecycleWorkRequested.load(),"GPD no-Host wake reaches the original lifecycle queue");
+  if(variant=="off-before-start")g_realStickTest.virtualTargetEnabled=false;
+  if(variant=="new-power-before-start")g_powerGeneration=generation+1;
+  if(variant=="new-request-before-start"){
+   const auto next=g_virtualStartProtection.admit("elite",startProtectionClock);
+   check(next.accepted&&next.requestId!=origin.requestId,"GPD old wake is tested against a real newer admitted player request");
+   cases.back()["newRequestId"]=next.requestId;
+  }
+  if(variant=="intent-before-start"){
+   {InputHostVirtualIntentMutation changed;}
+   check(inputHostConfiguredPersona()=="elite","GPD intent replacement keeps the same persona without a new player ticket");
+  }
+  if(variant=="wake-budget-before-start"){
+   const auto now=GetTickCount64();const auto age=now>=armed.armedAt?now-armed.armedAt:armed.maxAgeMs;
+   if(age<armed.maxAgeMs)personaLifecycle140::advance(armed.maxAgeMs-age);
+  }
+#ifdef YMCC_GPD_WAKE_R4_BOUNDARY_PROBES
+  cases.back()["r4BoundaryProbesCompiled"]=true;
+  if(variant=="expired-first-on")gpdFirstOnWakeFakeTlsProbe(origin.requestId,armed);
+  bool actualHelperSeam=false;
+  if(variant=="pending-control"||variant=="expired-first-on")fixtureGpdTransferSourceAtEnsure=[&](){
+   actualHelperSeam=true;gpdFirstOnWakeHelperProbe(expiredOrigin,origin.requestId);
+  };
+#else
+  cases.back()["r4BoundaryProbesCompiled"]=false;
+#endif
+  {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+#ifdef YMCC_GPD_WAKE_R4_BOUNDARY_PROBES
+  if(variant=="pending-control"||variant=="expired-first-on")check(actualHelperSeam,
+    "GPD selected helper probes actually execute at the real Start ensure seam");
+#endif
+  bool held=false,writerWait=false;unsigned attempts=0;
+  for(const auto& event:fixtureEvents){
+   if(event.value("event","")=="input-host-native-writer-fence"){
+    held=held||event["detail"].value("phase","")=="held";
+    writerWait=writerWait||event["detail"].value("phase","")=="wait";
+   }
+   if(event.value("event","")=="input-host-wake-execution"&&event["detail"].value("stage","")=="start-attempt")++attempts;
+  }
+  cases.back()["actualWriterFenceHeld"]=held;
+  cases.back()["actualWriterSessionRefusalObserved"]=writerWait;
+  cases.back()["wakeAttempts"]=wake::episode.startAttempts;
+  cases.back()["observedStartAttemptEvents"]=attempts;
+  cases.back()["nativeEvents"]=fixtureEvents;
+  cases.back()["trace"]=g_startEntrySeam.trace;
+  const auto after=g_virtualStartProtection.view(startProtectionClock);
+  check(wake::episode.startAttempts==(variant=="intent-before-start"?1u:cancelled?0u:1u),
+    "GPD queue retirement forbids Start and same-persona intent revocation is refused by its sole actual Start attempt");
+  if(cancelled){
+   check(!held&&!g_inputHostProcess&&!g_inputHostHello&&g_startEntrySeam.trace.empty(),
+     "GPD retired wake cannot acquire a writer or borrow OFF newer power or newer player ownership");
+  }else if(unknownWriter){
+   std::ifstream input(writerPath,std::ios::binary);std::ostringstream observed;observed<<input.rdbuf();
+   check(writerWait&&!held&&!g_inputHostProcess&&!g_inputHostHello,
+     "GPD normal wake reaches the actual writer Session refusal without creating a Host for an unknown record");
+   check(observed.str()==unknownBytes,"GPD rejected unknown writer record retains every original byte");
+  }else{
+   check(held,expiredOrigin?
+     "GPD normal wake after expired first ON reaches the actual writer fence without renewing player protection":
+     "GPD pending control reaches the actual writer fence through the same wake and Start consumers");
+  }
+  check(!expiredOrigin||cancelled||(after.requestId==origin.requestId&&after.phase=="expired"&&after.remainingMs==0&&after.fallbackAttempts==0),
+    "GPD normal wake does not mint a replacement player ticket or extend its expired thirty-second period");
+  check(forbiddenIo==0&&fullPipeChildObservers.empty(),"GPD wake boundary performs no physical IO or real managed Host RPC");
+  cases.back()["cleanup"]=cleanup();
+  check(!g_inputHostProcess&&!g_inputHostPrepared&&fullPipeChildObservers.empty(),
+    "GPD directed wake boundary returns all fixture-owned Host handles before finishing");
+  cases.back()["passed"]=failures.size()==beforeFailures;
+ }
+}
+
+#ifdef YMCC_GPD_PERSONA_MUTEX_PROBES
+// Explicit-only successor: the real Start Scope calls the real helper while a
+// writer owns the real persona mutex. Observation is an adapted read-only leaf,
+// not an unchanged call graph, a fake getter, or an OS WaitChain measurement.
+static constexpr const char* gpdPersonaMutexVariants[]={"unchanged-intent","same-persona-replaced-intent"};
+struct GpdPersonaMutexProbe {
+ std::mutex mx;std::condition_variable cv;
+ const std::chrono::steady_clock::time_point deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+ bool held=false,holding=false,beforeObserved=false,afterObserved=false,readReturnedWhileHeld=false;
+ bool cancelled=false,timedOut=false,writerDone=false,writerException=false,holdWindowCompleted=false;
+ unsigned beforeCalls=0,afterCalls=0;
+ unsigned long long writerRevisionBefore=0,writerRevisionAfter=0;
+ std::string personaWhileHeld;
+};
+static void gpdPersonaMutexObserve(bool after,void* context){
+ auto& probe=*static_cast<GpdPersonaMutexProbe*>(context);
+ std::lock_guard<std::mutex> lock(probe.mx);
+ if(after){++probe.afterCalls;probe.afterObserved=true;if(probe.holding)probe.readReturnedWhileHeld=true;}
+ else{++probe.beforeCalls;probe.beforeObserved=true;}
+ probe.cv.notify_all();
+}
+struct GpdPersonaMutexObservationScope {
+ void (*previous)(bool,void*)=fixtureGpdPersonaMutexObserver;
+ void* previousContext=fixtureGpdPersonaMutexObserverContext;
+ explicit GpdPersonaMutexObservationScope(GpdPersonaMutexProbe& probe){
+  fixtureGpdPersonaMutexObserverContext=&probe;fixtureGpdPersonaMutexObserver=&gpdPersonaMutexObserve;
+ }
+ ~GpdPersonaMutexObservationScope(){
+  fixtureGpdPersonaMutexObserver=previous;fixtureGpdPersonaMutexObserverContext=previousContext;
+ }
+ GpdPersonaMutexObservationScope(const GpdPersonaMutexObservationScope&)=delete;
+ GpdPersonaMutexObservationScope& operator=(const GpdPersonaMutexObservationScope&)=delete;
+};
+struct GpdPersonaMutexWriter {
+ GpdPersonaMutexProbe& probe;bool replaceIntent;std::thread thread;
+ GpdPersonaMutexWriter(GpdPersonaMutexProbe& value,bool replace):probe(value),replaceIntent(replace),thread([this](){run();}){}
+ void run() noexcept {
+  try{
+   // No Host/runtime lock is taken here. The helper thread retains its actual
+   // Host -> wake-metadata -> persona ordering throughout the wait.
+   std::unique_lock<std::mutex> personaLock(g_inputHostPersonaMx);
+   std::unique_lock<std::mutex> lock(probe.mx);
+   probe.held=probe.holding=true;probe.personaWhileHeld=g_realStickTest.virtualTargetPersona;
+   probe.writerRevisionBefore=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
+   probe.cv.notify_all();
+   if(!probe.cv.wait_until(lock,probe.deadline,[&](){return probe.beforeObserved||probe.cancelled;}))probe.timedOut=true;
+   if(probe.beforeObserved&&!probe.cancelled&&!probe.timedOut){
+    const auto holdUntil=(std::min)(probe.deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(20));
+    const bool signalled=probe.cv.wait_until(lock,holdUntil,[&](){return probe.afterObserved||probe.cancelled;});
+    probe.readReturnedWhileHeld=probe.readReturnedWhileHeld||probe.afterObserved;
+    probe.holdWindowCompleted=!signalled&&std::chrono::steady_clock::now()>=holdUntil;
+    if(std::chrono::steady_clock::now()>=probe.deadline)probe.timedOut=true;
+    if(!probe.cancelled&&!probe.timedOut&&replaceIntent){InputHostVirtualIntentMutation changed;}
+   }
+   probe.writerRevisionAfter=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
+   personaLock.unlock();probe.holding=false;probe.writerDone=true;probe.cv.notify_all();
+  }catch(...){
+   std::lock_guard<std::mutex> lock(probe.mx);probe.holding=false;probe.writerException=true;probe.writerDone=true;probe.cv.notify_all();
+  }
+ }
+ void cancelAndJoin(){
+  {std::lock_guard<std::mutex> lock(probe.mx);probe.cancelled=true;probe.cv.notify_all();}
+  if(thread.joinable())thread.join();
+ }
+ ~GpdPersonaMutexWriter(){cancelAndJoin();}
+ GpdPersonaMutexWriter(const GpdPersonaMutexWriter&)=delete;
+ GpdPersonaMutexWriter& operator=(const GpdPersonaMutexWriter&)=delete;
+};
+static void gpdPersonaMutexHelperProbe(bool replaceIntent,std::uint64_t ticket){
+ namespace wake=ymcc::inputHost::wakeExecutionRuntime;
+ auto& proof=cases.back()["mutexProbe"];
+ proof={{"acceptanceScope","real GPD Start helper plus real persona mutex component only"},
+   {"observationPort","read-only configured-persona wrapper; actual getter unchanged; call graph adapted"},
+   {"osWaitChainObserved",false},{"completeCycleProven",false},{"managedHostProven",false},{"writerThreads",0}};
+ const auto* actualScope=wake::active;
+ check(g_inputHostMx.ownedByCurrentThread()&&actualScope&&actualScope->gpdStartBound,
+   "GPD persona mutex probe enters the actual Start Scope with current Host ownership");
+ if(!g_inputHostMx.ownedByCurrentThread()||!actualScope||!actualScope->gpdStartBound)return;
+ const auto originalWork=*actualScope;
+ const auto originalDeadline=g_inputHostSwitchRecoveryStartDeadline;
+ const auto originalRequest=g_inputHostSwitchRecoveryStartRequestId,originalPower=g_inputHostSwitchRecoveryStartPower;
+ const auto originalAttempts=wake::episode.startAttempts,originalRecreates=wake::episode.recreateAttempts;
+ const auto originalPlayer=g_virtualStartProtection.view(inputHostStartProtectionNow());
+ const auto oldObserver=fixtureGpdPersonaMutexObserver;const auto oldContext=fixtureGpdPersonaMutexObserverContext;
+ std::uint64_t initialCookie=0;
+ const auto initialRemaining=inputHostGpdStartRemaining(ticket,"elite",inputHostStartProtectionNow(),&initialCookie);
+ check(!oldObserver&&initialRemaining&&initialCookie==originalWork.serial&&
+   originalPlayer.phase=="expired"&&!originalPlayer.locked&&originalPlayer.remainingMs==0,
+   "GPD persona mutex control first confirms real normal-wake authority without renewing expired ON");
+ proof["initialRemaining"]=initialRemaining;proof["initialCookie"]=initialCookie;
+ proof["originalWork"]={{"serial",originalWork.serial},{"requestId",originalWork.requestId},
+   {"generation",originalWork.generation},{"armedAt",originalWork.armedAt},{"maxAgeMs",originalWork.maxAgeMs},
+   {"playerDeadline",originalWork.playerDeadline},{"protectedPlayer",originalWork.protectedPlayer},
+   {"gpdIntentRevision",originalWork.gpdIntentRevision},{"startDeadline",originalDeadline},
+   {"startAttempts",originalAttempts},{"recreateAttempts",originalRecreates}};
+ if(oldObserver||!initialRemaining||initialCookie!=originalWork.serial)return;
+ GpdPersonaMutexProbe probe;std::uint64_t remaining=0,cookie=999;bool held=false,helperException=false;
+ {
+  GpdPersonaMutexWriter writer(probe,replaceIntent);proof["writerThreads"]=1;
+  {
+   std::unique_lock<std::mutex> lock(probe.mx);
+   held=probe.cv.wait_until(lock,probe.deadline,[&](){return probe.held||probe.writerDone;})&&probe.held;
+  }
+  if(held){
+   GpdPersonaMutexObservationScope observation(probe);
+   try{remaining=inputHostGpdStartRemaining(ticket,"elite",inputHostStartProtectionNow(),&cookie);}
+   catch(...){helperException=true;}
+  }
+  // Cancellation is only private handshaking/exception cleanup. It cannot
+  // mutate work, player protection, execution clocks or product intent.
+  writer.cancelAndJoin();
+ }
+ const auto player=g_virtualStartProtection.view(inputHostStartProtectionNow());
+ const auto persona=inputHostConfiguredPersona();
+ proof["beforeObserved"]=probe.beforeObserved;proof["afterObserved"]=probe.afterObserved;
+ proof["readReturnedWhileHeld"]=probe.readReturnedWhileHeld;proof["holdWindowMs"]=20;
+ proof["holdWindowCompleted"]=probe.holdWindowCompleted;proof["sharedWaitLimitMs"]=5000;
+ proof["beforeCalls"]=probe.beforeCalls;proof["afterCalls"]=probe.afterCalls;
+ proof["writerHeld"]=held;proof["writerRevisionBefore"]=probe.writerRevisionBefore;
+ proof["writerRevisionAfter"]=probe.writerRevisionAfter;proof["personaWhileHeld"]=probe.personaWhileHeld;
+ proof["personaAfter"]=persona;proof["remaining"]=remaining;proof["cookie"]=cookie;
+ proof["writerTimedOut"]=probe.timedOut;proof["writerException"]=probe.writerException;
+ proof["helperException"]=helperException;proof["writerDone"]=probe.writerDone;proof["writerJoined"]=true;
+ proof["observerRestored"]=fixtureGpdPersonaMutexObserver==oldObserver&&fixtureGpdPersonaMutexObserverContext==oldContext;
+ proof["afterWork"]={{"serial",wake::episode.serial},{"requestId",wake::episode.requestId},
+   {"armedAt",wake::episode.armedAt},{"maxAgeMs",wake::episode.maxAgeMs},
+   {"startDeadline",g_inputHostSwitchRecoveryStartDeadline},{"startAttempts",wake::episode.startAttempts},
+   {"recreateAttempts",wake::episode.recreateAttempts}};
+ check(held&&probe.beforeObserved&&probe.afterObserved&&probe.holdWindowCompleted&&!probe.readReturnedWhileHeld&&
+   !probe.timedOut&&!probe.writerException&&!helperException&&probe.writerDone&&!probe.holding,
+   "GPD real persona read is observed before waiting and only returns after the writer releases its mutex");
+ check(probe.personaWhileHeld=="elite"&&persona=="elite"&&
+   probe.writerRevisionBefore==originalWork.gpdIntentRevision&&
+   (replaceIntent?probe.writerRevisionAfter!=probe.writerRevisionBefore:probe.writerRevisionAfter==probe.writerRevisionBefore)&&
+   !g_inputHostVirtualIntentWriters.load(std::memory_order_acquire),
+   "GPD persona mutex writer preserves elite and settles the real same-persona intent mutation before unlocking");
+ check(replaceIntent?(!remaining&&!cookie):(remaining&&cookie==originalWork.serial&&remaining<=initialRemaining),
+   replaceIntent?"GPD real helper rejects same-persona intent replaced during the actual persona mutex wait":
+     "GPD real helper retains original cookie for unchanged intent after the actual persona mutex wait");
+ check(wake::active==actualScope&&g_inputHostMx.ownedByCurrentThread()&&
+   fixtureGpdPersonaMutexObserver==oldObserver&&fixtureGpdPersonaMutexObserverContext==oldContext,
+   "GPD persona mutex probe restores observation and never borrows or reverses the actual Host lock");
+ check(player.requestId==originalPlayer.requestId&&player.phase=="expired"&&!player.locked&&!player.remainingMs&&
+   player.fallbackAttempts==originalPlayer.fallbackAttempts&&wake::episode.serial==originalWork.serial&&
+   wake::episode.requestId==originalWork.requestId&&wake::episode.generation==originalWork.generation&&
+   wake::episode.armedAt==originalWork.armedAt&&wake::episode.maxAgeMs==originalWork.maxAgeMs&&
+   wake::episode.playerDeadline==originalWork.playerDeadline&&wake::episode.protectedPlayer==originalWork.protectedPlayer&&
+   wake::episode.startAttempts==originalAttempts&&wake::episode.recreateAttempts==originalRecreates&&
+   g_inputHostSwitchRecoveryStartDeadline==originalDeadline&&g_inputHostSwitchRecoveryStartRequestId==originalRequest&&
+   g_inputHostSwitchRecoveryStartPower==originalPower,
+   "GPD real persona mutex control preserves original ticket wake ARM deadline and attempt quotas");
+}
+static void gpdPersonaMutexRaceCases(){
+ namespace wake=ymcc::inputHost::wakeExecutionRuntime;
+ const personaLifecycle140::ControlledDmi dmi={"GPD","G1618-05","HandheldCompanion.Devices.GPDWin5","/physicalModels/0"};
+ for(const std::string variant:gpdPersonaMutexVariants){
+  const auto beforeFailures=failures.size();
+  personaLifecycle140::prepare(2,"gpd-persona-mutex-race/"+variant,&dmi);fixtureFullPipe=false;
+  const auto managedSpawnsBefore=fullPipeSpawnCount;const auto managedReceiptsBefore=fullPipeReceipts.size();
+  cases.back()["selectedParameter"]="gpd-persona-mutex-race";cases.back()["realManagedPipe"]=false;
+  cases.back()["acceptanceScope"]="real GPD Start helper plus real persona mutex component only; no full Cycle/Host";
+  g_realStickTest.virtualTargetPersona="elite";
+  const auto on=targetDocument("elite",0);
+  check(sgWriteFileAtomic(YM_SETTINGS_FILE,on.dump()),"GPD persona mutex case writes only its private original ON document");
+  const auto origin=g_virtualStartProtection.admit("elite",startProtectionClock);
+  check(origin.accepted&&origin.requestId&&!g_inputHostProcess&&!g_inputHostEpoch&&!g_inputHostPrepared&&
+    !g_inputHostHello&&fullPipeChildObservers.empty(),"GPD persona mutex case begins at real admitted first ON without a Host");
+  personaLifecycle140::advance(ymcc::VirtualStartProtection::maxMs+1);
+  const auto beforeWake=g_virtualStartProtection.view(startProtectionClock);
+  check(beforeWake.requestId==origin.requestId&&beforeWake.phase=="expired"&&!beforeWake.locked&&!beforeWake.remainingMs,
+    "GPD persona mutex case expires the original thirty-second player period before ordinary wake");
+  const auto generation=currentPowerGeneration()+1;g_powerGeneration=generation;
+  g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;g_inputHostPowerAdmissionRevoked=false;
+  inputHostRequestWakeRescan(generation);const auto armed=wake::episode;
+  check(armed.serial&&armed.generation==generation&&armed.requestId==origin.requestId&&
+    !armed.protectedPlayer&&!armed.playerDeadline,
+    "GPD persona mutex case arms the actual ordinary wake with its original expired ticket");
+  personaLifecycle140::advance(kWakeHandshakeWaitMs+1);inputHostConsumeWakeRescan();
+  check(g_inputHostLifecycleWorkRequested.load(),"GPD persona mutex case reaches the actual lifecycle queue before Start");
+  bool actualHelperSeam=false;
+  fixtureGpdTransferSourceAtEnsure=[&](){
+   actualHelperSeam=true;gpdPersonaMutexHelperProbe(variant=="same-persona-replaced-intent",origin.requestId);
+  };
+  {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+  check(actualHelperSeam,"GPD persona mutex case executes its two-thread control at the actual Start ensure seam");
+  bool held=false;unsigned attempts=0;
+  for(const auto& event:fixtureEvents){
+   if(event.value("event","")=="input-host-native-writer-fence"&&event["detail"].value("phase","")=="held")held=true;
+   if(event.value("event","")=="input-host-wake-execution"&&event["detail"].value("stage","")=="start-attempt")++attempts;
+  }
+  cases.back()["actualWriterFenceHeld"]=held;cases.back()["observedStartAttemptEvents"]=attempts;
+  cases.back()["ownedManagedHostSpawns"]=fullPipeSpawnCount-managedSpawnsBefore;
+  cases.back()["managedPipeReceiptsAdded"]=fullPipeReceipts.size()-managedReceiptsBefore;
+  cases.back()["nativeEvents"]=fixtureEvents;cases.back()["trace"]=g_startEntrySeam.trace;
+  check(held&&attempts==1&&wake::episode.startAttempts==1,
+    "GPD persona mutex controls share one actual native writer admission and one original Start attempt");
+  check(forbiddenIo==0&&fullPipeChildObservers.empty()&&!fixtureFullPipe&&
+    fullPipeSpawnCount==managedSpawnsBefore&&fullPipeReceipts.size()==managedReceiptsBefore,
+    "GPD persona mutex controls issue no physical IO or real managed Host RPC");
+  cases.back()["cleanup"]=cleanup();
+  check(!g_inputHostProcess&&!g_inputHostPrepared&&!g_inputHostHello&&fullPipeChildObservers.empty()&&!fixtureGpdTransferSourceAtEnsure&&
+    !fixtureGpdPersonaMutexObserver&&!fixtureGpdPersonaMutexObserverContext,
+    "GPD persona mutex controls join owned threads restore POD observation and return fixture Host handles");
+  cases.back()["passed"]=failures.size()==beforeFailures;
+ }
+}
+#endif
+
+#if defined(YMCC_FIXTURE_GPD_PENDING_BEFORE_HIDE)
+#include "pre_hide_cases.inc"
+#endif
+
 int wmain(int argc,wchar_t**argv){try{
- if(argc!=3&&argc!=4)return 2;const std::wstring mode=argv[2];if(argc==4)fixtureManagedDll=argv[3];g_yemanccDataDir=argv[1];g_appDataDir=argv[1];fspath::create_directories(g_yemanccDataDir);fixturePersistOffCheckpoints=mode==L"off-lifecycle"||mode==L"switch-recovery";if(fixturePersistOffCheckpoints){std::set_terminate(fixtureOffTerminate);_set_invalid_parameter_handler(fixtureOffInvalidParameter);}fixtureOffCheckpoint("consumer-entry");fixtureTargetReturnIndependentCase();g_machineIdentity.attempted=true;g_machineIdentity.resolved=true;
+#ifdef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
+ if(argc==2&&std::wstring_view(argv[1])==L"--gpd-terminal-inert-leaf")return 6;
+#endif
+ if(argc!=3&&argc!=4&&argc!=5)return 2;const std::wstring mode=argv[2];std::wstring selectedCase;
+ if(argc>=4&&std::wstring_view(argv[3])==L"case:onex-parameterized"){
+  const auto* family=std::getenv("YMCC_FIXTURE_FAMILY");
+  if(argc!=5||mode!=L"family-lifecycle"||!family||std::strcmp(family,"onex")!=0||!*argv[4])return 2;
+  std::error_code managedError;if(!fspath::is_regular_file(fspath::path(argv[4]),managedError)||managedError)return 2;
+ }
+#ifndef YMCC_FIXTURE_OEM_AFTER_OFF
+ if(argc==5&&mode==L"persona-lifecycle"&&std::wstring_view(argv[3])==L"case:oem-after-off")return 2;
+#endif
+ if(argc==5){selectedCase=argv[3];if(!((mode==L"off-lifecycle"&&fixtureSdOffSourceLostSelector(selectedCase))||(mode==L"full-pipe-core"&&((selectedCase==L"case:wake-kept-source"||(selectedCase.rfind(L"case:wake-kept-source:",0)==0&&fixtureWakeSourceSelectionKnown(W2U(selectedCase.substr(std::wstring(L"case:wake-kept-source:").size())))))||selectedCase==L"case:wake-kept-visibility"||(selectedCase==L"case:gpd-expired-first-on-full-cycle"||selectedCase==L"case:gpd-expired-first-on-full-cycle:native-writer")))||(mode==L"persona-lifecycle"&&(selectedCase==L"case:gpd-live-sd-transfer"||selectedCase==L"case:oem-after-off"))||(mode==L"family-lifecycle"&&(selectedCase==L"case:onex-parameterized"||selectedCase==L"case:classified-fault-cleanup-elite"||selectedCase==L"case:classified-fault-cleanup-ps"||selectedCase.rfind(L"case:runtime-after-final:",0)==0))||(mode==L"target-return"&&(fixturePrepareRejectionSelector(selectedCase)||selectedCase==L"case:ps-return-root"||selectedCase==L"case:ps-return-proof"||selectedCase==L"case:ps-nopin-proof"||selectedCase==L"case:ps-return-all"))))return 2;fixtureManagedDll=argv[4];}
+ else if(argc==4&&std::wstring_view(argv[3]).rfind(L"case:",0)==0){selectedCase=argv[3];
+#if defined(YMCC_FIXTURE_GPD_PENDING_BEFORE_HIDE)
+ if(selectedCase.rfind(L"case:gpd-pending-before-hide:",0)==0){if(mode!=L"family-lifecycle")return 2;}else
+#endif
+#ifdef YMCC_GPD_PERSONA_MUTEX_PROBES
+ if(selectedCase==L"case:gpd-persona-mutex-race"){if(mode!=L"switch-recovery")return 2;}else
+#endif
+ if(mode!=L"switch-recovery"||(selectedCase!=L"case:source-reconfirm-collection"&&selectedCase.rfind(L"case:source-reconfirm-collection:",0)!=0&&selectedCase!=L"case:gpd-first-on-expired-wake"&&selectedCase!=L"case:owned-readback-cli-current"&&selectedCase!=L"case:owned-readback-cli-boundary:host-journal"&&selectedCase!=L"case:owned-readback-cli-boundary"&&selectedCase!=L"case:partial-start-cleanup-owner"&&selectedCase!=L"case:partial-start-cleanup-preflight"&&selectedCase!=L"case:startup-exception-owner"&&selectedCase!=L"case:serial-thread-start"&&selectedCase!=L"case:serial-entry-diagnostic"&&selectedCase!=L"case:serial-exit-owner"&&selectedCase!=L"case:serial-power-action"&&selectedCase!=L"case:serial-config-action"&&selectedCase!=L"case:switch-return-boundaries"))return 2;}else if(argc==4)fixtureManagedDll=argv[3];g_yemanccDataDir=argv[1];g_appDataDir=argv[1];fspath::create_directories(g_yemanccDataDir);fixturePersistOffCheckpoints=mode==L"off-lifecycle"||mode==L"switch-recovery";if(fixturePersistOffCheckpoints){std::set_terminate(fixtureOffTerminate);_set_invalid_parameter_handler(fixtureOffInvalidParameter);}fixtureOffCheckpoint("consumer-entry");fixtureTargetReturnIndependentCase();g_machineIdentity.attempted=true;g_machineIdentity.resolved=true;
  g_msiControllerTraceInventoryForTest=[](){return json{{"known",false},{"scope","offline"}};};g_msiControllerOfficialStackForTest=[](){return json{{"scope","offline"},{"modeWriterProven",false}};};
  bool expectedFailure=false,ok=false;
  if(mode==L"entry"||mode==L"mutation1"||mode==L"mutation2"){const int mutation=mode==L"entry"?0:mode==L"mutation1"?1:2;expectedFailure=mutation!=0;ok=msiStartOrderEntrySelfTest(mutation);}
@@ -2349,10 +3705,27 @@ int wmain(int argc,wchar_t**argv){try{
  else if(mode==L"start-protection"){startProtectionCases();ok=failures.empty();}
  else if(mode==L"recovery-protection"){recoveryProtectionCases();ok=failures.empty();}
  else if(mode==L"record-read"){recordReadCases();ok=failures.empty();}
- else if(mode==L"switch-recovery"){switchRecoveryCases();ok=failures.empty();}
+ else if(mode==L"switch-recovery"){
+#ifdef YMCC_GPD_PERSONA_MUTEX_PROBES
+ if(selectedCase==L"case:gpd-persona-mutex-race")gpdPersonaMutexRaceCases();else
+#endif
+ if(selectedCase==L"case:switch-return-boundaries")switchRecoveryCases(4);else if(selectedCase==L"case:source-reconfirm-collection")sourceReconfirmCollectionCases();else if(selectedCase.rfind(L"case:source-reconfirm-collection:",0)==0)sourceReconfirmCollectionCases(W2U(selectedCase.substr(std::wstring(L"case:source-reconfirm-collection:").size())));else if(selectedCase==L"case:gpd-first-on-expired-wake")gpdFirstOnExpiredWakeCases();else if(selectedCase==L"case:owned-readback-cli-current")switchRecoveryCases(2);else if(selectedCase==L"case:owned-readback-cli-boundary:host-journal")switchRecoveryCases(3);else if(selectedCase==L"case:owned-readback-cli-boundary")switchRecoveryCases(1);else if(selectedCase==L"case:partial-start-cleanup-owner")partialStartCleanupOwnerCases();else if(selectedCase==L"case:partial-start-cleanup-preflight")partialStartCleanupPreflightCases();else if(selectedCase==L"case:startup-exception-owner")startupExceptionOwnerCases();else if(selectedCase==L"case:serial-thread-start")serialThreadStartCases();else if(selectedCase==L"case:serial-entry-diagnostic")serialEntryDiagnosticCases();else if(selectedCase==L"case:serial-exit-owner")serialExitOwnerCases();else if(selectedCase==L"case:serial-power-action")serialPowerActionCases();else if(selectedCase==L"case:serial-config-action")serialConfigActionCases();else switchRecoveryCases();ok=failures.empty();}
  else if(mode==L"tuple-protection"){protectedTupleRecoveryCases();ok=failures.empty();}
- else if(mode==L"persona-lifecycle"){personaLifecycleCases140();ok=failures.empty();}
- else if(mode==L"family-lifecycle"){familyLifecycleCases140();ok=failures.empty();}
+ else if(mode==L"persona-lifecycle"){
+#ifdef YMCC_FIXTURE_OEM_AFTER_OFF
+ if(selectedCase==L"case:oem-after-off")personaLifecycle140::oemAfterOffCases();else
+#endif
+ if(selectedCase==L"case:gpd-live-sd-transfer")personaLifecycle140::gpdLiveSdTransferCases();else personaLifecycleCases140();ok=failures.empty();}
+ else if(mode==L"family-lifecycle"){
+#if defined(YMCC_FIXTURE_GPD_PENDING_BEFORE_HIDE)
+ if(selectedCase.rfind(L"case:gpd-pending-before-hide:",0)==0)preHide183409::run(W2U(selectedCase.substr(std::wstring(L"case:gpd-pending-before-hide:").size())));else
+#endif
+ if(selectedCase.rfind(L"case:runtime-after-final:",0)==0){
+ const auto value=W2U(selectedCase.substr(25));const auto separator=value.find(':');
+ if(separator==std::string::npos)return 2;const auto edge=value.find(':',separator+1);
+ if(edge!=std::string::npos&&value.find(':',edge+1)!=std::string::npos)return 2;
+ runtimeFamilyTransportCase140(value.substr(0,separator),value.substr(separator+1,edge==std::string::npos?std::string::npos:edge-separator-1),edge==std::string::npos?std::string{}:value.substr(edge+1));
+ }else if(selectedCase==L"case:classified-fault-cleanup-elite")classifiedFaultCleanupCases140("elite");else if(selectedCase==L"case:classified-fault-cleanup-ps")classifiedFaultCleanupCases140("dualsense-edge");else familyLifecycleCases140(selectedCase==L"case:onex-parameterized");ok=failures.empty();}
  else if(mode==L"worker-cost"){workerMaintenanceCostCases();ok=failures.empty();}
  else if(mode==L"recovery-cost"){recoveryMaintenanceCostCases();ok=failures.empty();}
  else if(mode==L"late-hide-pending"){expectedFailure=!ymcc::msi::latehide::buildEnabled;msiLateHidePendingConsumerCases();ok=failures.empty();}
@@ -2360,12 +3733,27 @@ int wmain(int argc,wchar_t**argv){try{
  else if(mode==L"late-hide-inflight"){msiLateHideInflightConsumerCases();ok=failures.empty();}
  else if(mode==L"late-hide-inflight-edges"){msiLateHideInflightEdgeCases();ok=failures.empty();}
  else if(mode==L"late-hide-orphaned-inflight"){msiLateHideOrphanedInflightCase();ok=failures.empty();}
- else if(mode==L"off-lifecycle"){coldOffCarryCases();fixtureOffCheckpoint("cold-cases-returned");fullPipeOffLifecycleCases();fixtureOffCheckpoint("original-off-cases-returned");ok=failures.empty();}
+ else if(mode==L"off-lifecycle"){
+#if defined(YMCC_FIXTURE_SD_OFF_SOURCE_LOST)
+ if(fixtureSdOffSourceLostSelector(selectedCase)){
+  const auto prefix=std::wstring(L"case:sd-off-source-lost:");
+  if(selectedCase==L"case:sd-off-source-lost")fullPipeSdOffSourceLostCases("absent");
+  else{const auto variant=W2U(selectedCase.substr(prefix.size()));if(variant.empty())throw std::invalid_argument("empty-sd-off-source-lost-variant");fullPipeSdOffSourceLostCases(variant);}
+ }else
+#endif
+ {coldOffCarryCases();fixtureOffCheckpoint("cold-cases-returned");fullPipeOffLifecycleCases();fixtureOffCheckpoint("original-off-cases-returned");}ok=failures.empty();}
  else if(mode==L"cold-archive"){coldArchiveCases();ok=failures.empty();}
  else if(mode==L"cold-msi-archive"){coldMsiArchiveCases();ok=failures.empty();}
  else if(mode==L"focus-recovery"){focusRecoveryCases();ok=failures.empty();}
- else if(mode==L"full-pipe"){fullPipeCases();fixtureTargetReturnFullPipeCases();ok=failures.empty();}
+ else if(mode==L"input-application"){fullPipeInputApplicationCases();ok=failures.empty();}
+ else if(mode==L"full-pipe-core"){if(selectedCase==L"case:gpd-expired-first-on-full-cycle"||selectedCase==L"case:gpd-expired-first-on-full-cycle:native-writer")fullPipeGpdExpiredFirstOnSelectedCases(selectedCase==L"case:gpd-expired-first-on-full-cycle:native-writer");else if(selectedCase==L"case:wake-kept-source")fullPipeWakeKeptSourceSelectedCases();else if(selectedCase.rfind(L"case:wake-kept-source:",0)==0)fullPipeWakeKeptSourceSelectedCases(W2U(selectedCase.substr(std::wstring(L"case:wake-kept-source:").size())));else if(selectedCase==L"case:wake-kept-visibility")fullPipeWakeKeptSelectedCases();else fullPipeCases();ok=failures.empty();}
+#ifdef YMCC_PREPARE_REJECTION_COLD_CASE
+ else if(mode==L"target-return"&&fixturePrepareRejectionSelector(selectedCase)){fullPipePrepareRejectionColdCase();ok=failures.empty();}
+#endif
+ else if(mode==L"target-return"){if(selectedCase==L"case:ps-nopin-proof")fullPipePrepareAckLostCase("PC",false,true);else if(selectedCase==L"case:ps-return-all")fullPipePsReturnEvidenceCases();else if(selectedCase==L"case:ps-return-root"||selectedCase==L"case:ps-return-proof")fullPipePsReturnSelected(selectedCase==L"case:ps-return-root");else fixtureTargetReturnFullPipeCases();ok=failures.empty();}
+ else if(mode==L"target-return-family"){familyLifecycleCases140();fixtureTargetReturnFullPipeCases();ok=failures.empty();}
+ else if(mode==L"full-pipe"){fullPipeCases(true);fixtureTargetReturnFullPipeCases();fullPipeOffLifecycleCase("MSI-return-unproven");ok=failures.empty();}
  else return 2;
  const auto report=json{{"status",ok?"PASS":"FAIL"},{"checks",checks},{"assertionTrace",assertionTrace},{"cases",cases},{"failures",failures},{"expectedFailure",expectedFailure},{"forbiddenIo",forbiddenIo},{"inertXinputReads",inertXinputReads},{"excludedSteamWallpaperNotifications",fixtureExcludedSteamWallpaperNotifications},{"targetReturnObservations",fixtureTargetReturnObservations},{"targetReturnCaptureModel","full-pipe: real107 parent+managed-child; native-only: event Host has explicit controlled PID/birth"},{"fullTranslationUnit",true},{"normalProductMainExecuted",false},{"realDeviceIo",false}};
- std::ofstream(fspath::path(g_yemanccDataDir)/L"fixture-result.json")<<report.dump(2);if(mode==L"full-pipe"||mode==L"late-hide-pending"||mode==L"switch-recovery")std::cout<<json{{"status",ok?"PASS":"FAIL"},{"checks",checks},{"failures",failures}}.dump()<<'\n';else std::cout<<report.dump(2)<<'\n';return ok&&forbiddenIo==0?0:1;
+ std::ofstream(fspath::path(g_yemanccDataDir)/L"fixture-result.json")<<report.dump(2);if(mode==L"full-pipe-core"||mode==L"family-lifecycle"||mode==L"target-return"||mode==L"target-return-family"||mode==L"full-pipe"||mode==L"late-hide-pending"||mode==L"switch-recovery")std::cout<<json{{"status",ok?"PASS":"FAIL"},{"checks",checks},{"failures",failures}}.dump()<<'\n';else std::cout<<report.dump(2)<<'\n';return ok&&forbiddenIo==0?0:1;
  }catch(const std::exception& e){try{const auto report=json{{"status","INCOMPLETE"},{"exception",e.what()},{"checks",checks},{"assertionTrace",assertionTrace},{"cases",cases},{"failures",failures},{"nativeEvents",fixtureEvents},{"state",state()},{"forbiddenIo",forbiddenIo},{"normalProductMainExecuted",false},{"realDeviceIo",false}};std::ofstream(fspath::path(g_yemanccDataDir)/L"fixture-exception.json")<<report.dump(2);}catch(...){}std::cerr<<e.what()<<'\n';return 3;}}

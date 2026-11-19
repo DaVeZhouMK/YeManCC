@@ -42,20 +42,32 @@ struct Evidence {
 };
 struct PairChoice {std::string gyroId,accelId;};
 inline bool validSensorApiId(const std::string& id) {
-    const auto value=probe::canonical(id);
-    if(value.size()!=48||value.compare(0,11,"SENSORAPI:{")!=0||value.back()!='}')return false;
+    if(id.size()!=48||id.back()!='}')return false;
+    static constexpr char prefix[]="SENSORAPI:{";
+    for(unsigned i=0;i<11;++i){
+        unsigned char c=static_cast<unsigned char>(id[i]);
+        if(c>='a'&&c<='z')c=static_cast<unsigned char>(c-'a'+'A');
+        if(c!=static_cast<unsigned char>(prefix[i]))return false;
+    }
     bool nonzero=false;
     for(unsigned i=11;i<47;++i){
-        if(i==19||i==24||i==29||i==34){if(value[i]!='-')return false;continue;}
-        const char c=value[i];if(!((c>='0'&&c<='9')||(c>='A'&&c<='F')))return false;
+        if(i==19||i==24||i==29||i==34){if(id[i]!='-')return false;continue;}
+        const unsigned char c=static_cast<unsigned char>(id[i]);
+        if(!((c>='0'&&c<='9')||(c>='A'&&c<='F')||(c>='a'&&c<='f')))return false;
         nonzero=nonzero||c!='0';
     }
     return nonzero;
 }
 inline std::string sourceApi(const std::string& id) {
     if(id.empty())return {};
-    if(probe::canonical(id).compare(0,10,"SENSORAPI:")==0)return validSensorApiId(id)?"sensorapi":std::string{};
-    return "winrt";
+    if(id.size()<10)return "winrt";
+    static constexpr char prefix[]="SENSORAPI:";
+    for(unsigned i=0;i<10;++i){
+        unsigned char c=static_cast<unsigned char>(id[i]);
+        if(c>='a'&&c<='z')c=static_cast<unsigned char>(c-'a'+'A');
+        if(c!=static_cast<unsigned char>(prefix[i]))return "winrt";
+    }
+    return validSensorApiId(id)?"sensorapi":std::string{};
 }
 inline std::array<std::string,2> sourceApis(const PairChoice& pair){return {sourceApi(pair.gyroId),sourceApi(pair.accelId)};}
 inline const char* standardSdkLayout(unsigned kind) noexcept {return kind==0?"sdk-motion-gyro-dps":"sdk-motion-accel-g";}
@@ -66,7 +78,17 @@ inline bool nativeReportedFrame(const std::string& api,unsigned kind,const probe
     return api=="sensorapi"&&!series.readingTransform&&!series.readingTransformError&&
         !series.standardSdkLayoutError&&series.standardSdkLayout==standardSdkLayout(kind);
 }
-inline bool same(const std::string& a,const std::string& b){return probe::canonical(a)==probe::canonical(b);}
+inline bool same(const std::string& a,const std::string& b){
+    if(a.size()!=b.size())return false;
+    if(a==b)return true;
+    const auto fold=[](unsigned char c)noexcept{
+        return c>='a'&&c<='z'?static_cast<unsigned char>(c-'a'+'A'):c;
+    };
+    unsigned difference=0;
+    for(std::size_t i=0;i<a.size();++i)
+        difference|=fold(static_cast<unsigned char>(a[i]))^fold(static_cast<unsigned char>(b[i]));
+    return difference==0;
+}
 inline bool same(const PairChoice& a,const PairChoice& b){return same(a.gyroId,b.gyroId)&&same(a.accelId,b.accelId);}
 struct Decision {
     PairChoice pair;

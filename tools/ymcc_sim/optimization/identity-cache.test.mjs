@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test,{after} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,8 +6,15 @@ import crypto from 'node:crypto';
 import { fingerprintCase, inspectCachedResult, deduplicateCases } from './identity-cache.mjs';
 
 // Only synthetic files here. Never os.tmpdir(), the product, or a formal fixture.
-const EVIDENCE = path.resolve('G:/YeManCC-Work/Testing/YMCC/Evidence/FixtureCostOptimization-20261023/cache-engine');
-fs.mkdirSync(EVIDENCE, { recursive: true });
+// EVIDENCE below holds invocation-owned synthetic inputs, not an immutable archive.
+const CACHE_TEST_WORKSPACE=path.resolve('G:/YeManCC-Work/Testing/YMCC/Workspace');
+assert(!fs.lstatSync(CACHE_TEST_WORKSPACE).isSymbolicLink());assert.equal(fs.realpathSync(CACHE_TEST_WORKSPACE).toLowerCase(),CACHE_TEST_WORKSPACE.toLowerCase());
+const EVIDENCE=fs.mkdtempSync(path.join(CACHE_TEST_WORKSPACE,'identity-cache-primary-tests-'));
+after(()=>{
+  const owned=path.resolve(EVIDENCE);assert.equal(path.dirname(owned),CACHE_TEST_WORKSPACE);assert(path.basename(owned).startsWith('identity-cache-primary-tests-'));
+  assert(!fs.lstatSync(owned).isSymbolicLink());assert.equal(fs.realpathSync(owned).toLowerCase(),owned.toLowerCase());
+  fs.rmSync(owned,{recursive:true,force:false});
+});
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const pin = file => ({ path: file, sha256: hash(file) });
 const codes = value => value.reasons.map(reason => reason.code);
@@ -649,6 +656,10 @@ test('wire fixed cache actual resolver ignores installed higher SDK and inherite
   fs.mkdirSync(path.dirname(nativeLedger),{recursive:true});fs.mkdirSync(path.dirname(sharedLedger),{recursive:true});
   fs.writeFileSync(nativeLedger,JSON.stringify({files:[path.join(msvc,'include/synthetic.h'),path.join(sdk,'Include/10.0.26100.0/um/Windows.h')]}));
   fs.writeFileSync(sharedLedger,JSON.stringify({files:['cl.exe','link.exe'].map(n=>path.join(bin,n))}));
+  const dotnetRoot=path.join(f.external,'dotnet'),managedLedger=path.join(f.repoRoot,'tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json');
+  fs.mkdirSync(dotnetRoot,{recursive:true});fs.mkdirSync(path.dirname(managedLedger),{recursive:true});
+  fs.writeFileSync(path.join(dotnetRoot,'dotnet.exe'),'synthetic fixed managed tool');
+  fs.writeFileSync(managedLedger,JSON.stringify({dotnetRoot}));
   const first=resolveWireBuild(f.repoRoot);
   fs.mkdirSync(path.join(sdk,'Include/99.0.0.0'),{recursive:true});
   fs.writeFileSync(path.join(msvc,'default-version.txt'),'99.0.0');

@@ -1,0 +1,16 @@
+{
+  "origin": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VirtualControllerStability-20261108\\win5-persistent-20261110\\field-130556-r1\\baseline\\native\\msi_native_foreground_isolation_runtime.h",
+    "bytes": 141267,
+    "sha256": "c29fd332a032c8e113a4a0edcece1ce3edef771499448ad1fbe2196e757a971e"
+  },
+  "byteStart": 85283,
+  "byteEndExclusive": 92741,
+  "originalSpanSha256": "658daac4d53dd476760467bb0a7ab7fc7fd0ea5c64f0a1ccb4c51a59d215e358",
+  "generated": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VirtualControllerStability-20261108\\win5-persistent-20261110\\field-130556-r1\\source\\tools\\gpd_native_handoff_cycle_legacy.h",
+    "bytes": 7465,
+    "sha256": "3c8586ecef68a3cfd28bf475a52f9f60e3c80621265088e5dfbb096a6275f09c"
+  },
+  "transform": "rename sole function identifier msiPostHideCycleStep -> msiPostHideCycleStepLegacy; original full body retained"
+}

@@ -1880,6 +1880,16 @@
   ],
   "sources": [
     {
+      "path": "tools/fixtures/input_coordinator_lifecycle/msi_return_observation.mjs",
+      "sha256": "d60b68785dff29138d96c26ec65fc55b690909079f8abbf7018f0893e8828f08",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "native/steam_endpoint_discovery.h",
+      "sha256": "ea1659abed921319b10c2e5ca9103df9f7b4a548ff2bc44944b3aff951c03a13",
+      "contentNormalization": "utf8-lf"
+    },
+    {
       "path": ".gitattributes",
       "sha256": "d8a7dfd637d04a58cbb8a555ba0997fc3d8016f35f5528371bbcae96abb7caf9",
       "contentNormalization": "utf8-lf"
@@ -4473,7 +4483,7 @@
     },
     {
       "path": "native/decky_sidebar_bootstrap.h",
-      "sha256": "b8144d9573ef0b8a6b23475e4b58da50c3aaead192a170534950a63be280f194",
+      "sha256": "6a95ed50abbb8be4a2944208377c8ccaf603a89df02595c6b2d39ada4d2b4585",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -5008,7 +5018,7 @@
     },
     {
       "path": "native/main.cpp",
-      "sha256": "1ff623d54a027d613e40ea7afbac0e3c0f8f8d5106369e3c648c3964a0797419",
+      "sha256": "488e61b3b1d9f0f34c152101441f3ec923c267e5e5cbde42a51c121a8c906863",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -6238,7 +6248,7 @@
     },
     {
       "path": "native/steam_live_cdp.h",
-      "sha256": "b387439219bb25f3e5749418537d1bad429f90ef7ad91f6f9cd137b022446b3d",
+      "sha256": "4fd07a3fa6f8fa659a26b533e41f5cec3ee0a8e19069214663cffaf4163728c2",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -6537,7 +6547,7 @@
     },
     {
       "path": "native/steam_ui_mode.h",
-      "sha256": "bffae02ae3b063c2d7e847b8f5ac6f2268b96dba551f47039958fd8711bdc45e",
+      "sha256": "b43d7cf883f917ed65849efbfd98b4bdd3bdf25dbdad76b3358857aecda6fab4",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -9811,7 +9821,7 @@
     },
     {
       "path": "tools/fixtures/hc_model_motion_consumer/oracle.mjs",
-      "sha256": "9a3f30508dff596d7a3eb12a3ab393f6b1fab67e266a0b525dadcff4864c4406",
+      "sha256": "54c21b88ab03c13ca0aab76bf66d5a9bf66216521726c358769c8b1dcb6be51d",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -10091,7 +10101,7 @@
     },
     {
       "path": "tools/fixtures/input_coordinator_lifecycle/settings_mutex_isolation.mjs",
-      "sha256": "f1a74b6c8c99cf1cf1904b98049f97581b8212f0c3c08f3311de315ee38b2016",
+      "sha256": "ec9823c106444b071945300737717ef5c60c6f1471f63bd492d898101ef42089",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -10146,7 +10156,7 @@
     },
     {
       "path": "tools/fixtures/input_host_lifecycle_completion/fixture.cpp",
-      "sha256": "16460751e83cb891d9a7eaa801ec2064233c554834bee363f06fe0537ce6fe90",
+      "sha256": "84421cefb1160b149b07455cb2ed6c791240f2c97d4d34fdd5ffb367b4957352",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -10373,7 +10383,7 @@
     },
     {
       "path": "tools/fixtures/virtual_start_protection.cpp",
-      "sha256": "6a593817a0a5eede87e2ccac467ffb08e0910ef69183f18fdd1edf44993d486d",
+      "sha256": "d293fa64b5fcfffc0646972cb4f20054aaba5fdf66e9d01f0c6c44abaad88284",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -10659,7 +10669,7 @@
     },
     {
       "path": "tools/input_coordinator_lifecycle_selftest.mjs",
-      "sha256": "53e5038646e6a3de8a44d6d9f82cceb97aea9fd61f9a20ad0cc99530480f681e",
+      "sha256": "9e14ec7eedd30e037a9d1664f143fb221e5da8d04bc3865977e87fbd3e1ced1f",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -10702,7 +10712,7 @@
     },
     {
       "path": "tools/input_host_lifecycle_completion_selftest.mjs",
-      "sha256": "4e1218a75648ef79714231bb0fd0de2d0fb572ab50bc77c493fad8529467618d",
+      "sha256": "2121038b2864e5b8dee05f1753c264cce3cd019234f4ccfb133f9f67782dc6c8",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -10943,7 +10953,7 @@
     },
     {
       "path": "tools/monitor_hud_host_optional_selftest.mjs",
-      "sha256": "d776ce828f42b560cd74ba4cab127cf2078b40e4cf36f1a8bee2fe86d603d9f6",
+      "sha256": "06e2f3e73da754c8206f131831d48504461317c1a8ac03f569e6a687fc49fc22",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -10998,7 +11008,7 @@
     },
     {
       "path": "tools/msi_crash_owner_liveness_selftest.mjs",
-      "sha256": "ad6bced40050a90028ec7113eb0cb099012baa73cd1da33f6b37378bf30e8a68",
+      "sha256": "3fc046a0d4e3b9d35ec2af2ff4690bec4173244c01f86034eac63104b692a74f",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11008,7 +11018,7 @@
     },
     {
       "path": "tools/msi_crash_record_io_selftest.mjs",
-      "sha256": "61c8eb899b2313f1ef30204fe0a467d03b135e2ede2dd502d6a4ffa802c0a361",
+      "sha256": "012a6a3d110686adf0bcfb876a4e126179f14008db8b9a1b005a501f9c4f1fa1",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11187,7 +11197,7 @@
     },
     {
       "path": "tools/radial_utilities_native_selftest.mjs",
-      "sha256": "7a9f92d1a3e4af4a107efa9a6eed7694828c769e89a23022dce79b47d2af5f1d",
+      "sha256": "a24be1d3f85d008b49eb554b67e1939f6fa7ad364daeed46f581362379af27ed",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11248,7 +11258,7 @@
     },
     {
       "path": "tools/startup_readiness_native_probe.py",
-      "sha256": "a771b54dfd87a373cc3215dafada8170365b8f3e0ae2b54f5a4916dcc8ba12a6"
+      "sha256": "18976151c9813b33acd239d6163a6926ac663434b94a9a0879fc06eb66dab6eb"
     },
     {
       "path": "tools/steam_appearance_automatic_refresh_selftest.ps1",
@@ -11461,7 +11471,7 @@
     },
     {
       "path": "tools/verify-msi-owned-return-runtime.mjs",
-      "sha256": "313dfc1d049ee96e27f3d3bf52dc614e54573b787d6b04b06fea82eb86ec19c8",
+      "sha256": "266943e85ec65357aa6a87bc3e599299212ec552665e0d5e8463f7c8ee63a08b",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11481,7 +11491,7 @@
     },
     {
       "path": "tools/virtual_start_protection_selftest.mjs",
-      "sha256": "fc77d8e16166a36ebffe03c269fb5803186601120240148df80757e62c4a8c0b",
+      "sha256": "5a69d0b8234409d5212410f9760a0492d1510c03c1e385b067d306d5e0576ec6",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11679,7 +11689,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/capability-hotpaths/adapter.mjs",
-      "sha256": "45b0316196b692cc7a6c275d70df72e182f059fe598ace76f1e834a1b92c4a38",
+      "sha256": "78b2450f239c5f4f1e84344cf9a35b96c46c3daba2926fbc8cdc25b161ad516f",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11689,22 +11699,22 @@
     },
     {
       "path": "tools/ymcc_sim/global/capability-maintenance/adapter.mjs",
-      "sha256": "59deb48018450acc6dca0225017c288cc9e0348ab0ee22675eca2a9b05bf0cbb",
+      "sha256": "3ec6a56f7fee73da370d9e3a2137b02e4181ad1c6735a55447329a5ea9a09fb6",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/capability-maintenance/contract.mjs",
-      "sha256": "f81bd5e99c2377c69392e644c138495cfb443a668cc1d92ddc392b5ab2a1e529",
+      "sha256": "f9c1fb7e6e92efdda5ed75f40e730478c179765de5e6d4437338f196a0495d3f",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/capability-maintenance/inputs.json",
-      "sha256": "2d8afa5238d20023f3b733dc615acbb70f070e6b115de5d46220452899851250",
+      "sha256": "0a6f0bcbdc2865231afc2499e03e74eed1d003337052523264d4a0c64a02e240",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/capability-maintenance/main.mjs",
-      "sha256": "b6f921fcb06ba76612d626d8f2817c8d7404deea0def93aa3bb75cdab00b18fc",
+      "sha256": "f43f7dfacf6d4ab67e9ed94fc534cd7b0ded334932b38d8ae5834c1f122f0d26",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11799,12 +11809,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-lifecycle/README.md",
-      "sha256": "c9c067882e3a7ebe5a791f746704609e8e8c91f9c1b49a6ec9c0e625c9249f73",
+      "sha256": "103f2216b2f1d33545895332f22f9ce7658748c60f3ddd00f357eeb7b0dd542b",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-lifecycle/adapter.mjs",
-      "sha256": "91a1ec8a4023ff688db8ee28b99f0f8a90ac342cc776f95680a092e033a69058",
+      "sha256": "65aa2a287b7ef2444fd63ef5267ea06960098c1eba8e69c65849e4d6ddfed132",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11819,12 +11829,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/README.md",
-      "sha256": "9c7c25df3c16f9b98e42d10dd8fbe33880f1b33621d8ecfb0313d97454bb6d19",
+      "sha256": "c6c5dd3dab8f48c67037e0ee3b55bb317b898a91cb0f2aafc96d9c5e8879a675",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/adapter.mjs",
-      "sha256": "183f4451280889f8e4795b4b2a633d3aec55b9c437ad7644a2be38a42a768f11",
+      "sha256": "e3418391ac4a7506fd72e805e19d5d1061695eccfc918722bd28150f5c135b09",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11884,7 +11894,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-b54-actual-worker.mjs",
-      "sha256": "9c725fc8a91b4a0944731059438b857cc11ba2501db3e060f7c0ac890f868175",
+      "sha256": "26fb011c992adbf5998f1b90b28ee8473666081a2cbb534d7e2b7be7c4973710",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11924,7 +11934,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-current-prepared.mjs",
-      "sha256": "8a9e0d2a2c92fde6c471938d7e3e5d07b5b7dfd3e6eff90af050ef2cda92af58",
+      "sha256": "b9bf15bb1a65128b9adc014e8934a572a57f854a8e45420b7101b22bbd655ed9",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11939,7 +11949,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-current-run.mjs",
-      "sha256": "0af2561830fd9eb70e4e9b89b1a63bfb11c81536d8725c5e214805f8c372eb44",
+      "sha256": "3ea6d4292828a90b106438ae56d7af78f848636eb42c71ddade11c277f4223d8",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12193,7 +12203,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-lifecycle-completion/adapter.mjs",
-      "sha256": "d85158c2be8554a3a768ad47d27f7daad843aeea3f7098c08bb68467967d96fe",
+      "sha256": "6a62bccc166221d2606bf88b726278907200020c068ed5a45ae695a82f47eb37",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12208,7 +12218,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-lifecycle-completion/run.mjs",
-      "sha256": "10a93dd84853c0805d747ef89b9389e64be362adfb8fd52be62aaa0a847d539a",
+      "sha256": "5acb324906f1516732348c72695afa6ff7950c501fc699a01927ef803151ccd0",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12323,12 +12333,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-port-cycle/run.mjs",
-      "sha256": "6899a3b5a099ae2f217d4afb38ddedd5c33cc6a816f626a6cfa549015ed15627",
+      "sha256": "4d7fe11d116557d50f80ed1be4dbc695e6a3aa545672d585383f2fd6eb80f849",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/controller-port-cycle/runner.test.mjs",
-      "sha256": "869e576089e97d23cdf3e1fb2c49cdd533da841ecbdab3a3f64b9ccfa6a17be5",
+      "sha256": "652272216f4a18224c396c4ea1478966bbed2fb733d58ee1eb5ecbb2a8a13553",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12358,7 +12368,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-priority-ledger/adapter.mjs",
-      "sha256": "592e738b88a150e015de6450e7d074e2a6c6b3a15fd9d4ef573a09986e40273c",
+      "sha256": "4e10efaeed13b246d3fb2ad0a43613a2cd7f8ef0933723163fb28134e6ad9ed1",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12367,8 +12377,13 @@
       "contentNormalization": "utf8-lf"
     },
     {
+      "path": "tools/ymcc_sim/global/controller-priority-ledger/original-receipt.mjs",
+      "sha256": "ecbfe30de677a830a4bbf1ddeaaff91d5528ec0f160b078f4420c2521ed41369",
+      "contentNormalization": "utf8-lf"
+    },
+    {
       "path": "tools/ymcc_sim/global/controller-priority-ledger/run.mjs",
-      "sha256": "d945fea2cc4b62304c30462b2fda257b87f3d748e614b606985512be317505b4",
+      "sha256": "442be55154b5fdb560957525c79f6f65aab7c0cde75a775d986afb9a230464b2",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12427,12 +12442,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-priority/run.mjs",
-      "sha256": "811aaa5fbf81f7d70d8836432edb98be734e6b026c17fe83610eaa1874715a16",
+      "sha256": "77838c08825774586be4901fb35b8a5675075355382f3d8723ffd8df04f8e063",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/controller-priority/runner.test.mjs",
-      "sha256": "f578372d01c824441a43e23adece9dd1a55dc7d42954f14f54dea8b740429b53",
+      "sha256": "f338fb723c0cde8185a8bb783dd773a8ee34b004e1e4efcd79806d02d95a62c7",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12602,22 +12617,22 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-start-protection/README.md",
-      "sha256": "eadae5b1102dae81b7f6812db1d7b202fa4c5d9efc91cda0331250a2093efe1f",
+      "sha256": "081255b0da9d230b3fcb84aafc0ce99d782fc9077dff3278b9b12d537d4f7dd9",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/controller-start-protection/adapter.mjs",
-      "sha256": "12989819aba5fdd8673880328a964c9e373612a9894667fe2eba88812686d175",
+      "sha256": "42d75ce8b95ef259b7727a720bd64983cbfe06b3e44ad7c336c88eed98ce175c",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/controller-start-protection/run.mjs",
-      "sha256": "75e529d1016fbfa93f2e1b10d43dac62a04ccf321f55aaa0b4b42f0726378ff8",
+      "sha256": "8b4432359ef06a080b6a68adefb34676715ef1e55235e1aa610fd54aa5887f97",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/controller-start-protection/startup-observer.mjs",
-      "sha256": "6775931f09c148f4829fa52069de841dd0c5671c06c2317dd50c34a939885556",
+      "sha256": "0b5b7a65b77a01c3706d2bc28a78eabaedad7756aee1608cc448b63bfe728585",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12627,12 +12642,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-startup-return/README.md",
-      "sha256": "2a803f253243e61c4a3708a243121a2982fd97e1c8bf245a4bee4dc9a79c5345",
+      "sha256": "200af9b5b3881a482e12084d14588d8fb7ec8e7357e837d5730f39feaa62a2e7",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/controller-startup-return/adapter.mjs",
-      "sha256": "5f15aa8a0c40c503a1bd62a082e0baad0bf833430c296e8f59cb8513a81ec7bb",
+      "sha256": "52b57f2b36f7e12c3bc08996f2ed55a1f9a17badf3cddcd6a59983c2f5808d08",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12650,17 +12665,17 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-startup-return/provenance.mjs",
-      "sha256": "7e2bd92f447f67ae6e5d50cf5c0cbc033a22c938ebebf6e9c6903aa8fe688b06",
+      "sha256": "1dd0f87bae24b35b2e3951404fbcd198b5857c90cdfb035ba5ff56f1949ca19a",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/controller-startup-return/run.mjs",
-      "sha256": "638aca2817af01e151f3ab58c296fe7aac385eb8e8c0c264d826e4cc5896e5e3",
+      "sha256": "afa2e17fc389675976be5247b76ea4244c4d059f16b31f3c5b4aea9787617b4d",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/controller-startup-return/runner.test.mjs",
-      "sha256": "878f9ea1897f2536dcde2c593572d716af2d981190aa276ed359dc5e324513aa",
+      "sha256": "98d561627cff8de268e4fcf195c4c2d5b057940b9436667f709000825c0d80ef",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12670,7 +12685,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-startup-return/toolchain-inputs.json",
-      "sha256": "9fd3393d6b9ddd28ea41223dc3d4783fed563d404a51ace1b0a8ca62fe443deb",
+      "sha256": "cbeaf283c3dfd7a51cfa2018ed11e84970e568dab742bfb2688763f881ee2be4",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12819,7 +12834,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/owned-adapter.mjs",
-      "sha256": "28fe3c63d09080a6a3b4d60016c93a1658143aef4e077d24c3d94f340fd8f6d3",
+      "sha256": "5ee496173140c73611e1a49811ecf8f3ba969eaa677cb98fef2f192cb3c034f4",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12869,7 +12884,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/typed-async-source-inputs.json",
-      "sha256": "5b06bce90b8babc6b4efbd069349cd10590605439ba7f85347a1d70c26cdac18",
+      "sha256": "4dcfc616630985b5e7fe9aed969ad5f3a0179e03d03749d97024d3d955e760a0",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13199,7 +13214,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-adopted-start-refusal-consumer/adapter.mjs",
-      "sha256": "54dc0c81d083dcf91a0a350ac0d044482a17b00cb58fdb0cb73fa1e23f4f713c",
+      "sha256": "f76985d2de58aa6193927e8d750a9da2a8209e559b668549f039a8f43150b2cb",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13214,7 +13229,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-adopted-start-refusal-consumer/boundary.json",
-      "sha256": "3d638a9af21060eca1993f15e8f7d7002e76da7c2234f49adca4a80a76684385",
+      "sha256": "3ca9f74de610d9bbc1c762a17d7f8263b07a1e18afc67314a775e3b083e4bdb8",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13229,17 +13244,17 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-adopted-start-refusal-consumer/run.mjs",
-      "sha256": "f60240cfdb79521e752d75e1224088a02bb82d4dbc0ee805d199007f82df168c",
+      "sha256": "8511e8ed6ab02fccb4e219026955fe308c24529ba6e05bcbfe65dfd3afab8a00",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/fan-adopted-start-refusal-consumer/spec.json",
-      "sha256": "2d4bd68d70536e140729694d22f3719c9ece461c7dbe71c5d46c28d3eb4e365c",
+      "sha256": "a2c1a11ac89f2e88464983615cb303381d7c3b4c6ba24219408e4922be6c5db5",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/fan-adopted-start-refusal-consumer/worker.mjs",
-      "sha256": "59b3898054375c241cb3bd99f3bf0b922ff79b54c9404488fd5cdcec99675016",
+      "sha256": "38f8e4bcbcc2f49ce60b9cb0d264e715e94f13186c19d9607108e893d80e435b",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13527,7 +13542,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/run.mjs",
-      "sha256": "a067cc38f5bcba677bb7d7651b22664c8bcbf1bdea71c8eb3288f5b86b3617c1",
+      "sha256": "702aec4275f4455011fa0c7758b8da31cd9087f48754c914ed2bd84aea45a51d",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13852,12 +13867,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-pending-acquisition-consumer/adapter.mjs",
-      "sha256": "4fb66d7d8684166b209f69fef1c40272a5e3072fb016a5a6a5970c4663ceeba4",
+      "sha256": "b5ff183adeedbe35eea76ea61cdc113fd89109ac975627b6da232f7cddfa0b52",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/fan-pending-acquisition-consumer/run.mjs",
-      "sha256": "ed34456ab4a5244118f36929ac31f4ed5b5ddffd4a986606ed9db94c7412fc4f",
+      "sha256": "29d23dfd2769ba4d6bf8e6aad4af24f338aedf2bd5f43f231d710e63e9922e24",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13867,7 +13882,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-pending-acquisition-consumer/spec.json",
-      "sha256": "1de73b16f03f7f8f6a6e2506ba0cff73db78226032f1a5b282db11a26fb93bbe",
+      "sha256": "dc8f3a7da37012bf75d92c5771de6759e2049f2684a4131cde89d7d2ea600d44",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13877,7 +13892,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-pending-acquisition-consumer/worker.mjs",
-      "sha256": "973168ccc71f3707ca25e17712a9af55b85e8c446f7aa29ac48857a4ce7021a3",
+      "sha256": "b637ee92c0a865092569d022dd24a27b4c609350ee140f1d810dc2a5f5742839",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13907,7 +13922,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-unconfirmed-resume-consumer/adapter.mjs",
-      "sha256": "1c6c0d3febe734d044b370e6fc36de7434fbd0764d3d4b09ffd7d288c8edff14",
+      "sha256": "91f23b4610487db0d4b0dd50db34585402de51973eacd4fe511863a181fb0838",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13917,7 +13932,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-unconfirmed-resume-consumer/run.mjs",
-      "sha256": "491b1b3032ff3f6edf5d34b4da93e0da9a3cc4909b685e1ae0b7f68cb13150b8",
+      "sha256": "f2ca6579ab91ec0d1d054690d80f837021b696448f6c7e4421615920b35f3060",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13927,7 +13942,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-unconfirmed-resume-consumer/spec.json",
-      "sha256": "6a9936c8f799e4887c6a97ca00484e66d33d6cb487084210397004ea0f1b9f40",
+      "sha256": "b81fe8a04992c639422def5d5597e27a59604f8a888da5c1d8d2400333ff3df5",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13937,7 +13952,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-unconfirmed-resume-consumer/worker.mjs",
-      "sha256": "26c4d710904a8801c7f9125403af1d72cf5e5cd2989dae04526cae2c7e6a7256",
+      "sha256": "ed36b75e36125a44ef30811b1a3468d45e97bec04ab1a455b1e6493f9121d337",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13981,7 +13996,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/game-rule-storage-consumer/README.md",
-      "sha256": "374bbb770e74650da29524094b329f51e22b8056ac5c9e70594564d943079554",
+      "sha256": "ca69552c269d9eee673ab70b3b3c79169bce759b0220161c31f5b58ffb166b1d",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13991,12 +14006,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/game-rule-storage-consumer/run.mjs",
-      "sha256": "d2cbcd2f2e047d20512f9d946aec9960f02326ca40127541d1a41c53251f5079",
+      "sha256": "adb22cabe9dc3d6dfb1f749592baea6eb2003888a1e06eafcea9b6ef2bb852ea",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/game-rule-storage-consumer/spec.json",
-      "sha256": "56ceb0e595874e4b08fb83cc38f7c68e8983c35a086b3ca5b8bfae38d88f77cd",
+      "sha256": "7d82e580496b28726f39113f8eb591076f58f846b8d92ed59c4d75be09ca1ae6",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -14353,12 +14368,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/library-workspace-datachain-consumer/contract.mjs",
-      "sha256": "782d8f7ffa0b081a874551027564fc3174da7028e000e2b8ab06ba0940127c10",
+      "sha256": "2f1585d9ab552e3ddf6c786870423b52288b1e62ecd032b43dce82a06d443d1a",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/library-workspace-datachain-consumer/contract.test.mjs",
-      "sha256": "f6127782ce8d322aaa948def019e1831df5a9eca1e47bcf08720a359174de353",
+      "sha256": "06781220dd722202ade88093c012c1f712d4a98ce71bd1862f19269c09203a12",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -14647,7 +14662,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/monitor-input/feedback-consumer.mjs",
-      "sha256": "5981522a62db95db86f8b8a5ac6dfd7f36928afef8d85e5945082570f2a651d7",
+      "sha256": "4f1248d4730d79c665a746c9fc89cedae8eb49ed077e42fe0d6fd418e2eb552c",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -14857,7 +14872,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/monitor-owned-close-consumer/README.md",
-      "sha256": "8d9281666f64663153f7a19cee2fbcbf3c859e40b81e36081544514c9d1762c0",
+      "sha256": "431da64bb37e2e10b69228e71507193c2b928bd0e9a48994a54c8daef0e54409",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -14867,7 +14882,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/monitor-owned-close-consumer/run.mjs",
-      "sha256": "843a9a6019140bcdf9bd9b3d17989a58b6548e3838d0f9c6e3754700b44bab15",
+      "sha256": "d6e6b24f1811b08a24eba1deee597b7e8a3fcaa8233275df2aaa163b78948b9d",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -14877,7 +14892,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/monitor-owned-close-consumer/spec.json",
-      "sha256": "85ed89f905b5d2b58abae89076e7c907ef88bf0008a806bf2c0033b5897622c2",
+      "sha256": "4e949035a16de329ac903fd4f4d01031da65fd0445cd51038dca6ce5f288c151",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -15012,7 +15027,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/motion-consumer-signals/adapter.mjs",
-      "sha256": "3ed076e8864f9f33064800da8b9ed88a5a8fafb0ff85a8e172696e1e361a90eb",
+      "sha256": "5bb93214671832dbf48a9bcd20da235e935b2e05f25581523fabbb95b4d0dfd0",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -15022,17 +15037,17 @@
     },
     {
       "path": "tools/ymcc_sim/global/motion-consumer-signals/evidence.mjs",
-      "sha256": "524506ff17c2a6c1ef2e7adeaddd5e74f2bedd18adcb74f60bb97b6829f0b4ab",
+      "sha256": "27ac047cc3f92f421aa78ace7b2c90f0d5feecb7b3732e66eac4546bf354a4f8",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/motion-consumer-signals/inputs.mjs",
-      "sha256": "ce64b5b3eae8ebc21007ff20abbe79b666d0ef077973f9b47d798ede2f9a2c3b",
+      "sha256": "71efd94d898fd0cfd2bf599cc3b42b119cdcc899c7572283ca032f4ad7704722",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/motion-consumer-signals/matrix-evidence.mjs",
-      "sha256": "5701a8309bee296007fbe5aa27623aa34d0082004983df73cf91d4126c4f58c1",
+      "sha256": "0ca6a0034b7657492014924f838e21f413b2321992bd5805a979d141e8123616",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -15081,6 +15096,14 @@
       "contentNormalization": "utf8-lf"
     },
     {
+      "path": "tools/ymcc_sim/global/motion-consumer-signals/toolchain-sleep-native-recovery.55c4c44.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/motion-consumer-signals/toolchain-sleep-non-user-wake.55c4c44.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
       "path": "tools/ymcc_sim/global/motion-consumer-signals/validation.mjs",
       "sha256": "d377917a1e62c28f329393ddf32819c7430d4de0b5f0a9e8e07fe303744cb497",
       "contentNormalization": "utf8-lf"
@@ -15107,7 +15130,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/msi-sd-rear-consumer/inputs.mjs",
-      "sha256": "fd1c1fe730307d1bd87ff4011c7f8190204811c09adb35090ea4d467c5d9ddb0",
+      "sha256": "678e21ae256fbe5ea5a33b9b9661d041e4cdc9aee09c9cf49bf23ed5dba9d629",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -15976,7 +15999,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/signal-adapters.mjs",
-      "sha256": "c21c5870c74b6f91bee7f5acd2defc7e00ad8ba28074b0e9e49278d49b8130c6",
+      "sha256": "e487618bfcf9eec659eab15bd37ca1b2819d3c62fe94d68990e694266d2844c1",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16063,12 +16086,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/run.mjs",
-      "sha256": "3e12e876796f9b5e018fdbb6164cdca52804ebcd46d5b9402136d99271a912c3",
+      "sha256": "df77b91b0c8fd45dac77b5cda7afb66e3718531e146cc511f0a2bdc4b34f2f5c",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/runner.test.mjs",
-      "sha256": "dd9619815cadc2708711e72727f971079d5678b1f8c7199c2c0dcd04a5c8371b",
+      "sha256": "685d9f3175b464cac574641d0e597f64111699f9d08e7ca536a997b36b493189",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16078,12 +16101,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/spec.json",
-      "sha256": "89cea999811fcc1f63299bb0775a3342031b4049fa3913009e7002c18456424f",
+      "sha256": "79c7bfa16be6055f89e593ae486c76cb82bb41d7c571b02d9c54723f40fd13b2",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/worker.mjs",
-      "sha256": "229b2b9c60413c152dd5854c43f21ca3f379b64ab105df732919e00ed0831fa8",
+      "sha256": "ded11470401ccaeba0c843917af92d04bf2d2e752b3712c9cd983fb8e268527e",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16380,16 +16403,16 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-session-marker-file-consumer/fixture.cpp.in",
-      "sha256": "aa08932532d968faa2a0229c61878d54a8b0fee797c212b6f5af84797bd1310b"
+      "sha256": "e62aaa8509309d6c8d4a04db1abc4f35e027d085ae955db39b1be866bfc1e7ac"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-session-marker-file-consumer/run.mjs",
-      "sha256": "6b42eb53c4fdc841baaa3153ab4ccc677198b1c475841dbc14681e3d5302390d",
+      "sha256": "85f89fdc4df1404add228b29aac591a62581550bbe69fcad2338a888e48ff4f6",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-session-marker-file-consumer/runner.test.mjs",
-      "sha256": "533d42181a8e913e2d46722dc7d722a92fe7eac2f829090c998521de0e72131a",
+      "sha256": "ff4edfc5053aa13ffe09eaa2ffafc521bbacec40ef66db740658452829943209",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16399,12 +16422,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-session-marker-file-consumer/spec.json",
-      "sha256": "a11d5829f4c71733b2d62feab04ca58e6c941da87e6cdf3630a3c4e6966fce16",
+      "sha256": "c591ed20f2e5d39176d98934e7ff9fd24d96840221151f946c72e9f3c0b1cce7",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-session-marker-file-consumer/worker.mjs",
-      "sha256": "6bdb336a1f24758ce1e9a7a90f70b9ec1e8b8dfcc84576e8bc410a0586df921b",
+      "sha256": "2db77f53ac8dbbb9912dc48554910b0992958e883daf9411f364737f4c455ca4",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16761,6 +16784,11 @@
       "contentNormalization": "utf8-lf"
     },
     {
+      "path": "tools/ymcc_sim/global/ui-navigation/Run-Ui.ps1",
+      "sha256": "66d73bdd875a001f42c803e049fc0b44a9b10ea1cd230c11d0eba43b9d285d61",
+      "contentNormalization": "utf8-lf"
+    },
+    {
       "path": "tools/ymcc_sim/global/ui-navigation/templates/build.mjs",
       "sha256": "585c8f63a6ae316d2e3ba2250ec6ba3697bd7af8a0f94189471bec7c555dc5c6",
       "contentNormalization": "utf8-lf"
@@ -16787,7 +16815,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/ui-navigation/templates/memoryIpc.ts",
-      "sha256": "953c95cc9f45baa5f4d66c8e88bfe7307bed7d1e7afd0c13ad5d764ddef829e3",
+      "sha256": "9ae69e9fcaf6dc81bb406934f108fcb95977824532ac0a462d09d0d260c8ef9d",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16877,7 +16905,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/ui-navigation/templates/verify.mjs",
-      "sha256": "007f1fca8fcfd3754aec73f9b618d023053ff503e2e5449cb4b0a773c55e2ea3",
+      "sha256": "72aff548063f1d907ca00b7b2dff8c14fdd54a2f0f405c60bd8ee6ebf50e6664",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/ui-navigation/templates/virtualStartProtectionCases.mjs",
+      "sha256": "03f163cec8f095944f71de02f06697ffc45d6b78669220d1b8df42f6ed3aab8f",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -17069,6 +17102,161 @@
       "path": "vite.config.ts",
       "sha256": "a3a0caa5443ca09713ab89ac77448dd96e91ec3b221b52d4a53f1e658c6ade1a",
       "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/fixtures/msi_owned_return_store/prepare_base.mjs",
+      "sha256": "beae64ebb40444d6335daa98b06799dbf6819c6c1caf107ebda30bc307811691",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "native/msi_owned_return_off_endpoint.h",
+      "sha256": "4be433bc6d7970dba68e430df3fd8c5f1cd68ba8e2d8eecfffb6ba9594aecd79",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-startup-return/toolchain.mjs",
+      "sha256": "5bdbbdd769f5954dbee676ffd6cf247a62a6d9910487eb544eb097febae454d2",
+      "contentNormalization": "utf8-lf"
+    },
+    {
+      "path": "tools/input_coordinator_msi_policy_source.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "0a2056ddb02db88c06a16a9f2a4bde98acc5bb2992a3dae8a202a9e03f4fefb1"
+    },
+    {
+      "path": "tools/input_coordinator_terminal26_source_profile.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "f3e659b81e8064b73df3e1258e7430f4ec19688548ae1b0c18d56ad73af7a841"
+    },
+    {
+      "path": "tools/input_coordinator_current_compile_only.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "2056200d5be3b5de18dc6ced90373c46f4b62abef4d342dbb63688f1b96ba788"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-native-prepare.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "eb05395ccb362f4fa92d7932591f2b0a6cc0f4a659f7780a771005b719e9d8f5"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-runtime-layout.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "a90b4851eeb61d65e0ee3f460c104bf11ebb57117d7a540792f45cbe6cfd8693"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/msi_policy_source_projection.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "95666f31a5467a59cf2f4b23730cf1fa7065e577e06132c42eb1f146f51b420e"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-current-managed-builder.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "0c419455b17ac08c6daa8883be81ef5371847c59f6b049bd82ba62b5c2760f35"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/msi_joint_source.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "9ea3d956575c9227fb7bdc3fbe91ce59ab25a1f2c9dacd459c8006d002ec46b5"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/msi_joint_visibility.inc",
+      "contentNormalization": "utf8-lf",
+      "sha256": "b45390d8bbc5f210086342065046b5479439079bd881ab7971dd3b494e65c5af"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/msi_joint_state_scope.inc",
+      "contentNormalization": "utf8-lf",
+      "sha256": "b2a387c8e77448dbb222a5ada99c3ddc9e3fb5d203929097c36aad85863d0fc1"
+    },
+    {
+      "path": "tools/fixtures/input_lifecycle_integration/msi_joint_visibility_fake.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "a0d4b2202dcdc30834102f754e16ea80b8fcfbc0a690dd9b5f57a5c8c19c5d61"
+    },
+    {
+      "path": "tools/fixtures/input_lifecycle_integration/MsiJointVisibilityBackend.cs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "61ab9f7af1fb7d6e77b07c6e5ac815cc575e883b845c02611561ba7e142b4511"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-qualified-observe.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "a4dd9ac92b0e99430292d488b29dea0d6ea452c42683f695195dc7a9adfbb0d4"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-observation-terminal.test.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "92ffac5c952f622f271a2984ad2e24e347dae1479d6874b59ee2817e627ffc42"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-prepare.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "648de870c89abdb1f4df34aa1800d54e4e235e1e7af9527724a7836b1997d32d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-managed-input-contract.test.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "31ae2aeef748048af7909fe13d3c148fc0919677ec1438a3a1efbdbe2cc36349"
+    },
+    {
+      "path": "tools/input_coordinator_current105_source_adapters.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "ed1ad7a201060d4cb35551e1542ac261309761ee290a899388eb5889635ade40"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-compile-source-profile-current-20261117a.json",
+      "contentNormalization": "utf8-lf",
+      "sha256": "66c18e7ebed3f4ae0bae8725daa4ee97e9ff04bde3162dc7b9bd56d57fca66fe"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-lifecycle-observe.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "d199734eb9861d20d2b74b335ef8c3fd3c74ed1e74eb88a4cc91d99ca5c86422"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-lifecycle-consumer-successor.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "94dafeae3a29bec84ab6ec47244a7a281062f80d55ca7add9b6be6470e736be6"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-current-oracle.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "166e04af7085cb627c3af2a0eec837b5a0f67d222ac895c8be764bc51c052704"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-current-negative-expectations.json",
+      "contentNormalization": "utf8-lf",
+      "sha256": "efe30084c1436c7c32bbac058b1ce4ec8da6c8c9f1074fca02247660b1a2843b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-adapter.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "2bd78b9cb46fcec797073190d2fff5ffc8ea5db2f64b7a5fd268f305e9f05179"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-inputs.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "2f2ab0e208027dad6ebd426631c7248acd96eb89165e9d9d247c644af779d5a8"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-prerequisites.json",
+      "contentNormalization": "utf8-lf",
+      "sha256": "47fb1174d24cf912361b2cb8e7aeddf396699d6d8da83e6d554133cf297aa936"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-run.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "8eee54a29780dd065678f6c6263a3ad3bd1ebdf3dcb0e197ee01bc10a3a3501a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-reference.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "00be81ccafb2ee38e6cbd3651f3f3d23c691df97f56b514c6f985cf22dee44b0"
+    },
+    {
+      "path": "tools/ymcc_sim/optimization/fixed-cpp-reference-cli.mjs",
+      "contentNormalization": "utf8-lf",
+      "sha256": "65b39e2bbfc66ab4b78411622ffdc0b0371560a7d4538f6a4e4a4f08286eaee2"
     }
   ],
   "sourceIdentityReview": {
@@ -17228,6 +17416,672 @@
         "sha256": "0a547a6ebe3d849a96559cfc6d48950974a489f4dafe6d12afb1235652548572"
       },
       "formalAcceptance": false
+    },
+    "msiNonSeamJointSource20261117": {
+      "atUtc": "2026-11-16T21:01:00.206Z",
+      "previousIndexSha256": "3ef30e4e733ad2bb8d68d0156999765d5414da23f6b3ee2f9dd6d5acacd9c71e",
+      "scope": "Original selected r5 MSI pair source/backend/OS fixture wiring only",
+      "changes": [
+        {
+          "path": "tools/input_coordinator_msi_policy_source.mjs",
+          "before": "0a2056ddb02db88c06a16a9f2a4bde98acc5bb2992a3dae8a202a9e03f4fefb1",
+          "after": "0a2056ddb02db88c06a16a9f2a4bde98acc5bb2992a3dae8a202a9e03f4fefb1",
+          "currentWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\input_coordinator_msi_policy_source.mjs",
+            "bytes": 28379,
+            "sha256": "0a2056ddb02db88c06a16a9f2a4bde98acc5bb2992a3dae8a202a9e03f4fefb1"
+          }
+        },
+        {
+          "path": "tools/input_coordinator_current_compile_only.mjs",
+          "before": "43952ec167d17eaaf17a93782a4f336ba84cf20a4bc264d693b70713ba7d0746",
+          "after": "43952ec167d17eaaf17a93782a4f336ba84cf20a4bc264d693b70713ba7d0746",
+          "currentWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\input_coordinator_current_compile_only.mjs",
+            "bytes": 96761,
+            "sha256": "d1fe0d8bfb325522febc509c7a01153d43b6fb7d092d38c6ba41adc90354b092"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-current-managed-builder.mjs",
+          "before": "0c419455b17ac08c6daa8883be81ef5371847c59f6b049bd82ba62b5c2760f35",
+          "after": "0c419455b17ac08c6daa8883be81ef5371847c59f6b049bd82ba62b5c2760f35",
+          "currentWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-current-managed-builder.mjs",
+            "bytes": 36217,
+            "sha256": "0c419455b17ac08c6daa8883be81ef5371847c59f6b049bd82ba62b5c2760f35"
+          }
+        },
+        {
+          "path": "tools/fixtures/input_coordinator_lifecycle/msi_joint_source.mjs",
+          "before": "77cbbe5f9f0d30f544818b42c12ef5764f367fbd9595629c6231ac3ce5da24a7",
+          "after": "9ea3d956575c9227fb7bdc3fbe91ce59ab25a1f2c9dacd459c8006d002ec46b5",
+          "currentWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\fixtures\\input_coordinator_lifecycle\\msi_joint_source.mjs",
+            "bytes": 47446,
+            "sha256": "9ea3d956575c9227fb7bdc3fbe91ce59ab25a1f2c9dacd459c8006d002ec46b5"
+          }
+        },
+        {
+          "path": "tools/fixtures/input_coordinator_lifecycle/msi_joint_visibility.inc",
+          "before": "b45390d8bbc5f210086342065046b5479439079bd881ab7971dd3b494e65c5af",
+          "after": "b45390d8bbc5f210086342065046b5479439079bd881ab7971dd3b494e65c5af",
+          "currentWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\fixtures\\input_coordinator_lifecycle\\msi_joint_visibility.inc",
+            "bytes": 14365,
+            "sha256": "b45390d8bbc5f210086342065046b5479439079bd881ab7971dd3b494e65c5af"
+          }
+        },
+        {
+          "path": "tools/fixtures/input_coordinator_lifecycle/msi_joint_state_scope.inc",
+          "before": "b2a387c8e77448dbb222a5ada99c3ddc9e3fb5d203929097c36aad85863d0fc1",
+          "after": "b2a387c8e77448dbb222a5ada99c3ddc9e3fb5d203929097c36aad85863d0fc1",
+          "currentWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\fixtures\\input_coordinator_lifecycle\\msi_joint_state_scope.inc",
+            "bytes": 4898,
+            "sha256": "b2a387c8e77448dbb222a5ada99c3ddc9e3fb5d203929097c36aad85863d0fc1"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-runtime-layout.mjs",
+          "before": "a76445d795d8ba810ffa0c3d96b418c6f54b4269f907aed6969ac53c227434eb",
+          "after": "c0588abcd8fa8852117fba20ecafd2a9e3b5a056d7ea72a5760889d278d800d7",
+          "currentWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-runtime-layout.mjs",
+            "bytes": 3171,
+            "sha256": "c0588abcd8fa8852117fba20ecafd2a9e3b5a056d7ea72a5760889d278d800d7"
+          }
+        },
+        {
+          "path": "tools/fixtures/input_lifecycle_integration/msi_joint_visibility_fake.mjs",
+          "before": "a0d4b2202dcdc30834102f754e16ea80b8fcfbc0a690dd9b5f57a5c8c19c5d61",
+          "after": "a0d4b2202dcdc30834102f754e16ea80b8fcfbc0a690dd9b5f57a5c8c19c5d61",
+          "currentWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\fixtures\\input_lifecycle_integration\\msi_joint_visibility_fake.mjs",
+            "bytes": 1517,
+            "sha256": "a0d4b2202dcdc30834102f754e16ea80b8fcfbc0a690dd9b5f57a5c8c19c5d61"
+          }
+        },
+        {
+          "path": "tools/fixtures/input_lifecycle_integration/MsiJointVisibilityBackend.cs",
+          "before": "61ab9f7af1fb7d6e77b07c6e5ac815cc575e883b845c02611561ba7e142b4511",
+          "after": "61ab9f7af1fb7d6e77b07c6e5ac815cc575e883b845c02611561ba7e142b4511",
+          "currentWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\fixtures\\input_lifecycle_integration\\MsiJointVisibilityBackend.cs",
+            "bytes": 18866,
+            "sha256": "61ab9f7af1fb7d6e77b07c6e5ac815cc575e883b845c02611561ba7e142b4511"
+          }
+        }
+      ],
+      "routingGroupsUnchanged": true,
+      "newDefaultIds": 0,
+      "newMinimum": 0,
+      "consumerExecutionByRegistration": "NOT_RUN",
+      "sourceReady": false,
+      "physicalAccepted": false
+    },
+    "msiParameterConsumerIntegration20261117": {
+      "atUtc": "2026-11-16T21:28:22.477Z",
+      "previousIndexSha256": "49e80ba73335fa634a215a412fb890fe489612e3ba77f9e7a89c01813be34214",
+      "changes": [
+        {
+          "path": "tools/fixtures/input_coordinator_lifecycle/msi_return_observation.mjs",
+          "before": "75cfc1fa9cc0faba90d6b58854463e14f4d6d73ebb5734867b7d94bdaa0fe6aa",
+          "after": "d60b68785dff29138d96c26ec65fc55b690909079f8abbf7018f0893e8828f08",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\fixtures\\input_coordinator_lifecycle\\msi_return_observation.mjs",
+            "bytes": 10478,
+            "sha256": "d60b68785dff29138d96c26ec65fc55b690909079f8abbf7018f0893e8828f08"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-current-run.mjs",
+          "before": "a4a53409e7f2d9f5e9595cd26d5d23dc1a1d14e3b0a8d4e2bb522c976724271f",
+          "after": "3ea6d4292828a90b106438ae56d7af78f848636eb42c71ddade11c277f4223d8",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-current-run.mjs",
+            "bytes": 23097,
+            "sha256": "c3bcb61a0558c21863240af39982eeb1e8b7482f836c2229c984a07da829950d"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-runtime-layout.mjs",
+          "before": "c0588abcd8fa8852117fba20ecafd2a9e3b5a056d7ea72a5760889d278d800d7",
+          "after": "bce9f6dcb72b28dc121e33ae5869657e6fd7e52213a16042b307cb4cbad97094",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-runtime-layout.mjs",
+            "bytes": 4534,
+            "sha256": "bce9f6dcb72b28dc121e33ae5869657e6fd7e52213a16042b307cb4cbad97094"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-native-prepare.mjs",
+          "before": "97b58002f45b1fa1c7c688ddf0e93660fe0f51b19be64246ed09d110e0c5d354",
+          "after": "f00738a722063db901ad57fc35611c108129405a2d6428618babdc7770961cc7",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal22-native-prepare.mjs",
+            "bytes": 26838,
+            "sha256": "47cc50d0a7295ce7cfe5ec7d9ffe7c39464b206e6b4fd9a950db8384474a48c3"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-qualified-observe.mjs",
+          "before": null,
+          "after": "a4dd9ac92b0e99430292d488b29dea0d6ea452c42683f695195dc7a9adfbb0d4",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal22-qualified-observe.mjs",
+            "bytes": 57457,
+            "sha256": "e04db556441df3448be8d66b1f8102bbba90b0f3f25f183758a35878c3c5620a"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-observation-terminal.test.mjs",
+          "before": null,
+          "after": "92ffac5c952f622f271a2984ad2e24e347dae1479d6874b59ee2817e627ffc42",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal22-observation-terminal.test.mjs",
+            "bytes": 56462,
+            "sha256": "46c0659b5941617b830d0778aac22025dea1b30b152ccaa6b014be752835d2aa"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/README.md",
+          "before": "9c7c25df3c16f9b98e42d10dd8fbe33880f1b33621d8ecfb0313d97454bb6d19",
+          "after": "77c606e66f47c78903f42a7f8e1ceeb53f5a3d0183009331f874fc3da4407873",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\README.md",
+            "bytes": 21004,
+            "sha256": "77c606e66f47c78903f42a7f8e1ceeb53f5a3d0183009331f874fc3da4407873"
+          }
+        }
+      ],
+      "routingGroupsUnchanged": true,
+      "newDefaultIds": 0,
+      "newMinimum": 0,
+      "newOriginalBusinessRuns": 0,
+      "scope": "Explicit scoped MSI parameter semantics, exact joint fixture inverse, old/new finite layout reader and directed controls",
+      "fullNativeModeOrParentAccepted": false,
+      "currentPrimaryAccepted": false
+    },
+    "currentCaptureNativeSourceProfile20261117": {
+      "atUtc": "2026-11-16T22:07:51.930Z",
+      "previousIndexSha256": "e9588e045bc8b0318e80aa78dc53cf31b339fa6bad35e67bbe77eb0637b710fb",
+      "evidence": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\SOURCE-PREFLIGHT-EXECUTION-RESULT-r2.json",
+        "bytes": 305344,
+        "sha256": "9078c4749293a870ed2072d06274d4ccc713f6482f879d0e863294568720083f"
+      },
+      "prior24Controls": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\SOURCE-PREFLIGHT-EXECUTION-RESULT-r1.json",
+        "bytes": 305330,
+        "sha256": "3b06ee27c646be60a0fb0a2433d950bb7594f4695f08fcbd256de575ca540db8"
+      },
+      "changes": [
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-prepare.mjs",
+          "before": null,
+          "after": "648de870c89abdb1f4df34aa1800d54e4e235e1e7af9527724a7836b1997d32d",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal22-prepare.mjs",
+            "bytes": 10304,
+            "sha256": "648de870c89abdb1f4df34aa1800d54e4e235e1e7af9527724a7836b1997d32d"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-managed-input-contract.test.mjs",
+          "before": null,
+          "after": "31ae2aeef748048af7909fe13d3c148fc0919677ec1438a3a1efbdbe2cc36349",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-managed-input-contract.test.mjs",
+            "bytes": 18034,
+            "sha256": "31ae2aeef748048af7909fe13d3c148fc0919677ec1438a3a1efbdbe2cc36349"
+          }
+        },
+        {
+          "path": "tools/input_coordinator_current_compile_only.mjs",
+          "before": "43952ec167d17eaaf17a93782a4f336ba84cf20a4bc264d693b70713ba7d0746",
+          "after": "d17dc38299d2b7b19c39f1e4586db99ab42ef44296b45de496dcf499da247e03",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\input_coordinator_current_compile_only.mjs",
+            "bytes": 98721,
+            "sha256": "28ab15096480efd1a3328b3fd78a9a970c44ec5a78395105e3bca0b0f4c1e805"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-native-prepare.mjs",
+          "before": "f00738a722063db901ad57fc35611c108129405a2d6428618babdc7770961cc7",
+          "after": "8d18c9e40eaee124205ccaff8b93f2624f9ce3fad42b538618e28396d044893c",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal22-native-prepare.mjs",
+            "bytes": 27739,
+            "sha256": "26bd627b19404e438bc969b4b8a364e6a3e175f747e634b1363218e0037a2c6d"
+          }
+        },
+        {
+          "path": "tools/input_coordinator_terminal26_source_profile.mjs",
+          "before": "5124f93694f0487933f5f78c1e15c0051f1a895d4239d45658b7f70585595865",
+          "after": "f3e659b81e8064b73df3e1258e7430f4ec19688548ae1b0c18d56ad73af7a841",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\input_coordinator_terminal26_source_profile.mjs",
+            "bytes": 23162,
+            "sha256": "f3e659b81e8064b73df3e1258e7430f4ec19688548ae1b0c18d56ad73af7a841"
+          }
+        },
+        {
+          "path": "tools/input_coordinator_current105_source_adapters.mjs",
+          "before": null,
+          "after": "ed1ad7a201060d4cb35551e1542ac261309761ee290a899388eb5889635ade40",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\input_coordinator_current105_source_adapters.mjs",
+            "bytes": 28670,
+            "sha256": "ed1ad7a201060d4cb35551e1542ac261309761ee290a899388eb5889635ade40"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-compile-source-profile-current-20261117a.json",
+          "before": null,
+          "after": "66c18e7ebed3f4ae0bae8725daa4ee97e9ff04bde3162dc7b9bd56d57fca66fe",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-compile-source-profile-current-20261117a.json",
+            "bytes": 16442,
+            "sha256": "66c18e7ebed3f4ae0bae8725daa4ee97e9ff04bde3162dc7b9bd56d57fca66fe"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/README.md",
+          "before": "77c606e66f47c78903f42a7f8e1ceeb53f5a3d0183009331f874fc3da4407873",
+          "after": "e57df5381988a6d5a76f502a1fe82682b7456191a337178cf3ec6906196f15d9",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\README.md",
+            "bytes": 22006,
+            "sha256": "e57df5381988a6d5a76f502a1fe82682b7456191a337178cf3ec6906196f15d9"
+          }
+        }
+      ],
+      "routingGroupsUnchanged": true,
+      "newDefaultIds": 0,
+      "newMinimum": 0,
+      "newOriginalBusinessRuns": 0,
+      "scope": "Explicit capture-only preparation and exact reviewed current-source native profile/three guarded entries/incorporated fixture identity. No compiler/runtime/Full authority.",
+      "currentPrimaryAccepted": false,
+      "touchpadPortAndActualPipeFollowup": {
+        "atUtc": "2026-11-16T22:39:03.671Z",
+        "previousIndex": {
+          "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\extra-adapter-index.json",
+          "bytes": 697392,
+          "sha256": "4fbf347cf397f88aa7c05aceb34b3e1c419980915ebf730b71cd8b114cb300ce"
+        },
+        "changes": [
+          {
+            "path": "tools/input_coordinator_current_compile_only.mjs",
+            "before": "d17dc38299d2b7b19c39f1e4586db99ab42ef44296b45de496dcf499da247e03",
+            "after": "ec8e8965a19c74ad7e91f928349165b92687cba77de04826552b3432f430bcbc",
+            "actualWholeBytes": {
+              "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\input_coordinator_current_compile_only.mjs",
+              "bytes": 100613,
+              "sha256": "39196da957db28673548d400c5032899653e2680625eeae2fc7f0257f62cfa3d"
+            }
+          }
+        ],
+        "sourceReview": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\TOUCHPAD-PORT-SOURCE-REVIEW-r1.json",
+          "bytes": 1293,
+          "sha256": "bb977b0306709f14f2f0df04b15c50408c8c67d828b83cdcf59bff1bd509d9fd"
+        },
+        "native": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\NATIVE-CURRENT-EXECUTION-RESULT-r3.json",
+          "bytes": 383927,
+          "sha256": "d2f72432ad58487c6259c6cf707b5295885f5a4300cee0bfebbbe1da6c0a404c"
+        },
+        "positivePipe": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\CURRENT-PIPE-EXECUTION-RESULT-r1.json",
+          "bytes": 340280,
+          "sha256": "cbd14e83e71d0ac164f12c2fa834c008661f2c3fb86103c587bff9505d8f0c62"
+        },
+        "sdkReview": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\sdk-input-review\\INDEPENDENT-SDK-INPUT-REVIEW-r1.json",
+          "bytes": 4533,
+          "sha256": "6d5dff56bf191a625de77d0cb221bd9d3a82158c3fb8e5288d190b670362e5da"
+        },
+        "scope": "Controller fixture fail-closed touchpad input leaf; exact full current positive recipe compiled with complete SDK preimages and original118/7274 pipe runtime. Original negative roles/lifecycle16/whole current profile remain open.",
+        "newDefaultIds": 0,
+        "newMinimum": 0,
+        "currentPrimaryAccepted": false
+      }
+    },
+    "currentCaptureLifecycleConsumer20261117": {
+      "atUtc": "2026-11-17T00:22:41.780Z",
+      "previousIndex": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\extra-adapter-index.json",
+        "bytes": 700459,
+        "sha256": "9888f0d6e5a78769e4fcedd8a0e694a1cdf2cbbda8829dba117cfdaa8d16464f"
+      },
+      "changes": [
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-qualified-observe.mjs",
+          "before": "a4dd9ac92b0e99430292d488b29dea0d6ea452c42683f695195dc7a9adfbb0d4",
+          "after": "a4dd9ac92b0e99430292d488b29dea0d6ea452c42683f695195dc7a9adfbb0d4",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal22-qualified-observe.mjs",
+            "bytes": 57457,
+            "sha256": "e04db556441df3448be8d66b1f8102bbba90b0f3f25f183758a35878c3c5620a"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-lifecycle-observe.mjs",
+          "before": null,
+          "after": "d199734eb9861d20d2b74b335ef8c3fd3c74ed1e74eb88a4cc91d99ca5c86422",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-lifecycle-observe.mjs",
+            "bytes": 25710,
+            "sha256": "d199734eb9861d20d2b74b335ef8c3fd3c74ed1e74eb88a4cc91d99ca5c86422"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-lifecycle-consumer-successor.mjs",
+          "before": null,
+          "after": "94dafeae3a29bec84ab6ec47244a7a281062f80d55ca7add9b6be6470e736be6",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-lifecycle-consumer-successor.mjs",
+            "bytes": 63109,
+            "sha256": "94dafeae3a29bec84ab6ec47244a7a281062f80d55ca7add9b6be6470e736be6"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/README.md",
+          "before": "e57df5381988a6d5a76f502a1fe82682b7456191a337178cf3ec6906196f15d9",
+          "after": "e536bf00e02bae02e17b95d16a2686e346cc63d7fdb4d58d9e1b491ff87c0aad",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\README.md",
+            "bytes": 23983,
+            "sha256": "e536bf00e02bae02e17b95d16a2686e346cc63d7fdb4d58d9e1b491ff87c0aad"
+          }
+        }
+      ],
+      "controls": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\LIFECYCLE-CONSUMER-CONTROLS-r5.json",
+        "bytes": 5171,
+        "sha256": "794dd5f417b6806f6e971261275417286cced620f8b8b5106b2eaf1dbcc96b57"
+      },
+      "tupleConsumer": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\CURRENT-TUPLE-POST-CONSUMER-r5.json",
+        "bytes": 12715,
+        "sha256": "85a69391e8c7eabce5d08b91f9784435db2fea6ac89ce41c084db2d053b540b8"
+      },
+      "originalFailureIntake": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\FOLLOWUP-INTAKE-r2.json",
+        "bytes": 21141,
+        "sha256": "010b4e45ed6cd16be5c80a6d6f2218f05bd0ae0f3ba96cb6d4e292ccc44f23a7"
+      },
+      "originalUnreached7": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\UNREACHED7-EXECUTION-RESULT-r4.json",
+        "bytes": 1858934,
+        "sha256": "050b59af389c8eb557dc084682fc8dd2ebc1d295dcfcd0e89e6b1b624731daae"
+      },
+      "scope": "Explicit fixed-capture post-compile lifecycle reader and exact tuple source binding only. Public pipe observer retains original bytes. No default ID/minimum, new release gate or full-parent success.",
+      "groupsUnchanged": true,
+      "currentPrimaryAccepted": false,
+      "ordinaryExport": "NOT_RUN"
+    },
+    "ownedCurrent26Runtime20261117": {
+      "atUtc": "2026-11-17T02:45:11.314Z",
+      "previousIndex": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\extra-adapter-index.json",
+        "bytes": 705794,
+        "sha256": "367e5206b40f0ceeabddee9b287bf81b23bb64075bab7b2a4bd332d88f3e58e1"
+      },
+      "changes": [
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-runtime-layout.mjs",
+          "before": "bce9f6dcb72b28dc121e33ae5869657e6fd7e52213a16042b307cb4cbad97094",
+          "after": "a90b4851eeb61d65e0ee3f460c104bf11ebb57117d7a540792f45cbe6cfd8693",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-runtime-layout.mjs",
+            "bytes": 5804,
+            "sha256": "a90b4851eeb61d65e0ee3f460c104bf11ebb57117d7a540792f45cbe6cfd8693"
+          }
+        },
+        {
+          "path": "tools/fixtures/input_coordinator_lifecycle/settings_mutex_isolation.mjs",
+          "before": "f1a74b6c8c99cf1cf1904b98049f97581b8212f0c3c08f3311de315ee38b2016",
+          "after": "148d5da84232ba91a9e0761123e781561278a3634f803e347eb097061fe039be",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\fixtures\\input_coordinator_lifecycle\\settings_mutex_isolation.mjs",
+            "bytes": 11064,
+            "sha256": "9bea8fd2489553275aa5264962ccefff984f51cd6b840ac99ab82a5fdcb948f9"
+          }
+        },
+        {
+          "path": "tools/input_coordinator_current_compile_only.mjs",
+          "before": "ec8e8965a19c74ad7e91f928349165b92687cba77de04826552b3432f430bcbc",
+          "after": "2056200d5be3b5de18dc6ced90373c46f4b62abef4d342dbb63688f1b96ba788",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\input_coordinator_current_compile_only.mjs",
+            "bytes": 101625,
+            "sha256": "f8cfba13d04150d521ffdac305b39e29d67575c687ddaffd91b906f618df3284"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-native-prepare.mjs",
+          "before": "8d18c9e40eaee124205ccaff8b93f2624f9ce3fad42b538618e28396d044893c",
+          "after": "eb05395ccb362f4fa92d7932591f2b0a6cc0f4a659f7780a771005b719e9d8f5",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal22-native-prepare.mjs",
+            "bytes": 28198,
+            "sha256": "686de1eebd2ee6db9ee9c81812f3e5028b9f4c69ee0f0ec78d254ee1f41c5ed1"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-current-oracle.mjs",
+          "before": null,
+          "after": "166e04af7085cb627c3af2a0eec837b5a0f67d222ac895c8be764bc51c052704",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-current-oracle.mjs",
+            "bytes": 7432,
+            "sha256": "166e04af7085cb627c3af2a0eec837b5a0f67d222ac895c8be764bc51c052704"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-current-negative-expectations.json",
+          "before": null,
+          "after": "efe30084c1436c7c32bbac058b1ce4ec8da6c8c9f1074fca02247660b1a2843b",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-current-negative-expectations.json",
+            "bytes": 35312,
+            "sha256": "efe30084c1436c7c32bbac058b1ce4ec8da6c8c9f1074fca02247660b1a2843b"
+          }
+        }
+      ],
+      "intake": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\OWNED-RUNTIME-INTAKE-r14.json",
+        "bytes": 40360,
+        "sha256": "871ec2995de507f7310ce11c7af6241d044e9a0e7e79bf006e9bfbc4cce2b3df"
+      },
+      "sourceControls": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\owned-public-runtime-default-review-r7\\STATIC-CONTROLS-r9.json",
+        "bytes": 20236,
+        "sha256": "bae23b946f5ffde71bef8f39a0e2249fe6355ee39c241380ef27c1c5016f476b"
+      },
+      "isolationReview": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\owned-public-runtime-review-r7\\SOURCE-REVIEW-r9.json",
+        "bytes": 23123,
+        "sha256": "acee7ddde18a657cbbf46df8ce72bde61cadc003ead8483bbaff969a2cc92412"
+      },
+      "pipeOracleControls": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\CURRENT-PIPE-ORACLE-CONTROLS-r6.json",
+        "bytes": 124542,
+        "sha256": "c6336714ed64268c04fe435e3c1c6e5b2586730d5d9117e0977aacc8d40279d5"
+      },
+      "scope": "Exact fixed-capture current26 reusable owner directory and source-derived pipe oracle. Four actual role results span one incomplete parent plus explicit continuation. Source-only C++/used fixture closure does not prove historical whole JS generator closure or public source/runtime admission.",
+      "groupsUnchanged": true,
+      "newDefaultIds": 0,
+      "newMinimum": 0,
+      "currentPrimaryAccepted": false,
+      "publicRuntimeAccepted": false,
+      "ordinaryExport": "NOT_RUN"
+    },
+    "fixedCppPublicEntry20261117": {
+      "atUtc": "2026-11-17T03:30:39.228Z",
+      "previousIndex": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\extra-adapter-index.json",
+        "bytes": 712536,
+        "sha256": "cc137e16550086fda63f13ea3863eeed0094d5b268cec96cfbeff3d86493850c"
+      },
+      "changes": [
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/adapter.mjs",
+          "before": "183f4451280889f8e4795b4b2a633d3aec55b9c437ad7644a2be38a42a768f11",
+          "after": "e3418391ac4a7506fd72e805e19d5d1061695eccfc918722bd28150f5c135b09",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\adapter.mjs",
+            "bytes": 9708,
+            "sha256": "e3418391ac4a7506fd72e805e19d5d1061695eccfc918722bd28150f5c135b09"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-adapter.mjs",
+          "before": null,
+          "after": "2bd78b9cb46fcec797073190d2fff5ffc8ea5db2f64b7a5fd268f305e9f05179",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-artifact-adapter.mjs",
+            "bytes": 4727,
+            "sha256": "2bd78b9cb46fcec797073190d2fff5ffc8ea5db2f64b7a5fd268f305e9f05179"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-inputs.mjs",
+          "before": null,
+          "after": "2f2ab0e208027dad6ebd426631c7248acd96eb89165e9d9d247c644af779d5a8",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-artifact-inputs.mjs",
+            "bytes": 37961,
+            "sha256": "2f2ab0e208027dad6ebd426631c7248acd96eb89165e9d9d247c644af779d5a8"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-prerequisites.json",
+          "before": null,
+          "after": "47fb1174d24cf912361b2cb8e7aeddf396699d6d8da83e6d554133cf297aa936",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-artifact-prerequisites.json",
+            "bytes": 5697,
+            "sha256": "47fb1174d24cf912361b2cb8e7aeddf396699d6d8da83e6d554133cf297aa936"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-run.mjs",
+          "before": null,
+          "after": "8eee54a29780dd065678f6c6263a3ad3bd1ebdf3dcb0e197ee01bc10a3a3501a",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-artifact-run.mjs",
+            "bytes": 18506,
+            "sha256": "8eee54a29780dd065678f6c6263a3ad3bd1ebdf3dcb0e197ee01bc10a3a3501a"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/README.md",
+          "before": "e536bf00e02bae02e17b95d16a2686e346cc63d7fdb4d58d9e1b491ff87c0aad",
+          "after": "190ac103675a61db6a8fc54626bdf995b37ff373f2592b2a7ec51d487fd23ac3",
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\README.md",
+            "bytes": 26631,
+            "sha256": "190ac103675a61db6a8fc54626bdf995b37ff373f2592b2a7ec51d487fd23ac3"
+          }
+        }
+      ],
+      "intake": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\public-artifact-r17\\PUBLIC-ENTRY-INTAKE-r20.json",
+        "bytes": 12694,
+        "sha256": "a3d5b43670809cec1169bd32b81477963339c3d45007e666245657356555dd76"
+      },
+      "sourceReaderControls": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\public-artifact-r17\\source-reader\\CONTROLS-FINAL.json",
+        "bytes": 16762,
+        "sha256": "94f9b17dd92c60b4c3eada56017749c1d8da83e20d3948e4a34108d06c102a34"
+      },
+      "independentReaderReview": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\public-artifact-r17\\capacity\\INPUT-READER-REVIEW-r19.json",
+        "bytes": 16070,
+        "sha256": "599bffce5be864ab35781c4a86a1895a22778928a34010df660e4f969d9ff9e4"
+      },
+      "independentExecutorReview": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\public-artifact-r17\\capacity\\SOURCE-REVIEW-r18.json",
+        "bytes": 4916,
+        "sha256": "b4903eed9f1a9570b11c9bd058f104583f52a43a4562efb0da99792c16c7f80f"
+      },
+      "scope": "Original four pipe IDs can explicitly execute fixed captured C++/used-fixture software artifacts. Real project entry selected positive and cancellation only; no historical whole-JS/cache/current-live/Full/hardware approval.",
+      "groupsUnchanged": true,
+      "globalRunnerUnchanged": true,
+      "oldDDeclarationUnchanged": true,
+      "newDefaultIds": 0,
+      "newMinimum": 0,
+      "cacheAcceptance": false,
+      "ordinaryExport": "NOT_RUN"
+    },
+    "fixedCppExplicitReferences20261117": {
+      "atUtc": "2026-11-17T04:02:58.493Z",
+      "scope": "EXPLICIT_FIXED_CPP_ORIGINAL_EVIDENCE_REFERENCE_ONLY",
+      "previousIndex": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\BacklogAssist-20261102\\Runtime105CurrentMembership-20261114\\native26-routing\\lifecycle-runtime-layout\\real-store-original-consumer-20261116\\r4-intake-20261117\\current-primary\\shared-role-batch\\public-artifact-r17\\runtime-reference-r22\\registration-before-r22.json",
+        "bytes": 719629,
+        "sha256": "7fa420d54f3da4bc877843a72f942ca79fb4ef61c373ab81050599871ceea2be"
+      },
+      "changes": [
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-reference.mjs",
+          "before": null,
+          "after": {
+            "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-reference.mjs",
+            "contentNormalization": "utf8-lf",
+            "sha256": "00be81ccafb2ee38e6cbd3651f3f3d23c691df97f56b514c6f985cf22dee44b0"
+          },
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\r3-terminal26-artifact-reference.mjs",
+            "bytes": 23633,
+            "sha256": "00be81ccafb2ee38e6cbd3651f3f3d23c691df97f56b514c6f985cf22dee44b0"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/optimization/fixed-cpp-reference-cli.mjs",
+          "before": null,
+          "after": {
+            "path": "tools/ymcc_sim/optimization/fixed-cpp-reference-cli.mjs",
+            "contentNormalization": "utf8-lf",
+            "sha256": "65b39e2bbfc66ab4b78411622ffdc0b0371560a7d4538f6a4e4a4f08286eaee2"
+          },
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\optimization\\fixed-cpp-reference-cli.mjs",
+            "bytes": 8160,
+            "sha256": "65b39e2bbfc66ab4b78411622ffdc0b0371560a7d4538f6a4e4a4f08286eaee2"
+          }
+        },
+        {
+          "path": "tools/ymcc_sim/global/controller-coordinator-pipe/README.md",
+          "before": {
+            "path": "tools/ymcc_sim/global/controller-coordinator-pipe/README.md",
+            "sha256": "190ac103675a61db6a8fc54626bdf995b37ff373f2592b2a7ec51d487fd23ac3",
+            "contentNormalization": "utf8-lf"
+          },
+          "after": {
+            "path": "tools/ymcc_sim/global/controller-coordinator-pipe/README.md",
+            "sha256": "c6c5dd3dab8f48c67037e0ee3b55bb317b898a91cb0f2aafc96d9c5e8879a675",
+            "contentNormalization": "utf8-lf"
+          },
+          "actualWholeBytes": {
+            "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\controller-coordinator-pipe\\README.md",
+            "bytes": 28634,
+            "sha256": "c6c5dd3dab8f48c67037e0ee3b55bb317b898a91cb0f2aafc96d9c5e8879a675"
+          }
+        }
+      ],
+      "newDefaultIds": 0,
+      "newMinimum": 0,
+      "groupsUnchanged": true,
+      "ordinaryExport": "NOT_RUN",
+      "genericCacheQualified": false,
+      "historicalWholeJavaScriptClosureComplete": false,
+      "currentPrimaryAccepted": false,
+      "executionInThisRegistryUpdate": 0
     }
   }
 }

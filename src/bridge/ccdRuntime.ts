@@ -1,5 +1,6 @@
 // Performance entry for the existing native CCD lease. No boot preset or settings writes.
 import { computed, reactive } from 'vue';
+import { reportFrontendTrace } from '@/robust/frontendDiagnostics';
 import { probeCcd, setCcdMode, type CcdProbe, type CcdSetReceipt } from './cpuctl';
 
 export const ccdState = reactive({
@@ -18,6 +19,24 @@ export const ccdOptions = computed(() => [
     value: d.index, label: `CCD · ${d.index}`, sub: `${d.logical} 个逻辑处理器`,
   })),
 ]);
+// Only state changes produced by the existing page read are reported.
+// No timer, new topology read, device write or saved-setting change.
+let lastVisibility = '';
+export function recordCcdVisibility(context: {scope:string;hybrid:boolean;visible:boolean}): void {
+  const c = ccdState.capability;
+  if (!c) return;
+  const reason = context.visible ? 'visible' : context.hybrid ? 'page_hybrid' :
+    context.scope === 'dedicated' ? 'dedicated_scope' :
+    c.performanceReason || c.reason || (!c.supported || !c.available ? 'native_unavailable' : 'performance_unconfirmed');
+  const trace = {schema:1,scope:context.scope,hybrid:context.hybrid,visible:context.visible,reason,
+    readerRevision:c.readerRevision || '',multiCcdSource:c.multiCcdSource || '',
+    supported:c.supported,available:c.available,performanceSupported:c.performanceSupported,
+    logical:c.logical,l3Domains:c.l3Domains,masks:c.ccdMasks};
+  const message = JSON.stringify(trace);
+  if (lastVisibility === message) return;
+  lastVisibility = message;
+  reportFrontendTrace('cpu-ccd-visibility',trace);
+}
 let probe: Promise<void> | null = null;
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 function notify(text: string) {

@@ -1,0 +1,168 @@
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <future>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+#include "settings_baseline.h"
+#include "controller_persona_settings.h"
+#include "input_startup_policy.h"
+#include "boot_mode_shortcuts.h"
+#include "boot_mode_preferences.h"
+using json=nlohmann::json;
+static void need(bool v,const std::string& why){if(!v)throw std::runtime_error(why);}
+struct ObservedEntryLock {std::unique_lock<std::mutex> lock;explicit ObservedEntryLock(std::mutex& mx):lock(mx){}};
+static void fixtureChild(HANDLE,const char*,bool=false);
+static void fixtureWakeContention();
+struct ObservedWakeLock {
+ std::unique_lock<std::mutex> lock;
+ explicit ObservedWakeLock(std::mutex& mutex):lock(mutex,std::defer_lock){if(!lock.try_lock()){fixtureWakeContention();lock.lock();}}
+};
+static void fixtureBeforeWait(uint64_t,DWORD);
+static void fixtureAfterWait(uint64_t,DWORD);
+static BOOL fixtureSettingsSignal(HANDLE);
+#include "steam_cssloader_use.h"
+using namespace ymcc;
+// ORIGINAL_LIFETIME_NEGATIVE
+namespace fspath=std::filesystem;
+static std::wstring YM_SETTINGS_FILE,YM_SETTINGS_BACKUP_FILE;
+static std::timed_mutex g_settingsFileMtx;
+static std::string W2U(const std::wstring& v){return fspath::path(v).string();}
+static steamcssuse::Runtime g_steamCssUse(false,35821,[]{return steamcsseditor::State::Absent;});
+static std::wstring fixtureSettingsMutexName(){return L"Local\\YMCC.CssOwner.SettingsFixture."+std::to_wstring(GetCurrentProcessId());}
+// ORIGINAL_SERIAL_FENCE
+// ORIGINAL_FILE_IO
+// ORIGINAL_SETTINGS_GUARD
+struct InputHostTargetWriteGuard {bool admit(const json&,const json&){return true;}void commit(){}};
+// ORIGINAL_SETTINGS_WRITERS
+// ORIGINAL_OWNER
+static struct {bool isolated=false;} g_aiFanMockSession;
+static std::atomic<bool> g_exitRequested{false};
+static struct {steamsession::Session value;steamsession::Session sessionSnapshot(){return value;}} g_steamSettingsObserver;
+static std::map<std::string,std::function<json(const json&)>> handlers;
+static void ipc_on(const std::string& n,std::function<json(const json&)> cb){handlers[n]=std::move(cb);}
+// ORIGINAL_REGISTRATIONS
+struct Fence {
+ uint64_t generation;HANDLE entered=CreateEventW(nullptr,TRUE,FALSE,nullptr),release=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+ explicit Fence(uint64_t g):generation(g){need(entered&&release,"Worker fence creation failed");}
+ ~Fence(){CloseHandle(entered);CloseHandle(release);}
+ void wait(){need(WaitForSingleObject(entered,1000)==WAIT_OBJECT_0,"Actual worker wait boundary not reached");}
+ void resume(){SetEvent(release);}
+};
+static std::mutex fenceMx,observationMx;
+static std::shared_ptr<Fence> pendingFence;
+static json waits=json::array(),signals=json::array();
+static std::atomic<bool> pauseNotification{false};
+static HANDLE signalEntered=nullptr,signalRelease=nullptr,wakeContended=nullptr;
+static void fixtureWakeContention(){if(pauseNotification&&wakeContended)SetEvent(wakeContended);}
+static std::shared_ptr<Fence> arm(uint64_t generation){auto f=std::make_shared<Fence>(generation);std::lock_guard lock(fenceMx);need(!pendingFence,"Overlapping worker fence");pendingFence=f;return f;}
+static void fixtureBeforeWait(uint64_t g,DWORD timeout){
+ std::shared_ptr<Fence> f;{std::lock_guard lock(fenceMx);if(pendingFence&&pendingFence->generation==g){f=std::move(pendingFence);}}
+ if(f){SetEvent(f->entered);WaitForSingleObject(f->release,2000);}
+ {std::lock_guard lock(observationMx);waits.push_back({{"generation",g},{"timeout",timeout},{"boundary","before-real-wait"}});}
+}
+static void fixtureAfterWait(uint64_t g,DWORD result){std::lock_guard lock(observationMx);waits.push_back({{"generation",g},{"result",result},{"boundary","after-real-wait"}});}
+static BOOL fixtureSettingsSignal(HANDLE event){
+ bool local=false,named=false;std::thread witness([&]{local=g_settingsFileMtx.try_lock();HANDLE mutex=CreateMutexW(nullptr,FALSE,fixtureSettingsMutexName().c_str());if(mutex){const auto r=WaitForSingleObject(mutex,0);named=r==WAIT_OBJECT_0||r==WAIT_ABANDONED;if(named)ReleaseMutex(mutex);CloseHandle(mutex);}if(local)g_settingsFileMtx.unlock();});witness.join();
+ if(pauseNotification){SetEvent(signalEntered);WaitForSingleObject(signalRelease,2000);}
+ const auto signaled=SetEvent(event);const auto error=signaled?0:GetLastError();std::lock_guard lock(observationMx);signals.push_back({{"localLockReleased",local},{"namedLockReleased",named},{"signaled",signaled!=FALSE},{"error",error}});return signaled;
+}
+struct Child {HANDLE h=nullptr;DWORD pid=0;ULONGLONG birth=0;~Child(){if(h)CloseHandle(h);}};
+static std::vector<std::unique_ptr<Child>> children;
+static void fixtureChild(HANDLE h,const char* stage,bool){if(std::string(stage)!="resumed")return;auto c=std::make_unique<Child>();need(DuplicateHandle(GetCurrentProcess(),h,GetCurrentProcess(),&c->h,SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,0),"Child observation unavailable");c->pid=GetProcessId(h);FILETIME b{},e{},k{},u{};need(GetProcessTimes(h,&b,&e,&k,&u)!=FALSE,"Child birth unavailable");c->birth=(ULONGLONG(b.dwHighDateTime)<<32)|b.dwLowDateTime;children.push_back(std::move(c));}
+static json childRows(bool stopped){json rows=json::array();for(const auto& c:children){const bool signaled=WaitForSingleObject(c->h,stopped?1000:0)==WAIT_OBJECT_0;rows.push_back({{"pid",c->pid},{"birth",std::to_string(c->birth)},{"signaled",signaled}});if(stopped)need(signaled,"Owned helper survived stale lease");}return rows;}
+static HANDLE releasedEvent=nullptr;
+static bool live(HANDLE h){return h&&WaitForSingleObject(h,0)==WAIT_TIMEOUT;}
+struct OwnedProcess {HANDLE h=nullptr;~OwnedProcess(){if(h){TerminateProcess(h,0);WaitForSingleObject(h,2000);CloseHandle(h);}}};
+static std::wstring self(){wchar_t b[32768]{};GetModuleFileNameW(nullptr,b,32768);return b;}
+static HANDLE launchOwned(const std::wstring& exe){auto command=L"\""+exe+L"\" --owned-idle";STARTUPINFOW si{sizeof(si)};PROCESS_INFORMATION p{};need(CreateProcessW(exe.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&p)!=FALSE,"Owned inert launch failed");CloseHandle(p.hThread);return p.hProcess;}
+static json readDocument(){SettingsFileGuard guard;return json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE));}
+static size_t signalCount(){std::lock_guard lock(observationMx);return signals.size();}
+static uint64_t currentToken(){std::lock_guard lock(g_steamCssUse.mutex_);return g_steamCssUse.token_;}
+static void setup(const json& defaults,const json& mode){
+ need(!currentToken(),"Prior lease still active");children.clear();ResetEvent(releasedEvent);auto doc=defaults;doc["input"]=mode["expectedBootContext"]["input"];doc["extensions"]=mode["expectedBootContext"]["extensions"];
+ SettingsFileGuard guard;need(sgWriteFileAtomic(YM_SETTINGS_FILE,doc.dump())&&sgWriteFileAtomic(YM_SETTINGS_BACKUP_FILE,doc.dump()),"Isolated setup write failed");
+}
+static uint64_t fixtureBegin(const json& mode,bool scoped=true){auto request=scoped?mode["beginRequest"]:json::object();return std::stoull(handlers.at("steamAppearance.beginUse")(request).at("token").get<std::string>());}
+static void ensure(uint64_t token,const json& mode,bool scoped=true){auto request=scoped?mode["ensureRequest"]:json::object();request["token"]=std::to_string(token);need(handlers.at("steamAppearance.ensureUse")(request).value("ok",false),"Actual ensure failed");}
+static std::shared_ptr<Fence> park(uint64_t token){auto f=arm(token);SetEvent(g_steamCssUse.wake_);f->wait();ResetEvent(g_steamCssUse.wake_);return f;}
+static bool commit(const std::string& writer,const json& before,json next){
+ next["input"]["revision"]=before["input"]["revision"].get<int>()+1;
+ if(writer=="document")return ymSettingsWriteDocument(next.dump(),nullptr,&before);
+ if(writer=="section")return ymSettingsWriteSection("input",next["input"]);
+ if(writer=="section-prepare")return ymSettingsWriteSection("ui",before["ui"],std::function<bool(json&,json&)>{[&](json&,json& all){all["input"]=next["input"];return true;}});
+ if(writer=="patch")return ymSettingsPatchSection("input",{{"revision",next["input"]["revision"]}});
+ if(writer=="input-cas")return ymSettingsSetInputBooleanCas("msiShieldEnabled",true);
+ if(writer=="bounded-recovery"){need(sgWriteFileAtomic(YM_SETTINGS_FILE,std::string(4*1024*1024+1,'!')),"Oversize setup failed");return ymSettingsWriteDocument(next.dump(),nullptr,&before);}
+ throw std::runtime_error("Unknown writer");
+}
+static bool stopped(){if(WaitForSingleObject(releasedEvent,1000)!=WAIT_OBJECT_0)return false;std::lock_guard lock(g_steamCssUse.mutex_);return !g_steamCssUse.token_&&!g_steamCssUse.helper_&&!g_steamCssUse.ensure_;}
+static void retire(){ResetEvent(releasedEvent);const auto before=readDocument();auto next=before;need(commit("document",before,next),"Fixture cleanup commit failed");need(stopped(),"Fixture cleanup did not retire request");childRows(true);}
+int main(int argc,char** argv){
+ json rows=json::array(),controls=json::array();std::ofstream raw;
+ try{
+  if(argc>1&&std::string(argv[1])=="--owned-idle"){Sleep(INFINITE);return 0;}
+  need(argc==6,"defaults, wire, root, boundary, raw required");json defaults,wire;std::ifstream(argv[1])>>defaults;std::ifstream(argv[2])>>wire;const auto root=fspath::absolute(argv[3]);const std::string boundary=argv[4];fspath::create_directories(root/L"steam-appearance");raw.open(argv[5],std::ios::app);YM_SETTINGS_FILE=(root/L"yeman-settings.json").wstring();YM_SETTINGS_BACKUP_FILE=YM_SETTINGS_FILE+L".bak";
+  const auto steamImage=root/L"steam.exe",backend=root/L"CssLoader-Standalone-Headless.exe",entry=root/L"steam-appearance.ps1",link=root/L"backend.path";fspath::copy_file(self(),steamImage);fspath::copy_file(self(),backend);std::ofstream(entry)<<"# SharedProcessQueryProtocol=1 ResidentBackendPolicy=3 AutomaticResultProtocol=2 ManualObservationProtocol=1\nStart-Sleep -Seconds 10\n";std::ofstream(root/L"steam-appearance/resident.ps1")<<"# AppearanceProcessQueryProtocol=2 function Start-ResidentAppearanceBackend\n";std::ofstream(root/L"steam-appearance/idle.ps1")<<"# AppearanceRenderProtocol=4 function Get-AppearanceVariableDefaults\n";std::ofstream(link)<<backend.string();
+  OwnedProcess steam,css;steam.h=launchOwned(steamImage.wstring());css.h=launchOwned(backend.wstring());FILETIME b{},e{},k{},u{};need(GetProcessTimes(steam.h,&b,&e,&k,&u)!=FALSE,"Steam birth unavailable");g_steamSettingsObserver.value={root.wstring(),GetProcessId(steam.h),123,(ULONGLONG(b.dwHighDateTime)<<32)|b.dwLowDateTime};releasedEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);need(releasedEvent!=nullptr,"Release observation unavailable");
+  need(g_steamCssUse.initialize(entry.wstring(),link.wstring(),180000,4000,[](const std::string& stage,const auto&,const auto&,const auto&){if(stage=="resident-backend-retained")SetEvent(releasedEvent);},0,[]{return true;},[]{return ULONGLONG(4);}),"Runtime initialize failed");g_steamCssUse.observeSteam(g_steamSettingsObserver.value);registerCssNativeOwner();
+  const auto record=[&](json row,bool control=false){raw<<row.dump()<<'\n';raw.flush();(control?controls:rows).push_back(std::move(row));};
+#if defined(YMCC_CSS_WAKE_LIFETIME)
+  if(boundary=="lifetime"){
+   signalEntered=CreateEventW(nullptr,TRUE,FALSE,nullptr);signalRelease=CreateEventW(nullptr,TRUE,FALSE,nullptr);wakeContended=CreateEventW(nullptr,TRUE,FALSE,nullptr);need(signalEntered&&signalRelease&&wakeContended,"Notification gates unavailable");
+   const auto initializeAgain=[&]{need(g_steamCssUse.initialize(entry.wstring(),link.wstring(),180000,4000,[](const std::string& stage,const auto&,const auto&,const auto&){if(stage=="resident-backend-retained")SetEvent(releasedEvent);},0,[]{return true;},[]{return ULONGLONG(4);}),"Runtime reinitialize failed");g_steamCssUse.observeSteam(g_steamSettingsObserver.value);};
+   const auto resourcesReturned=[&]{return !g_steamCssUse.worker_.joinable()&&!g_steamCssUse.wake_&&!g_steamCssUse.stop_&&!g_steamCssUse.token_&&!g_steamCssUse.ensure_&&!g_steamCssUse.helper_&&!g_steamCssUse.requestWake_&&!g_steamCssUse.requestScoped_;};
+   for(const auto& mode:wire["modes"]){
+    setup(defaults,mode);const auto token=fixtureBegin(mode);ensure(token,mode);HANDLE original=g_steamCssUse.requestWake_;ResetEvent(signalEntered);ResetEvent(signalRelease);ResetEvent(wakeContended);pauseNotification=true;
+    auto notification=std::async(std::launch::async,[]{return g_steamCssUse.notifyRequestChanged();});const bool entered=WaitForSingleObject(signalEntered,1000)==WAIT_OBJECT_0;
+    auto shutdown=std::async(std::launch::async,[]{g_steamCssUse.shutdown();});const bool contended=entered&&WaitForSingleObject(wakeContended,1000)==WAIT_OBJECT_0;DWORD flags=0;const bool alive=GetHandleInformation(original,&flags)!=FALSE;SetEvent(signalRelease);const bool notified=notification.get();shutdown.get();pauseNotification=false;
+    bool lateIgnored=true;const auto previousSignals=signalCount();for(unsigned i=0;i<64;++i)lateIgnored=!g_steamCssUse.notifyRequestChanged()&&lateIgnored;lateIgnored=lateIgnored&&previousSignals==signalCount();const bool returned=resourcesReturned();const auto observed=childRows(true);
+    record({{"mode",mode["mode"]},{"boundary","notify-overlaps-real-shutdown"},{"actualWakeMutexContention",contended},{"handleAliveBeforeSignal",alive},{"notificationSucceeded",notified},{"workerAndHandlesReturned",returned},{"lateNotificationsIgnored",lateIgnored},{"children",observed},{"steamRetained",live(steam.h)},{"residentRetained",live(css.h)}});
+    need(entered&&contended&&alive&&notified&&returned&&lateIgnored,"Actual notify/shutdown lifetime synchronization failed");need(live(steam.h)&&live(css.h),"Shutdown killed independent process");initializeAgain();
+   }
+   const auto& mode=wire["modes"][0];setup(defaults,mode);const auto token=fixtureBegin(mode);ensure(token,mode);HANDLE original=g_steamCssUse.requestWake_;ResetEvent(signalEntered);ResetEvent(signalRelease);ResetEvent(wakeContended);pauseNotification=true;
+   auto mutation=std::async(std::launch::async,[]{return fixtureMutatedNotify(g_steamCssUse);});const bool entered=WaitForSingleObject(signalEntered,1000)==WAIT_OBJECT_0;
+   g_steamCssUse.shutdown();DWORD flags=0;SetLastError(ERROR_SUCCESS);const bool closed=GetHandleInformation(original,&flags)==FALSE&&GetLastError()==ERROR_INVALID_HANDLE;SetEvent(signalRelease);const bool incorrectlySignaled=mutation.get();pauseNotification=false;json signal;{std::lock_guard lock(observationMx);signal=signals.back();}
+   const bool detected=entered&&closed&&!incorrectlySignaled&&signal["error"]==ERROR_INVALID_HANDLE;record({{"control","actual-notifier-lock-removal"},{"mutationDetected",detected},{"closedBeforeSignal",closed},{"signalError",signal["error"]},{"children",childRows(true)},{"workerAndHandlesReturned",resourcesReturned()}},true);need(detected,"Notifier lock-removal negative was not detected");need(resourcesReturned()&&live(steam.h)&&live(css.h),"Final lifetime cleanup failed");
+   CloseHandle(signalEntered);CloseHandle(signalRelease);CloseHandle(wakeContended);signalEntered=signalRelease=wakeContended=nullptr;CloseHandle(releasedEvent);releasedEvent=nullptr;
+   std::cout<<json{{"status","PASS"},{"rows",rows},{"controls",controls},{"signals",signals},{"workerWaits",waits},{"runtimeWorkerAndHandlesReturned",true},{"ownedInertProcessesOnly",true}}.dump()<<'\n';return 0;
+  }
+#endif
+  if(boundary=="all"||boundary=="commit")for(const auto& mode:wire["modes"])for(const std::string writer:{"document","section","section-prepare","patch","input-cas","bounded-recovery"}){
+   setup(defaults,mode);const auto token=fixtureBegin(mode);ensure(token,mode);auto f=park(token);const auto before=readDocument();const auto startSignals=signalCount();ResetEvent(releasedEvent);bool written=false,nonblocking=true;
+   if(writer=="document"){std::unique_lock held(g_steamCssUse.mutex_);auto write=std::async(std::launch::async,[&]{return commit(writer,before,before);});nonblocking=write.wait_for(std::chrono::seconds(1))==std::future_status::ready;held.unlock();written=write.get();}else written=commit(writer,before,before);
+   f->resume();const bool clean=stopped();record({{"mode",mode["mode"]},{"writer",writer},{"written",written},{"nativeMutexDidNotBlockWriter",nonblocking},{"notificationCount",signalCount()-startSignals},{"stopped",clean},{"children",childRows(clean)},{"steamRetained",live(steam.h)},{"residentRetained",live(css.h)}});
+   need(written&&nonblocking,"Durable settings writer blocked or failed");need(clean,"settings commit did not stop scoped CSS helper");need(signalCount()==startSignals+1,"Expected one scoped settings wake");need(live(steam.h)&&live(css.h),"Settings cancellation killed retained process");if(boundary=="commit")goto completed;
+  }
+  if(boundary=="all")for(const auto& mode:wire["modes"]){
+   setup(defaults,mode);const auto token=fixtureBegin(mode);ensure(token,mode);auto f=park(token);const auto startSignals=signalCount();
+   unsigned ackWrites=0;for(const char* key:{"appliedRevision","appliedConfigHash","pendingConfigHash","hostAcknowledgedRevision","hostAcknowledgedConfigHash","applyStatus"}){const auto before=readDocument();auto next=before;next["input"][key]=std::string(key).find("Revision")!=std::string::npos?json(17):json("fixture-ack");need(ymSettingsWriteDocument(next.dump(),nullptr,&before),"ACK writer failed");++ackWrites;}
+   need(ymSettingsPatchSection("ui",{{"fixtureUnrelated",true}}),"Unrelated writer failed");const auto reset=ymSettingsResetApplication(defaults);need(reset.value("ok",false),"Reset writer failed");const auto beforeFailure=readDocument();HANDLE held=CreateFileW(YM_SETTINGS_FILE.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);need(held!=INVALID_HANDLE_VALUE,"Failed-write file lock unavailable");const bool failed=commit("document",beforeFailure,beforeFailure);CloseHandle(held);need(!failed&&readDocument()==beforeFailure,"Failed atomic write changed primary");
+   record({{"mode",mode["mode"]},{"control","ack-unrelated-reset-failed-commit"},{"ackWrites",ackWrites},{"notificationCount",signalCount()-startSignals},{"tokenRetained",currentToken()==token},{"childrenStillLive",childRows(false)}} ,true);need(signalCount()==startSignals&&currentToken()==token,"Unrelated or failed write woke/replaced scope");for(const auto& child:childRows(false))need(child["signaled"]==false,"Unrelated write stopped helper");f->resume();retire();
+  }
+  if(boundary=="all"||boundary=="coalesced")for(const auto& mode:wire["modes"]){
+   setup(defaults,mode);uint64_t previous;{std::lock_guard lock(g_steamCssUse.mutex_);previous=g_steamCssUse.generation_;}auto f=park(previous);const auto token=fixtureBegin(mode);ensure(token,mode);const auto before=readDocument();const auto startSignals=signalCount();need(commit("document",before,before),"Coalesced commit failed");f->resume();const bool clean=stopped();record({{"mode",mode["mode"]},{"boundary","coalesced-old-generation"},{"waitGeneration",previous},{"newToken",token},{"notificationCount",signalCount()-startSignals},{"stopped",clean},{"children",childRows(clean)}});need(clean,"coalesced settings wake lost current lease validation");if(boundary=="coalesced")goto completed;
+  }
+  if(boundary=="all")for(const auto& mode:wire["modes"]){
+   setup(defaults,mode);const auto old=fixtureBegin(mode);ensure(old,mode);auto f=park(old);const auto before=readDocument();need(commit("document",before,before),"Handoff commit failed");auto successor=mode;successor["beginRequest"]["bootContext"]["input"]=readDocument()["input"];successor["ensureRequest"]["bootContext"]["input"]=readDocument()["input"];const auto next=fixtureBegin(successor);ensure(next,successor);const auto oldChildren=children.size()-1;auto stale=handlers.at("steamAppearance.endUse")({{"token",std::to_string(old)}});need(currentToken()==next,"Old native endUse cleared successor");auto nextFence=arm(next);f->resume();nextFence->wait();need(currentToken()==next&&next!=old,"Old worker wake cleared successor");for(size_t i=0;i<oldChildren;++i)need(WaitForSingleObject(children[i]->h,1000)==WAIT_OBJECT_0,"Old helper not returned at handoff");need(live(children.back()->h),"Successor helper was stopped");record({{"mode",mode["mode"]},{"boundary","old-release-new-lease"},{"oldToken",old},{"successorToken",next},{"staleReply",stale},{"successorRetained",true},{"oldHelpersSignaled",oldChildren}},true);nextFence->resume();retire();
+  }
+  if(boundary=="all"){
+   const auto& mode=wire["modes"][0];setup(defaults,mode);const auto token=fixtureBegin(mode,false);ensure(token,mode,false);auto f=park(token);const auto startSignals=signalCount();const auto before=readDocument();need(commit("document",before,before),"Ordinary settings commit failed");need(currentToken()==token&&signalCount()==startSignals,"Ordinary lease gained scoped wake");f->resume();g_steamCssUse.shutdown();childRows(true);record({{"control","ordinary-lease-no-scoped-signal"},{"notificationCount",signalCount()-startSignals},{"runtimeWorkerJoined",!g_steamCssUse.worker_.joinable()}},true);
+  }
+ completed:
+  g_steamCssUse.shutdown();need(!g_steamCssUse.worker_.joinable()&&!g_steamCssUse.wake_&&!g_steamCssUse.stop_&&!g_steamCssUse.token_&&!g_steamCssUse.ensure_&&!g_steamCssUse.helper_,"Runtime shutdown retained resource");need(live(steam.h)&&live(css.h),"Shutdown killed independent resident or Steam");for(const auto& signal:signals)need(signal["localLockReleased"]==true&&signal["namedLockReleased"]==true&&signal["signaled"]==true,"Notification ran under settings lock or used invalid handle");CloseHandle(releasedEvent);releasedEvent=nullptr;
+  std::cout<<json{{"status","PASS"},{"rows",rows},{"controls",controls},{"signals",signals},{"workerWaits",waits},{"runtimeWorkerAndHandlesReturned",true},{"ownedInertProcessesOnly",true}}.dump()<<'\n';return 0;
+ }catch(const std::exception& e){
+  {std::lock_guard lock(fenceMx);if(pendingFence)pendingFence->resume();}g_steamCssUse.shutdown();std::cout<<json{{"status","FAIL"},{"error",e.what()},{"rows",rows},{"controls",controls},{"signals",signals},{"workerWaits",waits}}.dump()<<'\n';if(releasedEvent)CloseHandle(releasedEvent);releasedEvent=nullptr;return 1;
+ }
+}

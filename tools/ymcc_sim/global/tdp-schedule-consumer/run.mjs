@@ -18,7 +18,7 @@ export function verifyOriginalExecution(execution,spec,{negative=false}={}){
  need(execution&&execution.thrown===null&&execution.processExitObserved===true,'TDP_SCHEDULE_MAIN_DID_NOT_COMPLETE');
  need(execution.boundary&&execution.boundary.denied.length===0&&execution.boundary.processAttempts===0&&execution.boundary.networkAttempts===0,'TDP_SCHEDULE_IO_BOUNDARY_VIOLATION');
  const markers=spec.expectedMarkers.filter(marker=>execution.logs.includes(marker));
- if(negative)need(execution.exitCode===1&&markers.length===0&&execution.logs.some(line=>line.includes(spec.fault.expectedFailedCase)),'TDP_SCHEDULE_ORIGINAL_ASSERTION_NOT_CAUGHT');
+ if(negative)need(execution.exitCode===1&&markers.length===0&&execution.terminalErrorLine===`Error: ${spec.fault.expectedFailedCase}`,'TDP_SCHEDULE_ORIGINAL_ASSERTION_NOT_CAUGHT');
  else need(execution.exitCode===0&&markers.length===spec.expectedMarkers.length,'TDP_SCHEDULE_ORIGINAL_NOT_PASS');
  return {completedMarkers:markers,failedNames:negative?[spec.fault.expectedFailedCase]:[],originalExitObserved:true,forbiddenProcessAttempts:0,networkRequests:0,virtualizedDefaultStorageCalls:execution.boundary.virtualizedCalls};
 }

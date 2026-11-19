@@ -2,21 +2,23 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue';
 import Dropdown from './Dropdown.vue';
 import { getUiVisibilityState, onUiVisibilityChange } from '@/bridge/uiLifecycle';
+import { getSharedPowerLifecycle, onSharedPowerLifecycle } from '@/bridge/powerLifecycleState';
 import InlineIcon from './InlineIcon.vue';
 import { batteryCharge, batteryChargeOptions, batteryChargeStatus, type BatteryChargeState } from '@/bridge/batteryCharge';
 const state = ref<BatteryChargeState | null>(null);
 const selected = ref<number | string>('');
 const busy = ref(false), loading = ref(false), dirty = ref(false), error = ref('');
+const preferenceWarning = ref('');
 const mayRunSoftware = ref(false);
 let active = false, inPage = true, generation = 0;
-let readFailures = 0, refreshQueued = false, powerPaused = false, powerGeneration = 0;
+const initialPower = getSharedPowerLifecycle();
+let readFailures = 0, refreshQueued = false, powerPaused = initialPower?.phase !== 'ready' || initialPower.known === false, powerGeneration = 0;
 let stopVisibility: (() => void) | undefined;
+let stopPower: (() => void) | undefined;
 const retryDelays = [1500, 5000, 15000];
 const readEvents = ['focus', 'ipc:window.focus', 'ipc:power.sourceChanged', 'ipc:power.acChanged'];
 const showEvents = ['ipc:window.shown', 'ipc:window.restored', 'ipc:window.maximized', 'ipc:window.summoned'];
 const hideEvents = ['ipc:window.hidden', 'ipc:window.minimized'];
-const pauseEvents = ['ipc:power.suspending', 'ipc:power.resuming'];
-const resumeEvents = ['ipc:power.resume-ready', 'ipc:power.resumed'];
 let timer: ReturnType<typeof setTimeout> | undefined;
 const options = computed(() => {
   const items = state.value ? batteryChargeOptions(state.value) : [];
@@ -59,7 +61,7 @@ async function refresh() {
   try {
     const next = await batteryCharge.get();
     if (active && generation === epoch) {
-      accept(next); error.value = '';
+      accept(next); error.value = preferenceWarning.value;
       // Known unsupported hardware stays idle. An unknown transport/host or a
       // temporarily unavailable known route can recover without a route switch.
       readFailures = !next.ok && (next.kind !== 'unsupported' || !next.model) ? readFailures + 1 : 0;
@@ -96,9 +98,13 @@ async function apply() {
     }
     const next = await (release ? batteryCharge.release() : batteryCharge.set(fence, target));
     if (active && generation === epoch) {
-      dirty.value = !next.ok; accept(next);
+      dirty.value = !next.ok || next.preferenceSaved === false; accept(next);
       if (release && next.ok) mayRunSoftware.value = false;
       if (!next.ok) error.value = batteryChargeStatus(next);
+      else if (next.preferenceSaved === false) {
+        preferenceWarning.value = '设备充电设置已接受，但' + (next.preferenceReason || '开机全局充电偏好未保存');
+        error.value = preferenceWarning.value;
+      } else preferenceWarning.value = '';
     }
   } catch (e) {
     if (active && generation === epoch) {
@@ -121,35 +127,32 @@ function activate() {
 }
 function suspend() { active = false; generation++; refreshQueued = false; stopTimer(); }
 function appeared() { if (!active) activate(); else if (!loading.value && !busy.value) requestRead(); }
-function acceptPowerEvent(event: Event) {
-  const value = (event as CustomEvent<{ generation?: number }>).detail?.generation;
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
-    if (value < powerGeneration) return false;
-    powerGeneration = value;
-  }
-  return true;
-}
-function powerPause(event: Event) { if (acceptPowerEvent(event)) { powerPaused = true; suspend(); } }
-function powerResume(event: Event) { if (acceptPowerEvent(event)) { powerPaused = false; appeared(); } }
 onMounted(() => {
+  let observedPower='';
+  stopPower = onSharedPowerLifecycle(snapshot => {
+    const next=JSON.stringify([snapshot.generation,snapshot.phase,snapshot.known!==false]);
+    if(next===observedPower)return;
+    observedPower=next;
+    // A missed pause must still retire reads belonging to the old power cycle.
+    if(powerGeneration!==0&&snapshot.generation!==powerGeneration)suspend();
+    powerGeneration=snapshot.generation;
+    powerPaused=snapshot.phase!=='ready'||snapshot.known===false;
+    if(powerPaused)suspend();else appeared();
+  });
   stopVisibility = onUiVisibilityChange(({ documentVisible, nativeWindowVisible }) => {
     if (documentVisible && nativeWindowVisible) activate(); else suspend();
   });
   for (const event of readEvents) window.addEventListener(event, requestRead);
   for (const event of showEvents) window.addEventListener(event, appeared);
   for (const event of hideEvents) window.addEventListener(event, suspend);
-  for (const event of pauseEvents) window.addEventListener(event, powerPause);
-  for (const event of resumeEvents) window.addEventListener(event, powerResume);
 });
 onActivated(() => { inPage = true; activate(); });
 onDeactivated(() => { inPage = false; suspend(); });
 onBeforeUnmount(() => {
-  inPage = false; suspend(); stopVisibility?.(); stopVisibility = undefined;
+  inPage = false; suspend(); stopVisibility?.(); stopVisibility = undefined; stopPower?.(); stopPower = undefined;
   for (const event of readEvents) window.removeEventListener(event, requestRead);
   for (const event of showEvents) window.removeEventListener(event, appeared);
   for (const event of hideEvents) window.removeEventListener(event, suspend);
-  for (const event of pauseEvents) window.removeEventListener(event, powerPause);
-  for (const event of resumeEvents) window.removeEventListener(event, powerResume);
 });
 </script>
 <template>
@@ -166,7 +169,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .description, .charge-status { color: var(--text-dim); font-size: 12px; line-height: 1.6; }
 .description { margin: 4px 0 0; }
-.charge-status { flex-shrink: 0; }
+.charge-status { flex: 0 1 auto; min-width: 0; max-width: min(50%, 240px); overflow-wrap: anywhere; }
 .charge-controls { display: flex; gap: 12px; align-items: center; max-width: 440px; margin-top: 12px; }
 .charge-controls > :first-child { flex: 1; min-width: 0; }
 button { flex-shrink: 0; padding: 8px 15px; min-height: 36px; border: 1px solid color-mix(in srgb, var(--text-dim) 28%, transparent); border-radius: 6px; background: var(--bg-input); color: var(--text); cursor: pointer; }

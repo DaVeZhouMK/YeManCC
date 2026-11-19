@@ -1,10 +1,12 @@
 ﻿[CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$Out)
+param([Parameter(Mandatory=$true)][string]$Out,[ValidateSet('All','LateCandidate','UnboundPid','ReusedPid')][string]$Case='All')
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 New-Item -ItemType Directory -Path $Out -Force|Out-Null
 function Load-Function($Path,$Name){$t=$null;$e=$null;$ast=[Management.Automation.Language.Parser]::ParseFile($Path,[ref]$t,[ref]$e);if($e.Count){throw $e[0]};$f=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $Name},$true);if(!$f){throw "Missing $Name"};$f.Extent.Text}
 Invoke-Expression (Load-Function (Join-Path $repo 'PowerControl\steam-appearance.ps1') 'Start-AppearanceBackend')
+Invoke-Expression (Load-Function (Join-Path $repo 'PowerControl\steam-appearance.ps1') 'Get-BackendProcesses')
+Invoke-Expression (Load-Function (Join-Path $repo 'PowerControl\steam-appearance.ps1') 'Test-BackendOwner')
 Invoke-Expression (Load-Function (Join-Path $repo 'PowerControl\steam-appearance\resident.ps1') 'Assert-SingleAppearanceBackend')
 Invoke-Expression (Load-Function (Join-Path $repo 'PowerControl\steam-appearance\resident.ps1') 'Get-AppearanceProcessPath')
 Invoke-Expression (Load-Function (Join-Path $repo 'PowerControl\steam-appearance\preset.ps1') 'Get-PresetResourceHash')
@@ -15,24 +17,39 @@ function New-AppearanceMutex([string]$Purpose) {
  New-Object Threading.Mutex($false,($script:AppearanceFixtureMutexPrefix+$Purpose))
 }
 $script:Rows=@();$script:Ready=$true;$script:Editing=$false;$script:Port=$false;$script:Spawns=0;$script:Waits=0
-function Row($Id,$Parent){[pscustomobject]@{Id=$Id;Path=$script:BackendExe;StartTime=([datetime]'2026-10-23').AddSeconds($Id);Parent=$Parent}}
+$script:CandidateReads=0;$script:LateCandidate=$false;$script:ListenerProcess=$null
+function Row($Id,$Parent){[pscustomobject]@{Id=$Id;Path=$script:BackendExe;StartTime=([datetime]'2026-10-23').AddSeconds($Id);Parent=$Parent;HasExited=$false}}
 function Read-PresetState {$null}
 function Test-CssDesktopEditing {$script:Editing}
 function Assert-CssDesktopNotEditing {if($script:Editing){throw 'editor-active'}}
 function Test-CurrentUserProcess($Process){$true}
-function Get-BackendProcesses {@($script:Rows|Where-Object Path -eq $script:BackendExe)}
 function Update-AppearanceProcessInventory {}
-function Get-AppearanceBackendCandidates {$script:Rows}
+function Get-AppearanceBackendCandidates {
+ $script:CandidateReads++
+ if($script:LateCandidate){
+  if($script:CandidateReads -eq 2){$script:Rows=@((Row 100 0),(Row 101 100));$script:Ready=$false}
+  if($script:CandidateReads -eq 3){$script:Ready=$true}
+ }
+ $script:Rows
+}
 function Get-AppearanceParentId($Process){$Process.Parent}
-function Get-Process {param($Name) throw 'PRIVATE_PROCESS_ENUMERATION_DENIED'}
-function Test-BackendOwner {$script:Ready}
-function Get-NetTCPConnection {param($State,$LocalPort) if($script:Port){[pscustomobject]@{OwningProcess=999}}}
+function Get-Process {param([int]$Id,$ErrorAction)
+ if(!$Id){throw 'PRIVATE_PROCESS_ENUMERATION_DENIED'}
+ if($script:ListenerProcess -and $script:ListenerProcess.Id -eq $Id){return $script:ListenerProcess}
+ $script:Rows|Where-Object Id -eq $Id
+}
+function Get-AppearanceTcpListeners {param($LocalPort)
+ if($LocalPort -ne 35821){throw 'Unexpected fixture listener query'}
+ $pidObserved=if($script:Port){999}elseif($script:ListenerProcess){$script:ListenerProcess.Id}elseif($script:Ready -and $script:Rows.Count){$script:Rows[-1].Id}
+ if($pidObserved){[pscustomobject]@{OwningProcess=$pidObserved;LocalAddress='127.0.0.1'}}
+}
 function Get-CimInstance {throw 'PRIVATE_CIM_ENUMERATION_DENIED'}
 function Start-ResidentAppearanceBackend {$script:Spawns++;$script:Rows=@((Row 100 0),(Row 101 100));$script:Ready=$true}
 function Start-Sleep {param($Milliseconds) $script:Waits++;throw 'bounded-not-ready-fixture'}
 $cases=New-Object Collections.Generic.List[string]
 function Assert($Value,$Name){if(!$Value){throw $Name};$cases.Add($Name)}
 function Reject([scriptblock]$Work){try{&$Work|Out-Null;return $false}catch{return $true}}
+if($Case -eq 'All'){
 $script:Rows=@((Row 100 0),(Row 101 100));$result=Start-AppearanceBackend
 Assert ($result.ok -and !$result.started -and $script:Spawns -eq 0) 'Packaged parent and child are reused as one instance'
 $script:Rows=@((Row 100 0),(Row 200 0));Assert (Reject {Start-AppearanceBackend}) 'Independent existing roots are rejected without killing or replacing either'
@@ -44,11 +61,29 @@ Assert ($script:Waits -eq 1 -and $script:Spawns -eq 0) 'No retry launch occurs w
 $script:Rows=@();$script:Ready=$false;$result=Start-AppearanceBackend;$again=Start-AppearanceBackend
 Assert ($result.ok -and $result.started -and $again.ok -and !$again.started -and $script:Spawns -eq 1) 'Missing backend starts exactly once and the next Ensure reuses it'
 $script:Editing=$true;$again=Start-AppearanceBackend;Assert ($again.ok -and $script:Spawns -eq 1) 'Existing editor-owned backend is preserved and reused'
-$hashFile=Join-Path $Out 'resource.css';[IO.File]::WriteAllText($hashFile,'first');$script:HashReads=0;$script:PresetResourceHashes=@{}
+$hashFile=Join-Path $Out 'resource.css';[IO.File]::WriteAllText($hashFile,'first');$script:HashReads=0
 function Get-ConfigHash($Path){$script:HashReads++;(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash}
 $a=Get-PresetResourceHash $hashFile;$b=Get-PresetResourceHash $hashFile
-Assert ($a -eq $b -and $script:HashReads -eq 1) 'Repeated status stages hash an unchanged resource only once per helper'
-[IO.File]::WriteAllText($hashFile,'updated-longer');$c=Get-PresetResourceHash $hashFile
-Assert ($c -ne $a -and $script:HashReads -eq 2) 'Resource modification invalidates the in-helper hash cache'
+Assert ($a -eq $b -and $script:HashReads -eq 2) 'Repeated status stages verify current bytes even if metadata is unchanged'
+$mtime=[IO.File]::GetLastWriteTimeUtc($hashFile);[IO.File]::WriteAllText($hashFile,'other');[IO.File]::SetLastWriteTimeUtc($hashFile,$mtime)
+$c=Get-PresetResourceHash $hashFile
+Assert ($c -ne $a -and $script:HashReads -eq 3) 'A same-length replacement at the same last-write time cannot reuse the old digest'
+}
+if($Case -in 'All','LateCandidate'){
+ $script:Editing=$false;$script:Rows=@();$script:Ready=$true;$script:CandidateReads=0;$script:LateCandidate=$true
+ $spawnsBefore=$script:Spawns
+ $result=Start-AppearanceBackend
+ Assert ($result.ok -and !$result.started -and $script:Spawns -eq $spawnsBefore) 'Same-path backend first visible during the last candidate read is retained without a second spawn'
+ $script:LateCandidate=$false
+}
+foreach($scenario in 'UnboundPid','ReusedPid'){
+ if($Case -notin 'All',$scenario){continue}
+ $script:Rows=@((Row 100 0),(Row 101 100));$script:Ready=$true
+ $script:ListenerProcess=if($scenario -eq 'UnboundPid'){Row 102 0}else{Row 101 100}
+ if($scenario -eq 'ReusedPid'){$script:ListenerProcess.StartTime=$script:ListenerProcess.StartTime.AddSeconds(1)}
+ $spawnsBefore=$script:Spawns;$waitsBefore=$script:Waits
+ $reason='';try{Start-AppearanceBackend|Out-Null}catch{$reason=$_.Exception.Message}
+ Assert ($reason -ceq 'bounded-not-ready-fixture' -and $script:Waits -eq ($waitsBefore+1) -and $script:Spawns -eq $spawnsBefore) "Readiness cannot use a listener outside the verified PID and birth snapshot: $scenario"
+}
 [pscustomobject]@{ok=$true;passed=$cases.Count;cases=@($cases);realSteamOperations=0;realCssOperations=0;fixtureSpawns=$script:Spawns;hashReads=$script:HashReads}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8
 Write-Output "PASS: $($cases.Count) resident singleton and resource budget checks"

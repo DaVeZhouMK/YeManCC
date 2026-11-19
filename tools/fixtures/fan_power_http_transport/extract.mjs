@@ -1,0 +1,28 @@
+import {cppBlock} from '../../ymcc_sim/global/decky-update-recovery/native-source-admission.mjs';
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';
+const root=process.argv[2],out=process.argv[3],selected=null,nativeSource=process.argv[4]??(root+'/native/main.cpp');
+assert(root&&out,'original fixture paths');fs.mkdirSync(out,{recursive:true});
+const sha=b=>crypto.createHash('sha256').update(b).digest('hex'),pin=p=>{const b=fs.readFileSync(p);return {path:path.resolve(p),bytes:b.length,sha256:sha(b)};},save=(n,v)=>fs.writeFileSync(out+'/'+n,typeof v==='string'?v:JSON.stringify(v,null,2)+'\n',{flag:'wx'});
+const main=fs.readFileSync(nativeSource,'utf8').replaceAll('\r\n','\n'),segments=[];
+const range=(a,z)=>{const at=main.indexOf(a),end=main.indexOf(z,at+a.length);assert(at>=0&&end>at,a);const text=main.slice(at,end);segments.push({anchor:a,begin:at,end,normalizedSha256:sha(text)});return text;};
+const worker='static void fanHostEmergencyResume(unsigned long long generation, ymcc::fan_resume::RequestTicket ticket) {';
+const parts=[range('struct FanHttpPowerAdmission {','static void reg_http() {'),range('static bool isFanLeaseIdValid(','static std::string fanApiPathFromObject('),range('static std::string fanHostResponseRequestId(HINTERNET request) {','// 同类入口'),range('struct FanBoundaryHttpReply {','struct FanBoundaryEvidence {'),range('struct FanBoundaryEvidence {','static bool fanHostEmergencyPost('),range('static bool fanHostEmergencyPost(','// ── Q1'),range('static bool fanHostEmergencyGetState(','static bool fanHostEmergencySuspend('),range('static bool fanHostEmergencySuspend(','/**\n * Main-process exit'),range('using FanResumeHostReply =',worker),range(worker,'\nstatic ')];
+const functionSource=anchor=>{const at=main.indexOf(anchor);assert(at>=0);const block=cppBlock(main,main.indexOf('{',at),anchor);const text=main.slice(at,block.end);segments.push({anchor,begin:at,end:block.end,normalizedSha256:sha(text)});return text;};
+const activity='static bool fanResumeActivityRevision(std::uint64_t& revision) noexcept {';
+if(main.includes(activity))parts.unshift(functionSource(activity));
+const manualActivity='static bool fanManualActivityRevision(std::uint64_t& revision) noexcept {';
+if(main.includes(manualActivity))parts.unshift(functionSource(manualActivity));
+const launch=functionSource('static void fanHostStartResumeTicket(ymcc::fan_resume::RequestTicket ticket) noexcept {');
+assert.equal(launch.split('std::thread([ticket]').length,2);
+parts.push(launch.replace('std::thread([ticket]','FixtureThread(ticket,[ticket]'));
+parts.push(functionSource('static FanResumeScheduleResult fanHostScheduleFanResume(unsigned long long generation, bool explicitManual, unsigned long long continuingManual) {'));
+const manualAnchor='ipc_on("power.fanManualWake", [](const json& a) -> json {';
+const manualAt=main.indexOf(manualAnchor);assert(manualAt>=0);const manualBlock=cppBlock(main,main.indexOf('{',manualAt),manualAnchor);assert.equal(main.slice(manualBlock.end,manualBlock.end+2),');');
+parts.push('static void fixtureRegisterManual(){\n'+main.slice(manualAt,manualBlock.end+2)+'\n}');
+segments.push({anchor:manualAnchor,begin:manualAt,end:manualBlock.end+2,normalizedSha256:sha(main.slice(manualAt,manualBlock.end+2))});
+
+parts.splice(3+(main.includes(activity)?1:0)+(main.includes(manualActivity)?1:0),0,range(main.includes('struct FanResumeHostBinding final:')?'struct FanResumeHostBinding final:':'struct FanResumeRemoteOffer {','struct FanBoundaryHttpReply {'));
+const original=parts.join('\n'),port='WinHttpConnect(session, L"127.0.0.1", 8765, 0)';assert.equal(original.split(port).length,2);
+save('PowerExtract.inc',original.replaceAll(port,'WinHttpConnect(session, L"127.0.0.1", fixturePort, 0)'));
+save('SOURCE-BINDING.json',{source:pin(nativeSource),segments,generated:pin(out+'/PowerExtract.inc'),adaptations:['Original loopback port becomes fixture ephemeral loopback port','Only original std::thread constructor leaf becomes FixtureThread(ticket, callable); callable executes on a real kernel thread and returns before test join','Native clock input is controlled for queue-expiry only; existing WinHTTP AsyncRequest clock remains real'],actualWorker:true,actualWinHTTP:true,schedulerThreadLaunchIsFixtureLeaf:true,hostSdkOrNewScope:false});
+save('TASK.json',{canonicalId:'plugins.decky-update-recovery',originalLeaf:'tools/fan_power_http_transport_selftest.cpp',selected,source:pin(root+'/tools/fan_power_http_transport_selftest.cpp'),main:pin(nativeSource),workerSourceBinding:pin(out+'/SOURCE-BINDING.json'),defaultLegacyGroupExecuted:false,mainlineImported:false,remoteFanReady:false});

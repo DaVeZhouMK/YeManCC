@@ -1,4 +1,7 @@
 #include "../native/steam_native_record_diagnostic.h"
+#ifdef _WIN32
+#include "../native/steam_native_record_win32.h"
+#endif
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -22,6 +25,7 @@ constexpr U64 GAME = 0xf1234567abc00000, OTHER_GAME = GAME ^ (1ULL << 40);
 constexpr std::uint32_t PID = 44551, FOREGROUND = 44552;
 unsigned assertions = 0, cases = 0, failures = 0;
 Json caseResults = Json::array(), measurements = Json::object();
+std::string selectedCase;
 struct Anchor { U64 rva; std::vector<unsigned char> bytes; };
 const std::array<Anchor, 7> PREDICATE_ANCHORS = {{
     {0x9d7a9c, {0x0f,0xb6,0x8b,0x01,0x02,0x00,0x00}},
@@ -219,6 +223,7 @@ void unavailable(Fixture& f, const char* reason) {
     expect(result["status"] == "unavailable" && result["reason"] == reason, std::string("reason: ") + reason + " got " + result.dump());
 }
 template<class F> void test(const std::string& name, F&& body) {
+    if (!selectedCase.empty() && selectedCase != name) return;
     ++cases;
     const auto before = assertions;
     try { body(); caseResults.push_back({{"name",name},{"status","passed"},{"assertions",assertions - before}}); }
@@ -234,6 +239,83 @@ void scenarioTests() {
         expect(result["primaryLivenessPid"] == PID && result["foregroundComparisonPid"] == FOREGROUND &&
             result["originalPrimaryMatched"] == true, "field order and primary comparison");
         expect(f.m.hits(RECORDS_ADDR + 0x198, 8) == 2 && f.m.hits(RECORDS_ADDR + 8, 8) == 4, "two bracketed target tuple reads");
+        using Typed = sr::TypedNativeRoleObservation;
+        static_assert(!std::is_default_constructible_v<Typed> && !std::is_convertible_v<Typed, bool>);
+        static_assert(!std::is_constructible_v<Typed, Query, std::size_t, std::optional<Typed::NativeRoles>>);
+        const auto runTyped = [](Fixture& input, std::optional<Typed>& output) {
+            return sr::observeWithRoles(input.q, [&](U64 address, void* destination, std::size_t size) {
+                return input.m.read(address, destination, size);
+            }, [&] { ++input.stableCalls; return input.stability ? input.stability(input.stableCalls) : true; }, &output);
+        };
+        std::optional<Typed> observation;
+        Fixture typed; const auto typedResult = runTyped(typed, observation); typed.check(typedResult);
+        expect(typedResult == result && typed.stableCalls == f.stableCalls, "typed path changes neither JSON nor stability calls");
+        expect(typed.m.reads.size() == f.m.reads.size(), "typed observation caused extra memory reads");
+        for (std::size_t i = 0; i < f.m.reads.size(); ++i)
+            expect(typed.m.reads[i].address == f.m.reads[i].address && typed.m.reads[i].size == f.m.reads[i].size &&
+                typed.m.reads[i].occurrence == f.m.reads[i].occurrence, "typed observation changed the original read sequence");
+        expect(observation && observation->matchingTargetRecordCount() == 1 && observation->nativeRoles() &&
+            observation->nativeRoles()->primaryLivenessPid == PID && observation->nativeRoles()->foregroundComparisonPid == FOREGROUND,
+            "typed observation did not preserve exact reader P/F");
+        expect(observation->query().account64 == ACCOUNT && observation->query().gameId64 == GAME &&
+            observation->query().moduleBase == MODULE_BASE && observation->query().expectedPid == PID,
+            "typed observation lost its original query binding");
+        const std::array<std::pair<std::uint32_t, std::uint32_t>, 4> roleTuples{{
+            {PID, PID}, {PID, FOREGROUND}, {FOREGROUND, PID}, {FOREGROUND, FOREGROUND}}};
+        for (const auto [primary, foreground] : roleTuples) {
+            Fixture value; value.records({{GAME, primary, foreground}});
+            const auto diagnostic = runTyped(value, observation); value.check(diagnostic);
+            expect(observation && observation->nativeRoles() && observation->matchingTargetRecordCount() == 1 &&
+                observation->nativeRoles()->primaryLivenessPid == primary && observation->nativeRoles()->foregroundComparisonPid == foreground,
+                "typed P/F was replaced by selected PID");
+            expect(diagnostic["originalPrimaryMatched"] == (primary == PID), "typed output changed original primary equality");
+        }
+        for (const unsigned count : {0U, 2U}) {
+            Fixture value; value.records(std::vector<Row>(count, Row{GAME}));
+            const auto diagnostic = runTyped(value, observation); value.check(diagnostic);
+            expect(observation && observation->matchingTargetRecordCount() == count && !observation->nativeRoles(),
+                "zero/ambiguous target exposed a chosen P/F");
+        }
+        for (unsigned fault = 0; fault < 5; ++fault) {
+            Fixture seed; runTyped(seed, observation); expect(observation.has_value(), "typed reset control missing");
+            Fixture failed;
+            if (fault < 2) failed.stability = [fault](unsigned call) { return call != fault + 1; };
+            else if (fault == 2) failed.m.failAt = 1;
+            else if (fault == 3) failed.m.throwAt = 1;
+            else failed.q.profileVerified = false;
+            const auto diagnostic = runTyped(failed, observation); failed.check(diagnostic);
+            expect(!observation && diagnostic["status"] == "unavailable", "failure retained a previous typed positive");
+        }
+        Fixture seed; runTyped(seed, observation);
+        Fixture alias;
+        const auto aliasResult = sr::observeWithRoles(observation->query(),
+            [&](U64 address, void* destination, std::size_t size) { return alias.m.read(address, destination, size); },
+            [] { return true; }, &observation);
+        expect(aliasResult == result && observation && observation->query().account64 == ACCOUNT,
+            "reset invalidated a query borrowed from the prior observation");
+        Fixture changed;
+        const auto immutable = sr::observeWithRoles(changed.q,
+            [&](U64 address, void* destination, std::size_t size) {
+                changed.q.account64 = 0; changed.q.gameId64 = 0; changed.q.expectedPid = 0;
+                return changed.m.read(address, destination, size);
+            }, [] { return true; }, &observation);
+        expect(immutable == result && observation && observation->query().account64 == ACCOUNT &&
+            observation->query().gameId64 == GAME && observation->query().expectedPid == PID,
+            "callback redirected the typed query identity");
+#ifdef _WIN32
+        using NativeTyped = ymcc::steamrecordwin::TypedNativeRoleObservation;
+        static_assert(!std::is_default_constructible_v<NativeTyped> && !std::is_convertible_v<NativeTyped, bool>);
+        std::optional<NativeTyped> nativeObservation;
+        unsigned ownerCalls = 0, hashCalls = 0;
+        const auto invalidNative = ymcc::steamrecordwin::observeWithRoles({},
+            [&](const std::wstring&) { ++hashCalls; return std::string{}; },
+            [&] { ++ownerCalls; return false; }, &nativeObservation);
+        expect(!nativeObservation && ownerCalls == 0 && hashCalls == 0 &&
+            invalidNative["reason"] == "native-record-original-binding-unavailable", "invalid wrapper accessed native provenance");
+#endif
+        measurements["typedRoleObservation"] = {{"sameOriginalReadSequence",true}, {"sameJson",true},
+            {"roleTuples",roleTuples.size()}, {"absenceOrAmbiguousCounts",2}, {"failedObservationClears",5},
+            {"borrowedQueryReset",true}, {"queryCallbackMutationIgnored",true}, {"actionAuthority",false}};
     });
     test("empty selected record vector", [] {
         Fixture f; f.records({}); const auto result = f.run(); f.check(result);
@@ -811,10 +893,15 @@ void budgetTests() {
     });
 }
 } // namespace
-int main() {
+int main(int argc, char** argv) {
+    if (argc != 1) {
+        if (argc != 3 || std::string(argv[1]) != "--case" || !*argv[2]) return 64;
+        selectedCase = argv[2];
+    }
     try {
         scenarioTests(); raceTests(); predicateValueTests(); predicateReadFailureTests();
         predicateRaceTests(); predicateBudgetTests(); budgetTests();
+        if (caseResults.empty()) return 64;
         std::cout << Json({{"status",failures == 0 ? "passed" : "failed"},{"cases",cases},{"assertions",assertions},
             {"failedCases",failures},{"caseResults",caseResults},{"measurements",measurements},
             {"realProcessReads",0},{"privateInterfaceCalls",0},{"writesToSteam",0},

@@ -56,6 +56,27 @@ async function fixture(model:string,generation=6,projection=false){
   async cleanup(){host.held?.resolve(host.snapshot());host.held=null;host.snapshotErrors=0;host.snapshotError=null;await life.close().catch(()=>{});Object.assign(globalThis,saved);Object.defineProperty(globalThis,'performance',performanceDescriptor);}};
 }
 async function main(){
+ for(const model of ['MSI','ROG','GPD','OneX','Lenovo'])for(const outcome of ['unconfirmed','off']as const)await scenario(`Public power cancellation ${model} ${outcome} preserves original observation owner`,async f=>{
+  const enable=f.host.enable.bind(f.host);let cancelled=false;
+  f.host.enable=async(nodes:readonly FanNode[]=[])=>{
+   if(cancelled)return enable(nodes);cancelled=true;f.host.calls.push('enable');
+   // The public contract permits this cancellation after an actual write
+   // prefix. It is not proof that the first request did no hardware work.
+   throw new FanApiError('original public scope retired',409,'FAN_PUBLIC_POWER_SUPERSEDED','/api/enable');
+  };
+  await assert.rejects(f.life.apply(CURVE),e=>e instanceof FanApiError&&e.errorCode==='FAN_PUBLIC_POWER_SUPERSEDED');
+  assert.equal(f.host.calls.filter(c=>c==='enable').length,1,'retired public scope caused immediate curve replay');
+  assert(f.life.recoveryActive,'public cancellation dropped the retained observation owner');
+  if(outcome==='off')await f.life.disable();
+  await f.clock.advance(35000);assert(!f.life.recoveryActive);
+  assert.equal(f.host.calls.filter(c=>c==='enable').length,1,'unconfirmed public cancellation authorized an automatic write');
+  if(outcome==='off')assert(!f.life.hasControlIntent,'OFF revived retired public recovery');
+  else assert(f.life.recoveryNeedsAttention,'finite unconfirmed observation did not settle');
+  assert.equal(f.host.calls.filter(c=>c==='close').length,0,'public cancellation manufactured another Close owner');
+  await f.life.apply(CURVE);assert.equal(f.life.state,'ready');
+  assert.equal(f.host.calls.filter(c=>c==='enable').length,2,'new explicit request was blocked by old public scope failure');
+  f.observations.push({outcome,immediateReplay:false,physicalConfirmed:false});
+ },model,0);
  for(const model of ['MSI','ROG','GPD','OneX','Lenovo'])for(const stage of ['events','acquire']as const)await scenario(`FAN1291 actual preparation stage ${stage} resource refusal is not replayed`,async f=>{
   const code=stage==='events'?'HC_SESSION_ROUTE_LOST':'OEM_RESTORE_FAILED';let failed=false;
   const original=stage==='events'?f.host.openEvents.bind(f.host):f.host.acquireControl.bind(f.host);

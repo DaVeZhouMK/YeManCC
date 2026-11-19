@@ -15,6 +15,8 @@ $source=Join-Path $ProjectRoot 'native\GamingHome'
 $setup=Join-Path $ProjectRoot 'tools\gaming-home'
 $sourceFiles=@(Get-ChildItem -LiteralPath $source,$setup -Recurse -File)
 $sourceFiles+=Get-Item -LiteralPath $PSCommandPath,(Join-Path $ProjectRoot 'PowerControl\YeManSteam2.bat'),(Join-Path $ProjectRoot 'PowerControl\YeManSteam.bat')
+$sharedSourcePaths=@('native\steam_startup_window_facts.h','native\steam_information_client.h','native\steam_installation_facts.h','deps\json\json.hpp','native\steam_home_client_identity.h','native\steam_client_action_channel.h','native\steam_home_cancel_messages.h')
+$sourceFiles+=@($sharedSourcePaths|ForEach-Object {Get-Item -LiteralPath (Join-Path $ProjectRoot $_)})
 $before=@($sourceFiles | ForEach-Object { [pscustomobject]@{path=$_.FullName;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $run=Join-Path $OutputDirectory ('build-'+[guid]::NewGuid().ToString('N').Substring(0,12))

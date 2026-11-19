@@ -155,7 +155,8 @@ public static class AsusACPI
         byte[] lpOutBuffer,
         string callKind,
         AsusFan? fan,
-        uint deviceId)
+        uint deviceId,
+        Func<bool>? currentOperation = null)
     {
         var receipt = new AsusAcpiCallReceipt(callKind, fan, dwIoControlCode, deviceId, lpInBuffer.Length, lpOutBuffer.Length);
         lock (handleLock)
@@ -168,6 +169,10 @@ public static class AsusACPI
             }
             else
             {
+                // Final software admission is after the real handle-lock wait.
+                // Keep this outside the transport catch: revocation is not I/O failure.
+                if (currentOperation is not null && !currentOperation())
+                    throw new OperationCanceledException("ASUS software curve operation superseded");
                 try
                 {
                     bool success = activeTransport.Control(
@@ -229,7 +234,12 @@ public static class AsusACPI
         string callKind,
         AsusFan? fan,
         uint deviceId,
-        out AsusAcpiCallReceipt receipt)
+        out AsusAcpiCallReceipt receipt) =>
+        CallMethodObserved(MethodID, args, callKind, fan, deviceId, out receipt, null);
+
+    private static byte[] CallMethodObserved(
+        uint MethodID, byte[] args, string callKind, AsusFan? fan, uint deviceId,
+        out AsusAcpiCallReceipt receipt, Func<bool>? currentOperation)
     {
         byte[] acpiBuf = new byte[8 + args.Length];
         byte[] outBuffer = new byte[16];
@@ -238,7 +248,7 @@ public static class AsusACPI
         BitConverter.GetBytes((uint)args.Length).CopyTo(acpiBuf, 4);
         Array.Copy(args, 0, acpiBuf, 8, args.Length);
 
-        receipt = Control(CONTROL_CODE, acpiBuf, outBuffer, callKind, fan, deviceId);
+        receipt = Control(CONTROL_CODE, acpiBuf, outBuffer, callKind, fan, deviceId, currentOperation);
 
         return outBuffer;
     }
@@ -260,14 +270,19 @@ public static class AsusACPI
         _ => null
     };
 
-    public static int DeviceSetObserved(uint DeviceID, byte[] Params, string logName, out AsusAcpiCallReceipt receipt)
+    public static int DeviceSetObserved(uint DeviceID, byte[] Params, string logName, out AsusAcpiCallReceipt receipt) =>
+        DeviceSetObserved(DeviceID, Params, logName, out receipt, null);
+
+    private static int DeviceSetObserved(
+        uint DeviceID, byte[] Params, string logName, out AsusAcpiCallReceipt receipt,
+        Func<bool>? currentOperation)
     {
         byte[] args = new byte[4 + Params.Length];
         BitConverter.GetBytes(DeviceID).CopyTo(args, 0);
         Params.CopyTo(args, 4);
 
         // 旧返回值语义保持不变（含句柄无效时的零缓冲解析）；真实情况由 receipt 给出。
-        byte[] status = CallMethodObserved(DEVS, args, logName ?? "DeviceSet", FanForDeviceId(DeviceID), DeviceID, out receipt);
+        byte[] status = CallMethodObserved(DEVS, args, logName ?? "DeviceSet", FanForDeviceId(DeviceID), DeviceID, out receipt, currentOperation);
         return BitConverter.ToInt32(status, 0);
     }
 
@@ -280,8 +295,14 @@ public static class AsusACPI
         return CallMethodObserved(DSTS, args, "DeviceGetBuffer", FanForDeviceId(DeviceID), DeviceID, out receipt);
     }
 
-    public static int SetFanCurveObserved(AsusFan device, byte[] curve, out AsusAcpiCallReceipt receipt)
+    public static int SetFanCurveObserved(AsusFan device, byte[] curve, out AsusAcpiCallReceipt receipt) =>
+        SetFanCurveObserved(device, curve, out receipt, null);
+
+    public static int SetFanCurveObserved(
+        AsusFan device, byte[] curve, out AsusAcpiCallReceipt receipt, Func<bool>? currentOperation)
     {
+        if (currentOperation is not null && !currentOperation())
+            throw new OperationCanceledException("ASUS software curve operation superseded");
         if (curve.Length != 16)
         {
             receipt = new AsusAcpiCallReceipt("SetFanCurve", device, DEVS, 0, 0, 16);
@@ -300,11 +321,11 @@ public static class AsusACPI
         switch (device)
         {
             case AsusFan.GPU:
-                return DeviceSetObserved(DevsGPUFanCurve, curve, "FanGPU", out receipt);
+                return DeviceSetObserved(DevsGPUFanCurve, curve, "FanGPU", out receipt, currentOperation);
             case AsusFan.Mid:
-                return DeviceSetObserved(DevsMidFanCurve, curve, "FanMid", out receipt);
+                return DeviceSetObserved(DevsMidFanCurve, curve, "FanMid", out receipt, currentOperation);
             default:
-                return DeviceSetObserved(DevsCPUFanCurve, curve, "FanCPU", out receipt);
+                return DeviceSetObserved(DevsCPUFanCurve, curve, "FanCPU", out receipt, currentOperation);
         }
     }
 

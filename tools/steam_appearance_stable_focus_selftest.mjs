@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';import fs from 'node:fs';import path fro
 const root=path.resolve(import.meta.dirname,'..'),out=path.resolve(process.argv[2]||'G:/YeManCC-Work/Testing/YMCC/Evidence/SteamThemeReconcile-20261023/stable-focus');fs.mkdirSync(out,{recursive:true});
 const pack=process.env.YMCC_STABLE_FOCUS_PACK||path.join(root,'PowerControl/steam-appearance/themes');
 const read=p=>fs.readFileSync(path.join(pack,p),'utf8');const files=['Round/round-outline.css'];
-const {chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_fixture.cjs')('playwright');
+const {chromium}=createRequire(process.env.YMCC_PLAYWRIGHT_PACKAGE_JSON||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_fixture.cjs')('playwright');
 const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});const cases=[];
 try{
  const page=await browser.newPage({viewport:{width:1280,height:800}});
@@ -22,6 +22,35 @@ try{
  // The real Steam A/B isolated Art Hero's identity filter on the hero IMG.
  // Keep the existing focus checks and cover every compatible gradient choice.
  await page.screenshot({path:path.join(out,'stable-focus.png')});
+ // Steam keeps the previous image after the active one in DOM order. Its exit
+ // animation hides it. Removing all animation must retain that visibility contract.
+ const nativeBackgroundPath=path.join(root,'tools/fixtures/steam-appearance-background-native-20261108.css');
+ const nativeBackground=fs.readFileSync(nativeBackgroundPath,'utf8');
+ const backgroundMeasurements=[];
+ for(const viewport of [{width:1280,height:720},{width:1280,height:800}]){
+  await page.setViewportSize(viewport);
+  for(const direction of ['Right','Left']){
+   const move=direction==='Right'?'_3dydsnWmvqlpzBU8cUO3kf':'_30M_n3XIKv5anMLmKiahOz';
+   await page.setContent('<body class="BasicUI"><main class="gamepadhomerecentgames_RecentGamesBackgroundContainer_QNkOt QNkOtW3xS-yj6LviWHvnd"><div id="images" class="gamepadhomerecentgames_RecentGamesBackgroundImages_30D-8 _30D-80Lg-Luy-KxOumBlaY"></div><div data-ymcc-wallpaper-surface><video id="dynamic"></video></div></main></body>');
+   await page.addStyleTag({content:'body{margin:0}main{height:100vh}img{display:block}'+nativeBackground});
+   await page.addStyleTag({content:read('Art Hero/shared.css')});
+   for(const [active,previous,preload] of [['first',null,'second'],['second','first','third'],['third','second','first'],['second','third','first']]){
+    await page.evaluate(({active,previous,preload,direction,move})=>{
+     const image=(id,mode)=>{const parent=document.createElement('div');parent.className=mode==='preload'?'MYh5NAv2dEuZH1E8bRwKH':'gamepadhomerecentgames_RecentGamesBackground_1SRox _1SRoxsfD-XkekIXfr0ofs3';const img=document.createElement('img');img.dataset.game=id;img.dataset.mode=mode;img.src='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800"><rect width="1280" height="800" fill="'+({first:'#cc3333',second:'#33cc33',third:'#3333cc'}[id])+'"/></svg>');img.className=mode==='preload'?'':('gamepadhomerecentgames_RecentGamesBackgroundImage_3Mp8R _3Mp8R2wnoCl6ko0HAX8IHE gamepadhomerecentgames_Move'+direction+'_'+(direction==='Right'?'3dyds':'30M_n')+' '+move+(mode==='inactive'?' gamepadhomerecentgames_OffScreen_Yk-I2 Yk-I2az42lZgbInNlu06r':''));parent.append(img);return parent;};
+     document.getElementById('images').replaceChildren(image(active,'active'),...(previous?[image(previous,'inactive')]:[]),image(preload,'preload'));
+    },{active,previous,preload,direction,move});
+    await page.locator('#images img').evaluateAll(imgs=>Promise.all(imgs.map(img=>img.decode())));
+    const state=await page.evaluate(()=>{const shown=e=>{for(let n=e;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}return true;};return {visible:[...document.querySelectorAll('#images img')].filter(shown).map(n=>n.dataset.game),layers:[...document.querySelectorAll('#images img')].map(n=>({game:n.dataset.game,mode:n.dataset.mode,opacity:getComputedStyle(n).opacity,animation:getComputedStyle(n).animationName,display:getComputedStyle(n).display})),video:getComputedStyle(document.getElementById('dynamic')).display};});
+    backgroundMeasurements.push({viewport,direction,active,previous,...state});
+    fs.writeFileSync(path.join(out,'background-selection-'+viewport.height+'-'+direction+'-'+active+'-from-'+(previous||'initial')+'.json'),JSON.stringify(backgroundMeasurements.at(-1),null,2),{flag:'wx'});
+    if(previous&&active==='third')await page.screenshot({path:path.join(out,'static-background-'+viewport.height+'-'+direction+'.png')});
+    assert.deepEqual(state.visible,[active],'Only the selected Steam static background may paint: '+JSON.stringify({viewport,direction,active,previous,layers:state.layers}));
+    assert.notEqual(state.video,'none','Static visibility correction must not hide the YMCC video surface');
+   }
+   cases.push(viewport.width+'x'+viewport.height+' '+direction+': first/next/previous static backgrounds retain exactly the selected game; video surface remains');
+  }
+ }
+ fs.writeFileSync(path.join(out,'background-selection.json'),JSON.stringify({measurements:backgroundMeasurements,nativeSource:{path:nativeBackgroundPath,sha256:crypto.createHash('sha256').update(nativeBackground).digest('hex')}},null,2),{flag:'wx'});
  const artDefinition=JSON.parse(read('Art Hero/theme.json'));
  files.push('Art Hero/theme.json');
  const gradientChoices=Object.entries(artDefinition.patches['Gradient Settings'].values);

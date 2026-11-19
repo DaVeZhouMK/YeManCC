@@ -27,7 +27,12 @@ export function lockContext(repo,{env=process.env}={}){
  const sources=SOURCE_INPUTS.map(relative=>({path:relative,sha256:hash(sourceFile(repo,relative)),status:'OK'}));
  need(hash(sourceFile(repo,SPEC.producer))===SPEC.producerSha256,'ORIGINAL_PRODUCER_NEEDS_REVIEW');
  const raw=fs.readFileSync(sourceFile(repo,SPEC.producer),'utf8');
- need(JSON.stringify([...raw.matchAll(/await check\('([^']+)'/g)].map(m=>m[1]))===JSON.stringify(SPEC.caseNames),'ORIGINAL_CASE_ORDER_CHANGED');
+ // journal-config is a separate explicit selection in the same producer.
+ // Its checks are not executed by this original default-group descriptor.
+ const begin='if(!selected){',end='\nif(selected){';
+ need(raw.split(begin).length===2&&raw.split(end).length===2,'ORIGINAL_SELECTION_BOUNDARIES_CHANGED');
+ const selected=raw.slice(raw.indexOf(begin),raw.indexOf(end));
+ need(JSON.stringify([...selected.matchAll(/await check\('([^']+)'/g)].map(m=>m[1]))===JSON.stringify(SPEC.caseNames),'ORIGINAL_CASE_ORDER_CHANGED');
  const manifestFile=path.join(repo,'.ymcc-source-snapshot/manifest.json');let sourceSelection={mode:'explicit-selected-repository-or-owned-view',repoRoot:fs.realpathSync(repo),sourceApproval:false};
  if(fs.existsSync(manifestFile)){
   const pin=authority.tools.find(row=>key(row.path)===key(manifestFile));need(pin&&hash(manifestFile)===pin.sha256,'EXPLICIT_SNAPSHOT_MANIFEST_IDENTITY_REQUIRED');

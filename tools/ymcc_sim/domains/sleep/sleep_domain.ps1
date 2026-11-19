@@ -37,7 +37,7 @@
 #>
 [CmdletBinding()]
 param(
-  [ValidateSet('forms', 'quick', 'switch', 'live', 'selfcheck', 'retrybudget', 'sleeptypes', 'typeseries', 'rapidwake')][string]$Mode = 'forms',
+  [ValidateSet('forms', 'quick', 'switch', 'live', 'selfcheck', 'retrybudget', 'sleeptypes', 'typeseries', 'rapidwake', 'command-pending')][string]$Mode = 'forms',
   [ValidateSet('sleep', 'wake', 'status', 'stop')][string]$Action = 'status',
   [int]$Port = 0,
   [switch]$StartHost,
@@ -68,11 +68,36 @@ param(
   [switch]$Reverse,
   [ValidateSet('all','software')][string]$TypingScope='all',
   [string]$S3EvidencePath='',
-  [string]$S3EvidenceSha256=''
+  [string]$S3EvidenceSha256='',
+  [string]$CommandPendingCase='',
+  [string]$CommandPendingReuse='',
+  [switch]$PrepareOnly
 )
 
 $ErrorActionPreference = 'Stop'
 if($Mode -ne 'sleeptypes' -and ($PSBoundParameters.ContainsKey('TypingScope') -or $PSBoundParameters.ContainsKey('S3EvidencePath') -or $PSBoundParameters.ContainsKey('S3EvidenceSha256'))){throw 'TYPING_INPUTS_REQUIRE_SLEEPTYPES_MODE'}
+# Explicit software composition stays before the legacy simulator/Host setup.
+if($Mode -ne 'command-pending' -and ($PSBoundParameters.ContainsKey('CommandPendingCase') -or $PSBoundParameters.ContainsKey('CommandPendingReuse') -or $PSBoundParameters.ContainsKey('PrepareOnly'))){throw 'COMMAND_PENDING_INPUTS_REQUIRE_COMMAND_PENDING_MODE'}
+if($Mode -eq 'command-pending'){
+  $commandAllowed=@('Mode','EvidenceDir','CommandPendingCase','CommandPendingReuse','PrepareOnly','Verbose','Debug','ErrorAction','WarningAction','InformationAction','ProgressAction','ErrorVariable','WarningVariable','InformationVariable','OutVariable','OutBuffer','PipelineVariable')
+  foreach($commandBound in $PSBoundParameters.Keys){if($commandBound -notin $commandAllowed){throw ('COMMAND_PENDING_UNSUPPORTED_INPUT_'+$commandBound)}}
+  if([string]::IsNullOrWhiteSpace($CommandPendingCase)){throw 'COMMAND_PENDING_EXPLICIT_CASE_REQUIRED'}
+  if([string]::IsNullOrWhiteSpace($EvidenceDir)){throw 'COMMAND_PENDING_EXPLICIT_EVIDENCE_REQUIRED'}
+  if($PSBoundParameters.ContainsKey('CommandPendingReuse') -and [string]::IsNullOrWhiteSpace($CommandPendingReuse)){throw 'COMMAND_PENDING_REUSE_MUST_NOT_BE_EMPTY'}
+  if($PrepareOnly -and -not [string]::IsNullOrWhiteSpace($CommandPendingReuse)){throw 'COMMAND_PENDING_REUSE_REQUIRES_EXECUTION'}
+  $commandFixtureRoot=Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+  $commandRepoRoot=Split-Path -Parent (Split-Path -Parent $commandFixtureRoot)
+  $commandToolchain=Get-Content -LiteralPath (Join-Path $commandFixtureRoot 'global\sleep-native-recovery-consumer\toolchain-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $commandPython=[string]$commandToolchain.pythonExecutable
+  if(-not [IO.Path]::IsPathRooted($commandPython) -or -not (Test-Path -LiteralPath $commandPython -PathType Leaf)){throw 'COMMAND_PENDING_CONFIGURED_PYTHON_MISSING'}
+  $commandEntry=Join-Path $commandRepoRoot 'tools\steam_original_recovery_dual_route_selftest.py'
+  $commandOut=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EvidenceDir)
+  $commandArgs=@($commandEntry,'--repo',$commandRepoRoot,'--out',$commandOut,'--scope','startup-pair','--command-pending-only','--command-pending-case',$CommandPendingCase)
+  if($PrepareOnly){$commandArgs+='--prepare-only'}
+  if(-not [string]::IsNullOrWhiteSpace($CommandPendingReuse)){$commandArgs+=@('--command-pending-reuse',$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CommandPendingReuse))}
+  & $commandPython @commandArgs
+  exit $LASTEXITCODE
+}
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path

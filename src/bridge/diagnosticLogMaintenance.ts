@@ -5,14 +5,15 @@ export const CURRENT_DIAGNOSTIC_LOG_FILES = [
   'app.log', 'native-lifecycle.log', 'native-detail.log',
   'fan-api.log', 'fan-lifecycle.log', 'hardware-coordinator.log', 'sleep-facts.log',
   'tdp.log', 'tdp-detail.log', 'frontend-errors.log', 'frontend-trace.log',
-  'frontend-trace-detail.log', 'webview-failures.log',
+  'frontend-trace-detail.log', 'webview-failures.log', 'gyro-motion-samples.log',
 ] as const;
-export const DIAGNOSTIC_LOG_DELETE_SCOPE = '仅本进程的应用、原生事件/明细、风扇/协调、陀螺仪/虚拟手柄/焦点、睡眠事实、TDP和界面当前日志（16项）';
+const LEGACY_DIAGNOSTIC_LOG_FILES = CURRENT_DIAGNOSTIC_LOG_FILES.slice(0, -1);
+export const DIAGNOSTIC_LOG_DELETE_SCOPE = '仅本进程的应用、原生事件/明细、风扇/协调、陀螺仪/虚拟手柄/焦点、睡眠事实、TDP和界面当前日志';
 export const DIAGNOSTIC_LOG_PRESERVED_SCOPE = 'InputHost/FanHost等外部宿主、监控明细、独立输入录制、Steam/侧边栏及其他独立日志保留；历史轮转、导出证据和配置不删除';
 
 export interface DiagnosticLogGates { gyro: boolean; virtual: boolean }
 export interface DiagnosticLogMaintenanceReceipt {
-  protocol: 'ymcc.current-diagnostic-logs.v1';
+  protocol: 'ymcc.current-diagnostic-logs.v1' | 'ymcc.current-diagnostic-logs.v2';
   ok: boolean;
   busy: boolean;
   captured: boolean;
@@ -47,19 +48,23 @@ function isGates(value: unknown): value is DiagnosticLogGates {
 function sameGates(a: DiagnosticLogGates, b: DiagnosticLogGates): boolean {
   return a.gyro === b.gyro && a.virtual === b.virtual;
 }
+function receiptFiles(protocol: DiagnosticLogMaintenanceReceipt['protocol']): readonly string[] {
+  return protocol === 'ymcc.current-diagnostic-logs.v1' ? LEGACY_DIAGNOSTIC_LOG_FILES : CURRENT_DIAGNOSTIC_LOG_FILES;
+}
 function readReceipt(value: unknown): DiagnosticLogMaintenanceReceipt {
   const boolKeys = ['ok', 'busy', 'captured', 'pauseAcknowledged', 'deleteAttempted', 'restored'];
   const textKeys = ['pauseError', 'deleteError', 'restoreError'];
-  if (!isObject(value) || value.protocol !== 'ymcc.current-diagnostic-logs.v1' ||
+  if (!isObject(value) || (value.protocol !== 'ymcc.current-diagnostic-logs.v1' && value.protocol !== 'ymcc.current-diagnostic-logs.v2') ||
       boolKeys.some(key => typeof value[key] !== 'boolean') ||
       textKeys.some(key => typeof value[key] !== 'string') ||
       !isGates(value.originalGates) || !isGates(value.restoredGates) || !Array.isArray(value.files)) {
     throw new Error('原生删除回执不完整，无法确认删除及恢复结果');
   }
   const receipt = value as unknown as DiagnosticLogMaintenanceReceipt;
+  const expected = receiptFiles(receipt.protocol);
   const names = new Set<string>();
   for (const file of receipt.files) {
-    if (!isObject(file) || !(CURRENT_DIAGNOSTIC_LOG_FILES as readonly unknown[]).includes(file.name) ||
+    if (!isObject(file) || !expected.includes(file.name) ||
         names.has(file.name) || !['deleted', 'missing', 'error'].includes(file.state) || typeof file.error !== 'string') {
       throw new Error('原生删除回执的文件范围无法确认');
     }
@@ -73,7 +78,7 @@ function readReceipt(value: unknown): DiagnosticLogMaintenanceReceipt {
     throw new Error('原生暂停、删除、恢复顺序回执不一致');
   }
   const success = receipt.captured && receipt.pauseAcknowledged && receipt.deleteAttempted && receipt.restored &&
-    names.size === CURRENT_DIAGNOSTIC_LOG_FILES.length && receipt.files.every(file => file.state !== 'error') &&
+    names.size === expected.length && receipt.files.every(file => file.state !== 'error') &&
     !receipt.pauseError && !receipt.deleteError && !receipt.restoreError && !receipt.busy;
   if (receipt.ok !== success) throw new Error('原生删除结果与逐项回执不一致');
   return receipt;
@@ -83,7 +88,7 @@ function describeReceipt(receipt: DiagnosticLogMaintenanceReceipt): DiagnosticLo
   if (receipt.busy) return { ok: false, status: '', error: '另一项日志删除仍在处理中，请稍后重试', changed: false, receipt };
   const errors: string[] = [];
   if (!receipt.pauseAcknowledged) errors.push('暂停确认失败，未删除日志：' + (receipt.pauseError || '未取得停止写入确认'));
-  else if (!receipt.deleteAttempted || receipt.deleteError || receipt.files.length !== CURRENT_DIAGNOSTIC_LOG_FILES.length) {
+  else if (!receipt.deleteAttempted || receipt.deleteError || receipt.files.length !== receiptFiles(receipt.protocol).length) {
     errors.push('删除失败：' + (receipt.deleteError || '当前文件删除未完成'));
   }
   if (receipt.captured && !receipt.restored) errors.push('恢复原日志开关失败：' + (receipt.restoreError || '未取得恢复确认'));

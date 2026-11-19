@@ -9,7 +9,7 @@ import { focusGamepadElement, getGamepadPopupPlacement, getGamepadViewportSafeAr
 import { openCheatEngine, openGameTrainerManager } from '@/bridge/gameTrainer';
 import { getUiSetting, loadUiSettings, setUiSettings } from '@/bridge/uiSettings';
 
-const props = defineProps<{ gameName: string; busy: boolean; hint: string; hasGame: boolean; game?: DetectedGame | null }>();
+const props = defineProps<{ gameName: string; busy: boolean; hint: string; hasGame: boolean; game?: DetectedGame | null; message?: string; error?: string }>();
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'launch'): void;
@@ -31,21 +31,39 @@ let anchor: HTMLElement | null = null;
 function position(): void {
   const menu = panel.value, list = items.value;
   if (closed || scanTarget.value || !menu?.offsetWidth || !list) return;
-  // Measure the complete list, not the height already clipped by a prior placement.
-  const css = getComputedStyle(menu), pixels = (value: string) => Number.parseFloat(value) || 0;
+  // This body-teleported menu must use the shell's visual scale, like its opener.
+  const owner = anchor?.closest<HTMLElement>('.game-recognition-popover')
+    || document.querySelector<HTMLElement>('.app-content');
+  const ownerRect = owner?.getBoundingClientRect();
+  const pixels = (value: string) => Number.parseFloat(value) || 0;
+  const scale = Math.max(.5, Math.min(4, ownerRect && owner?.offsetWidth
+    ? ownerRect.width / owner.offsetWidth
+    : pixels(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) || 1));
+  const ownerCss = owner ? getComputedStyle(owner) : null;
+  const anchorCss = anchor ? getComputedStyle(anchor) : null;
+  const appearance = {
+    'font-size': `${14 * scale}px`,
+    'border-radius': `${pixels(ownerCss?.borderTopLeftRadius || '12px') * scale}px`,
+    '--trainer-action-radius': `${pixels(anchorCss?.borderTopLeftRadius || '9px') * scale}px`,
+  };
+  const width = Math.min(340 * scale, window.innerWidth - 16);
+  // Apply visual metrics and width before measuring wrapping and the complete list.
+  for (const [key, value] of Object.entries(appearance)) menu.style.setProperty(key, value);
+  menu.style.width = width + 'px';
+  const css = getComputedStyle(menu);
   const desiredHeight = Math.ceil(list.scrollHeight + (menu.querySelector<HTMLElement>('.trainer-menu-heading')?.offsetHeight || 0)
     + (menu.querySelector<HTMLElement>('.trainer-menu-cancel')?.offsetHeight || 0) + pixels(css.rowGap) * 2
     + pixels(css.paddingTop) + pixels(css.paddingBottom) + pixels(css.borderTopWidth) + pixels(css.borderBottomWidth));
   const rect = anchor?.isConnected ? anchor.getBoundingClientRect() : null;
-  const placement = getGamepadPopupPlacement(rect, Math.min(340, window.innerWidth - 16), desiredHeight, 8);
+  const placement = getGamepadPopupPlacement(rect, width, desiredHeight, 8 * scale);
   const safe = getGamepadViewportSafeArea(), height = Math.max(1, Math.min(desiredHeight, safe.bottom - safe.top));
   const left = rect ? Math.max(safe.left, Math.min(rect.left, safe.right - Number.parseFloat(placement.style.width))) + 'px' : placement.style.left;
   if (Number.parseFloat(placement.style.maxHeight) + 1 < height) {
     // Long lists may overlap their opener and use the full safe viewport. Keep
     // left alignment with the opener, then move upward only as far as needed.
-    const top = Math.max(safe.top, Math.min(rect ? rect.bottom + 8 : safe.top, safe.bottom - height));
-    style.value = { position: 'fixed', left, width: placement.style.width, top: top + 'px', maxHeight: height + 'px' };
-  } else style.value = { ...placement.style, left };
+    const top = Math.max(safe.top, Math.min(rect ? rect.bottom + 8 * scale : safe.top, safe.bottom - height));
+    style.value = { ...appearance, position: 'fixed', left, width: placement.style.width, top: top + 'px', maxHeight: height + 'px' };
+  } else style.value = { ...appearance, ...placement.style, left };
 }
 function anchorScrolled(event: Event): void {
   const target = event.target;
@@ -136,7 +154,7 @@ onBeforeUnmount(() => {
         <div class="trainer-menu-heading"><AppIcon name="gamepad" /><strong>游戏修改器</strong></div>
         <div ref="items" class="trainer-menu-items">
         <button type="button" class="trainer-menu-action" data-gp-row="0" data-gp-col="0" :disabled="!hasGame" @click="emit('launch')">
-          <AppIcon :name="busy ? 'close' : 'play'" /><span><strong>{{ launchLabel }}</strong><small>{{ hint }}</small></span>
+          <AppIcon :name="busy ? 'close' : 'play'" /><span><strong>{{ launchLabel }}</strong><small>{{ hint }}</small><small v-if="error || message" class="trainer-menu-result" :class="{ 'trainer-menu-error': error }" role="status" aria-live="polite">{{ error || message }}</small></span>
         </button>
         <button type="button" class="trainer-menu-action" data-gp-row="1" data-gp-col="0" :disabled="opening" @click="openManager"><AppIcon name="folder" /><span><strong>打开修改器管理器</strong><small>Game Cheats Manager</small></span></button>
         <button v-if="ceScanAvailable" type="button" class="trainer-menu-action" data-gp-row="2" data-gp-col="0" data-trainer-value-scan :disabled="!game || opening" @click="openScanner"><AppIcon name="search" /><span><strong>简单改数值</strong><small>填数字 · 变化一次 · 一起修改</small></span></button>
@@ -152,17 +170,20 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .trainer-menu-shade { position: fixed; inset: 0; z-index: 30000; background: rgba(0,0,0,.18); }
-.trainer-menu { box-sizing: border-box; display: flex; flex-direction: column; gap: 7px; padding: 12px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: hidden; border: 1px solid rgba(255,255,255,.22); border-radius: 14px; background: var(--bg-solid); color: var(--text); box-shadow: 0 16px 48px rgba(0,0,0,.38); }
-.trainer-menu-items { display: flex; flex-direction: column; gap: 7px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scroll-padding: 4px; }
-.trainer-menu-heading { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; padding: 3px 2px 8px; font-size: 13px; }
-.trainer-menu :deep(svg) { width: 17px; height: 17px; flex: 0 0 auto; color: var(--accent); }
-.trainer-menu button { font: inherit; color: inherit; cursor: pointer; border: 1px solid rgba(255,255,255,.22); border-radius: 9px; background: var(--bg-input); min-height: 44px; flex: 0 0 auto; }
-.trainer-menu button:focus-visible, .trainer-menu button.gp-focus, .trainer-menu button:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+.trainer-menu { box-sizing: border-box; display: flex; flex-direction: column; gap: .571429em; padding: .857143em; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: hidden; border: .071429em solid var(--console-line, var(--border)); border-radius: .857143em; background: var(--bg-solid); color: var(--text); font-size: 14px; line-height: 1.4; box-shadow: 0 16px 44px #0006; }
+.trainer-menu-items { display: flex; flex-direction: column; gap: .571429em; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scroll-padding: .285714em; }
+.trainer-menu-heading { flex: 0 0 auto; display: flex; align-items: center; gap: .5em; padding: .214286em .142857em .571429em; font-size: 1em; }
+.trainer-menu-heading strong { font-weight: 600; }
+.trainer-menu :deep(svg) { width: 1.214286em; height: 1.214286em; flex: 0 0 auto; color: var(--accent); }
+.trainer-menu button { font: inherit; color: inherit; cursor: pointer; border: .071429em solid var(--console-line, var(--border)); border-radius: var(--trainer-action-radius, .642857em); background: var(--console-surface-alt, var(--bg-input)); min-height: 4.214286em; flex: 0 0 auto; }
+.trainer-menu button:focus-visible, .trainer-menu button.gp-focus, .trainer-menu button:hover { outline: .142857em solid var(--accent); outline-offset: -.142857em; }
 .trainer-menu button:disabled { opacity: .5; cursor: default; }
-.trainer-menu-action { display: flex; align-items: center; gap: 8px; padding: 9px; text-align: left; }
-.trainer-menu-action span { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
-.trainer-menu-action strong { font-size: 12px; font-weight: 650; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.trainer-menu-action small { font-size: 10px; color: var(--text-dim); }
-.trainer-menu .trainer-menu-cancel { display: flex; align-items: center; justify-content: center; gap: 3px; min-height: 30px; font-size: 10px; border-color: rgba(255,255,255,.08); border-radius: 7px; }
+.trainer-menu-action { display: flex; align-items: center; gap: .571429em; padding: .714286em; text-align: left; }
+.trainer-menu-action span { display: grid; gap: .214286em; min-width: 0; overflow-wrap: anywhere; }
+.trainer-menu-action strong { font-size: .928571em; line-height: 1.4; font-weight: 600; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.trainer-menu-action small { font-size: .857143em; line-height: 1.4; color: var(--text-dim); }
+.trainer-menu-action .trainer-menu-result { white-space: pre-line; }
+.trainer-menu-action .trainer-menu-error { color: var(--danger); }
+.trainer-menu .trainer-menu-cancel { display: flex; align-items: center; justify-content: center; gap: .307692em; min-height: 2.615385em; padding: .538462em .692308em; font-size: .928571em; line-height: 1.35; }
 .trainer-key-b { color: var(--danger); font-weight: 800; }
 </style>

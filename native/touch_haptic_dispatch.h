@@ -46,7 +46,9 @@ struct Receipt {
 // Serialized by the device writer; fixed POD and no clock/allocation required.
 struct FailureLogGate {
     SourceToken key{};Reason reason=Reason::None;std::uint32_t error=0;bool active=false;
-    bool publish(bool touch,bool ok,const SourceToken& token,Reason why,std::uint32_t code)noexcept {
+    std::uint64_t deliveryEpoch=0;
+    bool publish(bool touch,bool ok,const SourceToken& token,Reason why,std::uint32_t code,std::uint64_t epoch=0)noexcept {
+        if(deliveryEpoch!=epoch){active=false;deliveryEpoch=epoch;}
         if(ok)active=false;if(!touch)return true;if(ok)return false;
         if(active&&key==token&&reason==why&&error==code)return false;
         key=token;reason=why;error=code;active=true;return true;
@@ -128,23 +130,31 @@ private:
 inline bool logPulseImmediately(bool touch,bool ok) noexcept {return !touch||!ok;}
 // Owned by the existing serial worker. Successful short pulses are counted,
 // not individually serialized/flushed to disk. One summary at a contact end.
+enum class FailureAttempt { Unknown,NotAttempted,Attempted };
 struct Summary {
     std::uint64_t sent=0,dropped=0,failed=0,xinput=0,msi=0,minimal=0,medium=0,strong=0;
     std::uint64_t outputBaselineAttempts=0,outputBaselineAccepted=0;
+    std::uint64_t attemptedFailures=0,notAttemptedFailures=0,unknownAttemptFailures=0;
     std::array<std::uint64_t,static_cast<std::size_t>(Reason::Count)> reasons{};
     std::array<std::uint32_t,static_cast<std::size_t>(Reason::Count)> errors{};
-    void failure(Reason reason,bool drop=false)noexcept {
-        if(drop)++dropped;else ++failed;
+    void failure(Reason reason,bool drop=false,FailureAttempt attempt=FailureAttempt::Unknown)noexcept {
+        if(drop)++dropped;
+        else {
+            ++failed;
+            if(attempt==FailureAttempt::Attempted)++attemptedFailures;
+            else if(attempt==FailureAttempt::NotAttempted)++notAttemptedFailures;
+            else ++unknownAttemptFailures;
+        }
         const auto index=static_cast<std::size_t>(reason);if(index<reasons.size())++reasons[index];
     }
     void record(const Receipt& r)noexcept {
         outputBaselineAttempts+=r.outputBaselineAttempted;outputBaselineAccepted+=r.outputBaselineAccepted;
-        if(!r.ok){failure(r.reason);const auto index=static_cast<std::size_t>(r.reason);if(index<errors.size())errors[index]=r.error;return;}
+        if(!r.ok){failure(r.reason,false,r.attempted?FailureAttempt::Attempted:FailureAttempt::NotAttempted);const auto index=static_cast<std::size_t>(r.reason);if(index<errors.size())errors[index]=r.error;return;}
         record(true,r.backend==Backend::Msi,r.strength);
     }
     bool empty()const noexcept{return !(sent||dropped||failed);}
     void record(bool ok,bool msiBackend,int strength=kStrengthPercent) noexcept {
-        if(!ok){++failed;return;}++sent;if(msiBackend)++msi;else ++xinput;
+        if(!ok){++failed;++unknownAttemptFailures;return;}++sent;if(msiBackend)++msi;else ++xinput;
         if(strength==kStrengthPercent)++minimal;
         else if(strength==kMediumStrengthPercent)++medium;
         else if(strength==kStrongStrengthPercent)++strong;

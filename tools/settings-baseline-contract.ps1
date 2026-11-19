@@ -35,7 +35,12 @@ function Test-YmccMutableSettingsPath([string]$RelativePath, [object]$Contract) 
   foreach ($owned in $paths) {
     if ($relative -ieq $owned -or $relative.StartsWith($owned + '/', [StringComparison]::OrdinalIgnoreCase) -or $relative.StartsWith($owned + '.bak', [StringComparison]::OrdinalIgnoreCase) -or
         $relative.StartsWith($owned + '.corrupt-', [StringComparison]::OrdinalIgnoreCase) -or
-        $relative.StartsWith($owned + '.before-user-reset-', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        $relative.StartsWith($owned + '.before-user-reset-', [StringComparison]::OrdinalIgnoreCase) -or
+        $relative.StartsWith($owned + '.before-upgrade-', [StringComparison]::OrdinalIgnoreCase) -or
+        $relative.StartsWith($owned + '.before-auto-recovery-', [StringComparison]::OrdinalIgnoreCase) -or
+        $relative.StartsWith($owned + '.before-bounded-recovery-', [StringComparison]::OrdinalIgnoreCase) -or
+        $relative.StartsWith($owned + '.before-backup-replacement-', [StringComparison]::OrdinalIgnoreCase) -or
+        $relative.StartsWith($owned + '.ymcc-retired-', [StringComparison]::OrdinalIgnoreCase)) { return $true }
   }
   return $false
 }
@@ -60,5 +65,6 @@ function Assert-YmccSettingsBaseline([string]$ProjectRoot, [string]$StagingPower
   }
   return [ordered]@{ id=$contract.id; revision=$contract.revision; documentSchemaVersion=$contract.documentSchemaVersion;
     manifestPath='settings-baseline.json'; manifestSha256=$manifestHash; defaultsPath=$contract.defaultsFile;
-    defaultsSha256=$defaultsHash; userData='preserve'; legacyImport='once-before-durable-baseline' }
+    defaultsSha256=$defaultsHash; userData='preserve'; legacyImport='once-before-durable-baseline';
+    conflictingUserData='replace-with-safe-defaults-at-admitted-startup'; recoveryArchive='best-effort' }
 }

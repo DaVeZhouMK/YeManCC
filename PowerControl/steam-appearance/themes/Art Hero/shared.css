@@ -137,6 +137,12 @@
     will-change: auto!important;
     transform: none!important;
 }
+/* Steam renders the previous image after the selected one. Its OffScreen
+   exit animation normally ends at opacity:0. With animation disabled above,
+   preserve that final state or the previous game covers the selected game. */
+.gamepadhomerecentgames_RecentGamesBackgroundImage_3Mp8R.gamepadhomerecentgames_OffScreen_Yk-I2 {
+    opacity: 0!important;
+}
 .gamepadhomerecentgames_RecentGamesBackground_1SRox,
 .gamepadhomerecentgames_RecentGamesBackgroundContainer_QNkOt,
 .gamepadhomerecentgames_RecentGamesBackgroundImages_30D-8 {
@@ -174,4 +180,4 @@
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-74b82ed7acf53846: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-509e0400e6c83461: 1; }
+:root { --ymcc-content-0ec7833c31fa61df: 1; }

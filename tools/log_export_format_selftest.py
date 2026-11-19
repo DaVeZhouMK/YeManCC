@@ -135,13 +135,283 @@ int wmain(int argc,wchar_t** argv){
  check("adaptation-log-resident-and-replay-guide",std::string(aiEvidenceLane("model-adaptation.log"))=="resident"&&guide["modelAdaptation"]["file"]=="model-adaptation.log"&&guide["modelAdaptation"].contains("replay"));
  check("cost-export-inventory-guide-points-to-actual-export-receipt",guide["retention"]["costArchiveExportInventory"].get<std::string>().find("log-export-availability.json costArchiveDiscovery.exportSelection")==0);
  check("ai-guide-warns-about-untrusted-input-and-inspection-scope",guide.contains("instructionTrust")&&guide.contains("inspection")&&guide.contains("clockRules")&&guide.contains("identityRules")&&guide.contains("sleepFacts"));
+ check("ai-guide-common-steam-power-evidence-stages-and-coverage",guide.contains("commonSteamAndPower")&&guide["commonSteamAndPower"].contains("consumerGate")&&guide["commonSteamAndPower"].contains("cancellation")&&guide["commonSteamAndPower"].contains("steamFailure")&&guide["commonSteamAndPower"].contains("coverage"));
  unsigned failures=0;for(const auto& item:checks)if(!item["pass"].get<bool>())++failures;
  std::cout<<json({{"checks",checks},{"failures",failures}}).dump(2)<<std::endl;return failures?3:0;
 }
 '''
 
+OPAQUE_TAIL_TESTS = r'''static bool allocationMeasure=false;static size_t largestAllocation=0;
+void* operator new(std::size_t n){if(allocationMeasure)largestAllocation=(std::max)(largestAllocation,n);if(auto* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
+void* operator new[](std::size_t n){return ::operator new(n);}void operator delete(void* p)noexcept{std::free(p);}void operator delete[](void* p)noexcept{std::free(p);}
+void operator delete(void* p,std::size_t)noexcept{std::free(p);}void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
+struct InputTrace {unsigned long long readCalls=0,getCalls=0,requestedBytes=0,returnedBytes=0;};
+static InputTrace inputTrace;
+static bool failRead=false,growOnSeek=false,shrinkOnSeek=false;
+struct CountedInput:std::ifstream {
+    fs::path path;
+    CountedInput(const fs::path& value,std::ios::openmode mode):std::ifstream(value,mode),path(value){}
+    void mutate(){
+        if(growOnSeek){growOnSeek=false;std::ofstream growthWriter(path,std::ios::binary|std::ios::app);growthWriter<<'\n';}
+        if(shrinkOnSeek){shrinkOnSeek=false;fs::resize_file(path,0);}
+    }
+    CountedInput& seekg(pos_type position){mutate();std::ifstream::seekg(position);return *this;}
+    CountedInput& seekg(off_type offset,std::ios_base::seekdir direction){std::ifstream::seekg(offset,direction);return *this;}
+    CountedInput& read(char* data,std::streamsize count){++inputTrace.readCalls;inputTrace.requestedBytes+=static_cast<unsigned long long>(count);if(failRead)setstate(std::ios::badbit);else std::ifstream::read(data,count);inputTrace.returnedBytes+=static_cast<unsigned long long>(gcount());return *this;}
+    CountedInput& get(char& value){++inputTrace.getCalls;++inputTrace.requestedBytes;if(failRead)setstate(std::ios::badbit);else std::ifstream::get(value);inputTrace.returnedBytes+=static_cast<unsigned long long>(gcount());return *this;}
+};
+// ACTUAL_BEFORE_INSPECTOR
+// ACTUAL_CURRENT_INSPECTOR
+static void seedOpaque(const fs::path& path,unsigned long long size,char last){
+    fs::create_directories(path.parent_path());std::ofstream out(path,std::ios::binary|std::ios::trunc);const std::string block(8192,'X');
+    unsigned long long left=size;while(left){const auto n=(std::min)(left,static_cast<unsigned long long>(block.size()));out.write(block.data(),static_cast<std::streamsize>(n));left-=n;}
+    if(size){out.seekp(static_cast<std::streamoff>(size-1));out.put(last);}out.close();if(!out)throw std::runtime_error("own seed failed");
+}
+static json measuredInspect(bool before,const fs::path& path,const std::string& entry,InputTrace& trace,size_t& peak){
+    inputTrace={};largestAllocation=0;allocationMeasure=true;
+    auto value=before?beforeStagedFileEvidence(path,entry):currentStagedFileEvidence(path,entry);
+    allocationMeasure=false;trace=inputTrace;peak=largestAllocation;return value;
+}
+int wmain(int argc,wchar_t** argv){try{
+    if(argc!=2)return 2;const fs::path root(argv[1]);if(fs::exists(root))return 3;fs::create_directories(root);
+    const auto warm=root/L"hash-warmup.txt";seedOpaque(warm,1,'X');DWORD cold=0,warm1=0,warm2=0,handlesAfter=0;
+    GetProcessHandleCount(GetCurrentProcess(),&cold);const auto hash1=sha256File(warm.wstring());GetProcessHandleCount(GetCurrentProcess(),&warm1);const auto hash2=sha256File(warm.wstring());GetProcessHandleCount(GetCurrentProcess(),&warm2);
+    if(hash1.size()!=64||hash1!=hash2||warm1!=warm2)throw std::runtime_error("own hash warmup unstable");
+    json measurements=json::array();bool opaque=true,allocationBound=true,metadata=true;
+    const unsigned long long sizes[]={0,1,8191,8ULL*1024*1024-1,8ULL*1024*1024,8ULL*1024*1024+1,64ULL*1024*1024};
+    for(const auto size:sizes){for(const char last:{'X','\n'}){
+        const auto path=root/(L"opaque-"+std::to_wstring(size)+(last=='\n'?L"-lf.bin":L"-x.bin"));seedOpaque(path,size,last);
+        InputTrace oldTrace,newTrace;size_t oldPeak=0,newPeak=0;
+        const auto old=measuredInspect(true,path,"snapshot.json",oldTrace,oldPeak);const auto now=measuredInspect(false,path,"snapshot.json",newTrace,newPeak);
+        opaque=opaque&&oldTrace.requestedBytes==(std::min)(size,8ULL*1024*1024)&&newTrace.requestedBytes==(size?1ULL:0ULL)&&newTrace.returnedBytes==newTrace.requestedBytes;
+        metadata=metadata&&now["bytes"]==size&&now["endsWithNewline"]==(size==0||last=='\n')&&now["format"]=="opaque-file"&&!now.contains("invalidJsonRows")&&now["earlierBytesNotInspected"]==(size?size-1:0)&&now["inspectionScope"]==(size?"final-byte-only":"empty-file");
+        allocationBound=allocationBound&&newPeak<65536&&(size<8ULL*1024*1024||oldPeak>=8ULL*1024*1024);
+        measurements.push_back({{"bytes",size},{"lastLf",last=='\n'},{"oldLogicalReadBytes",oldTrace.requestedBytes},{"newLogicalReadBytes",newTrace.requestedBytes},{"oldLargestCppAllocation",oldPeak},{"newLargestCppAllocation",newPeak}});
+    }}
+    check("opaque0-through64MiB-inspection-requests-only-final-byte",opaque);
+    check("opaque-largest-observed-Cpp-allocation-no-longer-scales-to8MiB",allocationBound);
+    check("opaque-scope-and-uninspected-byte-count-match-smaller-inspection",metadata);
+    const auto normal=root/L"native-lifecycle.log";const std::vector<std::string> shapes={"","{}\n","{\"time\":\"a\"}\n{\"time\":\"b\"}","{\"x\":",std::string(70000,'X'),"{}\r\n",std::string("\xff\0",2)};
+    bool jsonl=true;for(const auto& shape:shapes){std::ofstream out(normal,std::ios::binary|std::ios::trunc);out.write(shape.data(),static_cast<std::streamsize>(shape.size()));out.close();InputTrace a,b;size_t x=0,y=0;const auto old=measuredInspect(true,normal,"native-lifecycle.log",a,x);const auto now=measuredInspect(false,normal,"native-lifecycle.log",b,y);jsonl=jsonl&&old==now&&a.requestedBytes==b.requestedBytes;}
+    seedOpaque(normal,8ULL*1024*1024+100,'\n');{std::ofstream out(normal,std::ios::binary|std::ios::app);out<<"{\"time\":\"retained\"}\n{";}
+    InputTrace a,b;size_t x=0,y=0;const auto oldLarge=measuredInspect(true,normal,"native-lifecycle.log",a,x);const auto newLarge=measuredInspect(false,normal,"native-lifecycle.log",b,y);
+    check("all-original-JSONL-small-and-tail-boundary-results-remain-exact",jsonl&&oldLarge==newLarge&&a.requestedBytes==b.requestedBytes&&newLarge["partialOrInvalidTrailingRecord"]==true);
+    const auto changing=root/L"changing.bin";bool growth=true;for(const bool before:{true,false}){seedOpaque(changing,1,'X');growOnSeek=true;InputTrace t;size_t peak=0;const auto value=measuredInspect(before,changing,"snapshot.json",t,peak);growth=growth&&fs::file_size(changing)==2&&value["bytes"]==1&&value["endsWithNewline"]==false;}
+    check("growth-after-size-query-still-reads-original-last-byte-position",growth);
+    bool shrink=true;for(const bool before:{true,false}){seedOpaque(changing,1,'X');shrinkOnSeek=true;InputTrace t;size_t peak=0;const auto value=measuredInspect(before,changing,"snapshot.json",t,peak);shrink=shrink&&value["status"]=="staged-read-error"&&!value.contains("endsWithNewline");}
+    check("shrink-before-read-is-error-and-never-fabricates-empty-or-LF",shrink);
+    seedOpaque(changing,9,'\n');failRead=true;const auto failed=currentStagedFileEvidence(changing,"unknown.bin");failRead=false;
+    check("returned-read-failure-cannot-become-healthy-opaque-metadata",failed["status"]=="staged-read-error"&&!failed.contains("endsWithNewline"));
+    HANDLE blocker=CreateFileW(changing.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    const auto refused=ymcc::logexport::stagedFileEvidence(changing,"unknown.bin");if(blocker!=INVALID_HANDLE_VALUE)CloseHandle(blocker);
+    check("actual-sharing-refusal-remains-original-staged-read-error",blocker!=INVALID_HANDLE_VALUE&&refused["status"]=="staged-read-error");
+    const auto doc=root/L"package"/L"payload.bin",steam=root/L"package"/L"steam"/L"logs"/L"text.txt";seedOpaque(doc,8ULL*1024*1024+1,'\n');seedOpaque(steam,7,'X');
+    std::vector<std::pair<std::wstring,std::wstring>> entries={{doc.parent_path().wstring(),L"payload.bin"},{(root/L"package").wstring(),L"steam"}};
+    const auto beforeHash=sha256File(doc.wstring());unsigned digests=0;const bool indexed=writeAiLogIndex(root/L"ai",entries,[&](const std::wstring& path){++digests;return sha256File(path);});
+    std::ifstream index(root/L"ai"/L"ai-log-index.jsonl");std::vector<json> frames;for(std::string line;std::getline(index,line);)frames.push_back(json::parse(line));index.close();
+    check("actual-index-keeps-full-file-hash-size-order-and-third-party-role",indexed&&digests==2&&frames.size()==6&&frames[1]["sha256"]==beforeHash&&frames[1]["bytes"]==8ULL*1024*1024+1&&frames[3]["lane"]=="external"&&frames[3]["format"]=="text-or-opaque"&&frames[2]["inspectionScope"]=="final-byte-only");
+    check("failed-full-digest-still-refuses-index",!writeAiLogIndex(root/L"bad-ai",entries,[](const std::wstring&){return std::string{};}));
+    const auto guide=aiReadingGuide();check("guide-matches10s-query-archive-timing-and-sidecar-failure-scopes",guide["ordinaryExportStages"]["windowsReport"].get<std::string>().find("first query retains10000ms")==0&&guide.contains("ordinaryArchiveAttemptTiming")&&guide.contains("deckySidecarLogFailures")&&guide["inspection"].get<std::string>().find("final-byte-only")!=std::string::npos);
+    check("inspection-and-index-keep-every-original-file-byte",sha256File(doc.wstring())==beforeHash&&fs::file_size(doc)==8ULL*1024*1024+1);
+    GetProcessHandleCount(GetCurrentProcess(),&handlesAfter);check("all-owned-inspection-and-hash-handles-return-to-observed-warm-count",warm2==handlesAfter);
+    unsigned failures=0;for(const auto& value:checks)failures+=!value["pass"].get<bool>();
+    std::cout<<json{{"selectedCase","opaque-tail"},{"checks",checks},{"failures",failures},{"measurements",measurements},{"coldHandlesBeforeHash",cold},{"firstHashHandles",warm1},{"handlesBefore",warm2},{"handlesAfter",handlesAfter},{"actualIfstreamBase",true},{"readCounterMeaning","logical bytes requested by actual read/get calls;not OS-buffer or disk-sector bytes"},{"hardwareActions",0},{"productOrSteamActions",0}}.dump(2)<<std::endl;return failures?3:0;
+}catch(const std::exception& error){allocationMeasure=false;std::cerr<<error.what()<<std::endl;return 4;}}
+'''
+
+
+def opaque_tail_source(before_header):
+    """Full real inspector/index/hash;single declared ifstream counter adapter."""
+    source=(ROOT/'native/main.cpp').read_text(encoding='utf-8-sig')
+    header=(ROOT/'native/log_export_evidence.h').read_text(encoding='utf-8-sig')
+    before=pathlib.Path(before_header).read_text(encoding='utf-8-sig')
+    signature='inline EvidenceJson stagedFileEvidence(const std::filesystem::path& staged,const std::string& entry) noexcept {'
+    old=extract(before,signature);current=extract(header,signature)
+    def counted(body,name):
+        if body.count('std::ifstream in(')!=1:raise ValueError('inspector stream port changed')
+        return body.replace('inline EvidenceJson stagedFileEvidence(', 'static EvidenceJson '+name+'(',1).replace('std::ifstream in(','CountedInput in(',1)
+    tests=OPAQUE_TAIL_TESTS.replace('// ACTUAL_BEFORE_INSPECTOR',counted(old,'beforeStagedFileEvidence'),1).replace('// ACTUAL_CURRENT_INSPECTOR',counted(current,'currentStagedFileEvidence'),1)
+    hashes=extract(source,'static std::string sha256FileCancellable(const std::wstring& path, const std::function<bool()>& cancelled) {')+'\n'+extract(source,'static std::string sha256File(const std::wstring& path) {')
+    return PRELUDE+'\n#include <cstdlib>\n#include <new>\n#include <stdexcept>\n#include <iterator>\nusing namespace ymcc::logexport;\n'+hashes+'\n'+tests
+
+
+def run_opaque_tail(args,source=None,selected_case="opaque-tail"):
+    import shutil,time
+    source=opaque_tail_source(args.opaque_before_header) if source is None else source
+    out=args.output_dir.resolve();out.mkdir(parents=True,exist_ok=True)
+    run=out/(selected_case+'-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'));run.mkdir()
+    def put(name,value):
+        with (run/name).open('xb') as stream:stream.write(value.encode('utf8') if isinstance(value,str) else value)
+    cpp=run/'fixture.cpp';exe=run/'fixture.exe';put('fixture.cpp',source)
+    compiler=shutil.which('cl.exe')
+    if not compiler:raise RuntimeError('Reviewed compiler environment required')
+    arguments=[compiler,'/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/W4','/WX','/wd4505','/showIncludes',str(cpp),'/I'+str(ROOT/'native'),'/I'+str(ROOT/'deps/json'),'/Fo'+str(run/'fixture.obj'),'/Fe'+str(exe),'/link','/VERBOSE:LIB']
+    start=time.monotonic();built=subprocess.run(arguments,cwd=run,capture_output=True,timeout=180)
+    put('compile.stdout.raw',built.stdout);put('compile.stderr.raw',built.stderr)
+    put('COMPILE.json',json.dumps({'arguments':arguments,'exitCode':built.returncode,'elapsedMs':int((time.monotonic()-start)*1000)}))
+    if built.returncode:return built.returncode
+    result=subprocess.run([str(exe),str(run/'files')],cwd=run,capture_output=True,timeout=90)
+    put('native.stdout.raw',result.stdout);put('native.stderr.raw',result.stderr)
+    value=json.loads(result.stdout);put('RESULT.json',json.dumps({'exitCode':result.returncode,'result':value},ensure_ascii=False,indent=2))
+    print(json.dumps({'case':selected_case,'checks':len(value['checks']),'failures':value['failures'],'result':str(run/'RESULT.json')}))
+    return result.returncode
+
+
+JSONL_RANGE_TESTS = r'''struct AllocationTrace {unsigned long long calls=0,bytes=0,watched=0;size_t lastSize=0,largest=0;};
+static AllocationTrace allocationTrace;static bool allocationMeasure=false;static size_t watchedSize=0;
+void* operator new(std::size_t n){if(allocationMeasure){++allocationTrace.calls;allocationTrace.bytes+=n;allocationTrace.lastSize=n;allocationTrace.largest=(std::max)(allocationTrace.largest,n);if(n==watchedSize)++allocationTrace.watched;}if(auto* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
+void* operator new[](std::size_t n){return ::operator new(n);}void operator delete(void* p)noexcept{std::free(p);}void operator delete[](void* p)noexcept{std::free(p);}
+void operator delete(void* p,std::size_t)noexcept{std::free(p);}void operator delete[](void* p,std::size_t)noexcept{std::free(p);}
+// ACTUAL_BEFORE_INSPECTOR
+// ACTUAL_CURRENT_INSPECTOR
+static void rangePut(const fs::path& path,const std::string& value){fs::create_directories(path.parent_path());std::ofstream file(path,std::ios::binary|std::ios::trunc);file.write(value.data(),static_cast<std::streamsize>(value.size()));file.close();if(!file)throw std::runtime_error("private seed failed");}
+static std::string rangeBytes(const fs::path& path){std::ifstream file(path,std::ios::binary);return {std::istreambuf_iterator<char>(file),{}};}
+static json measuredRange(bool before,const fs::path& path,AllocationTrace& measured){allocationTrace={};allocationMeasure=true;auto value=before?beforeStagedFileEvidence(path,"native-lifecycle.log"):currentStagedFileEvidence(path,"native-lifecycle.log");allocationMeasure=false;measured=allocationTrace;return value;}
+static json traceJson(const AllocationTrace& value){return {{"calls",value.calls},{"bytes",value.bytes},{"watched",value.watched},{"largest",value.largest}};}
+int wmain(int argc,wchar_t** argv){try{
+    if(argc!=2)return 2;const fs::path root(argv[1]);if(fs::exists(root))return 3;fs::create_directories(root);
+    const auto file=root/L"native-lifecycle.log";rangePut(file,"{}\n");DWORD cold=0,warm1=0,beforeHandles=0,afterHandles=0;
+    GetProcessHandleCount(GetCurrentProcess(),&cold);const auto firstHash=sha256File(file.wstring());GetProcessHandleCount(GetCurrentProcess(),&warm1);const auto secondHash=sha256File(file.wstring());GetProcessHandleCount(GetCurrentProcess(),&beforeHandles);if(firstHash.size()!=64||firstHash!=secondHash||warm1!=beforeHandles)throw std::runtime_error("own hash warmup unstable");
+    const std::string calibration(4096,'x');allocationTrace={};allocationMeasure=true;const auto calibrated=calibration.substr(0,4096);allocationMeasure=false;
+    if(allocationTrace.calls!=1||calibrated.size()!=4096)throw std::runtime_error("copy-size calibration changed");watchedSize=allocationTrace.lastSize;
+    const std::string line="{\"x\":1}"+std::string(4089,' ');std::string data;for(unsigned i=0;i<128;++i)data+=line+'\n';rangePut(file,data);
+    AllocationTrace oldTrace,newTrace;const auto old=measuredRange(true,file,oldTrace);const auto now=measuredRange(false,file,newTrace);
+    check("128-long-valid-row-inspection-metadata-remains-exact",old==now&&now["validJsonRows"]==128&&now["invalidJsonRows"]==0&&rangeBytes(file)==data);
+    check("one-calibrated-owned-substring-allocation-is-removed-per-long-row",oldTrace.watched==128&&newTrace.watched==0&&oldTrace.calls>=newTrace.calls+128);
+#ifdef YMCC_JSONL_RANGE_OLD_ONLY
+    GetProcessHandleCount(GetCurrentProcess(),&afterHandles);unsigned failed=0;for(const auto& value:checks)failed+=!value["pass"].get<bool>();std::cout<<json{{"checks",checks},{"failures",failed},{"oldAllocation",traceJson(oldTrace)},{"newAllocation",traceJson(newTrace)},{"watchedCopyBytes",watchedSize},{"handlesBefore",beforeHandles},{"handlesAfter",afterHandles},{"actualOldInspectorBody",true},{"hardwareActions",0},{"productOrSteamActions",0}}.dump(2)<<std::endl;return failed?3:0;
+#else
+    check("gross-requested-allocation-bytes-drop-by-exact128-copy-buffers",oldTrace.bytes>=newTrace.bytes+128*watchedSize&&oldTrace.largest==newTrace.largest);
+    const auto longAllocation=json{{"old",traceJson(oldTrace)},{"current",traceJson(newTrace)},{"calibratedCopyBytes",watchedSize},{"rows",128}};
+    const std::string richLine=json{{"timestampUtc","2026-11-17T00:00:00Z"},{"message",std::string(4096,'x')},{"state",{{"ok",true},{"count",17}}}}.dump();std::string rich;for(unsigned i=0;i<32;++i)rich+=richLine+'\n';rangePut(file,rich);
+    const auto richOld=measuredRange(true,file,oldTrace);const auto richNow=measuredRange(false,file,newTrace);
+    check("32-long-payload-and-time-rows-keep-fields-with32-fewer-allocations",richOld==richNow&&richNow["firstTime"]=="2026-11-17T00:00:00Z"&&oldTrace.calls>=newTrace.calls+32&&oldTrace.bytes>newTrace.bytes);
+    const auto richAllocation=json{{"old",traceJson(oldTrace)},{"current",traceJson(newTrace)},{"rows",32},{"lineBytes",richLine.size()}};
+    std::vector<std::pair<std::string,std::string>> shapes={
+        {"empty",""},{"blank-lines","\n\r\n \n"},{"adjacent","{}\n[]\nnull\n17\ntrue"},{"no-newline","{\"time\":\"last\"}"},
+        {"bad-tail","{}\n{broken"},{"bad-middle","{broken\n{}\n"},{"bad-utf8",std::string("{\"x\":\"\xff\"}")},
+        {"nul",std::string("{}\0{}",5)},{"bom",std::string("\xef\xbb\xbf{}\n\xef\xbb\xbf[]")},{"unicode","{\"x\":\"中文🎮\u2028\"}\n"},
+        {"numeric-overflow","{\"n\":1e999}"},{"duplicate-key","{\"x\":1,\"x\":2}"},{"trailing-token","{}junk\n{}"},
+        {"time-priority","{\"timestampUtc\":\"zulu\",\"timeWithOffset\":\"offset\",\"time\":\"legacy\"}\n{\"timestampLocal\":\"local\",\"atUtc\":\"utc\"}"},
+        {"time-types","{\"timestampUtc\":false,\"timeWithOffset\":1,\"timestampLocal\":null,\"atUtc\":\"utc\",\"time\":\"fallback\"}"},
+        {"line65536","{\"s\":\""+std::string(65528,'x')+"\"}"},{"line65537","{\"s\":\""+std::string(65529,'x')+"\"}"},
+        {"tail-window",std::string(8*1024*1024,'X')+"\n{\"time\":\"retained\"}\n{"}};
+    bool exact=true,bytesKept=true;json evidence=json::array();unsigned number=0;
+    for(const auto& shape:shapes){const auto path=root/L"cases"/(std::to_wstring(number++)+L".jsonl");rangePut(path,shape.second);const auto before=beforeStagedFileEvidence(path,"native-lifecycle.log"),actual=currentStagedFileEvidence(path,"native-lifecycle.log");exact=exact&&before==actual;bytesKept=bytesKept&&rangeBytes(path)==shape.second;evidence.push_back({{"case",shape.first},{"bytes",shape.second.size()},{"result",actual}});}
+    check("18-format-boundary-UTF8-BOM-NUL-number-and-time-shapes-match-old",exact&&shapes.size()==18);
+    check("each-format-input-is-kept-byte-exact",bytesKept);
+    const auto& last=evidence.back()["result"];check("8MiB-leading-boundary-and-bad-final-tail-keep-original-scope",last["inspectionScope"]=="retained-tail-only"&&last["partialOrInvalidTrailingRecord"]==true&&last["validJsonRows"]==1&&last["invalidJsonRows"]==1&&last["lastTime"]=="retained");
+    rangePut(file,"{}\n[]\nnull\n");const auto smallOld=measuredRange(true,file,oldTrace),smallNow=measuredRange(false,file,newTrace);check("small-SSO-row-path-adds-no-allocation-and-keeps-results",smallOld==smallNow&&newTrace.calls<=oldTrace.calls&&newTrace.bytes<=oldTrace.bytes);
+    const auto missing=root/L"missing.jsonl";check("unreadable-file-keeps-original-typed-metadata",beforeStagedFileEvidence(missing,"native-lifecycle.log")==currentStagedFileEvidence(missing,"native-lifecycle.log"));
+    const auto opaque=root/L"opaque.bin";rangePut(opaque,"opaque\n");check("opaque-final-byte-path-remains-exact",beforeStagedFileEvidence(opaque,"snapshot.json")==currentStagedFileEvidence(opaque,"snapshot.json"));
+    rangePut(file,"{\"time\":\"first\",\"x\":1}\n{\"time\":\"last\",\"x\":2}\n");const auto beforeHash=sha256File(file.wstring());std::vector<std::pair<std::wstring,std::wstring>> entries={{root.wstring(),L"native-lifecycle.log"}};
+    const auto actual=ymcc::logexport::stagedFileEvidence(file,"native-lifecycle.log");const auto expected=beforeStagedFileEvidence(file,"native-lifecycle.log");bool indexed=writeAiLogIndex(root/L"ai",entries,sha256File);
+    std::ifstream index(root/L"ai"/L"ai-log-index.jsonl");std::vector<json> frames;for(std::string value;std::getline(index,value);)frames.push_back(json::parse(value));index.close();
+    check("actual-index-full-hash-size-and-inspection-fields-remain-correct",indexed&&frames.size()==4&&frames[1]["sha256"]==beforeHash&&frames[1]["format"]=="json-lines"&&frames[2]["validJsonRows"]==2&&frames[2]["firstTime"]=="first"&&frames[2]["lastTime"]=="last"&&actual==expected&&sha256File(file.wstring())==beforeHash);
+    GetProcessHandleCount(GetCurrentProcess(),&afterHandles);check("all-owned-inspector-and-hash-handles-return-to-warm-count",beforeHandles==afterHandles);
+    unsigned failed=0;for(const auto& row:checks)failed+=!row["pass"].get<bool>();std::cout<<json{{"selectedCase","jsonl-range"},{"checks",checks},{"failures",failed},{"longAllocation",longAllocation},{"richAllocation",richAllocation},{"formatEvidence",evidence},{"coldHandles",cold},{"firstHashHandles",warm1},{"handlesBefore",beforeHandles},{"handlesAfter",afterHandles},{"actualBeforeAndCurrentBodies",true},{"hardwareActions",0},{"productOrSteamActions",0}}.dump(2)<<std::endl;return failed?3:0;
+#endif
+}catch(const std::exception& error){allocationMeasure=false;std::cerr<<error.what()<<std::endl;return 4;}}
+'''
+
+
+def jsonl_range_source(before_header):
+    """Actual full old/current inspectors;no stream or parser type adapter."""
+    source=(ROOT/'native/main.cpp').read_text(encoding='utf-8-sig')
+    header=(ROOT/'native/log_export_evidence.h').read_text(encoding='utf-8-sig')
+    before=pathlib.Path(before_header).read_text(encoding='utf-8-sig')
+    signature='inline EvidenceJson stagedFileEvidence(const std::filesystem::path& staged,const std::string& entry) noexcept {'
+    old=extract(before,signature).replace('inline EvidenceJson stagedFileEvidence(','static EvidenceJson beforeStagedFileEvidence(',1)
+    current=extract(header,signature).replace('inline EvidenceJson stagedFileEvidence(','static EvidenceJson currentStagedFileEvidence(',1)
+    tests=JSONL_RANGE_TESTS.replace('// ACTUAL_BEFORE_INSPECTOR',old,1).replace('// ACTUAL_CURRENT_INSPECTOR',current,1)
+    hashes=extract(source,'static std::string sha256FileCancellable(const std::wstring& path, const std::function<bool()>& cancelled) {')+'\n'+extract(source,'static std::string sha256File(const std::wstring& path) {')
+    return PRELUDE+'\n#include <cstdlib>\n#include <new>\n#include <stdexcept>\n#include <iterator>\nusing namespace ymcc::logexport;\n'+hashes+'\n'+tests
+
+
+FINITE_OUTCOME_GUIDE_TESTS = r'''
+int wmain(int argc,wchar_t**){
+ if(argc!=2)return 2;DWORD before=0,after=0;GetProcessHandleCount(GetCurrentProcess(),&before);
+ const auto guide=ymcc::logexport::aiReadingGuide();
+ check("finite-outcome-guide-lists-thirteen-exact-existing-events",guide.contains("finiteNativeOutcomeReceipts")&&guide["finiteNativeOutcomeReceipts"]["schemaVersion"]==1&&guide["finiteNativeOutcomeReceipts"]["events"]==json::array({"shortcut-action-request","shortcut-action-result","msi-claw-return-debt","steam-overlay-startup","process-efficiency-startup","input-module-replay-unverified","hwinfo-recovery-result-discarded","controller-motion-raw-registration","gyro-power-early-pause-completed","gyro-power-start-current","fxsound-toggle","settings-upgrade-repaired","gamepad-feedback-stop-pending"}));
+ const auto& fan=guide["fanLifecycleLogFailures"];
+ check("fan-failure-guide-current-export-field",fan["field"]=="availability fanLifecycleLogFailureEvidence");
+ check("fan-failure-guide-independent-bounded-counters",fan["scope"].get<std::string>().find("7 independent Fan-owned")!=std::string::npos&&fan["scope"].get<std::string>().find("95B")!=std::string::npos);
+ check("fan-failure-guide-excludes-unobserved-destructor-and-argument-preparation",fan["limits"].get<std::string>().find("by-value arguments before entry,destructor close")!=std::string::npos);
+ const auto& calibration=guide["calibrationRestoreEvidence"];
+ check("calibration-guide-three-exact-events",calibration["events"]==json::array({"gyro-calibration-awaiting-current-source","gyro-calibration-awaiting-current-recipe","gyro-calibration-restored"}));
+ check("calibration-guide-keeps-two-waits-legacy-and-recipe-distinct",calibration["states"].get<std::string>().find("source wait differs")!=std::string::npos&&calibration["states"].get<std::string>().find("legacy offset and recipe")!=std::string::npos);
+ check("calibration-guide-bounded-and-not-input-proof",calibration["offlineView"].get<std::string>().find("max48 observations")!=std::string::npos&&calibration["currentSensorOrInputHealthProven"]==false&&calibration["operationsPaired"]==false);
+ const auto& value=guide["finiteNativeOutcomeReceipts"];
+ check("finite-outcome-guide-keeps-sensor-command-and-power-independent",value["sensorPower"].get<std::string>().find("independent")!=std::string::npos);
+ check("finite-outcome-guide-does-not-upgrade-feedback-or-config-to-hardware-proof",value["feedbackStop"].get<std::string>().find("does not prove hardware stop")!=std::string::npos&&value["settingsAndFx"].get<std::string>().find("do not prove physical hardware")!=std::string::npos);
+ check("finite-outcome-guide-bounds-witnesses-and-rejects-health-proof",value["offlineView"].get<std::string>().find("max80 observations")!=std::string::npos&&value["currentBusinessSuccessInferred"]==false&&value["physicalOrResourceReturnProven"]==false);
+ check("finite-outcome-guide-keeps-pending-debt-and-discarded-zero-separate",value["shortcut"].get<std::string>().find("pending is unresolved")!=std::string::npos&&value["returnDebt"].get<std::string>().find("retained is unresolved")!=std::string::npos&&value["finiteStartup"].get<std::string>().find("discarded recovery code0 remains discarded")!=std::string::npos);
+ check("original-guide-trust-clocks-identity-and-export-query-remain",guide.contains("instructionTrust")&&guide.contains("clockRules")&&guide.contains("identityRules")&&guide["ordinaryExportStages"]["windowsReport"].get<std::string>().find("first query retains10000ms")==0);
+ GetProcessHandleCount(GetCurrentProcess(),&after);check("guide-construction-returns-owned-handles",before==after);
+ unsigned failed=0;for(const auto& row:checks)failed+=!row["pass"].get<bool>();std::cout<<json{{"checks",checks},{"failures",failed},{"guide",guide},{"handlesBefore",before},{"handlesAfter",after},{"hardwareActions",0},{"productOrSteamActions",0}}.dump(2)<<'\n';return failed?3:0;
+}
+'''
+
+
+def finite_outcomes_guide_source():
+    source=(ROOT/'native/main.cpp').read_text(encoding='utf-8-sig')
+    hashes=extract(source,'static std::string sha256FileCancellable(const std::wstring& path, const std::function<bool()>& cancelled) {')+'\n'+extract(source,'static std::string sha256File(const std::wstring& path) {')
+    return PRELUDE+'\n'+hashes+'\n'+FINITE_OUTCOME_GUIDE_TESTS
+
+
+TOUCHPAD_RECOVERY_GUIDE_TESTS=r'''
+int wmain(){
+ DWORD before=0,after=0;GetProcessHandleCount(GetCurrentProcess(),&before);
+ const auto guide=ymcc::logexport::aiReadingGuide();
+ const auto& value=guide["touchpadRecoveryEvidence"];
+ check("touchpad-guide-uses-existing-offline-summary",value["offlineView"]=="commonEvidence.touchpadRecoveryEvidence");
+ check("touchpad-guide-keeps-top-level-and-recovery-layers-separate",value["layers"].get<std::string>().find("do not override")!=std::string::npos);
+ check("touchpad-guide-does-not-certify-current-input-or-cause",value["currentInputHealthProven"]==false&&value["rootCauseProven"]==false);
+ check("touchpad-guide-keeps-bounded-observations-and-raw",value["budget"].get<std::string>().find("max48")!=std::string::npos);
+ GetProcessHandleCount(GetCurrentProcess(),&after);check("guide-owned-handles-returned",before==after);
+ bool pass=true;for(const auto& row:checks)pass=pass&&row["pass"].get<bool>();std::cout<<json{{"checks",checks},{"guide",guide},{"handlesBefore",before},{"handlesAfter",after},{"hardwareActions",0},{"productOrSteamActions",0}}.dump(2)<<'\n';return pass?0:1;
+}
+'''
+
+def touchpad_recovery_guide_source():
+    source=(ROOT/'native/main.cpp').read_text(encoding='utf-8-sig')
+    hashes=extract(source,'static std::string sha256FileCancellable(const std::wstring& path, const std::function<bool()>& cancelled) {')+'\n'+extract(source,'static std::string sha256File(const std::wstring& path) {')
+    return PRELUDE+'\n'+hashes+'\n'+TOUCHPAD_RECOVERY_GUIDE_TESTS
+
+
+def jsonl_sax_source(before_header,fixture_name='log_export_jsonl_sax.inc'):
+    source=(ROOT/'native/main.cpp').read_text(encoding='utf-8-sig')
+    header=(ROOT/'native/log_export_evidence.h').read_text(encoding='utf-8-sig')
+    before=pathlib.Path(before_header).read_text(encoding='utf-8-sig')
+    signature='inline EvidenceJson stagedFileEvidence(const std::filesystem::path& staged,const std::string& entry) noexcept {'
+    old=extract(before,signature).replace('inline EvidenceJson stagedFileEvidence(','static EvidenceJson beforeStagedFileEvidence(',1)
+    current=extract(header,signature).replace('inline EvidenceJson stagedFileEvidence(','static EvidenceJson currentStagedFileEvidence(',1)
+    tests=(ROOT/'tools/fixtures'/fixture_name).read_text(encoding='utf-8-sig').replace('// ACTUAL_BEFORE_INSPECTOR',old,1).replace('// ACTUAL_CURRENT_INSPECTOR',current,1)
+    hashes=extract(source,'static std::string sha256FileCancellable(const std::wstring& path, const std::function<bool()>& cancelled) {')+'\n'+extract(source,'static std::string sha256File(const std::wstring& path) {')
+    return PRELUDE+'\n#include <cstdlib>\n#include <new>\n#include <stdexcept>\n#include <iterator>\nusing namespace ymcc::logexport;\n'+hashes+'\n'+tests
+
+
 def main():
- parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output-dir',required=True,type=pathlib.Path);parser.add_argument('--baseline',required=True,type=pathlib.Path);parser.add_argument('--cost-bundle',type=pathlib.Path,help='Optional offline ZIP central-directory replay; never runs the product');args=parser.parse_args()
+ parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output-dir',required=True,type=pathlib.Path);parser.add_argument('--baseline',type=pathlib.Path);parser.add_argument('--cost-bundle',type=pathlib.Path,help='Optional offline ZIP central-directory replay; never runs the product')
+ parser.add_argument('--case',choices=['opaque-tail','jsonl-range','jsonl-sax','finite-outcomes','touchpad-recovery']);parser.add_argument('--opaque-before-header',type=pathlib.Path);parser.add_argument('--jsonl-before-header',type=pathlib.Path)
+ args=parser.parse_args()
+ if args.case=='touchpad-recovery':
+  if args.opaque_before_header or args.jsonl_before_header or args.baseline or args.cost_bundle:parser.error('touchpad-recovery accepts only output directory')
+  return run_opaque_tail(args,touchpad_recovery_guide_source(),'touchpad-recovery')
+ if args.case=='finite-outcomes':
+  if args.opaque_before_header or args.jsonl_before_header or args.baseline or args.cost_bundle:parser.error('finite-outcomes accepts only output directory')
+  return run_opaque_tail(args,finite_outcomes_guide_source(),'finite-outcomes')
+ if args.case=='opaque-tail':
+  if not args.opaque_before_header or args.jsonl_before_header or args.baseline or args.cost_bundle:parser.error('opaque-tail requires only explicit previous header and output directory')
+  return run_opaque_tail(args)
+ if args.case=='jsonl-sax':
+  if not args.jsonl_before_header or args.opaque_before_header or args.baseline or args.cost_bundle:parser.error('jsonl-sax requires only explicit previous header and output directory')
+  return run_opaque_tail(args,jsonl_sax_source(args.jsonl_before_header),'jsonl-sax')
+ if args.case=='jsonl-range':
+  if not args.jsonl_before_header or args.opaque_before_header or args.baseline or args.cost_bundle:parser.error('jsonl-range requires only explicit previous header and output directory')
+  return run_opaque_tail(args,jsonl_range_source(args.jsonl_before_header),'jsonl-range')
+ if args.opaque_before_header or args.jsonl_before_header:parser.error('previous inspector header requires its matching directed case')
+ if not args.baseline:parser.error('original default format suite requires baseline')
  out=args.output_dir.resolve();out.mkdir(parents=True,exist_ok=True);run=out/('run-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S'));run.mkdir()
  source=(ROOT/'native/main.cpp').read_bytes();text=source.decode('utf-8-sig').replace('\r\n','\n');sig='static void fanHostNoteMsiModeWrite(unsigned long long generation) noexcept {';function=extract(text,sig)
  headers={name:(ROOT/'native'/name).read_bytes() for name in ('log_export_evidence.h','log_ai_index.h')}

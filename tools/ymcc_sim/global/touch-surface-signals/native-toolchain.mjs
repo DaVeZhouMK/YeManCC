@@ -8,10 +8,9 @@ import {calibrationToolchainPreamble} from '../../../fixtures/hc_reviewed_calibr
 const exec=promisify(execFile);
 export const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
 export async function compileTouchFixture({repoRoot,workDir,name,source,generated={}}){
- const hash=digest(fs.readFileSync(source)+JSON.stringify(generated)+JSON.stringify(collectTouchSources(repoRoot)));
- const dir=path.join(workDir,name+'-'+hash.slice(0,16)),executable=path.join(dir,name+'.exe');fs.mkdirSync(dir,{recursive:true});
- for(const [file,text] of Object.entries(generated))fs.writeFileSync(path.join(dir,file),text);
- if(!fs.existsSync(executable)){
+ if(!/^[a-z][a-z0-9-]*$/.test(name))throw Error('TOUCH_BUILD_NAME_INVALID');
+ const dir=path.join(workDir,name),executable=path.join(dir,name+'.exe');fs.mkdirSync(dir);
+ for(const [file,text] of Object.entries(generated))fs.writeFileSync(path.join(dir,file),text,{flag:'wx'});
   const vswhere=path.join(process.env['ProgramFiles(x86)']??'C:/Program Files (x86)','Microsoft Visual Studio/Installer/vswhere.exe');
   const found=await exec(vswhere,['-latest','-products','*','-requires','Microsoft.VisualStudio.Component.VC.Tools.x86.x64','-property','installationPath'],{windowsHide:true,timeout:10000});
   const setup=path.join(found.stdout.trim(),'VC/Auxiliary/Build/vcvars64.bat');
@@ -20,7 +19,6 @@ export async function compileTouchFixture({repoRoot,workDir,name,source,generate
   fs.writeFileSync(path.join(dir,'compile.cmd'),calibrationToolchainPreamble(setup)+'cl.exe @compile.rsp\r\nif errorlevel 1 exit /b %errorlevel%\r\ndumpbin /imports "'+executable+'" > imports.txt\r\n');
   try{const r=await exec(process.env.ComSpec??'cmd.exe',['/d','/c','compile.cmd'],{cwd:dir,windowsHide:true,timeout:60000,maxBuffer:4e6});fs.writeFileSync(path.join(dir,'compile.log'),r.stdout+r.stderr);}
   catch(error){fs.writeFileSync(path.join(dir,'compile.log'),String(error.stdout??'')+String(error.stderr??''));throw Error('TOUCH_FIXTURE_BUILD_FAILED:'+path.join(dir,'compile.log'));}
- }
  const imports=fs.readFileSync(path.join(dir,'imports.txt'),'utf8');
  const forbidden=['user32.dll','win32u.dll','gdi32.dll','shell32.dll','ole32.dll','hid.dll','setupapi.dll','xinput1_4.dll','sendinput','injecttouchinput','setwindowshook','setwineventhook','getasynckeystate'].filter(x=>imports.toLowerCase().includes(x));
  if(forbidden.length)throw Error('TOUCH_UNSAFE_IMPORT:'+forbidden.join(','));

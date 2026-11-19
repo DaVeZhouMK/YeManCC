@@ -221,11 +221,71 @@ def compile_and_test(root: Path, compiler: Path, env: dict, fixture: Path, json_
             'failures': [{'name': c['name'], 'error': c.get('error')} for c in data['cases'] if not c['passed']]}
 
 
+
+def prepare_query_actor_only(args, source: Path, fixture: Path, root: Path) -> int:
+    """Prepare exact complete actors and current dependencies without execution.
+
+    Steam/provider leaves are explicit ports; owned Win32 events/threads and
+    the optional inert fixture DLL exercise return/lifetime boundaries only.
+    """
+    root.mkdir(parents=True, exist_ok=False)
+    def store(name: str, raw: bytes) -> None:
+        with (root / name).open('xb') as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+    parts, manifest = {}, []
+    for label, file in [('before', args.before), ('after', source)]:
+        text = file.read_text(encoding='utf-8-sig')
+        actor, identity = extract(text, 'class QueryActor {', ';')
+        parts[label] = actor
+        manifest.append(dict(variant=label, source=pin(file), extraction=identity))
+    module_before = args.module_before or args.before
+    module_actor, module_id = extract(module_before.read_text(encoding='utf-8-sig'), 'class QueryActor {', ';')
+    store('original-module-actor.inc', (module_actor+'\n').encode('utf-8'))
+    manifest.append(dict(variant='module-before', source=pin(module_before), extraction=module_id))
+    current = source.read_text(encoding='utf-8-sig')
+    handle, handle_id = extract(current, 'struct H{', ';')
+    store('actual-handle.inc', (handle+'\n').encode('utf-8'))
+    waits, wait_ids = [], []
+    for anchor, suffix in [('enum class QueryCancellationState', ';'),
+                           ('QueryCancellationState queryCancellationState(', ''),
+                           ('void requireQueryCancellation(', ''),
+                           ('DWORD waitQuerySignal(', ''), ('void waitQueryReturn(', '')]:
+        body, identity = extract(current, anchor, suffix)
+        waits.append(body)
+        wait_ids.append(identity)
+    store('actual-query-wait.inc', ('\n\n'.join(waits)+'\n').encode('utf-8'))
+    for label in ['before', 'after']:
+        store(label+'-actor.inc', (parts[label]+'\n').encode('utf-8'))
+    json_source = Path(__file__).resolve().parents[1] / 'deps/json/json.hpp'
+    store('json.hpp', json_source.read_bytes())
+    names = ['actual-handle.inc', 'actual-query-wait.inc', 'before-actor.inc', 'original-module-actor.inc', 'after-actor.inc', 'json.hpp']
+    for name in ['query_actor_ports.hpp', 'query_actor_cases.cpp', 'query_actor_fixture.cpp']:
+        original = fixture / name
+        if name == 'query_actor_fixture.cpp' and not original.exists():
+            continue
+        store(name, original.read_bytes())
+        names.append(name)
+    report = dict(status='ACTUAL_COMPLETE_QUERY_ACTORS_PREPARED_NO_BUSINESS_EXECUTION',
+        actors=manifest,handleExtraction=handle_id,queryWaitExtractions=wait_ids,
+        originalFixtureEntry=pin(Path(__file__)),jsonHeader=pin(json_source),
+        inputs=[pin(root/name) for name in names],sourceQualificationAndSteamCallsArePorts=True,
+        actualEventsAndThreads=True,newDefaultTests=0,productWrites=0,
+        steamGameDeviceSleepActions=0,liveFocusOrRecoveryVerified=False)
+    store('PREPARED.json', (json.dumps(report,ensure_ascii=False,indent=2)+'\n').encode('utf-8'))
+    print(str(root/'PREPARED.json'),flush=True)
+    return 0
+
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--before', type=Path, required=True)
     p.add_argument('--evidence', type=Path, required=True, help='new directory only; no overwrite')
     p.add_argument('--source', type=Path)
+    p.add_argument('--module-before', type=Path, help='Explicit original module-lifetime actor baseline for prepare-only consumers')
+    p.add_argument('--prepare-query-actor-only', action='store_true', help='prepare exact complete query actors only; no compiler or business execution')
     p.add_argument('--vc-tools')
     p.add_argument('--sdk-root', default=r'C:/Program Files (x86)/Windows Kits/10')
     p.add_argument('--sdk-version')
@@ -234,6 +294,10 @@ def main() -> int:
     source = (args.source or repo / 'native/steam_original_recovery_engine.cpp').resolve()
     fixture = Path(__file__).resolve().parent / 'steam_original_recovery_source_context_fixtures'
     root = args.evidence.resolve()
+    if args.module_before and not args.prepare_query_actor_only:
+        p.error('--module-before requires --prepare-query-actor-only')
+    if args.prepare_query_actor_only:
+        return prepare_query_actor_only(args, source, fixture, root)
     root.mkdir(parents=True, exist_ok=False)
     summary = {'success': False, 'at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                'scope': 'bounded source-context selector and query consumer with fixture ports'}

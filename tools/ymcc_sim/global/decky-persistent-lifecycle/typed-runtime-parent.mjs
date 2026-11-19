@@ -6,7 +6,9 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import { originalAssertions, validateRuntimeResult } from './typed-legacy-runtime-regression.mjs';
-const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+import {originalReadyConsumer,originalCommittedReadyConsumer} from './owned-run.mjs';
+const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+const digest = file => sha(fs.readFileSync(file));
 const key = file => path.resolve(file).toLowerCase();
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const inside = (root, file) => key(file).startsWith(key(root) + path.sep);
@@ -24,9 +26,11 @@ export function validateTypedRuntimeParentReceipt(value, {repo, evidenceRoot, wo
   const verify = (row, root) => {
     assert(row && /^[a-f0-9]{64}$/.test(row.sha256), 'TYPED_RUNTIME_FILE_PIN');
     if (root) assert(inside(root, row.path) && key(fs.realpathSync(row.path)) === key(row.path), 'TYPED_RUNTIME_OWNED_PATH');
-    assert.equal(digest(row.path), row.sha256, 'TYPED_RUNTIME_FILE_CHANGED:' + row.path);
-    return row;
+    const bytes = fs.readFileSync(row.path);
+    assert.equal(sha(bytes), row.sha256, 'TYPED_RUNTIME_FILE_CHANGED:' + row.path);
+    return bytes;
   };
+  const verifiedJson = (row, root) => JSON.parse(verify(row, root).toString('utf8'));
   const compilePins = new Map(), seen = new Set();
   for (const row of value.sourceInputs) {
     assert(!seen.has(row.path), 'TYPED_RUNTIME_DUPLICATE_SOURCE'); seen.add(row.path);
@@ -45,8 +49,26 @@ export function validateTypedRuntimeParentReceipt(value, {repo, evidenceRoot, wo
     assert.equal(toolPins.get(key(row.path))?.sha256, row.sha256, 'TYPED_RUNTIME_TOOL_NOT_PREBOUND');
     verify(row); compilePins.set(key(row.path), row);
   }
-  for (const row of value.generated) {
-    assert.equal(row.bytePreserved, true); assert.equal(sourcePins.get(row.origin), row.originSha256, 'TYPED_RUNTIME_GENERATED_ORIGIN');
+  assert.deepEqual(value.generated.map(row=>key(row.path)), [
+    's/tools/typed-legacy-runtime-helpers.inc','s/tools/typed-legacy-runtime-path-assertions.inc',
+    's/native/decky_wake_ready_consumer.inc','s/native/decky_wake_committed_consumer.inc','s/tools/typed-legacy-runtime-deferred-cleanup.inc'
+  ].map(relative=>key(path.join(workRoot,relative))), 'TYPED_RUNTIME_EXTRACTION_MEMBERSHIP');
+  const readyConsumer=originalReadyConsumer(path.join(workRoot,'s'));
+  const committedConsumer=originalCommittedReadyConsumer(path.join(workRoot,'s'));
+  assert.equal(readyConsumer.originSha256,sourcePins.get('native/main.cpp'),'TYPED_RUNTIME_READY_SOURCE');
+  assert.equal(committedConsumer.originSha256,sourcePins.get('native/main.cpp'),'TYPED_RUNTIME_COMMITTED_SOURCE');
+  assert.deepEqual(value.generated[2],readyConsumer,'TYPED_RUNTIME_READY_EXTRACTION');
+  assert.deepEqual(value.generated[3],committedConsumer,'TYPED_RUNTIME_COMMITTED_EXTRACTION');
+  const deferred=value.generated[4],legacy='tools/decky_sidebar_runtime_selftest.cpp',legacyText=fs.readFileSync(path.join(repo,legacy),'utf8');
+  const deferredBegin=legacyText.indexOf('    // The final-cleanup policy borrows'),deferredEnd=legacyText.indexOf('    std::cout << "YMCC Decky sidebar native no-launch tests passed:',deferredBegin);
+  assert(deferredBegin>=0&&deferredEnd>deferredBegin,'TYPED_RUNTIME_DEFERRED_BOUNDARY');assert.equal(deferred.origin,legacy);
+  assert.equal(deferred.originSha256,sourcePins.get(legacy));assert.deepEqual(deferred.slice,{begin:deferredBegin,end:deferredEnd});
+  assert.equal(digest(path.join(repo,legacy)),sourcePins.get(legacy));assert.equal(crypto.createHash('sha256').update(legacyText.slice(deferredBegin,deferredEnd)).digest('hex'),deferred.sha256,'TYPED_RUNTIME_DEFERRED_EXACT_BYTES');
+  assert.deepEqual(read(path.join(evidenceRoot,'GENERATED.json')),value.generated,'TYPED_RUNTIME_EXTRACTION_FILE');
+  for (const [index,row] of value.generated.entries()) {
+    // The committed leaf was re-derived above, including any borrowed generation context.
+    if(index!==3)assert.equal(row.bytePreserved, true);
+    assert.equal(sourcePins.get(row.origin), row.originSha256, 'TYPED_RUNTIME_GENERATED_ORIGIN');
     verify(row, workRoot); compilePins.set(key(row.path), row);
   }
   assert.deepEqual(value.executions.map(row => row.id), ['compile','native']);
@@ -58,18 +80,17 @@ export function validateTypedRuntimeParentReceipt(value, {repo, evidenceRoot, wo
     verify(row.program, index === 0 ? undefined : workRoot); verify(row.stdout, evidenceRoot); verify(row.stderr, evidenceRoot);
     if (index === 0) assert.equal(toolPins.get(key(row.program.path))?.sha256, row.program.sha256, 'TYPED_RUNTIME_COMPILER_NOT_PREBOUND');
   }
-  verify(value.compilerGraph, workRoot);
-  const graph = read(value.compilerGraph.path); assert.equal(graph.Version, '1.2');
+  const graph = verifiedJson(value.compilerGraph, workRoot); assert.equal(graph.Version, '1.2');
   for (const file of [graph.Data.Source, ...graph.Data.Includes]) {
     const row = compilePins.get(key(file)); assert(row, 'TYPED_RUNTIME_UNDECLARED_COMPILER_INPUT:' + file);
     assert.equal(digest(file), row.sha256, 'TYPED_RUNTIME_COMPILER_INPUT_CHANGED');
   }
   for (const row of value.nativeArtifacts) verify(row, workRoot);
-  verify(value.raw, evidenceRoot); verify(value.mapping, evidenceRoot);
+  const rawBytes = verify(value.raw, evidenceRoot), mappingBytes = verify(value.mapping, evidenceRoot);
   const expected = originalAssertions(fs.readFileSync(path.join(repo, 'tools/decky_sidebar_runtime_selftest.cpp'), 'utf8'));
-  const raw = read(value.raw.path), summary = validateRuntimeResult(raw, expected);
+  const raw = JSON.parse(rawBytes.toString('utf8')), summary = validateRuntimeResult(raw, expected);
   assert.deepEqual(value.summary, summary);
-  const mapping = read(value.mapping.path); assert.equal(mapping.length, expected.length);
+  const mapping = JSON.parse(mappingBytes.toString('utf8')); assert.equal(mapping.length, expected.length);
   mapping.forEach((row, i) => {
     for (const field of ['ordinal','label','legacyCall','legacyLine','group']) assert.deepEqual(row[field], expected[i][field], 'TYPED_RUNTIME_ORDERED_MAPPING');
     assert.equal(row.status, 'PASS'); assert.deepEqual(row.raw, value.raw);

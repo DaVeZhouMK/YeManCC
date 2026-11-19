@@ -2,6 +2,7 @@ import { app, fs, shell } from './api';
 import { cleanGameTitle } from './gamedetect';
 import { getSettingsGeneration } from './settingsRepository';
 import { reportFrontendError } from '@/robust/frontendDiagnostics';
+import { assertTrainerPowerReady, getTrainerLifecycleEpoch, subscribeTrainerLifecycle, TrainerPowerChangedError } from './trainerLifecycle';
 
 export interface GameTrainerIdentity {
   method: string;
@@ -68,6 +69,7 @@ interface PrepareOptions {
 }
 interface PreparationJob {
   key: string;
+  lifecycleEpoch: number;
   sourceGeneration: number;
   mode: 'Prepare' | 'RefreshData';
   title: string;
@@ -251,7 +253,7 @@ function validateStoredTrainer(value:Record<string,any>,title:string):GcmSearchR
 async function trainerPaths(): Promise<{ cacheRoot: string; script: string }> {
   const generation = syncTrainerSource();
   if (!pathsPromise) {
-    const pending = trainerConfigIO(Promise.all([app.powerControlDir(), app.dataDir()]),'读取修改器目录').then(([powerControl, data]) => {
+    const pending = trainerConfigIO(Promise.all([app.powerControlDir(TRAINER_CONFIG_IO_MS), app.dataDir(TRAINER_CONFIG_IO_MS)]),'读取修改器目录').then(([powerControl, data]) => {
       assertTrainerSource(generation);
       if (![powerControl,data].every(value=>typeof value==='string'&&/^(?:[a-z]:[\\/]|\\\\)/i.test(value)&&!/[\x00-\x1f]/.test(value)&&!/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value))) throw new Error('无法确定修改器工作目录');
       return { cacheRoot: `${data.replace(/[\\/]+$/, '')}\\trainer-cache`, script: `${powerControl.replace(/[\\/]+$/, '')}\\YeManTrainerPrepare.ps1` };
@@ -394,7 +396,14 @@ export function restoreReadyGameTrainer(gameName: string, processPath: string, o
       if (entryKey.split('|')[0] !== trainerGameKey(title)) continue;
       try {
         if (!trainerObject(entry)) throw new TrainerConfigError('修改器缓存条目不是对象');
-        const cached = validateStoredTrainer(entry as Record<string,any>,title);
+        if (typeof entry.gameName !== 'string' || !trainerGameKey(entry.gameName)) throw new TrainerConfigError('修改器缓存缺少有效游戏名称');
+        const cached = validateStoredTrainer(entry as Record<string,any>,entry.gameName);
+        // A confirmed custom-library identity may have been prepared under the
+        // executable stem before the native window title became available.
+        // Only its exact identity aliases can join the new display name; PID,
+        // birth, EXE path, provenance and both file hashes still have to match.
+        if (trainerGameKey(cached.gameName) !== trainerGameKey(title)
+          && !cached.identity?.aliases?.some(alias => trainerGameKey(alias) === trainerGameKey(title))) continue;
         if(cached.ok!==true)continue;
         if (cached.state !== 'ready' || !matchesRunningGame(cached.identity, processPath, target)
           || !hasConfirmedIdentity(cached.identity, title, processPath) || !/^[a-f0-9]{64}$/i.test(cached.sha256 || '')) continue;
@@ -448,9 +457,11 @@ export function cancelAutomaticTrainerPreparations(): void {
 }
 function checkCancelled(job: PreparationJob): void {
   assertTrainerSource(job.sourceGeneration);
-  if (job.cancelled) throw new GameTrainerCancelledError();
+  if (job.cancelled || job.lifecycleEpoch !== getTrainerLifecycleEpoch()) throw new GameTrainerCancelledError();
 }
 async function runPreparation(job: PreparationJob): Promise<GcmSearchResult> {
+  checkCancelled(job);
+  const powerGeneration = await assertTrainerPowerReady(job.lifecycleEpoch);
   checkCancelled(job);
   const { cacheRoot, script } = await trainerPaths();
   if (!(await trainerConfigIO(fs.exists(script),'核对修改器组件'))) throw new Error('缺少后台修改器组件，请更新完整安装包');
@@ -470,9 +481,11 @@ async function runPreparation(job: PreparationJob): Promise<GcmSearchResult> {
   try {
     await writeTrainerPending(job.resultPath,{...binding,requestId,gameName:job.title,ok:false,state:'queued'},job.sourceGeneration);
     checkCancelled(job);
-    const worker = await shell.hidden('powershell.exe', args);
-    if (worker.ok !== true) throw new Error('无法启动后台修改器组件');
-    started = true;
+    await assertTrainerPowerReady(job.lifecycleEpoch, powerGeneration);
+    checkCancelled(job);
+    started = true; // A lost acknowledgement cannot prove that no worker started.
+    const worker = await trainerConfigIO(shell.hidden('powershell.exe', args, TRAINER_CONFIG_IO_MS),'启动后台修改器组件');
+    if (worker.ok !== true) { started = false; throw new Error('无法启动后台修改器组件'); }
     if (job.cancelled) await writeCancellation(job);
     const deadline = Date.now() + (job.mode === 'RefreshData' ? 60000 : 200000);
     let lastProgress = '';
@@ -489,6 +502,10 @@ async function runPreparation(job: PreparationJob): Promise<GcmSearchResult> {
         if (job.mode === 'Prepare' && parsed.state === 'ready' && (!resultTrainer(parsed) || !(await trainerConfigIO(fs.exists(parsed.trainerPath!),'核对修改器文件')))) throw new Error('修改器文件未通过安装核验');
         if (parsed.state === 'ready' && job.processTarget && !matchesRunningGame(parsed.identity, job.processPath, job.processTarget)) throw new Error('修改器回执对应的顶部游戏进程已改变');
         checkCancelled(job);
+        if (terminal.has(parsed.state)) {
+          await assertTrainerPowerReady(job.lifecycleEpoch, powerGeneration);
+          checkCancelled(job);
+        }
         const progress = JSON.stringify(parsed);
         if (progress !== lastProgress) { publish(parsed, job); lastProgress = progress; }
         if (terminal.has(parsed.state)) {
@@ -499,9 +516,18 @@ async function runPreparation(job: PreparationJob): Promise<GcmSearchResult> {
       }
       await new Promise((resolve) => setTimeout(resolve, 400));
     }
+    // After a suspended renderer resumes, the wall deadline can fire before
+    // queued lifecycle events. Read the same native authority once before
+    // classifying this old request as a genuine preparation timeout.
+    checkCancelled(job);
+    await assertTrainerPowerReady(job.lifecycleEpoch, powerGeneration);
+    checkCancelled(job);
     job.cancelled = true;
     await writeCancellation(job);
     throw new Error('后台准备修改器超时，请稍后重试');
+  } catch (error) {
+    if (started && !completed) { job.cancelled = true; await writeCancellation(job).catch(() => {}); }
+    throw error instanceof TrainerPowerChangedError ? new GameTrainerCancelledError() : error;
   } finally {
     if (!started || completed) {
       await trainerConfigIO(fs.remove(job.resultPath),'清理修改器回执').catch(() => {});
@@ -516,7 +542,7 @@ export function prepareGameTrainer(gameName: string, options: PrepareOptions = {
   const key = trainerTaskKey(title, options.processPath);
   if (!trainerGameKey(title) || title.length > 240) return Promise.reject(new Error('未识别到有效游戏名'));
   const existing = jobs.get(key);
-  const sameTarget = !options.processTarget || (existing?.processTarget?.pid === options.processTarget.pid && existing.processTarget.processCreated === options.processTarget.processCreated);
+  const sameTarget = !options.processTarget && !existing?.processTarget || !!options.processTarget && existing?.processTarget?.pid === options.processTarget.pid && existing.processTarget.processCreated === options.processTarget.processCreated;
   if (existing && !existing.cancelled && sameTarget) {
     if (!options.automatic) existing.manual = true;
     if (options.onProgress) { existing.listeners.add(options.onProgress); const current = states.get(key); if (current) options.onProgress({ ...current }); }
@@ -525,13 +551,15 @@ export function prepareGameTrainer(gameName: string, options: PrepareOptions = {
   if (existing) void cancelJob(existing).catch(() => {});
   const catalog = jobs.get('@catalog');
   if (catalog && !options.automatic) void cancelJob(catalog).catch(() => {});
-  const job: PreparationJob = { key, sourceGeneration: generation, mode: 'Prepare', title, processPath: options.processPath || '', processTarget: options.processTarget ? { ...options.processTarget } : undefined, manual: !options.automatic, cancelled: false, listeners: new Set(), promise: Promise.resolve(null as never) };
+  const job: PreparationJob = { key, lifecycleEpoch: getTrainerLifecycleEpoch(), sourceGeneration: generation, mode: 'Prepare', title, processPath: options.processPath || '', processTarget: options.processTarget ? { ...options.processTarget } : undefined, manual: !options.automatic, cancelled: false, listeners: new Set(), promise: Promise.resolve(null as never) };
+  const stopLifecycle = subscribeTrainerLifecycle(() => { void cancelJob(job).catch(() => {}); });
   if (options.onProgress) job.listeners.add(options.onProgress);
   jobs.set(key, job);
   job.promise = workerQueue.then(() => runPreparation(job)).catch((error) => {
-    publish({ ok: false, gameName: title, state: error instanceof GameTrainerCancelledError ? 'cancelled' : 'failed', error: String(error.message || error), message: String(error.message || error) }, job);
-    throw error;
-  }).finally(() => { if (jobs.get(key) === job) jobs.delete(key); });
+    const failure = error instanceof TrainerPowerChangedError ? new GameTrainerCancelledError() : error;
+    publish({ ok: false, gameName: title, state: failure instanceof GameTrainerCancelledError ? 'cancelled' : 'failed', error: String(failure.message || failure), message: String(failure.message || failure) }, job);
+    throw failure;
+  }).finally(() => { stopLifecycle(); if (jobs.get(key) === job) jobs.delete(key); });
   workerQueue = job.promise.catch(() => {});
   publish({ ok: false, gameName: title, state: 'queued', message: '等待后台准备修改器' }, job);
   return job.promise;
@@ -539,65 +567,116 @@ export function prepareGameTrainer(gameName: string, options: PrepareOptions = {
 export function refreshGameTrainerData(): Promise<GcmSearchResult> {
   const generation = syncTrainerSource();
   const existing = jobs.get('@catalog');
-  if (existing) return existing.promise;
+  if (existing && !existing.cancelled && existing.lifecycleEpoch === getTrainerLifecycleEpoch()) return existing.promise;
   if (jobs.size) return Promise.resolve({ ok: false, gameName: 'YMCC Trainer Catalog', state: 'unavailable', retryAfter: Date.now() + 60000 });
-  const job: PreparationJob = { key: '@catalog', sourceGeneration: generation, mode: 'RefreshData', title: 'YMCC Trainer Catalog', processPath: '', manual: false, cancelled: false, listeners: new Set(), promise: Promise.resolve(null as never) };
+  const job: PreparationJob = { key: '@catalog', lifecycleEpoch: getTrainerLifecycleEpoch(), sourceGeneration: generation, mode: 'RefreshData', title: 'YMCC Trainer Catalog', processPath: '', manual: false, cancelled: false, listeners: new Set(), promise: Promise.resolve(null as never) };
+  const stopLifecycle = subscribeTrainerLifecycle(() => { void cancelJob(job).catch(() => {}); });
   jobs.set(job.key, job);
-  job.promise = workerQueue.then(() => runPreparation(job)).finally(() => { if (jobs.get(job.key) === job) jobs.delete(job.key); });
+  job.promise = workerQueue.then(() => runPreparation(job)).finally(() => { stopLifecycle(); if (jobs.get(job.key) === job) jobs.delete(job.key); });
   workerQueue = job.promise.catch(() => {});
   return job.promise;
 }
-const launches = new Map<string, Promise<{ action: 'opened' | 'searched'; trainer?: InstalledGameTrainer; search?: GcmSearchResult }>>();
+type ReadyGameTrainerLaunch = { action: 'opened'; trainer: InstalledGameTrainer; notice?: string };
+type GameTrainerLaunch = { action: 'opened' | 'searched'; trainer?: InstalledGameTrainer; search?: GcmSearchResult; notice?: string };
+const launches = new Map<string, Promise<GameTrainerLaunch>>();
+function launchInstanceKey(name: string, path: string, target?: GameTrainerProcessTarget): string {
+  return JSON.stringify([trainerTaskKey(name, path), getSettingsGeneration(), getTrainerLifecycleEpoch(), target?.pid ?? 0, target?.processCreated ?? '']);
+}
 export function openOrSearchGameTrainer(gameName: string, onProgress?: (progress: GcmSearchResult) => void, processPath = '', options: GameTrainerTaskOptions = {}) {
   options={...options,processTarget:options.processTarget?{...options.processTarget}:undefined};
   const generation = syncTrainerSource();
-  const key = trainerTaskKey(gameName, processPath);
+  const key = launchInstanceKey(gameName, processPath, options.processTarget);
   const activeLaunch = launches.get(key);
   if (activeLaunch) return activeLaunch;
-  const action = (async (): Promise<{ action: 'opened' | 'searched'; trainer?: InstalledGameTrainer; search?: GcmSearchResult }> => {
+  const lifecycleEpoch = getTrainerLifecycleEpoch(), stopLifecycle = subscribeTrainerLifecycle(() => {});
+  let powerGeneration: number | undefined;
+  const action = (async (): Promise<GameTrainerLaunch> => {
     const check = async () => {
+      powerGeneration = await assertTrainerPowerReady(lifecycleEpoch, powerGeneration);
       assertTrainerSource(generation);
       if (options.isCancelled?.()) throw new GameTrainerCancelledError();
       if (options.isTargetCurrent && !(await options.isTargetCurrent())) throw new Error('目标游戏已退出或更换，修改器已保留，下次可直接启动');
+      assertTrainerSource(generation);
+      if (options.isCancelled?.()) throw new GameTrainerCancelledError();
+      // Async game validation can cross suspend/wake or page recovery after
+      // the first power read. An old acknowledgement is not a fresh action.
+      if (options.isTargetCurrent) powerGeneration = await assertTrainerPowerReady(lifecycleEpoch, powerGeneration);
       assertTrainerSource(generation);
       if (options.isCancelled?.()) throw new GameTrainerCancelledError();
     };
     await check();
     if (EMULATORS.has(processPath.split(/[\\/]/).pop()?.toLowerCase() || '')) {
       await check();
-      await launchTrainerWorker('CheatEngine', undefined, processPath, check, options.processTarget);
-      return { action: 'opened' };
+      const result = await launchTrainerWorker('CheatEngine', undefined, processPath, check, options.processTarget, options.interactiveShell);
+      return { action: 'opened', notice: result.notice };
+    }
+    // A renderer may have lost the in-memory ready state while the original
+    // owner already saved it. Rejoin that exact live instance before preparing.
+    // Both menu entry points then share the same GCM resolver and launch receipt.
+    if (options.processTarget && options.isTargetCurrent) {
+      if (!getReadyGameTrainer(gameName, processPath, options.processTarget)) {
+        let fault: GameTrainerCacheFault | undefined;
+        await restoreReadyGameTrainer(gameName, processPath, {
+          processTarget: options.processTarget,
+          isTargetCurrent: () => generation === getSettingsGeneration() && !options.isCancelled?.(),
+          onCacheFault: kind => { fault = kind; },
+        });
+        await check();
+        if (fault) throw new Error('无法读取本地修改器记录，请打开修改器管理器核对后重试');
+      }
+      await check();
+      if (getReadyGameTrainer(gameName, processPath, options.processTarget)) {
+        return startReadyGameTrainerLaunch(gameName, processPath, { ...options, isTargetCurrent: options.isTargetCurrent }, generation);
+      }
     }
     const search = await prepareGameTrainer(gameName, { onProgress, processPath, processTarget: options.processTarget });
     await check();
+    if (options.isTargetCurrent && getReadyGameTrainer(gameName, processPath, options.processTarget)) {
+      return { ...await startReadyGameTrainerLaunch(gameName, processPath, { ...options, isTargetCurrent: options.isTargetCurrent }, generation), search };
+    }
     const trainer = resultTrainer(search);
     if (!trainer) throw new Error(search.message || search.error || '暂未找到可启动的修改器');
     if (!(await trainerConfigIO(fs.exists(trainer.path),'核对修改器文件'))) throw new Error('修改器文件已被移除，请重新准备');
     if (trainer.sha256 && (await trainerConfigIO(fs.sha256File(trainer.path),'核对修改器散列')).toLowerCase() !== trainer.sha256.toLowerCase()) throw new Error('修改器文件已改变，请在修改器管理器中确认后重新准备');
     await check();
-    await launchTrainerWorker('Trainer', trainer, processPath, check, options.processTarget);
-    return { action: 'opened', trainer, search };
+    const result = await launchTrainerWorker('Trainer', trainer, processPath, check, options.processTarget, options.interactiveShell);
+    return { action: 'opened', trainer, search, notice: result.notice };
   })();
+  launches.set(key, action);
+  void action.finally(() => { stopLifecycle(); if (launches.get(key) === action) launches.delete(key); }).catch(() => {});
+  return action;
+}
+const readyLaunches = new Map<string, Promise<ReadyGameTrainerLaunch>>();
+// Consumers must revalidate their locked PID/creation-time/path target, not just a title.
+export function launchReadyGameTrainer(gameName: string, processPath: string, options: GameTrainerTaskOptions & { isTargetCurrent: () => Promise<boolean> }): Promise<ReadyGameTrainerLaunch> {
+  options={...options,processTarget:options.processTarget?{...options.processTarget}:undefined};
+  const generation = syncTrainerSource();
+  const key = launchInstanceKey(gameName, processPath, options.processTarget);
+  const existing = readyLaunches.get(key);
+  if (existing) return existing;
+  if (launches.has(key)) return Promise.reject(new Error('修改器操作正在进行，请稍候'));
+  const action = startReadyGameTrainerLaunch(gameName, processPath, options, generation);
   launches.set(key, action);
   void action.finally(() => { if (launches.get(key) === action) launches.delete(key); }).catch(() => {});
   return action;
 }
-const readyLaunches = new Map<string, Promise<{ action: 'opened'; trainer: InstalledGameTrainer; notice?: string }>>();
-// Consumers must revalidate their locked PID/creation-time/path target, not just a title.
-export function launchReadyGameTrainer(gameName: string, processPath: string, options: GameTrainerTaskOptions & { isTargetCurrent: () => Promise<boolean> }): Promise<{ action: 'opened'; trainer: InstalledGameTrainer; notice?: string }> {
-  options={...options,processTarget:options.processTarget?{...options.processTarget}:undefined};
-  const generation = syncTrainerSource();
+function startReadyGameTrainerLaunch(gameName: string, processPath: string, options: GameTrainerTaskOptions & { isTargetCurrent: () => Promise<boolean> }, generation: number): Promise<ReadyGameTrainerLaunch> {
   const key = trainerTaskKey(gameName, processPath);
-  const existing = readyLaunches.get(key);
-  if (existing) return existing;
-  if (launches.has(key)) return Promise.reject(new Error('修改器操作正在进行，请稍候'));
-  const action = (async (): Promise<{ action: 'opened'; trainer: InstalledGameTrainer; notice?: string }> => {
+  const instanceKey = launchInstanceKey(gameName, processPath, options.processTarget);
+  const lifecycleEpoch = getTrainerLifecycleEpoch(), stopLifecycle = subscribeTrainerLifecycle(() => {});
+  let powerGeneration: number | undefined;
+  const action = (async (): Promise<ReadyGameTrainerLaunch> => {
     const trainer = getReadyGameTrainer(gameName, processPath, options.processTarget);
     if (!trainer) throw new Error('未找到已就绪的修改器');
     const check = async () => {
+      powerGeneration = await assertTrainerPowerReady(lifecycleEpoch, powerGeneration);
       assertTrainerSource(generation);
       if (options.isCancelled?.()) throw new GameTrainerCancelledError();
       if (typeof options.isTargetCurrent !== 'function' || !(await options.isTargetCurrent())) throw new Error('目标游戏已退出或更换，未启动修改器');
+      assertTrainerSource(generation);
+      if (options.isCancelled?.()) throw new GameTrainerCancelledError();
+      powerGeneration = await assertTrainerPowerReady(lifecycleEpoch, powerGeneration);
+      assertTrainerSource(generation);
       if (options.isCancelled?.()) throw new GameTrainerCancelledError();
       const current = getReadyGameTrainer(gameName, processPath, options.processTarget);
       if (!current || current.path !== trainer.path || current.folder !== trainer.folder || current.sha256 !== trainer.sha256) throw new Error('修改器就绪状态已改变，请重新确认');
@@ -620,6 +699,7 @@ export function launchReadyGameTrainer(gameName: string, processPath: string, op
     let notice: string | undefined;
     try {
       const resolved = await launchTrainerWorker('Trainer', trainer, processPath, check, options.processTarget, options.interactiveShell);
+      await check();
       notice = resolved.notice;
       if (resolved?.trainerPath && resolved.trainerFolder && syncTrainerSource() === generation && states.get(key) === checkedState) {
         const updated = { ...checkedState!, trainerPath: resolved.trainerPath, trainerFolder: resolved.trainerFolder };
@@ -638,53 +718,63 @@ export function launchReadyGameTrainer(gameName: string, processPath: string, op
     }
     return { action: 'opened', trainer, notice };
   })();
-  readyLaunches.set(key, action);
-  launches.set(key, action);
-  void action.finally(() => {
-    if (readyLaunches.get(key) === action) readyLaunches.delete(key);
-    if (launches.get(key) === action) launches.delete(key);
-  }).catch(() => {});
+  readyLaunches.set(instanceKey, action);
+  void action.finally(() => { stopLifecycle(); if (readyLaunches.get(instanceKey) === action) readyLaunches.delete(instanceKey); }).catch(() => {});
   return action;
 }
 interface TrainerLaunchReceipt { notice?: string; launchBackend?: string; window?: string; requestId?: string; pending?: boolean; ok?: boolean; error?: string; code?: string; program?: string; arguments?: string; trainerPath?: string; trainerFolder?: string }
 class GameTrainerLaunchError extends Error { constructor(message: string, readonly code = '') { super(message); } }
 async function launchTrainerWorker(mode: 'Trainer' | 'Manager' | 'CheatEngine', trainer?: InstalledGameTrainer, processPath = '', beforeLaunch?: () => Promise<void>, processTarget?: GameTrainerProcessTarget, interactiveShell = false): Promise<TrainerLaunchReceipt> {
   const generation = syncTrainerSource();
-  processTarget=processTarget?{...processTarget}:undefined;
-  if(processTarget&&(!Number.isSafeInteger(processTarget.pid)||processTarget.pid<=0||typeof processTarget.processCreated!=='string'||!/^[1-9][0-9]*$/.test(processTarget.processCreated)))throw new TrainerConfigError('启动请求的游戏进程身份无效');
-  const { cacheRoot, script: prepareScript } = await trainerPaths();
-  const script = prepareScript.replace(/YeManTrainerPrepare\.ps1$/, 'YeManTrainerLaunch.ps1');
-  if (!(await trainerConfigIO(fs.exists(script),'核对修改器组件'))) throw new Error('缺少修改器启动组件，请更新完整安装包');
-  await trainerConfigIO(fs.mkdir(cacheRoot + '\\requests'),'创建修改器请求目录');
-  const requestId = 'launch-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
-  const resultPath = cacheRoot + '\\requests\\' + requestId + '.json';
-
-  const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-Mode', mode, '-CacheRoot', cacheRoot, '-ResultPath', resultPath, '-RequestId', requestId];
-  if (trainer) args.push('-TrainerPath', trainer.path, '-TrainerFolder', trainer.folder, '-ExpectedSha256', trainer.sha256 || '', '-TrainerGameName', trainer.gameName, '-TrainerOrigin', trainer.origin);
-  if (trainer?.gcmResourceId) args.push('-GcmResourceId', trainer.gcmResourceId);
-  args.push('-AppDirectory', await app.exeDir());
-  if (processPath) args.push('-GameExecutablePath', processPath);
-  const identity = trainer?.identity;
-  const boundIdentity = identity && matchesRunningGame(identity, processPath, { pid: identity.processId || 0, processCreated: identity.processCreated || '' }) ? identity : undefined;
-  const target = processTarget || (boundIdentity ? { pid: boundIdentity.processId!, processCreated: boundIdentity.processCreated! } : undefined);
-  if (target) args.push('-GameProcessId', String(target.pid), '-GameProcessCreated', target.processCreated);
-  if (boundIdentity?.executableSha256) args.push('-ExpectedGameSha256', boundIdentity.executableSha256);
-  if (interactiveShell) args.push('-InteractiveShell');
-  const binding=trainerRequestBinding(processPath,target,generation);
-  await writeTrainerPending(resultPath,{...binding,requestId,ok:false,pending:true},generation);
+  const lifecycleEpoch = getTrainerLifecycleEpoch();
+  let resultPath = '';
+  const cancel = () => resultPath
+    ? trainerConfigIO(fs.writeTextFileAtomic(resultPath + '.cancel', 'cancel', TRAINER_CONFIG_IO_MS), '保存修改器取消信号')
+    : Promise.resolve();
+  // Subscribe before the first awaited path/config operation: direct CE/manager
+  // actions also belong to the click's original power/page generation.
+  const stopLifecycle = subscribeTrainerLifecycle(() => {
+    void cancel().catch(() => {});
+  });
   let complete = false;
   let started = false;
   try {
+    processTarget=processTarget?{...processTarget}:undefined;
+    if(processTarget&&(!Number.isSafeInteger(processTarget.pid)||processTarget.pid<=0||typeof processTarget.processCreated!=='string'||!/^[1-9][0-9]*$/.test(processTarget.processCreated)))throw new TrainerConfigError('启动请求的游戏进程身份无效');
+    const powerGeneration = await assertTrainerPowerReady(lifecycleEpoch);
+    const { cacheRoot, script: prepareScript } = await trainerPaths();
+    const script = prepareScript.replace(/YeManTrainerPrepare\.ps1$/, 'YeManTrainerLaunch.ps1');
+    if (!(await trainerConfigIO(fs.exists(script),'核对修改器组件'))) throw new Error('缺少修改器启动组件，请更新完整安装包');
+    await trainerConfigIO(fs.mkdir(cacheRoot + '\\requests'),'创建修改器请求目录');
+    const requestId = 'launch-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+    resultPath = cacheRoot + '\\requests\\' + requestId + '.json';
+
+    const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-Mode', mode, '-CacheRoot', cacheRoot, '-ResultPath', resultPath, '-RequestId', requestId];
+    if (trainer) args.push('-TrainerPath', trainer.path, '-TrainerFolder', trainer.folder, '-ExpectedSha256', trainer.sha256 || '', '-TrainerGameName', trainer.gameName, '-TrainerOrigin', trainer.origin);
+    if (trainer?.gcmResourceId) args.push('-GcmResourceId', trainer.gcmResourceId);
+    args.push('-AppDirectory', await trainerConfigIO(app.exeDir(TRAINER_CONFIG_IO_MS),'读取修改器启动目录'));
+    if (processPath) args.push('-GameExecutablePath', processPath);
+    const identity = trainer?.identity;
+    const boundIdentity = identity && matchesRunningGame(identity, processPath, { pid: identity.processId || 0, processCreated: identity.processCreated || '' }) ? identity : undefined;
+    const target = processTarget || (boundIdentity ? { pid: boundIdentity.processId!, processCreated: boundIdentity.processCreated! } : undefined);
+    if (target) args.push('-GameProcessId', String(target.pid), '-GameProcessCreated', target.processCreated);
+    if (boundIdentity?.executableSha256) args.push('-ExpectedGameSha256', boundIdentity.executableSha256);
+    if (interactiveShell) args.push('-InteractiveShell');
+    const binding=trainerRequestBinding(processPath,target,generation);
+    await writeTrainerPending(resultPath,{...binding,requestId,ok:false,pending:true},generation);
     await beforeLaunch?.();
+    await assertTrainerPowerReady(lifecycleEpoch, powerGeneration);
     assertTrainerSource(generation);
-    if ((await shell.hidden('powershell.exe', args)).ok !== true) throw new Error('无法启动修改器启动组件');
+    started = true; // A lost dispatch acknowledgement must retain its request.
+    if ((await trainerConfigIO(shell.hidden('powershell.exe', args, TRAINER_CONFIG_IO_MS),'启动修改器组件')).ok !== true) { started = false; throw new Error('无法启动修改器启动组件'); }
     assertTrainerSource(generation);
-    started = true;
     const deadline = Date.now() + 90000;
     while (Date.now() < deadline) {
       assertTrainerSource(generation);
+      if (lifecycleEpoch !== getTrainerLifecycleEpoch()) throw new GameTrainerCancelledError();
       const result = await readTrainerDocument(resultPath,65536) as TrainerLaunchReceipt;
       assertTrainerSource(generation);
+      if (lifecycleEpoch !== getTrainerLifecycleEpoch()) throw new GameTrainerCancelledError();
       if (result?.requestId === requestId && result.pending !== true) {
         assertTrainerRequest(result as Record<string,unknown>,binding);
         if(typeof result.ok!=='boolean'||(result.pending!==undefined&&typeof result.pending!=='boolean'))throw new TrainerConfigError('修改器启动确认回执类型无效');
@@ -702,7 +792,18 @@ async function launchTrainerWorker(mode: 'Trainer' | 'Manager' | 'CheatEngine', 
       await new Promise(resolve => setTimeout(resolve, 250));
     }
     throw new Error('未收到启动确认，请检查是否有待确认的系统权限窗口');
-  } finally { if (complete || !started) await trainerConfigIO(fs.remove(resultPath),'清理修改器启动回执').catch(() => {}); }
+  } catch (error) {
+    // IPC/read failures can end the consumer while its worker still owns the
+    // pending request. Retire that exact request before releasing observers.
+    if (started && !complete) await cancel().catch(() => {});
+    throw error;
+  } finally {
+    stopLifecycle();
+    if (resultPath && (complete || !started)) {
+      await trainerConfigIO(fs.remove(resultPath),'清理修改器启动回执').catch(() => {});
+      await trainerConfigIO(fs.remove(resultPath + '.cancel'),'清理修改器取消信号').catch(() => {});
+    }
+  }
 }
 let cheatEngineLaunch: Promise<void> | null = null;
 export function openCheatEngine(): Promise<void> {

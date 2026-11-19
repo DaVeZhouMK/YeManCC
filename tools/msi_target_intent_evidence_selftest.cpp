@@ -3,7 +3,17 @@
 #include <thread>
 #include <vector>
 using namespace ymcc::msi::intentEvidence;
-int main(){unsigned cases=0;auto check=[&](bool x,const char* n){++cases;if(!x){std::cerr<<"FAIL "<<n<<"\n";std::exit(1);}};
+#ifdef YMCC_INTENT_PREFLIGHT_ONLY
+#include "fixtures/msi_target_intent_observation.inc"
+#endif
+int main(int argc,char** argv){
+    if(argc!=1){
+#ifdef YMCC_INTENT_PREFLIGHT_ONLY
+        if(argc==2&&std::strcmp(argv[1],"--observation-preflight")==0)return runIntentObservationPreflight();
+#endif
+        return 2;
+    }
+    unsigned cases=0;auto check=[&](bool x,const char* n){++cases;if(!x){std::cerr<<"FAIL "<<n<<"\n";std::exit(1);}};
     for(unsigned mask=0;mask<8;++mask)check(enabled(mask&1,mask&2,mask&4)==(mask==7),"family/build/detail three-gate");
     const Json saved={{"revision",20},{"outputTarget",{{"persona","steamdeck"},{"buttonMappingEnabled",true},{"gyroEnabled",true}}}};
     Json off=saved;off["outputTarget"]={{"persona","disabled"},{"buttonMappingEnabled",false},{"gyroEnabled",false}};

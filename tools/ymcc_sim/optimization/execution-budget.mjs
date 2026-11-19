@@ -8,7 +8,24 @@ import {runProcess,makeRunDirectory} from '../global/runner.mjs';
 import {simulationCorePath} from '../global/release-host-environment.mjs';
 export const MAX_WALL_BUDGET_MS=1_800_000;
 const inside=(root,file)=>{const r=path.relative(root,file);return r===''||(!path.isAbsolute(r)&&r!=='..'&&!r.startsWith('..'+path.sep));};
-const write=(file,value)=>fs.writeFileSync(file,JSON.stringify(value,null,2)+'\n');
+// Publish new evidence only after the complete payload has been written and closed.
+// A failed write keeps its owned pending file; an existing final is never replaced.
+const writeBytes=(file,bytes)=>{
+ const temporary=file+'.'+crypto.randomBytes(6).toString('hex')+'.pending';let fd,primaryError=null,stage='open-temporary';
+ try{
+  fd=fs.openSync(temporary,'wx');stage='write-temporary';fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);
+  stage='close-temporary';try{fs.closeSync(fd);}finally{fd=undefined;}
+  stage='publish-final';fs.linkSync(temporary,file);stage='remove-temporary';fs.unlinkSync(temporary);
+ }catch(error){primaryError=error;error.recordingFile=file;error.recordingTemporary=temporary;error.recordingStage=stage;throw error;}
+ finally{if(fd!==undefined){try{fs.closeSync(fd);}catch(error){if(primaryError)primaryError.recordingCleanupError={code:error.code??error.name,message:error.message};else throw error;}}}
+};
+const write=(file,value)=>writeBytes(file,JSON.stringify(value,null,2)+'\n');
+function readGuardRecordingDiagnostic(processResult){
+ const prefix='YMCC_SIM_RECEIPT_WRITE_FAILED ';
+ const rows=(processResult.stderr??'').split(/\r?\n/).filter(line=>line.startsWith(prefix));
+ if(rows.length!==1)return null;
+ try{const value=JSON.parse(rows[0].slice(prefix.length));return value?.schemaVersion===1&&value.helperPid===processResult.pid&&value.receipt&&typeof value.receipt==='object'?value:null;}catch{return null;}
+}
 const read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 // Raw bytes, one fixed buffer, and the original monotonic deadline in both phases.
 const scanSourceIdentity=(files,deadline,expected)=>{
@@ -87,21 +104,48 @@ export async function runWithWallBudget(args,{repoRoot,coreRoot,workerEntry,budg
  if(originalDomain&&(!command||!path.isAbsolute(command.executable)||!Array.isArray(command.args)||command.args.some(a=>typeof a!=='string'||a.includes('\0'))||!Array.isArray(command.sourceInputs)||command.sourceInputs.length===0))throw Error('OWNED_COMMAND_INVALID');
  const sourceFiles=[...new Set([helper,...additionalInputs,...(originalDomain?command.sourceInputs:[workerEntry]),fileURLToPath(import.meta.url),path.join(repoRoot,'tools/ymcc_sim/global/runner.mjs')])];
  const executable=originalDomain?command.executable:process.execPath;
- write(contextFile,{...context,scope:originalDomain?'original-domain':'optimized-adapters'});write(argumentsFile,originalDomain?command.args:[workerEntry,'--budget-worker',contextFile,context.nonce]);
+ const recordingErrors=[],unpersistedRecords=[];
+ const record=(file,value,phase,json=false)=>{
+  const bytes=json?JSON.stringify(value,null,2)+'\n':value;
+  try{writeBytes(file,bytes);return true;}
+  catch(error){recordingErrors.push({file,phase,stage:error.recordingStage??null,temporary:error.recordingTemporary??null,code:error.code??error.name,message:error.message,cleanupError:error.recordingCleanupError??null});unpersistedRecords.push({file,phase,bytes});return false;}
+ };
+ const finishRecording=(result,processResult=null)=>{
+  const originalStatus=result.status,originalExitCode=result.exitCode;
+  const mark=()=>{
+   if(!recordingErrors.length&&!result.guardRecordingDiagnostic)return;
+   result.originalClassification={status:originalStatus,exitCode:originalExitCode};
+   result.recording={status:'INCOMPLETE',errors:recordingErrors,unpersistedRecords:unpersistedRecords.map(row=>({file:row.file,phase:row.phase,utf8Bytes:Buffer.byteLength(row.bytes),sha256:crypto.createHash('sha256').update(row.bytes).digest('hex')})),durableFallbackClaimed:false};
+   result.actualPassedThisRun=null;
+   const businessFailure=result.workerStatus&&/^(FAIL|TIMEOUT)(?:_|$)/.test(result.workerStatus);
+   const primaryProcessFailure=/^FAIL(?:_|$)/.test(originalStatus)&&Number.isInteger(result.processExitCode)&&result.processExitCode!==0&&!result.guardRecordingDiagnostic;
+   if(result.status!=='TIMEOUT'&&!businessFailure&&!primaryProcessFailure){result.status='INCOMPLETE_RECORDING';result.exitCode=Number.isInteger(result.processExitCode)&&result.processExitCode!==0?result.processExitCode:10;}
+  };
+  mark();record(path.join(runDir,'execution-budget.json'),result,'final-envelope',true);mark();
+  if(result.recording)console.error('YMCC_EXECUTION_RECORDING_FAILED '+JSON.stringify({schemaVersion:1,runDir,status:result.status,exitCode:result.exitCode,processStarted:result.processStarted,processExitCode:result.processExitCode,errors:recordingErrors,guardRecordingDiagnostic:result.guardRecordingDiagnostic??null,ownedJobObservation:result.ownedJob?{jobAssigned:result.ownedJob.jobAssigned,jobDisposed:result.ownedJob.jobDisposed,childExitedBeforeReturn:result.ownedJob.childExitedBeforeReturn,activeProcessesFinal:result.ownedJob.activeProcessesFinal,zeroObservedBeforeDispose:result.ownedJob.zeroObservedBeforeDispose,cleanupError:result.ownedJob.cleanupError}:null,originalClassification:result.originalClassification}));
+  return {exitCode:result.exitCode,result,...(result.recording?{unpersistedRecords,capturedOutput:processResult?{stdout:processResult.stdout??'',stderr:processResult.stderr??''}:null}:{})};
+ };
+
+ if(!record(contextFile,{...context,scope:originalDomain?'original-domain':'optimized-adapters'},'context-admission',true)||!record(argumentsFile,originalDomain?command.args:[workerEntry,'--budget-worker',contextFile,context.nonce],'arguments-admission',true)){
+  const result={schemaVersion:1,status:'INCOMPLETE_RECORDING',runDir,budgetMs,cleanupReserveMs,wallMs:performance.now()-started,exitCode:10,processExitCode:null,processStarted:false,launchError:null,timedOut:false,timeoutPhase:null,ownedJob:null,ownedJobVerified:false,resourceZeroVerified:false,sourcePins:[],sourceDrift:[],sourceReadErrors:[],sourceIdentity:{status:'NOT_RUN',pre:null,post:null},sourceClosureComplete:false,workerStatus:null,workerEvidenceError:null,workerActualPassedThisRun:null,actualPassedThisRun:null,scope:originalDomain?'original-domain':'optimized-adapters',fixtureScope:'Required pre-launch evidence could not be recorded; no child started',fullProductAcceptance:false};
+  return finishRecording(result);
+ }
  const pre=scanSourceIdentity(sourceFiles,deadline),sourcePins=pre.pins;
  if(pre.metadata.timedOut||performance.now()>=deadline-cleanupReserveMs){
   const result={schemaVersion:1,status:'TIMEOUT',runDir,budgetMs,cleanupReserveMs,wallMs:performance.now()-started,exitCode:124,processExitCode:null,processStarted:false,launchError:null,timedOut:true,timeoutPhase:pre.metadata.timedOut?'source-identity-pre':'worker-admission',ownedJob:null,ownedJobVerified:false,sourcePins,sourceDrift:[],sourceReadErrors:[],sourceIdentity:{status:'INCOMPLETE',pre:pre.metadata,post:null},sourceClosureComplete:false,sourceIdentityScope:'Wrapper, guard, runner and explicitly supplied entry/additional inputs only; transitive worker/domain closure is not established here',workerStatus:null,workerEvidenceError:null,workerActualPassedThisRun:null,partialEvidencePreserved:true,actualPassedThisRun:null,scope:originalDomain?'original-domain':'optimized-adapters',fixtureScope:'Original selected adapters/domain only; process exit and deadline are not acceptance',fullProductAcceptance:false};
-  write(path.join(runDir,'execution-budget.json'),result);
+  const completed=finishRecording(result);
   console.log(JSON.stringify({status:result.status,runDir,budgetMs,wallMs:result.wallMs,deadlineEnforced:false}));
-  return {exitCode:124,result};
+  return completed;
  }
  const processResult=await runProcess(powershell,['-NoLogo','-NoProfile','-NonInteractive','-File',helper,'-ProgramPath',executable,'-ArgumentsPath',argumentsFile,'-DeadlineEpochMs',String(context.deadlineEpochMs),'-CleanupReserveMs',String(cleanupReserveMs),'-DeadlineReceiptPath',guardReceipt],{cwd:repoRoot,env:process.env,timeoutMs:Math.max(1,Math.floor(budgetMs-(performance.now()-started)))});
- fs.writeFileSync(path.join(runDir,'budget.stdout.log'),processResult.stdout??'');fs.writeFileSync(path.join(runDir,'budget.stderr.log'),processResult.stderr??'');
+ record(path.join(runDir,'budget.stdout.log'),processResult.stdout??'','captured-stdout');record(path.join(runDir,'budget.stderr.log'),processResult.stderr??'','captured-stderr');
+ const guardRecordingDiagnostic=readGuardRecordingDiagnostic(processResult);
  let worker=null,plan=null,guard=null,workerReadError=null;
  try{worker=read(path.join(runDir,'result.json'));}catch(error){workerReadError=error.code==='ENOENT'?'MISSING':'INVALID_JSON';}
  try{plan=read(path.join(runDir,'plan.json'));}catch{}try{guard=read(guardReceipt);}catch{}
  const workerValid=validWorker(worker,runDir),workerEvidenceError=originalDomain?null:workerReadError??(workerValid?null:'INVALID_SCHEMA');
  const ownedJobVerified=object(guard)&&guard.schemaVersion===1&&guard.jobDisposed===true&&Number.isInteger(guard.childPid)&&guard.childPid>0&&guard.exitCode===processResult.exitCode&&guard.deadlineEpochMs===context.deadlineEpochMs&&guard.cleanupReserveMs===cleanupReserveMs&&typeof guard.deadlineExpired==='boolean'&&guard.status===(guard.deadlineExpired?'TIMEOUT':guard.exitCode===0?'EXITED':'FAILED');
+ const resourceZeroVerified=ownedJobVerified&&guard.resourceObservationVersion===1&&guard.jobAssigned===true&&guard.childExitedBeforeReturn===true&&guard.zeroObservedBeforeDispose===true&&guard.activeProcessesFinal===0&&Number.isInteger(guard.jobQueryCount)&&guard.jobQueryCount>0&&guard.cleanupError===null;
  const processTimeout=processResult.timedOut||processResult.exitCode===124||guard?.deadlineExpired===true||(!originalDomain&&workerValid&&/^TIMEOUT(?:_|$)/.test(worker.status));
  const ended=Number.isInteger(processResult.exitCode)&&!processResult.signal&&!processResult.launchError&&ownedJobVerified;
  const nonPassWorker=workerValid&&nonPassStatus.test(worker.status)&&worker.status!=='NOT_RUN_NO_RELEASE_BUGS';
@@ -122,10 +166,13 @@ export async function runWithWallBudget(args,{repoRoot,coreRoot,workerEntry,budg
  else status=workerReadError==='MISSING'&&validPlan(plan,args)?'PLAN_ONLY':'INCOMPLETE_RESULT';
  const exitCode=timeout?124:!ended?2:processResult.exitCode!==0?processResult.exitCode:/^FAIL(?:_|$)/.test(status)?2:/^(BLOCKED|INCOMPLETE|NOT_RUN)(?:_|$)/.test(status)&&status!=='NOT_RUN_NO_RELEASE_BUGS'?10:0;
  const result={schemaVersion:1,status,runDir,budgetMs,cleanupReserveMs,wallMs:performance.now()-started,exitCode,processExitCode:processResult.exitCode,processStarted:true,launchError:processResult.launchError??null,timedOut:timeout,timeoutPhase:processTimeout?'owned-process':post.metadata.timedOut?'source-identity-post':timeout?'final-classification':null,ownedJob:guard,ownedJobVerified,sourcePins,sourceDrift,sourceReadErrors,sourceIdentity,sourceClosureComplete:false,sourceIdentityScope:'Wrapper, guard, runner and explicitly supplied entry/additional inputs only; transitive worker/domain closure is not established here',workerStatus:worker?.status??null,workerEvidenceError,workerActualPassedThisRun:originalDomain||!workerValid||!ended?null:worker.summary?.actualPassedThisRun??null,partialEvidencePreserved:true,actualPassedThisRun:originalDomain||!workerValid||!ended||timeout||!post.metadata.complete||sourceDrift.length?null:worker.summary?.actualPassedThisRun??null,scope:originalDomain?'original-domain':'optimized-adapters',fixtureScope:'Original selected adapters/domain only; process exit and deadline are not acceptance',fullProductAcceptance:false};
- write(path.join(runDir,'execution-budget.json'),result);
+ if(guardRecordingDiagnostic)result.guardRecordingDiagnostic=guardRecordingDiagnostic;
+ result.resourceZeroVerified=resourceZeroVerified;
+ result.resourceProofScope=resourceZeroVerified?'Current guard observed this owned Job at activeProcesses=0 before disposal; not product handles or device return.':'No complete current owned-Job zero observation; legacy disposal proof is not resource-return acceptance.';
+ const completed=finishRecording(result,processResult);
  if(processResult.stdout)process.stdout.write(processResult.stdout);if(processResult.stderr)process.stderr.write(processResult.stderr);
- console.log(JSON.stringify({status,runDir,budgetMs,wallMs:result.wallMs,deadlineEnforced:ownedJobVerified}));
- return {exitCode,result};
+ console.log(JSON.stringify({status:result.status,runDir,budgetMs,wallMs:result.wallMs,deadlineEnforced:ownedJobVerified}));
+ return completed;
 }
 
 /** The sole legacy dispatcher is the existing versioned simulator front door. */

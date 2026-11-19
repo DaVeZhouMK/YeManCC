@@ -1,6 +1,15 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';
+import test,{after} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';
 import {fingerprintCase,inspectCachedResult} from './identity-cache.mjs';
-const output=path.resolve('G:/YeManCC-Work/Testing/YMCC/Evidence/WireFinalEngine-20261105/FailureReferenceControls/Private');fs.mkdirSync(output,{recursive:true});const sha=b=>crypto.createHash('sha256').update(b).digest('hex'),pin=file=>({path:file,sha256:sha(fs.readFileSync(file))});
+// Synthetic inputs belong to this invocation, never to a historical Evidence archive.
+const workspace=path.resolve('G:/YeManCC-Work/Testing/YMCC/Workspace');
+assert(!fs.lstatSync(workspace).isSymbolicLink());assert.equal(fs.realpathSync(workspace).toLowerCase(),workspace.toLowerCase());
+const output=fs.mkdtempSync(path.join(workspace,'identity-cache-failure-output-'));
+after(()=>{
+ const owned=path.resolve(output);assert.equal(path.dirname(owned),workspace);assert(path.basename(owned).startsWith('identity-cache-failure-output-'));
+ assert(!fs.lstatSync(owned).isSymbolicLink());assert.equal(fs.realpathSync(owned).toLowerCase(),owned.toLowerCase());
+ fs.rmSync(owned,{recursive:true,force:false});
+});
+const sha=b=>crypto.createHash('sha256').update(b).digest('hex'),pin=file=>({path:file,sha256:sha(fs.readFileSync(file))});
 function fixture(status='FAIL'){
  const root=fs.mkdtempSync(path.join(output,'case-')),repoRoot=path.join(root,'repo'),caseDir=path.join(root,'case');fs.mkdirSync(repoRoot);fs.mkdirSync(caseDir);fs.writeFileSync(path.join(repoRoot,'entry.mjs'),'export const inert=true;');
  const adapter={id:'synthetic.failure',kind:'node',path:'entry.mjs',args:[],scope:'source-contract',timeoutMs:1000,evidenceInputs:['entry.mjs'],resultFiles:['child/result.json'],cacheOutputManifest:'child/result.json'},options={closureComplete:true,toolClosureComplete:true,resolvedInputs:[]};const identity=fingerprintCase({repoRoot,adapter,options});assert(identity.cacheable);

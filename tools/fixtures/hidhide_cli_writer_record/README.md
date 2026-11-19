@@ -29,6 +29,15 @@ Namespace: `ymcc::hidhideCliWriter`.
   opens have no record. Missing is distinct from Invalid/RetryableIo: Missing
   opens an in-memory revision-1 empty record without immediately writing it.
   A persisted `active:null` record is Valid, not Missing.
+- A safely decoded, fully empty historical record whose machine hint misses can
+  be reused by the exclusive Session without rewriting it. `openedFrom()` keeps
+  the original Invalid fast-match result; `historyBindingMatched()` is false.
+  This Session is not current resource or device proof. The first ordinary
+  changing reservation saves the current binding and complete new duty together,
+  at the original revision plus one; only a committed save publishes that change.
+  Native history is empty only when both active and nativeVisibility are absent;
+  target history requires no obligations. Public load remains strict. Nonempty
+  or unreadable history is not silently discarded or assigned cleanup authority.
 - `reserve(expectedRevision, reservedAttempt)` requires empty active and a
   childless Reserved attempt. Any already active reservation is rejected.
 - `markMayRun(expectedRevision, attemptId, child)` binds the child once and
@@ -79,6 +88,17 @@ import, and abrupt child exit immediately after zero-byte owner creation with
 both existing and missing records. Only the fixture's own executable is spawned.
 No normal product, Host, real CLI, driver, device, Job, service or AppData is used.
 Static imports do not constitute runtime module tracing or hardware acceptance.
+
+`--binding-hint-only` selects 22 explicit cases in this same fixture, Release
+only. It covers the Win5 three-record field inputs, read-only empty hints,
+exclusive ownership, first reserve/current binding, three owned abrupt exits
+after commit and subsequent nonempty reopen, invalid/IO/debt negatives and
+write/flush/replace failure preservation. It executes none of the default cases,
+Checked or the default semantic mutants; those original selections remain.
+The native compiler closure includes virtual_target_return_session.h. No new
+global test ID, minimum, Start policy, record migration worker or device action
+is added. These record cases do not accept the complete nonempty-history resource
+fallback, production Start/OFF, sleep, or physical controller behavior.
 ## Native refresh writer and native visibility (same record/session/owner)
 
 Namespace `ymcc::nativeRefreshWriter` in the existing native refresh headers.

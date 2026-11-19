@@ -72,7 +72,7 @@ const REASONS: Record<string, string> = {
   'physical-source-unavailable': '当前未取得可用的物理手柄输入。',
 };
 
-const EXTERNAL_PRIORITY_POLICY = '经核验的外接手柄可用时暂停本机虚拟输出、隐藏本机物理手柄，让外接手柄直通；断开后恢复已请求模式，保留所选模式。';
+const EXTERNAL_PRIORITY_POLICY = '全局记忆，不随游戏或开机模式切换。经核验的外接手柄可用时屏蔽本机手柄并暂停本机虚拟输出，优先使用外接手柄；断开后恢复已请求模式。';
 
 export function externalControllerPriorityPresentation(
   runtime: ExternalPriorityRuntimeState | null, enabled: boolean, busy = false,

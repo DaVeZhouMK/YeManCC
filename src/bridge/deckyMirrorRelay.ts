@@ -3,13 +3,21 @@
 import { validSteamObservation, type SteamRunningObservation } from '../../decky-plugin/src/steamRunningContext';
 import type { MirrorSnapshot } from '../../decky-plugin/src/mirrorClient';
 import type { GameMirrorAdmission } from './deckyGameActions';
+import type { ContinuousPerformanceReadStage, GameCustomDisplayReadStage } from './performanceSchedule';
 export interface MirrorControlAdmission {audioOptimization?:string;performance?:string;frames?:string;touchpads?:string;global?:string;monitor?:string;trainer?:string;}
 export type RelayReadSnapshot = Omit<MirrorSnapshot,'runId'|'revision'> & {gameAdmission?:GameMirrorAdmission;controlAdmission?:MirrorControlAdmission};
 export interface MirrorPeer { connection: string; runId: string; connected?: boolean; revision?: number; connectionRevision?:number; }
 export interface MirrorRequest extends MirrorPeer { request: { command: string; runId: string; id?: string; clientId?: string; [key: string]: unknown }; }
 export interface RelayMutationContext { nativePeer?:{connection:string;runId:string;connectionRevision:number}; generation:number; revision:number; gameIdentity?:string; gameAdmission?:GameMirrorAdmission; controlAdmission?:MirrorControlAdmission; checkpoint:() => void; }
-export type MirrorReadStage = 'power'|'powerSource'|'schedule'|'performance'|'topology'|'gyro'|'frames'|'touchpads'|'global'|'monitor'|'input';
-export interface MirrorReadTrace { measure<T>(stage: MirrorReadStage, read: () => Promise<T>): Promise<T>; }
+export type MirrorReadStage = 'audio'|'profile'|'power'|'powerSource'|'schedule'|'performance'|'topology'|'gyro'|'frames'|'touchpads'|'global'|'monitor'|'input';
+const invalidationSources=["audio","monitor","input","touchpads","frames","schedule","profile","game","power","fan","controller","steam","trainer","speed","lossless","action","unspecified","multiple"] as const;
+export type MirrorInvalidationSource=typeof invalidationSources[number];
+export interface MirrorReadTrace {
+  measure<T>(stage:MirrorReadStage, read:()=>Promise<T>):Promise<T>;
+  isCurrent:()=>boolean;
+  performanceStage?:(stage:ContinuousPerformanceReadStage,elapsedMs:number)=>void;
+  profileStage?:(stage:GameCustomDisplayReadStage,elapsedMs:number)=>void;
+}
 export interface RelayDeps {
   read: (trace?: MirrorReadTrace) => Promise<RelayReadSnapshot>;
   diagnostic?: (event: string, detail: Record<string, unknown>) => void;
@@ -17,7 +25,7 @@ export interface RelayDeps {
   snapshotDemand?:()=>void;
   schedule?:(action:()=>void,delay:number)=>ReturnType<typeof setTimeout>;
   cancel?:(timer:ReturnType<typeof setTimeout>)=>void;
-  observe: (invalidate: () => void) => (() => void);
+  observe: (invalidate: (source?:MirrorInvalidationSource) => void) => (() => void);
   reply: (connection: string, message: unknown) => Promise<boolean>;
   observeSteam?: (observation:SteamRunningObservation) => boolean;
   execute?: (command:string,args:Record<string,unknown>,context:RelayMutationContext) => Promise<{saved:boolean;applied:boolean;pending?:boolean;notice:string}>;
@@ -26,12 +34,14 @@ export class ReadOnlyMirrorRelay {
   private peer: MirrorPeer | null = null;
   private epoch = 0;
   private sourceEpoch = 0;
+  // Per-read diagnostic scope only; it never grants freshness or recovery.
+  private activeReadChange:{source?:MirrorInvalidationSource}|null=null;
   private revision = 0;
   private dirty = true;
   private requested = false;
   private snapshotDemandPaused = false;
   private demandEpoch = 0;
-  private queued = false;
+  private queuedDemandEpoch: number | null = null;
   private stopObserve: (() => void) | null = null;
   private cache: MirrorSnapshot | null = null;
   // Bounded receipts offered to this authenticated peer; never client-supplied source data.
@@ -45,6 +55,7 @@ export class ReadOnlyMirrorRelay {
   private freshReadRequested=false;
   private deferredSnapshot:MirrorSnapshot|null=null;
   private readTask: Promise<MirrorSnapshot | null> | null = null;
+  private probeRead: {id:string;sourceEpoch:number;demandEpoch:number} | null = null;
   private deliveries = new Map<string,Promise<void>>();
   private disposed = false;
   private mutationBusy = false;
@@ -108,7 +119,7 @@ export class ReadOnlyMirrorRelay {
   private startObserving(): boolean {
     if (this.stopObserve) return true;
     const demandEpoch = this.demandEpoch;
-    try { this.stopObserve = this.deps.observe(() => { if (demandEpoch === this.demandEpoch) this.invalidate(); }); return true; }
+    try { this.stopObserve = this.deps.observe(source => { if (demandEpoch === this.demandEpoch) this.invalidate(source); }); return true; }
     catch { this.detach(); return false; }
   }
   private stopObserving(): void {
@@ -126,19 +137,33 @@ export class ReadOnlyMirrorRelay {
   }
   // Only a verified context edge or completed explicit owner action may bypass
   // the fault read's wait. Ordinary demand/events cannot renew that budget.
-  invalidateFresh(contextChanged=false):void {
+  invalidateFresh(contextChanged=false,source:MirrorInvalidationSource='unspecified'):void {
     if(contextChanged){this.stopRecovery();this.recoveryAttempt=0;this.deferredSnapshot=null;}
-    this.freshReadRequested=true;this.invalidate();
+    this.freshReadRequested=true;this.invalidate(source);
   }
-  invalidate(): void {
-    if (this.disposed || !this.peer) return;
+  private markSnapshotDirty(source:MirrorInvalidationSource='unspecified'):void {
+    const changed=this.activeReadChange;
+    if(changed){
+      const fixed=typeof source==='string'&&invalidationSources.includes(source)?source:'unspecified';
+      changed.source=changed.source===undefined||changed.source===fixed?fixed:'multiple';
+    }
     this.dirty = true; this.sourceEpoch++;
+  }
+  invalidate(source:MirrorInvalidationSource='unspecified'): void {
+    if (this.disposed || !this.peer) return;
+    this.markSnapshotDirty(source);
     // The original save notifies before its action promise settles. Do not
     // publish an intermediate revision and then a second post-action revision.
     // Keep it dirty; the existing mutation finally invalidates once after commit.
-    if (!this.requested || this.queued || this.mutationBusy) return;
-    this.queued = true;
-    queueMicrotask(() => { this.queued = false; if (this.peer && this.requested && !this.disposed && !this.mutationBusy) void this.push(); });
+    const demandEpoch=this.demandEpoch;
+    if (!this.requested || this.queuedDemandEpoch===demandEpoch || this.mutationBusy) return;
+    this.queuedDemandEpoch=demandEpoch;
+    queueMicrotask(() => {
+      // A retired callback cannot push to a reopened sidebar or clear its queue.
+      if(this.queuedDemandEpoch!==demandEpoch)return;
+      this.queuedDemandEpoch=null;
+      if(demandEpoch===this.demandEpoch && this.peer && this.requested && !this.disposed && !this.mutationBusy)void this.push();
+    });
   }
   private stopRecovery():void {
     this.recoveryLease=null;
@@ -162,6 +187,8 @@ export class ReadOnlyMirrorRelay {
   private detach(): void {
     this.stopRecovery();this.recoveryAttempt=0;this.readFault=false;
     this.epoch++; this.sourceEpoch++; this.demandEpoch++; this.stopObserving(); this.deliveries.clear(); this.offeredSnapshots.clear();
+    this.activeReadChange=null;
+    this.probeRead=null;
     this.firstDemandRead=true;this.freshReadRequested=false;this.deferredSnapshot=null;this.peer = null; this.cache = null; this.readTask = null; this.dirty = true; this.requested = false; this.snapshotDemandPaused = false; this.revision = 0;
   }
   private snapshot(): Promise<MirrorSnapshot | null> {
@@ -169,26 +196,53 @@ export class ReadOnlyMirrorRelay {
     if (!this.dirty && this.cache) return Promise.resolve(this.cache);
     if (this.readTask) return this.readTask;
     const epoch = this.epoch; const peer = this.peer;
-    let task: Promise<MirrorSnapshot | null>;let unstable=false;
+    let task: Promise<MirrorSnapshot | null>;let unstable=false,reportRetriedRead=false;
     task = (async () => {
       for (let attempt = 0; attempt < 3; attempt++) {
         const sourceEpoch = this.sourceEpoch;
         let data: RelayReadSnapshot;
         const readDemandEpoch=this.demandEpoch,readId=++this.readSequence,started=(this.deps.now??Date.now)(),first=this.firstDemandRead;
+        // This retry now reads the new source for the same pending probe.
+        // Never carry that proof across a side-panel close and reopen.
+        if(attempt && this.probeRead?.demandEpoch===readDemandEpoch)this.probeRead.sourceEpoch=sourceEpoch;
         this.firstDemandRead=false;
         const timings:Record<string,number>={};let failed=false,partial=false;
-        const trace:MirrorReadTrace={measure:async(stage,read)=>{const begin=(this.deps.now??Date.now)();try{return await read();}catch(error){partial=true;throw error;}finally{timings[stage+'Ms']=Math.max(0,(this.deps.now??Date.now)()-begin);}}};
+        let profileReadMs:Partial<Record<GameCustomDisplayReadStage,number>>|undefined;
+        let failureStage:MirrorReadStage|undefined,failureKind:'source-changed'|'read-error'|undefined;
+        const trace:MirrorReadTrace & {source?:MirrorInvalidationSource}={
+          measure:async(stage,read)=>{const begin=(this.deps.now??Date.now)();try{return await read();}catch(error){partial=true;failureStage??=stage;throw error;}finally{timings[stage+'Ms']=Math.max(0,(this.deps.now??Date.now)()-begin);}},
+           isCurrent:()=>!this.disposed&&epoch===this.epoch&&readDemandEpoch===this.demandEpoch&&sourceEpoch===this.sourceEpoch,
+          performanceStage:(stage,elapsedMs)=>{if(Number.isFinite(elapsedMs)&&elapsedMs>=0)timings[stage+'Ms']=Math.floor(elapsedMs);},
+          profileStage:(stage,elapsedMs)=>{if(Number.isFinite(elapsedMs)&&elapsedMs>=0)(profileReadMs??={})[stage]=Math.min(3600000,Math.floor(elapsedMs));},
+        };
+        // Reuse the existing trace object; no extra per-read scope allocation.
+        const changed=trace;this.activeReadChange=changed;
         if(first)this.diagnostic('snapshot-read-start',{readId,demandEpoch:readDemandEpoch});
         try { data = await this.deps.read(trace); }
-        catch { failed=true;data = { generation: 0, ready: false, game: null, fan: { supported: false, enabled: false, preset: '', choices: [] }, notice: 'YMCC 状态读取失败；未修改任何配置' }; }
+        catch(error) { failed=true;failureKind='read-error';
+          // Only this exact local marker is diagnostic. Never log exception text
+          // or use it to bypass the original fallback, source fence or recovery.
+          try{if(error&&typeof error==='object'&&(error as {message?:unknown}).message==='MIRROR_SNAPSHOT_SOURCE_CHANGED')failureKind='source-changed';}catch{}
+          data = { generation: 0, ready: false, game: null, fan: { supported: false, enabled: false, preset: '', choices: [] }, notice: 'YMCC 状态读取失败；未修改任何配置' }; }
         const finished=(this.deps.now??Date.now)(),elapsedMs=Math.max(0,finished-started);
         const fault=failed||partial||!data.ready;
-        const current=!this.disposed&&epoch===this.epoch&&readDemandEpoch===this.demandEpoch&&sourceEpoch===this.sourceEpoch;
-        if(first || current&&fault!==this.readFault || (failed||partial||elapsedMs>=250) && finished-this.lastReadDiagnostic>=10000){
+        const current=trace.isCurrent();
+        if(first || current&&(reportRetriedRead||fault!==this.readFault) || (failed||partial||elapsedMs>=250) && finished-this.lastReadDiagnostic>=10000){
           this.lastReadDiagnostic=finished;
           this.diagnostic('snapshot-read-finished',{readId,demandEpoch:readDemandEpoch,elapsedMs,ok:!failed&&!partial,
-            stage:failed?'failed':partial?'partial':'settled',ready:data.ready,discarded:this.disposed||epoch!==this.epoch||readDemandEpoch!==this.demandEpoch||sourceEpoch!==this.sourceEpoch,...timings});
+            stage:failed?'failed':partial?'partial':'settled',ready:data.ready,discarded:this.disposed||epoch!==this.epoch||readDemandEpoch!==this.demandEpoch||sourceEpoch!==this.sourceEpoch,...timings,
+            ...(profileReadMs?{profileReadMs:{...profileReadMs}}:{}),
+            ...(failed||partial?{failureKind:failureKind??'owner-read',...(failureStage?{failureStage}:{})}:{}),
+            ...(epoch===this.epoch&&readDemandEpoch===this.demandEpoch&&sourceEpoch!==this.sourceEpoch&&changed.source?{invalidatedBy:changed.source}:{}),
+            ...(this.disposed?{discardReason:'disposed'}:epoch!==this.epoch?{discardReason:'peer-changed'}:readDemandEpoch!==this.demandEpoch?{discardReason:'demand-changed'}:sourceEpoch!==this.sourceEpoch?{discardReason:'source-changed'}:{})});
         }
+        if(this.activeReadChange===changed)this.activeReadChange=null;
+        // The first result may be retired by a source change while the same
+        // transaction immediately rereads. Record its current follow-up once;
+        // otherwise a successful delivery leaves only a discarded log record.
+        // No additional reads, timers or healthy steady-state records.
+        if(first&&!current)reportRetriedRead=true;
+        else if(current)reportRetriedRead=false;
         if (this.disposed || epoch !== this.epoch || !this.matches(peer)) return null;
         if (sourceEpoch !== this.sourceEpoch) { if (!this.requested) return null; continue; }
         this.readFault=fault;
@@ -208,7 +262,7 @@ export class ReadOnlyMirrorRelay {
       if (epoch !== this.epoch) return null;
       unstable=true;
       return this.deferredView();
-    })().finally(() => { if (this.readTask === task) {this.readTask = null;if(unstable)this.recoverRead();} });
+    })().finally(() => { if (this.readTask === task) {this.readTask = null;this.probeRead=null;if(unstable)this.recoverRead();} });
     this.readTask = task; return task;
   }
   private sameSliderSource(previous:MirrorSnapshot|undefined,current:MirrorSnapshot,command:string):boolean {
@@ -224,36 +278,63 @@ export class ReadOnlyMirrorRelay {
     // Each original owner still validates its exact private source before save.
     return true;
   }
-  // This is an explicit unavailable view, never an admitted/healthy cache.
+  // This is an explicit unavailable view, never fresh native proof or an admitted cache.
   // Churning reads may not have produced this.cache at all; repeated demand
   // must still wait on the same recovery lease instead of starting 3 more reads.
   private deferredView():MirrorSnapshot|null {
     if(!this.peer)return null;
     if(!this.deferredSnapshot){
       const previous=this.cache??{generation:0,game:null,fan:{supported:false,enabled:false,preset:'',choices:[]}};
-      this.deferredSnapshot={...previous,runId:this.peer.runId,revision:++this.revision,ready:false,
+      this.deferredSnapshot={...previous,runId:this.peer.runId,revision:++this.revision,ready:false,provenance:{kind:'unconfirmed'},
         actions:{fan:false,game:false,performance:false,frames:false,touchpads:false,global:false,audioOptimization:false,monitor:false},
         fan:{...previous.fan,canToggle:false},notice:'YMCC 状态正在更新；侧栏会自动恢复'};
     }
     return this.deferredSnapshot;
   }
-  private async push(probeId?:string): Promise<void> {
+  private displayCurrent(snapshot:MirrorSnapshot,sourceEpoch:number):boolean {
+    return !this.disposed && !!this.peer && this.requested && this.cache===snapshot && snapshot.ready &&
+      !this.dirty && !this.readFault && !this.readTask && !this.mutationBusy && this.recoveryTimer===null && sourceEpoch===this.sourceEpoch;
+  }
+  // Internal display-only completion. gameSteam never enters action admission,
+  // so keep the already-offered control revision and all original receipts.
+  // Real context/settings invalidations still require their original fresh read.
+  repaintGameSteam(identity:string,generation:number,value:MirrorSnapshot['gameSteam']):boolean {
+    const snapshot=this.cache,sourceEpoch=this.sourceEpoch;
+    if(!snapshot || snapshot.game?.identity!==identity || snapshot.generation!==generation || !this.displayCurrent(snapshot,sourceEpoch))return false;
+    const next=value===undefined?undefined:structuredClone(value);
+    if(JSON.stringify(snapshot.gameSteam)===JSON.stringify(next))return true;
+    if(next===undefined)delete snapshot.gameSteam;else snapshot.gameSteam=next;
+    const epoch=this.epoch,demandEpoch=this.demandEpoch;
+    const deliver=()=>{if(epoch===this.epoch && demandEpoch===this.demandEpoch && this.displayCurrent(snapshot,sourceEpoch))void this.push(undefined,{snapshot,sourceEpoch});};
+    // A prior native delivery may already have copied the old metadata. Send
+    // the final display after it settles, without rereading business owners.
+    const deliveries=[...this.deliveries.values()];
+    if(deliveries.length)void Promise.allSettled(deliveries).then(deliver);else deliver();
+    return true;
+  }
+  private async push(probeId?:string,display?:{snapshot:MirrorSnapshot;sourceEpoch:number}): Promise<void> {
     const peer = this.peer; const epoch = this.epoch, demandEpoch = this.demandEpoch;
     if (!peer || !this.requested) return;
-    const fresh=this.freshReadRequested;this.freshReadRequested=false;
+    const fresh=display?false:this.freshReadRequested;if(!display)this.freshReadRequested=false;
     let snapshot:MirrorSnapshot|null;
-    if(this.recoveryTimer!==null&&!fresh){
+    if(display){if(!this.displayCurrent(display.snapshot,display.sourceEpoch))return;snapshot=display.snapshot;}
+    else if(this.recoveryTimer!==null&&!fresh){
       // Both cached and never-stable sources share the one fault observation.
       snapshot=this.cache&&!this.dirty?this.cache:this.deferredView();
-    }else snapshot=await this.snapshot();
+    }else {
+      const read=this.snapshot();
+      if(probeId&&read===this.readTask&&(this.probeRead?.id!==probeId||this.probeRead.sourceEpoch!==this.sourceEpoch||this.probeRead.demandEpoch!==demandEpoch))
+        this.probeRead={id:probeId,sourceEpoch:this.sourceEpoch,demandEpoch};
+      snapshot=await read;
+    }
     if (!snapshot || !this.requested || demandEpoch !== this.demandEpoch || epoch !== this.epoch || !this.matches(peer)) return;
-    const key = epoch + ':' + snapshot.revision + ':' + (probeId??'');
+    const key = epoch + ':' + snapshot.revision + ':' + (probeId??'') + (display?':display':'');
     const prior = this.deliveries.get(key);
     if (prior) { await prior; return; }
     // Coalesce only concurrent deliveries; a later explicit request still gets a reply.
     let delivery:Promise<void>;
     delivery = Promise.resolve().then(async () => {
-      if (this.requested && demandEpoch === this.demandEpoch && epoch === this.epoch && this.matches(peer)) {
+      if (this.requested && demandEpoch === this.demandEpoch && epoch === this.epoch && this.matches(peer) && (!display||this.displayCurrent(snapshot,display.sourceEpoch))) {
         let offer=this.offeredSnapshots.get(snapshot.revision);
         if(!offer){offer={snapshot,pending:0,delivered:false};this.offeredSnapshots.set(snapshot.revision,offer);}
         offer.pending++;
@@ -283,7 +364,10 @@ export class ReadOnlyMirrorRelay {
       }
       const probeId=event.request.probeId;
       if(probeId!==undefined&&(typeof probeId!=='string'||!/^probe:[A-Za-z0-9_-]{1,80}:\d{1,16}$/.test(probeId)))return;
-      if(probeId){this.dirty=true;this.sourceEpoch++;}
+      // HUD ready can resend the same nonce while its owner read is in flight.
+      // A duplicate in the same source epoch must not retire that read.
+      const sameProbe=probeId&&this.probeRead?.id===probeId&&this.probeRead.sourceEpoch===this.sourceEpoch&&this.probeRead.demandEpoch===this.demandEpoch;
+      if(probeId&&!sameProbe){this.dirty=true;this.sourceEpoch++;}
       if (!this.startObserving()) return;
       this.snapshotDemandPaused = false;
       const resumed=!this.requested;
@@ -294,7 +378,11 @@ export class ReadOnlyMirrorRelay {
       // demand again would discard it and repeat every business-owner read.
       // Reopen/probe/later explicit demand stays fresh; source events invalidate
       // independently, including a game/power change during the shared read.
-      if((resumed || probeId || !this.readTask)&&this.recoveryTimer===null)this.deps.snapshotDemand?.();
+      if(this.deps.snapshotDemand && (resumed || probeId&&!sameProbe || !this.readTask)&&this.recoveryTimer===null){
+        this.deps.snapshotDemand();
+        // The request below already owns delivery, including its probe nonce.
+        if(!this.disposed && this.peer)this.markSnapshotDirty();
+      }
       await this.push(probeId as string|undefined); return;
     }
     if (typeof event.request.id !== 'string' || event.request.id.length > 128) return;
@@ -384,7 +472,13 @@ export class ReadOnlyMirrorRelay {
         return {type:'reply',runId:event.runId,id:request.id,ok:false,error:sourceChanged
           ? 'YMCC 原方案已变化；未保存，请查看更新后的侧栏再选择，不自动重试'
           : '镜像操作未确认；请查看 YMCC 当前状态，不自动重放'};
-      } finally { this.mutationBusy = false; if (this.matches(event)) this.invalidateFresh(); }
+      } finally {
+        this.mutationBusy = false;
+        // The accepted owner may settle after a new peer read the old facts.
+        // Refresh only the current observation; never route the retired reply
+        // or resubmit its action. Hidden/disposed demand still performs no IO.
+        if (!this.disposed && this.peer) this.invalidateFresh();
+      }
     });
     client.receipts.set(sequence,{signature,response:receipt});
     // Keep a high-water mark after evicting old completed outcomes, so they cannot replay.

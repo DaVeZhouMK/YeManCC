@@ -44,6 +44,10 @@ static void exerciseLegacy(const json& row,const json& r,bool firstTuple,json& r
         checkReviewed(!resolveOldOnlyForTest(id,rejected)&&receiptJson(rejected)==receiptJson(selected),"reviewed-no-fallback",label+": old resolver cannot reacquire superseded recipe");
         g_hcMotionSelector.selectorId=r["selectorId"].get<std::string>();g_hcMotionSelector.gyroMatrixId=r["gyroMatrixId"].get<std::string>();g_hcMotionSelector.accelMatrixId=r["accelMatrixId"].get<std::string>();g_hcMotionSelector.matrixSourceSha256=r["sourceSha256"].get<std::string>();
         checkReviewed(!inputCaptureMotionSelectorBound()&&probeActive(true,true,true,"p","p",73,73).processCalls==0,"reviewed-no-fallback",label+": stale valid legacy receipt rejected");g_hcMotionSelector=selected;
+        if(motion["name"]=="GPDWin5") {
+            g_hcMotionSelector.unifiedBinding=ymcc::capabilities::motion::bind(ymcc::capabilities::motion::Kind::Legacy,recipe,ymcc::hc_legacy_motion::recipes);
+            checkReviewed(!inputCaptureMotionSelectorBound()&&probeActive(true,true,true,"p","p",73,73).processCalls==0,"reviewed-no-fallback",label+": Win5 legacy registration cannot reclaim reviewed ownership");g_hcMotionSelector=selected;
+        }
     }
     const std::string group=want?"legacy-admission":"legacy-controller";
     check(cold==want&&bound==want&&active.admitted==want,group,label+": cold to bound to actual admission");
@@ -70,6 +74,12 @@ static void exerciseLegacy(const json& row,const json& r,bool firstTuple,json& r
         const auto& g=gm["samples"][i];const auto& a=am["samples"][i];
         const std::array<double,6> raw{g["input"][0],g["input"][1],g["input"][2],a["input"][0],a["input"][1],a["input"][2]};
         check(vectorsEqual(mapped(raw),g["output"],a["output"]),"legacy-matrices",label+": independent C# basis/signed sample");
+        if(reviewed&&motion["name"]=="GPDWin5") {
+            const auto& oldGyro=r["matrices"][0]["samples"][i];const auto& oldAccel=r["matrices"][1]["samples"][i];
+            checkReviewed(oldGyro["input"]==g["input"]&&oldGyro["output"]!=g["output"]&&oldAccel==a,"reviewed-selection",label+": historical callback corrects gyro while retaining independent legacy accel");
+            double x=0,y=0,z=0;const bool parsed=ymccApplyNamedImuMatrix(id.gyroMatrixId,raw[0],raw[1],raw[2],x,y,z);
+            checkReviewed(parsed&&near(x,oldGyro["output"][0].get<double>())&&near(y,oldGyro["output"][1].get<double>())&&near(z,oldGyro["output"][2].get<double>()),"reviewed-tuple",label+": canonical legacy gyro declaration remains unchanged");
+        }
         const auto sample=probeActive(true,true,true,"p","p",73,73,raw);
         if(want) {
             check(sample.admitted&&vectorsEqual(sample.active,g["output"],a["output"])&&sample.matrixIdentity=="hc-active-"+selected.selectorId,"legacy-active-axes",label+": actual six-axis activation");
@@ -339,7 +349,8 @@ int main(int argc,char** argv) {
     json oracle; std::ifstream(argv[1])>>oracle;
     using namespace candidate;
     json aliasResults=json::array(), legacyResults=json::array(), legacyClasses=json::object();
-    check(std::size(ymcc::hc_model_motion::recipes)==9+oracle["reviewed"].size(),"catalog","nine new plus exactly eighteen reviewed resource recipes");
+    check(std::size(ymcc::hc_model_motion::recipes)==9+oracle["reviewed"].size(),"catalog","nine new plus independently sourced reviewed recipes");
+    checkReviewed(oracle["reviewed"].size()==19&&std::count_if(oracle["reviewed"].begin(),oracle["reviewed"].end(),[](const json& row){return row["name"]=="GPDWin5";})==1,"reviewed-selection","eighteen JSON deltas plus exactly one historical Win5 callback delta");
     for(const std::string cls:{"", "unknown", "HandheldCompanion.Devices.AYANEO3suffix", "HandheldCompanion.Devices.ayaneo3"})
       check(ymcc::hc_model_motion::find(cls)==nullptr,"catalog","lookup rejects unknown/partial/incorrect case class");
     for(const auto& row:oracle["identities"]) {

@@ -38,6 +38,21 @@ inline Json compact(const Json& detail) {
         const auto it = detail.find(key);
         if (it != detail.end() && it->is_object()) copy(*it, out[key] = Json::object(), keys);
     };
+    child("startupLaunchCapture", {"known", "retired", "retirementReason", "status", "sourceRevision",
+        "considered", "captured", "reused", "retained", "actionAuthority", "currentEvidenceProven",
+        "attemptCount", "firstAttemptAtTick", "lastAttemptAtTick", "lastDurationMs",
+        "lastDirectoryAtTick", "discoveryStartedAtTick", "discoveryFinishedAtTick", "discoveryDurationMs",
+        "diagnosticReportsRemaining",
+        "clientDiscoveryOutcome","clientDiscoverySessionReason","clientDiscoveryReplyReason","clientDiscoveryReplyStage","clientDiscoveryReplyStatus","clientDiscoveryMutationStatus"});
+    child("qualifiedOriginalGroupRoleRead", {"schema", "actionAuthority", "stage", "scopeAvailable", "readerReturned", "typedAvailable", "readerFieldsKnown"});
+    const auto roleRead=detail.find("qualifiedOriginalGroupRoleRead");
+    if(roleRead!=detail.end()&&roleRead->is_object()){
+        const auto reader=roleRead->find("reader");
+        if(reader!=roleRead->end()&&reader->is_object())copy(*reader,out["qualifiedOriginalGroupRoleRead"]["reader"] = Json::object(),
+            {"status", "reason", "available", "matchingTargetRecordCount", "primaryLivenessPid", "foregroundComparisonPid", "originalPrimaryMatched", "readCalls", "readBytes"});
+    }
+    child("qualifiedOriginalGroupRoles", {"source", "available", "current", "primaryPid", "foregroundPid",
+        "nativePrimaryExact", "nativeForegroundExact", "actionAuthority"});
     child("originalGame", {"pid", "created", "windowsSession"});
     child("steamClient", {"pid", "created"});
     child("tracker", {"complete", "status", "appid"});

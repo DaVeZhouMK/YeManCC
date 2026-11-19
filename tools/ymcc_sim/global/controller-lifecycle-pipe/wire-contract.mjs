@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {relocatedToolchain} from '../inputhost-protocol/adapter.mjs';
 const REPO=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
 export const WIRE_ID='controller.lifecycle-native-managed-pipe';
 export const WIRE_CONTRACT_SOURCE='tools/ymcc_sim/global/controller-lifecycle-pipe/wire-contract.mjs';
@@ -9,7 +10,7 @@ const need=(ok,message)=>{if(!ok)throw Error('WIRE_CONTRACT_'+message);};
 const read=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,''));
 const inside=(root,file)=>{const rel=path.relative(root,file);return rel===''||(!path.isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+path.sep));};
 const uniqueRoot=(files,pattern,name)=>{const found=[...new Set(files.flatMap(file=>{const match=path.resolve(file).split(path.sep).join('/').match(pattern);return match?[match[1]]:[];}))];need(found.length===1,name+'_NOT_UNIQUE');return path.resolve(found[0]);};
-export function resolveWireBuild(repoRoot=REPO){
+export function resolveWireBuild(repoRoot=REPO,options={}){
  const native=read(path.join(repoRoot,'tools/ymcc_sim/global/controller-lifecycle-pipe/native-tool-inputs.json')).files;
  const shared=read(path.join(repoRoot,'tools/ymcc_sim/global/controller-priority-ledger/tool-inputs.json')).files;
  need(Array.isArray(native)&&Array.isArray(shared),'TOOL_LIST_INVALID');
@@ -21,7 +22,11 @@ export function resolveWireBuild(repoRoot=REPO){
  const windowsRoot=path.resolve('C:/Windows'),bin=path.join(msvcRoot,'bin/Hostx64/x64');
  const includePaths=[...['ucrt','shared','um','winrt','cppwinrt'].map(name=>path.join(sdkInclude,name)),path.join(msvcRoot,'include')];
  const libraryPaths=[...['ucrt','um'].map(name=>path.join(sdkRoot,'Lib',sdkVersion,name,'x64')),path.join(msvcRoot,'lib/x64')];
- const value={schemaVersion:1,kind:'wire-fixed-direct-msvc-sdk-v1',architecture:'x64',msvcRoot,sdkRoot,sdkVersion,windowsRoot,compiler:path.join(bin,'cl.exe'),linker:path.join(bin,'link.exe'),cmd:path.join(windowsRoot,'System32/cmd.exe'),includePaths,libraryPaths,dotnet:path.resolve('C:/Program Files/dotnet/dotnet.exe'),node:process.execPath};
+ const declared=read(path.join(repoRoot,'tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json'));
+ need(typeof declared.dotnetRoot==='string'&&path.isAbsolute(declared.dotnetRoot),'DOTNET_DECLARATION_INVALID');
+ let dotnet=path.join(declared.dotnetRoot,'dotnet.exe');
+ if(options.dotnet!==undefined){need(typeof options.dotnet==='string'&&path.isAbsolute(options.dotnet)&&path.basename(options.dotnet).toLowerCase()==='dotnet.exe','DOTNET_PATH_INVALID');const reviewed=relocatedToolchain(repoRoot,path.dirname(options.dotnet));dotnet=path.join(reviewed.dotnetRoot,'dotnet.exe');}
+ const value={schemaVersion:1,kind:'wire-fixed-direct-msvc-sdk-v1',architecture:'x64',msvcRoot,sdkRoot,sdkVersion,windowsRoot,compiler:path.join(bin,'cl.exe'),linker:path.join(bin,'link.exe'),cmd:path.join(windowsRoot,'System32/cmd.exe'),includePaths,libraryPaths,dotnet,node:process.execPath};
  for(const file of [value.compiler,value.linker,value.cmd,value.dotnet,value.node,...includePaths,...libraryPaths])need(fs.existsSync(file),'PINNED_PATH_MISSING:'+file);
  for(const file of [value.compiler,value.linker])need(shared.some(item=>path.resolve(item).toLowerCase()===file.toLowerCase()),'COMPILER_NOT_IN_LEDGER:'+file);
  need(!JSON.stringify(value).match(/[\r\n%]/),'PATH_METACHARACTER');
@@ -32,7 +37,7 @@ export function wireChildEnvironment(build,privateRoot){
  // Construct from nothing: no inherited CL/LINK/SDK/MSVC/Node or DOTNET probes.
  return {SystemRoot:build.windowsRoot,WINDIR:build.windowsRoot,COMSPEC:build.cmd,
   PATH:[bin,path.join(build.windowsRoot,'System32'),build.windowsRoot].join(';'),PATHEXT:'.COM;.EXE;.BAT;.CMD',
-  INCLUDE:build.includePaths.join(';'),LIB:build.libraryPaths.join(';'),LIBPATH:build.libraryPaths.join(';'),
+  INCLUDE:build.includePaths.join(';'),LIB:build.libraryPaths.join(';'),LIBPATH:build.libraryPaths.join(';'),VSLANG:'1033',
   TEMP:base,TMP:base,LOCALAPPDATA:base,APPDATA:base,USERPROFILE:base,DOTNET_CLI_HOME:base,
   DOTNET_ROOT:path.dirname(build.dotnet),DOTNET_MULTILEVEL_LOOKUP:'0',DOTNET_CLI_TELEMETRY_OPTOUT:'1',DOTNET_NOLOGO:'1',DOTNET_DISABLE_GUI_ERRORS:'1'};
 }

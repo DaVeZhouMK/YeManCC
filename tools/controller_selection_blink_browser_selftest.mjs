@@ -16,6 +16,21 @@ const selectedFill = code => `.device-vector [data-fill-for~="${code}"][data-fil
 try {
   page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1, reducedMotion: 'no-preference' });
   page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => {
+    window.__blinkTarget = node => {
+      if (node.matches('.device-vector [data-fill-for]')) {
+        if (node.getAttribute('data-fill-active') !== 'true' || node.getAttribute('data-fill-live') === 'true') return null;
+        const code = node.getAttribute('data-fill-for').split(' ')[0], root = node.closest('.device-diagram');
+        return root.querySelector('[data-blink-for~="' + code + '"][data-blink-active=true]') ? root.querySelector('.device-blink-layer') : null;
+      }
+      if (node.matches('.keyboard-asset [data-key-code]')) {
+        if (node.getAttribute('data-selected') !== 'true' || node.getAttribute('data-live') === 'true') return null;
+        return node.closest('.keyboard-board').querySelector('.keyboard-blink-layer');
+      }
+      return node;
+    };
+    window.__blinkAnimations = node => window.__blinkTarget(node)?.getAnimations() || [];
+  });
   await page.goto(pathToFileURL(path.join(out, 'actual-editor/editor.html')).href);
   await page.locator('.rule-row').first().waitFor();
   await page.evaluate(async () => {
@@ -42,13 +57,15 @@ try {
   async function select(index) { await page.locator('.rule-row').nth(index).click(); await page.locator('.action-manage-cancel').click(); await page.mouse.move(1, 1); await page.evaluate(() => document.activeElement.blur()); }
   async function animationChanges(locator, property, name) {
     const result = await locator.first().evaluate((node, property) => {
-      const animation = node.getAnimations()[0];
+      const animation = window.__blinkAnimations(node)[0];
       if (!animation) return { animated: false };
       const timing = animation.effect.getTiming();
       animation.pause(); animation.currentTime = 0;
-      const first = getComputedStyle(node).getPropertyValue(property);
+      const target = window.__blinkTarget(node);
+      if (target !== node) property = 'opacity';
+      const first = getComputedStyle(target).getPropertyValue(property);
       animation.currentTime = Number(timing.duration) / 2;
-      const second = getComputedStyle(node).getPropertyValue(property);
+      const second = getComputedStyle(target).getPropertyValue(property);
       const rect = node.getBoundingClientRect();
       const stable = { x: rect.x, y: rect.y, w: rect.width, h: rect.height };
       animation.currentTime = 0;
@@ -59,7 +76,7 @@ try {
         filter: getComputedStyle(node).filter };
     }, property);
     check(result.animated && result.infinite && result.duration === 850, name + ' uses the original continuous 850ms blink');
-    check(result.first !== result.second, name + ' changes its fill across the actual animation');
+    check(result.first !== result.second, name + ' changes its visible fill layer across the actual animation');
     check(result.stable && result.filter === 'none', name + ' preserves geometry without adding a shadow');
   }
 
@@ -68,31 +85,31 @@ try {
   const editingBefore = await page.locator('.output-summary b').innerText();
   const savedBefore = await page.evaluate(() => JSON.stringify(window.__editorPreview.settings));
   await page.locator('.rule-row').nth(1).hover();
-  check(await page.locator(selectedFill('leftThumb')).first().evaluate(n => n.getAnimations().length > 0), 'editor mouse hover blinks the pointed rule without clicking');
+  check(await page.locator(selectedFill('leftThumb')).first().evaluate(n => window.__blinkAnimations(n).length > 0), 'editor mouse hover blinks the pointed rule without clicking');
   check(await page.locator('.rule-row.active').innerText().then(t => t.includes('模拟鼠标')) && await page.locator('.output-summary b').innerText() === editingBefore, 'hover leaves the actual editing target unchanged');
   check(await page.locator('.rule-context-popover').count() === 0, 'hover never opens rule management');
   await page.locator('.rule-row').nth(2).focus();
-  check(await page.locator(selectedFill('L5')).first().evaluate(n => n.getAnimations().length > 0), 'controller focus takes over the preview while the mouse remains on another rule');
+  check(await page.locator(selectedFill('L5')).first().evaluate(n => window.__blinkAnimations(n).length > 0), 'controller focus takes over the preview while the mouse remains on another rule');
   await page.locator('.rule-row').nth(3).focus();
-  check(await page.locator('.oem-capsule[data-oem-key="claw"]').evaluate(n => n.classList.contains('mapped') && n.getAnimations().length > 0), 'controller focus previews the dedicated handheld input bubble');
+  check(await page.locator('.oem-capsule[data-oem-key="claw"]').evaluate(n => n.classList.contains('mapped') && window.__blinkAnimations(n).length > 0), 'controller focus previews the dedicated handheld input bubble');
   await page.mouse.move(1, 1); await page.locator('.rule-row').nth(0).hover();
-  check(await page.locator(selectedFill('y')).first().evaluate(n => n.getAnimations().length > 0), 'mouse hover can take the preview back after controller navigation');
+  check(await page.locator(selectedFill('y')).first().evaluate(n => window.__blinkAnimations(n).length > 0), 'mouse hover can take the preview back after controller navigation');
   await page.locator('.rule-row').nth(4).focus();
-  check(await page.locator('.mirror-stage .keyboard-preview path[data-key-code="KeyK"]').evaluate(n => n.getAttribute('data-selected') === 'true' && n.getAnimations().length > 0), 'controller focus previews the keyboard rule with blinking keys');
+  check(await page.locator('.mirror-stage .keyboard-preview path[data-key-code="KeyK"]').evaluate(n => n.getAttribute('data-selected') === 'true' && window.__blinkAnimations(n).length > 0), 'controller focus previews the keyboard rule with blinking keys');
   await page.mouse.move(1, 1);
   await page.evaluate(() => document.activeElement.blur());
-  check(await page.locator(selectedFill('y')).first().evaluate(n => n.getAnimations().length > 0), 'leaving hover and focus returns to the rule being edited');
+  check(await page.locator(selectedFill('y')).first().evaluate(n => window.__blinkAnimations(n).length > 0), 'leaving hover and focus returns to the rule being edited');
   await page.locator('.rule-row').nth(5).hover();
-  check(await page.locator(selectedFill('a')).first().evaluate(n => n.getAnimations().length > 0) && await page.locator('.handheld-key-bubbles span').evaluate(n => n.getAnimations().length > 0), 'hover previews controller and F14 together through the existing mixed-input chain');
+  check(await page.locator(selectedFill('a')).first().evaluate(n => window.__blinkAnimations(n).length > 0) && await page.locator('.handheld-key-bubbles span').evaluate(n => window.__blinkAnimations(n).length > 0), 'hover previews controller and F14 together through the existing mixed-input chain');
   check(await page.evaluate(() => JSON.stringify(window.__editorPreview.settings)) === savedBefore, 'mouse and controller preview changes preserve all draft/settings data');
   await select(1); await page.locator('.rule-row').nth(1).click();
   await page.locator('.rule-row').nth(0).hover();
-  check(await page.locator(selectedFill('leftThumb')).first().evaluate(n => n.getAnimations().length > 0), 'open management stays attached to its actual edit rule during hover');
+  check(await page.locator(selectedFill('leftThumb')).first().evaluate(n => window.__blinkAnimations(n).length > 0), 'open management stays attached to its actual edit rule during hover');
   await page.locator('.action-manage-cancel').click();
   await page.locator('.new-action').click(); await page.locator('.record-action').click();
   await page.evaluate(() => window.__editorPreview.emit('shortcut.recording.gamepad', { inputs: [{ source: 'controller', code: 'a' }], released: false }));
   await page.locator('.rule-row').nth(0).dispatchEvent('mouseenter');
-  check(await page.locator(selectedFill('a')).first().evaluate(n => n.getAnimations().length > 0), 'recording stays on its live input instead of a hovered rule');
+  check(await page.locator(selectedFill('a')).first().evaluate(n => window.__blinkAnimations(n).length > 0), 'recording stays on its live input instead of a hovered rule');
   await page.locator('.record-action').click(); await page.locator('.creation-cancel').click();
   await select(0);
 
@@ -106,19 +123,19 @@ try {
     await animationChanges(page.locator(selectedFill('back')), 'fill', label + ' associated Back button');
     const liveShape = page.locator(selectedFill('y')).first();
     const geometry = await liveShape.getAttribute('d');
-    const glyphs = await page.locator('.device-vector [data-fill-for]').evaluateAll(nodes => nodes.filter(n => n.getAttribute('data-fill-active') !== 'true').every(n => !n.getAnimations().length));
+    const glyphs = await page.locator('.device-vector [data-fill-for]').evaluateAll(nodes => nodes.filter(n => n.getAttribute('data-fill-active') !== 'true').every(n => !window.__blinkAnimations(n).length));
     check(glyphs, label + ' unassociated buttons remain still');
     const held = Array(18).fill(false); held[3] = true;
     await page.evaluate(buttons => window.__editorPreview.state({ buttons }), held);
     await page.waitForFunction(() => document.querySelector('[data-fill-for~="y"][data-fill-live=true]'));
-    check(await liveShape.evaluate(n => !n.getAnimations().length && getComputedStyle(n).fill === 'rgb(72, 151, 210)'), label + ' actual press overrides blinking with solid fill');
+    check(await liveShape.evaluate(n => !window.__blinkAnimations(n).length && getComputedStyle(n).fill === 'rgb(72, 151, 210)'), label + ' actual press overrides blinking with solid fill');
     check(await liveShape.getAttribute('d') === geometry, label + ' actual press preserves the original shape');
     await page.evaluate(() => window.__editorPreview.state({}));
     check(await liveShape.getAttribute('data-fill-live') === 'true', label + ' minimum short press visibility remains intact');
     await page.waitForFunction(() => document.querySelector('[data-fill-for~="y"][data-fill-live=false]'));
-    check(await liveShape.evaluate(n => n.getAnimations().length > 0), label + ' selected blink resumes after real press release');
+    check(await liveShape.evaluate(n => window.__blinkAnimations(n).length > 0), label + ' selected blink resumes after real press release');
     await select(1);
-    check(await page.locator('.device-vector [data-fill-for~="y"]').first().evaluate(n => !n.getAnimations().length), label + ' previous rule stops blinking when selection changes');
+    check(await page.locator('.device-vector [data-fill-for~="y"]').first().evaluate(n => !window.__blinkAnimations(n).length), label + ' previous rule stops blinking when selection changes');
     await animationChanges(page.locator(selectedFill('leftThumb')), 'fill', label + ' selected stick click');
     const cap = page.locator('.device-vector [data-stick="0"]').first(), neutral = await cap.getAttribute('transform');
     await page.evaluate(() => window.__editorPreview.state({ axes: [.75, -.5, 0, 0] }));
@@ -126,7 +143,7 @@ try {
     await page.evaluate(() => window.__editorPreview.state({}));
     await select(2);
     await animationChanges(page.locator(selectedFill(model === 'steamdeck' ? 'L5' : 'L4')), 'fill', label + ' recognized rear button');
-    check(await page.locator('.device-vector [data-fill-for="' + (model === 'steamdeck' ? 'L4' : 'L5') + '"]').first().evaluate(n => !n.getAnimations().length), label + ' absent extra rear button never blinks');
+    check(await page.locator('.device-vector [data-fill-for="' + (model === 'steamdeck' ? 'L4' : 'L5') + '"]').first().evaluate(n => !window.__blinkAnimations(n).length), label + ' absent extra rear button never blinks');
     const diagramAfter = await page.locator('.device-diagram').boundingBox();
     check(['x', 'y', 'width', 'height'].every(key => Math.abs(diagramBefore[key] - diagramAfter[key]) < .1), label + ' rule selection keeps central controller fixed');
   }
@@ -134,22 +151,22 @@ try {
   const oem = page.locator('.oem-capsule[data-oem-key="claw"]');
   await animationChanges(oem, 'background-color', 'dedicated handheld button bubble');
   await page.evaluate(() => window.__editorPreview.state({ oemPressedKeys: ['claw'] }));
-  check(await oem.evaluate(n => n.classList.contains('live') && !n.getAnimations().length), 'actual dedicated button press keeps solid fill');
+  check(await oem.evaluate(n => n.classList.contains('live') && !window.__blinkAnimations(n).length), 'actual dedicated button press keeps solid fill');
   await page.evaluate(() => window.__editorPreview.state({}));
   await select(4);
   const keyboard = page.locator('.mirror-stage .keyboard-preview');
   await animationChanges(keyboard.locator('path[data-key-code="KeyK"]'), 'fill', 'associated keyboard key');
-  check(await keyboard.locator('path[data-key-code="KeyL"]').evaluate(n => !n.getAnimations().length), 'unassociated keyboard key remains still');
+  check(await keyboard.locator('path[data-key-code="KeyL"]').evaluate(n => !window.__blinkAnimations(n).length), 'unassociated keyboard key remains still');
   const textBefore = await keyboard.locator('.keyboard-asset').evaluate(n => [...n.querySelectorAll('path:not([data-key-code])')].map(n => n.outerHTML).join(''));
   await page.keyboard.down('k');
-  check(await keyboard.locator('path[data-key-code="KeyK"]').evaluate(n => n.getAttribute('data-live') === 'true' && !n.getAnimations().length), 'actual keyboard press keeps solid fill over selected animation');
+  check(await keyboard.locator('path[data-key-code="KeyK"]').evaluate(n => n.getAttribute('data-live') === 'true' && !window.__blinkAnimations(n).length), 'actual keyboard press keeps solid fill over selected animation');
   check(await keyboard.locator('.keyboard-asset').evaluate(n => [...n.querySelectorAll('path:not([data-key-code])')].map(n => n.outerHTML).join('')) === textBefore, 'keyboard glyph outlines are unchanged');
   await page.keyboard.up('k');
   await page.waitForFunction(() => document.querySelector('.mirror-stage path[data-key-code="KeyK"][data-live=false]'));
   await select(5);
   await animationChanges(page.locator('.handheld-key-bubbles span'), 'background-color', 'mixed handheld F14 bubble');
   await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F14', key: 'F14', bubbles: true })));
-  check(await page.locator('.handheld-key-bubbles span').evaluate(n => n.classList.contains('live') && !n.getAnimations().length), 'actual F14 press uses solid bubble fill');
+  check(await page.locator('.handheld-key-bubbles span').evaluate(n => n.classList.contains('live') && !window.__blinkAnimations(n).length), 'actual F14 press uses solid bubble fill');
   await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keyup', { code: 'F14', key: 'F14', bubbles: true })));
   await select(6);
   await page.locator('.output-summary').click();
@@ -165,14 +182,14 @@ try {
     await page.screenshot({ path: path.join(out, 'blink-' + height + '.png') });
   }
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-fill-for~="y"][data-fill-active=true]')).animationName === 'none');
-  check(await page.locator(selectedFill('y')).first().evaluate(n => !n.getAnimations().length && n.getAttribute('data-fill-active') === 'true'), 'reduced motion keeps static selected controller fill');
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.device-blink-layer')).animationName === 'none');
+  check(await page.locator(selectedFill('y')).first().evaluate(n => !window.__blinkAnimations(n).length && n.getAttribute('data-fill-active') === 'true'), 'reduced motion keeps static selected controller fill');
   await select(3);
-  check(await oem.evaluate(n => !n.getAnimations().length && n.classList.contains('mapped')), 'reduced motion keeps static dedicated button selection');
+  check(await oem.evaluate(n => !window.__blinkAnimations(n).length && n.classList.contains('mapped')), 'reduced motion keeps static dedicated button selection');
   await select(4);
-  check(await keyboard.locator('path[data-key-code="KeyK"]').evaluate(n => !n.getAnimations().length && n.getAttribute('data-selected') === 'true'), 'reduced motion keeps static keyboard selection');
+  check(await keyboard.locator('path[data-key-code="KeyK"]').evaluate(n => !window.__blinkAnimations(n).length && n.getAttribute('data-selected') === 'true'), 'reduced motion keeps static keyboard selection');
   await select(5);
-  check(await page.locator('.handheld-key-bubbles span').evaluate(n => !n.getAnimations().length), 'reduced motion disables mixed-key bubble motion');
+  check(await page.locator('.handheld-key-bubbles span').evaluate(n => !window.__blinkAnimations(n).length), 'reduced motion disables mixed-key bubble motion');
   check(JSON.stringify(await page.evaluate(() => [window.__editorPreview.writes, window.__editorPreview.nativeWrites])) === JSON.stringify(initialWrites), 'selection animation performs no settings or native writes');
   check(errors.length === 0, 'no browser exceptions');
   fs.writeFileSync(path.join(out, 'BROWSER-ACCEPTANCE.json'), JSON.stringify({ checks, errors, actualSettingsWritten: false, nativeInputInjected: false }, null, 2));

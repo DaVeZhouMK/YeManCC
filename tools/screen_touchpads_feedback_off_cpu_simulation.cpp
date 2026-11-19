@@ -59,7 +59,7 @@ int wmain(int argc,wchar_t** argv){
  handlePointer(nullptr,0,WM_POINTERUP,10,100,30,0);check("one-release-keeps-other-muted-contact",feedbackOnlyContacts.mask()==2&&surfacePressed(0));
  auto next=core.config;next.touchFeedback=TouchFeedbackMode::Medium;configure(next,0);
  check("feedback-setting-change-releases-previous-gesture",feedbackOnlyContacts.mask()==0);
- handlePointer(nullptr,0,WM_POINTERDOWN,12,80,20,0);check("reenabled-new-gesture-starts-fresh-with-one-pulse",pulses==1&&strength==20);
+ handlePointer(nullptr,0,WM_POINTERDOWN,12,80,20,0);check("reenabled-new-gesture-starts-fresh-with-one-medium-pulse",pulses==1&&strength==ymcc::touchhaptic::kMediumStrengthPercent);
  handlePointer(nullptr,0,WM_POINTERUP,12,80,20,0);check("all-routes-avoid-real-input",inputCalls==0);
  const Json result={{"ok",ok},{"baseline",baseline},{"cases",cases},{"disabledMoves",10000},{"disabledMotionStateChanges",motionChanges},{"realInputInjected",0},{"realWindowsCreated",0},{"processCpuMeasured",false}};
  std::ofstream out(std::filesystem::path(argv[1]),std::ios::binary);out<<result.dump(2);std::cout<<"FEEDBACK_OFF_SIMULATION ok="<<ok<<" checks="<<cases.size()<<" motionSteps="<<motionChanges<<"\n";return ok&&out.good()?0:3;

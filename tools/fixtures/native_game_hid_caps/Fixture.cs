@@ -4,22 +4,29 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 
-internal sealed record Scenario(string Name,string Family="msi",string Fault="",int FailProof=1,string Compatible="",ushort UsagePage=1,ushort Usage=5,string Board="",bool Xusb=false);
+internal sealed record Scenario(string Name,string Family="msi",string Fault="",int FailProof=1,string Compatible="",ushort UsagePage=1,ushort Usage=5,string Board="",bool Xusb=false,bool GpdRoot=false,bool GpdSibling=false);
 
 internal static class Boundary
 {
     internal static Scenario Case=new("initial");
     internal static int Proofs,Disabled,Enabled,Opened,Preparsed,Freed,AliveReads,InterfaceQueries;
     internal static readonly List<string> Calls=[];
+    internal static int Factories,Conversions,Cycles;
+    internal static readonly List<Guid> InterfaceTypes=[];
+    internal static readonly List<string> InterfaceInstances=[];
+    internal static bool Prepared=>Case.GpdRoot && Conversions>0;
+    internal static bool RootFault(string name)=>Case.GpdRoot && Case.Fault==name;
     internal static bool Timing;
+    internal static bool ColdLifetime;
     internal static long ClockMs;
+    internal static long DisableDelayMs=17;
     internal static int ObservationLocates;
     internal static string ClockFault="";
     internal static string Root=>Case.Family=="rog"?@"USB\VID_0B05&PID_1B4C\ROG":Case.Family=="rog-original"?@"USB\VID_0B05&PID_1ABE\ROG":Case.Family=="gpd"?@"USB\VID_045E&PID_028E\GPD":@"USB\VID_0DB0&PID_1901\00006F64096B22E7";
-    internal static string Target=>Case.Xusb?((Case.Name.Contains("field-hid-xusb",StringComparison.Ordinal)?"HID":"USB")+Root[3..21]+@"&MI_00\XUSB"):Case.Family=="msi"?@"HID\VID_0DB0&PID_1901&IG_02\8&3E27176&0&0000":"HID"+Root[3..21]+@"&IG_02\GAME";
+    internal static string Target=>Case.GpdRoot?(Case.GpdSibling?Root+"-SIBLING":Root):Case.Xusb?((Case.Name.Contains("field-hid-xusb",StringComparison.Ordinal)?"HID":"USB")+Root[3..21]+@"&MI_00\XUSB"):Case.Family=="msi"?@"HID\VID_0DB0&PID_1901&IG_02\8&3E27176&0&0000":"HID"+Root[3..21]+@"&IG_02\GAME";
     internal const string Position="PCIROOT(0)#USBROOT(0)#USB(4)";
     internal static bool Fault(string name)=>Case.Fault==name && Proofs>=Case.FailProof;
-    internal static void Reset(Scenario scenario){Case=scenario;Proofs=Disabled=Enabled=Opened=Preparsed=Freed=AliveReads=InterfaceQueries=0;Calls.Clear();Timing=false;ClockMs=0;ObservationLocates=0;ClockFault="";}
+    internal static void Reset(Scenario scenario){Case=scenario;Proofs=Disabled=Enabled=Opened=Preparsed=Freed=AliveReads=InterfaceQueries=0;Calls.Clear();Timing=false;ClockMs=0;DisableDelayMs=17;ObservationLocates=0;ClockFault="";Factories=Conversions=Cycles=0;InterfaceTypes.Clear();InterfaceInstances.Clear();}
 }
 
 internal static class Fixture
@@ -100,10 +107,10 @@ internal static class Fixture
         }
         Results.Add(new{scenario,result,expected=expectedResult,Boundary.Proofs,Boundary.Disabled,Boundary.Enabled,Boundary.Opened,Boundary.Preparsed,Boundary.Freed,Boundary.InterfaceQueries,diagnostic,calls=Boundary.Calls.ToArray()});
     }
-    private static void RunTiming(string fault,string clockFault="")
+    private static void RunTiming(string fault,string clockFault="",long disableElapsedMs=17)
     {
-        var label="timing-"+fault+"-"+clockFault;
-        Boundary.Reset(new(label,Fault:fault,FailProof:0));Boundary.Timing=true;Boundary.ClockMs=1000;Boundary.ClockFault=clockFault;
+        var label="timing-"+fault+"-"+clockFault+(disableElapsedMs==17?"":"-disable-"+disableElapsedMs);
+        Boundary.Reset(new(label,Fault:fault,FailProof:0));Boundary.Timing=true;Boundary.ClockMs=1000;Boundary.ClockFault=clockFault;Boundary.DisableDelayMs=disableElapsedMs;
         var facts=new MsiNativePortCycle.GameRefreshFacts();
         var previous=Console.Out;using var capture=new StringWriter();Console.SetOut(capture);
         Exception? error=null;
@@ -127,7 +134,7 @@ internal static class Fixture
         Check(success?error is null:error?.GetType().Name==(fault=="admission-throw"?"ApplicationException":fault=="admission-false"?"HidAuthorityChangedException":"InvalidOperationException"),label+" original success or exception preserved");
         Check(facts.DisableCallEntered==!unentered && facts.EnableCallEntered==success,label+" original entered flags");
         void Duration(long? actual,long? expected,string name)=>Check(actual==(clockFault.Length==0?expected:null),label+" "+name+" exact monotonic ms or null");
-        Duration(facts.DisableCallElapsedMs,unentered?null:17,"disable excludes observation");
+        Duration(facts.DisableCallElapsedMs,unentered?null:disableElapsedMs,"disable excludes observation");
         Duration(facts.DisableFailureObservationElapsedMs,observed?7+(statusEntered?11:0)+(postEntered?13:0):null,"whole observation");
         if(observed){
             var observation=facts.DisableFailureStatus!;
@@ -152,14 +159,183 @@ internal static class Fixture
                 Check(diagnostic.Value.GetProperty("TimingClock").GetString()=="monotonic" && diagnostic.Value.GetProperty("DisableCallElapsedMs").ValueKind==(unentered || clockFault.Length>0?JsonValueKind.Null:JsonValueKind.Number),label+" serialized timing presence");
             }
         }
-        Results.Add(new{scenario=label,clockFault,refreshSucceeded=error is null,exception=error?.GetType().FullName,Boundary.Disabled,Boundary.Enabled,diagnostic,calls=Boundary.Calls.ToArray()});
+        Results.Add(new{scenario=label,clockFault,disableElapsedMs,refreshSucceeded=error is null,exception=error?.GetType().FullName,Boundary.Disabled,Boundary.Enabled,diagnostic,calls=Boundary.Calls.ToArray()});
         Boundary.Timing=false;Boundary.ClockFault="";
+    }
+    // Only the original OS/SDK boundaries are inert: every case enters actual Run9.
+    private static void RunGpdRoot(Scenario scenario,int expected,int factories,int conversions,int cycles)
+    {
+        Boundary.Reset(scenario);
+        if(scenario.Fault=="old-disable-result23"){
+            Boundary.Timing=true;Boundary.ClockMs=1000;Boundary.DisableDelayMs=65370;
+        }
+        string[] arguments=[MsiNativePortCycle.Command,Boundary.Root,"--location",Boundary.Position,
+            "--parent-pid","999999","--once","--game-xusb",Boundary.Target];
+        var previous=Console.Out;using var capture=new StringWriter();Console.SetOut(capture);
+        int result;
+        try{result=MsiNativePortCycle.Run(arguments);}
+        finally{Console.SetOut(previous);}
+        var label=scenario.Name;
+        Check(arguments.Length==9 && arguments[7]=="--game-xusb" && Boundary.Target==Boundary.Root,
+            label+" complete actual Run9 with exact selected root");
+        Check(result==expected,label+" result="+result+" expected="+expected);
+        Check(Boundary.Disabled==0 && Boundary.Enabled==0,label+" no CM Disable/Enable on success or failure");
+        Check(Boundary.Factories==factories && Boundary.Conversions==conversions && Boundary.Cycles==cycles,
+            label+" exact SDK factory/conversion/CyclePort counts");
+        Check(Boundary.Calls.Count(call=>call=="factory:"+Boundary.Root)==factories &&
+            Boundary.Calls.Count(call=>call=="usb:"+Boundary.Root)==conversions &&
+            Boundary.Calls.Count(call=>call=="cycle:"+Boundary.Root)==cycles,
+            label+" SDK consumes only selected root and retains entered calls");
+        if(conversions>0)Check(Boundary.Calls.IndexOf("factory:"+Boundary.Root)<Boundary.Calls.IndexOf("usb:"+Boundary.Root),
+            label+" factory precedes conversion");
+        if(cycles>0)Check(Boundary.Calls.IndexOf("usb:"+Boundary.Root)<Boundary.Calls.IndexOf("cycle:"+Boundary.Root),
+            label+" conversion precedes one cycle");
+        Check(Boundary.Proofs==0 && Boundary.Opened==0 && Boundary.Preparsed==0 && Boundary.Freed==0,
+            label+" XUSB never consumes HID compatible/caps/open proof");
+        var xusbClass=new Guid("EC87F1E3-C13B-4100-B5F7-8B84D54260CB");
+        Check(Boundary.InterfaceTypes.All(type=>type==xusbClass) &&
+            Boundary.InterfaceInstances.All(instance=>instance==Boundary.Target),
+            label+" discovery keeps actual XUSB class and target");
+        if(expected==0){
+            Check(Boundary.InterfaceQueries==2,label+" active authority checked before and after SDK preparation");
+            Check(Boundary.Calls.Count(call=>call=="status:1:0")==1,label+" selected root known started before factory");
+            var lastLocate=Boundary.Calls.LastIndexOf("locate:"+Boundary.Root);
+            Check(lastLocate>Boundary.Calls.IndexOf("usb:"+Boundary.Root) && lastLocate<Boundary.Calls.IndexOf("cycle:"+Boundary.Root),
+                label+" selected DEVINST reread after preparation before mutation");
+        }
+        if(scenario.Fault.StartsWith("status-",StringComparison.Ordinal))
+            Check(Boundary.Calls.Count(call=>call=="status:1:0")==1 && Boundary.Factories==0,
+                label+" unknown/notstarted/problem status refuses before SDK");
+        if(scenario.Fault is "wrong-board" or "parent-dead" or "location-mismatch")
+            Check(Boundary.InterfaceQueries==0 && !Boundary.Calls.Any(call=>call.StartsWith("status:",StringComparison.Ordinal)),
+                label+" original early refusal has no authority or status operation");
+        if(scenario.Fault=="after-prepare-authority-lost")
+            Check(Boundary.InterfaceQueries==2,label+" authority actually fails on second read");
+        if(scenario.Fault=="authority-lost")
+            Check(Boundary.InterfaceQueries==1,label+" initial authority loss precedes factory");
+        if(scenario.Fault=="after-prepare-node-changed")
+            Check(Boundary.Calls.Contains("root-node-after-prepare:99") && Boundary.InterfaceQueries==1,
+                label+" changed DEVINST blocks stale authority");
+        if(scenario.Fault=="after-prepare-parent-dead")
+            Check(Boundary.Calls.Contains("parent-after-prepare:dead"),label+" captured parent fails after preparation");
+        if(scenario.Fault=="after-prepare-location-changed")
+            Check(Boundary.Calls.Contains("location-after-prepare:changed"),label+" location changed after preparation");
+        var text=capture.ToString();JsonElement? diagnostic=null;
+        Check(Encoding.UTF8.GetByteCount(text)<=2048,label+" unchanged diagnostic cap");
+        if(text.Length>0){
+            const string prefix="YMCC_MSI_GAME_AUTHORITY_DIAGNOSTIC ";
+            Check(text.StartsWith(prefix,StringComparison.Ordinal) && text.Split(prefix,StringSplitOptions.None).Length==2,
+                label+" one original bounded diagnostic");
+            if(text.StartsWith(prefix,StringComparison.Ordinal)){
+                using var parsed=JsonDocument.Parse(text[prefix.Length..]);diagnostic=parsed.RootElement.Clone();
+                Check(diagnostic.Value.TryGetProperty("Xusb",out var xusb) && xusb.ValueKind==JsonValueKind.True,
+                    label+" diagnostic preserves actual XUSB source");
+            }
+        }
+        if(scenario.Fault=="cycle-throw"){
+            Check(result==6 && diagnostic is not null,label+" thrown CyclePort preserves 6 and real diagnostic");
+            if(diagnostic is JsonElement cycleFailure){
+                bool False(string key)=>cycleFailure.TryGetProperty(key,out var value) && value.ValueKind==JsonValueKind.False;
+                Check(cycleFailure.TryGetProperty("Kind",out var kind) && kind.GetString()=="ymcc.gameRefresh.failure" &&
+                    cycleFailure.TryGetProperty("Result",out var code) && code.GetInt32()==6,
+                    label+" original refresh failure identity");
+                Check(cycleFailure.TryGetProperty("Stage",out var stage) && stage.GetString()=="root-cycle" &&
+                    cycleFailure.TryGetProperty("RootPortCycle",out var rootCycle) && rootCycle.ValueKind==JsonValueKind.True,
+                    label+" actual root-cycle stage and explicit RootPortCycle");
+                Check(False("DisableCallEntered") && False("EnableCallEntered"),
+                    label+" never fabricates old CM entered flags");
+                Check(cycleFailure.TryGetProperty("ExceptionType",out var error) && error.GetString()=="System.ApplicationException",
+                    label+" actual SDK exception retained");
+            }
+        }
+        if(scenario.Fault=="old-disable-result23"){
+            // Old Run9 enters Disable, advances 65370 virtual ms, returns 23,
+            // and reports result6/factory0/cycle0: candidate assertions must fail.
+            Check(Boundary.ClockMs>=1000 && Boundary.ClockMs<1000+Boundary.DisableDelayMs,
+                label+" candidate bypasses simulated 65-second CM Disable");
+            if(Boundary.Disabled>0 && diagnostic is JsonElement oldFailure)
+                Check(oldFailure.TryGetProperty("DisableResult",out var code) && code.TryGetUInt32(out var value) && value==23 &&
+                    oldFailure.TryGetProperty("DisableCallElapsedMs",out var elapsed) && elapsed.GetInt64()==65370,
+                    label+" necessary old-source failure retains 23 and exact virtual duration");
+        }
+        Results.Add(new{scenario,arguments,result,expected,inputRoute="xusb",Boundary.Disabled,Boundary.Enabled,
+            Boundary.Factories,Boundary.Conversions,Boundary.Cycles,Boundary.InterfaceQueries,Boundary.Proofs,
+            Boundary.Opened,Boundary.Preparsed,Boundary.Freed,Boundary.ClockMs,Boundary.DisableDelayMs,
+            diagnostic,calls=Boundary.Calls.ToArray()});
+        Boundary.Timing=false;
+    }
+    private static void RunGpdRootControl(Scenario scenario)
+    {
+        Run(scenario,0,false);
+        Check(Boundary.Target!=Boundary.Root,scenario.Name+" nonexact target retained");
+        Check(Boundary.Factories==0 && Boundary.Conversions==0 && Boundary.Cycles==0,
+            scenario.Name+" sibling/HID/other OEM never promoted to root");
+        Check(Boundary.Disabled==1 && Boundary.Enabled==1 &&
+            Boundary.Calls.Contains("locate:"+Boundary.Target) && Boundary.Calls.Contains("disable:10:4") &&
+            Boundary.Calls.Contains("enable:10:0"),scenario.Name+" original target CM path retained");
+        Check(!Boundary.Calls.Any(call=>call.StartsWith("status:",StringComparison.Ordinal)),
+            scenario.Name+" no new root-cycle status read");
+        Check(scenario.Xusb?Boundary.Proofs==0 && Boundary.Opened==0:Boundary.Proofs==3 && Boundary.Opened>0,
+            scenario.Name+" original input-specific proof retained");
+    }
+    private static void RunGpdRootCases()
+    {
+        RunGpdRoot(new("gpd-root-cycle-old-disable-result23","gpd","old-disable-result23",0,Xusb:true,GpdRoot:true),0,1,1,1);
+        RunGpdRoot(new("gpd-root-cycle-normal","gpd",Xusb:true,GpdRoot:true),0,1,1,1);
+        foreach(var item in new (string Fault,int Result,int Factory,int Conversion,int Cycle)[]{
+            ("factory-null",7,1,0,0),("factory-throw",6,1,0,0),("cycle-throw",6,1,1,1),
+            ("after-prepare-parent-dead",3,1,1,0),("after-prepare-location-changed",5,1,1,0),
+            ("after-prepare-node-changed",8,1,1,0),("after-prepare-authority-lost",8,1,1,0),
+            ("status-notstarted",7,0,0,0),("status-problem-bit",7,0,0,0),
+            ("status-problem-code",7,0,0,0),("status-unknown",7,0,0,0),("status-throw",6,0,0,0),
+            ("authority-lost",8,0,0,0),("wrong-board",4,0,0,0),("parent-dead",3,0,0,0),
+            ("location-mismatch",5,0,0,0)})
+            RunGpdRoot(new("gpd-root-cycle-"+item.Fault,"gpd",item.Fault,0,Xusb:true,GpdRoot:true),
+                item.Result,item.Factory,item.Conversion,item.Cycle);
+        RunGpdRootControl(new("gpd-root-cycle-control-msi-mi00","msi",Xusb:true));
+        RunGpdRootControl(new("gpd-root-cycle-control-gpd-hid","gpd"));
+        RunGpdRootControl(new("gpd-root-cycle-control-rog-mi00","rog",Xusb:true));
+        RunGpdRootControl(new("gpd-root-cycle-control-gpd-mi00","gpd",Xusb:true));
+        RunGpdRootControl(new("gpd-root-cycle-control-gpd-sibling","gpd",Xusb:true,GpdRoot:true,GpdSibling:true));
+    }
+    private static void RunColdLifetimeCases()
+    {
+        foreach(var fault in new[]{"success","parent-open-failed","parent-dead","birth-mismatch","expired","oversized-budget","cancel-signaled","cancel-wait-failed","after-prepare-parent-dead","after-prepare-cancel","after-prepare-authority-lost","cycle-throw","status-unknown","location-mismatch"}){
+            Boundary.Reset(new("cold-lifetime-"+fault,"gpd",fault,0,Xusb:true,GpdRoot:true));Boundary.ColdLifetime=true;
+            var parentId=int.Parse(Environment.GetEnvironmentVariable("YMCC_COLD_FIXTURE_PARENT_PID")!);
+            using var parent=System.Diagnostics.Process.GetProcessById(parentId);
+            var birth=(ulong)parent.StartTime.ToUniversalTime().ToFileTimeUtc();if(fault=="birth-mismatch")++birth;
+            var now=checked((ulong)Environment.TickCount64);var deadline=fault=="expired"?now:now+(fault=="oversized-budget"?31000UL:30000UL);
+            using var cancellation=new EventWaitHandle(false,EventResetMode.ManualReset);
+            var value=cancellation.SafeWaitHandle.DangerousGetHandle();
+            // Transfer only this fixture-created event to actual Run15. Its
+            // SafeWaitHandle owns and closes it; the outer object cannot double-close.
+            var args=new[]{MsiNativePortCycle.Command,Boundary.Root,"--location",Boundary.Position,"--parent-pid",parentId.ToString(),"--once",MsiNativePortCycle.GameXusbCycle,Boundary.Root,"--parent-birth",birth.ToString(),"--deadline-tick",deadline.ToString(),"--cancel-handle",((nuint)value).ToString()};
+            if(!MsiNativePortCycle.TryArguments(args,out _,out _,out _))throw new InvalidOperationException("Fixture Run15 arguments rejected before owned handle transfer");
+            cancellation.SafeWaitHandle.SetHandleAsInvalid();
+            var previous=Console.Out;using var text=new StringWriter();Console.SetOut(text);
+            int result;try{result=MsiNativePortCycle.Run(args);}finally{Console.SetOut(previous);}
+            var expected=fault switch{"success"=>0,"after-prepare-authority-lost"=>8,"cycle-throw"=>6,"status-unknown"=>7,"location-mismatch"=>5,_=>13};
+            Check(result==expected,"cold-lifetime-"+fault+" typed result="+result+" expected="+expected);
+            Check(Boundary.Disabled==0&&Boundary.Enabled==0,"cold-lifetime-"+fault+" no CM Disable/Enable");
+            Check(Boundary.Cycles==(fault is "success" or "cycle-throw"?1:0),"cold-lifetime-"+fault+" exactly expected SDK mutation entries");
+            Check(result!=13||Boundary.Cycles==0,"cold-lifetime-"+fault+" typed13 proves no CyclePort entry");
+            Results.Add(new{fault,result,expected,Boundary.Disabled,Boundary.Enabled,Boundary.Cycles,calls=Boundary.Calls.ToArray(),scope="actual Run15; inert device/registry/parent/wait ports; fixture-owned event handle"});
+            Boundary.ColdLifetime=false;
+        }
     }
     public static int Main(string[] args)
     {
-        var baseline=args.Contains("--baseline");
-        if(baseline){Run(new("g3e-real-empty-compatible"),0,true);}
+        var baseline=args.Length==2&&args[1]=="--baseline";
+        var timingOnly=args.Length==3&&args[1]=="--case"&&args[2]=="timing";
+        var gpdRootOnly=args.Length==3&&args[1]=="--case"&&args[2]=="gpd-root-cycle";
+        var coldLifetimeOnly=args.Length==3&&args[1]=="--case"&&args[2]=="gpd-cold-lifetime";
+        if(args.Length<1 || args.Length!=1&&!baseline&&!timingOnly&&!gpdRootOnly&&!coldLifetimeOnly){Console.Error.WriteLine("Unknown helper fixture selection; executed=0");return 2;}
+        if(coldLifetimeOnly){RunColdLifetimeCases();}
+        else if(gpdRootOnly){RunGpdRootCases();}
+        else if(baseline){Run(new("g3e-real-empty-compatible"),0,true);}
         else{
+            if(!timingOnly){
             foreach(var family in new[]{"msi","rog","rog-original","gpd"}){
                 foreach(var usage in new ushort[]{4,5})foreach(var compatible in new[]{"","HID_DEVICE_UP:0001_U:0005","HID_DEVICE_UP:0001_U:0006"})
                     Run(new(family+"-game-"+usage+"-compat-"+compatible,family,Compatible:compatible,Usage:usage),0,false);
@@ -199,10 +375,12 @@ internal static class Fixture
             disableCalls=enableCalls=returnChecks=0;
             clean=MsiNativePortCycle.RefreshGameNode(()=>true,_=>{disableCalls++;return 0;},()=>{enableCalls++;return 0;},null,()=>{returnChecks++;return true;});
             Check(clean && disableCalls==1 && enableCalls==1 && returnChecks==0,"healthy refresh adds no return discovery or extra enable");
+            }
             foreach(var fault in new[]{"admission-false","admission-throw","success","disable-throw","observe-ok","locate-error","locate-mismatch","locate-throw","status-error","status-throw","post-locate-error","post-locate-mismatch","post-locate-throw"})RunTiming(fault);
             foreach(var clockFault in new[]{"timestamp","elapsed"})foreach(var fault in new[]{"success","disable-throw","observe-ok"})RunTiming(fault,clockFault);
+            foreach(var duration in new long[]{65370,65378})RunTiming("observe-ok",disableElapsedMs:duration);
         }
-        var report=new{productionCompensationScope="rog-pid1b4c-exact-owned-node",passed=Failures.Count==0,assertions,cases=Results.Count,failures=Failures,results=Results,baseline,realHardwareAccess=false,realSdkLoaded=false,productMainExecuted=false};
+        var report=new{productionCompensationScope="rog-pid1b4c-exact-owned-node",passed=Failures.Count==0,assertions,cases=Results.Count,failures=Failures,results=Results,baseline,selection=coldLifetimeOnly?"gpd-cold-lifetime":gpdRootOnly?"gpd-root-cycle":timingOnly?"timing":"default",realHardwareAccess=false,realSdkLoaded=false,productMainExecuted=false};
         File.WriteAllText(args[0],JsonSerializer.Serialize(report,new JsonSerializerOptions{WriteIndented=true}));
         Console.WriteLine(JsonSerializer.Serialize(new{report.passed,assertions,report.cases,report.failures,baseline}));return report.passed?0:1;
     }
@@ -210,8 +388,8 @@ internal static class Fixture
 
 internal sealed class ParentProcessLifetime:IDisposable
 {
-    internal static ParentProcessLifetime? TryOpen(int parent)=>new();
-    internal bool IsAlive{get{Boundary.AliveReads++;return Boundary.Case.Fault!="parent-dead" && !(Boundary.Case.Fault=="parent-late" && Boundary.AliveReads>=3) && !(Boundary.Case.Fault=="enable-parent-gone-after-disable" && Boundary.Disabled>0);}}
+    internal static ParentProcessLifetime? TryOpen(int parent)=>Boundary.ColdLifetime&&Boundary.Case.Fault=="parent-open-failed"?null:new();
+    internal bool IsAlive{get{Boundary.AliveReads++;if(Boundary.Prepared && Boundary.RootFault("after-prepare-parent-dead")){Boundary.Calls.Add("parent-after-prepare:dead");return false;}return Boundary.Case.Fault!="parent-dead" && !(Boundary.Case.Fault=="parent-late" && Boundary.AliveReads>=3) && !(Boundary.Case.Fault=="enable-parent-gone-after-disable" && Boundary.Disabled>0);}}
     public void Dispose(){}
 }
 
@@ -232,19 +410,50 @@ namespace InertRegistry
 namespace Nefarius.Utilities.DeviceManagement.PnP
 {
     internal enum DeviceLocationFlags{Normal}
-    internal sealed class PnPDevice{internal static PnPDevice GetDeviceByInstanceId(string instance,DeviceLocationFlags flags)=>new();}
-    internal sealed class UsbPnPDevice{internal void CyclePort()=>throw new InvalidOperationException("root cycling is outside this fixture");}
+    internal sealed class PnPDevice
+    {
+        internal string Instance {get;}
+        private PnPDevice(string instance){Instance=instance;}
+        internal static PnPDevice? GetDeviceByInstanceId(string instance,DeviceLocationFlags flags)
+        {
+            if(!Boundary.Case.GpdRoot)throw new InvalidOperationException("root cycling is outside this fixture");
+            Boundary.Factories++;Boundary.Calls.Add("factory:"+instance);
+            if(instance!=Boundary.Root || flags!=DeviceLocationFlags.Normal)
+                throw new InvalidOperationException("inert factory received a nonselected root");
+            if(Boundary.RootFault("factory-throw"))throw new ApplicationException("inert SDK factory failure");
+            return Boundary.RootFault("factory-null")?null:new(instance);
+        }
+    }
+    internal sealed class UsbPnPDevice
+    {
+        private readonly string instance;
+        internal UsbPnPDevice(string value){instance=value;}
+        internal void CyclePort()
+        {
+            if(!Boundary.Case.GpdRoot)throw new InvalidOperationException("root cycling is outside this fixture");
+            Boundary.Cycles++;Boundary.Calls.Add("cycle:"+instance);
+            if(Boundary.RootFault("cycle-throw"))throw new ApplicationException("inert SDK CyclePort failure");
+        }
+    }
 }
 namespace Nefarius.Utilities.DeviceManagement.Extensions
 {
-    internal static class DeviceExtensions{internal static Nefarius.Utilities.DeviceManagement.PnP.UsbPnPDevice ToUsbPnPDevice(this Nefarius.Utilities.DeviceManagement.PnP.PnPDevice device)=>new();}
+    internal static class DeviceExtensions
+    {
+        internal static Nefarius.Utilities.DeviceManagement.PnP.UsbPnPDevice ToUsbPnPDevice(this Nefarius.Utilities.DeviceManagement.PnP.PnPDevice device)
+        {
+            if(!Boundary.Case.GpdRoot)throw new InvalidOperationException("root cycling is outside this fixture");
+            Boundary.Conversions++;Boundary.Calls.Add("usb:"+device.Instance);
+            return new(device.Instance);
+        }
+    }
 }
 
 internal static partial class MsiNativePortCycle
 {
     // Optional lifecycle import: no OS wait; an unexpected call refuses execution.
     private static uint WaitForCycleCancellation(SafeWaitHandle handle,uint milliseconds)
-    { Boundary.Calls.Add("cancel-wait-inert"); return uint.MaxValue; }
+    { Boundary.Calls.Add("cancel-wait-inert");return Boundary.ColdLifetime?(Boundary.Case.Fault=="cancel-signaled"||Boundary.Prepared&&Boundary.Case.Fault=="after-prepare-cancel"?0u:Boundary.Case.Fault=="cancel-wait-failed"?uint.MaxValue:0x102u):uint.MaxValue; }
     // Fixture-only lexical replacement: normal cases use the real monotonic clock;
     // explicit timing cases advance only at inert device boundaries, without waits.
     private static class Stopwatch
@@ -268,6 +477,7 @@ internal static partial class MsiNativePortCycle
             if(Boundary.Case.Fault==part+"-throw")throw new ApplicationException("inert observation locate exception");
             return Boundary.Case.Fault==part+"-error"?13u:0;
         }
+        if(Boundary.Prepared && Boundary.RootFault("after-prepare-node-changed") && instance==Boundary.Root){Boundary.Calls.Add("root-node-after-prepare:99");node=99;return 0;}
         node=instance==Boundary.Root?1u:Boundary.Fault("node-retired") || Boundary.Enabled>0 && Boundary.Fault("enable-node-replaced")?99u:10u;if(instance!=Boundary.Root && Boundary.Enabled>0){if(Boundary.Fault("enable-authority-throws"))throw new ApplicationException("inert return identity exception");if(Boundary.Fault("enable-identity-retired"))return 13;}return 0;}
     private static uint Property(uint node,ref PropertyKey key,out uint type,byte[]? buffer,ref uint bytes,uint flags)
     {
@@ -276,7 +486,9 @@ internal static partial class MsiNativePortCycle
         if(key.Id==4 && buffer is null)Boundary.Proofs++;
         if(key.Id==4 && Boundary.Fault("property-missing")){bytes=0;return 13;}
         if(key.Id==4 && buffer is not null && Boundary.Fault("property-data-error"))return 13;
-        var text=key.Id==37?(Boundary.Case.Fault=="location-changed" && Boundary.Proofs>=1 || Boundary.Enabled>0 && Boundary.Fault("enable-location-changed"))?"USB#OTHER":Boundary.Position:Boundary.Case.Compatible;
+        var rootLocationChanged=key.Id==37 && (Boundary.RootFault("location-mismatch") || Boundary.Prepared && Boundary.RootFault("after-prepare-location-changed"));
+        if(rootLocationChanged && Boundary.Prepared && buffer is null)Boundary.Calls.Add("location-after-prepare:changed");
+        var text=rootLocationChanged?"USB#OTHER":key.Id==37?(Boundary.Case.Fault=="location-changed" && Boundary.Proofs>=1 || Boundary.Enabled>0 && Boundary.Fault("enable-location-changed"))?"USB#OTHER":Boundary.Position:Boundary.Case.Compatible;
         var data=Encoding.Unicode.GetBytes(text+"\0");
         if(buffer is null){bytes=key.Id==4 && text.Length==0?4u:(uint)data.Length;return 26;}
         if(key.Id==4 && Boundary.Fault("property-size-race")){bytes=(uint)buffer.Length+100;return 26;}
@@ -287,10 +499,17 @@ internal static partial class MsiNativePortCycle
     private static uint DevNodeStatus(out uint status,out uint problem,uint node,uint flags)
     {
         Boundary.Calls.Add("status:"+node+":"+flags);status=8;problem=0;
+        if(Boundary.Case.GpdRoot){
+            if(Boundary.RootFault("status-notstarted"))status=0;
+            if(Boundary.RootFault("status-problem-bit"))status|=0x400;
+            if(Boundary.RootFault("status-problem-code"))problem=22;
+            if(Boundary.RootFault("status-unknown"))return 13;
+            if(Boundary.RootFault("status-throw"))throw new ApplicationException("inert root status failure");
+        }
         if(Boundary.Timing){Boundary.ClockMs+=11;if(Boundary.Case.Fault=="status-throw")throw new ApplicationException("inert observation status exception");}
         return Boundary.Case.Fault=="status-error"?13u:0;
     }
-    private static uint Disable(uint node,uint flags){Boundary.Disabled++;Boundary.Calls.Add("disable:"+node+":"+flags);if(Boundary.Timing)Boundary.ClockMs+=17;if(Boundary.Fault("disable-throw"))throw new InvalidOperationException("inert disable exception");return Boundary.Timing && Boundary.Case.Fault!="success"?23u:Boundary.Fault("disable-result")?uint.MaxValue:0;}
+    private static uint Disable(uint node,uint flags){Boundary.Disabled++;Boundary.Calls.Add("disable:"+node+":"+flags);if(Boundary.Timing)Boundary.ClockMs+=Boundary.DisableDelayMs;if(Boundary.Fault("disable-throw"))throw new InvalidOperationException("inert disable exception");return Boundary.Timing && Boundary.Case.Fault!="success"?23u:Boundary.Fault("disable-result")?uint.MaxValue:0;}
     private static uint Enable(uint node,uint flags){
         Boundary.Enabled++;Boundary.Calls.Add("enable:"+node+":"+flags);
         if(Boundary.Enabled==1 && Boundary.Case.Fault.StartsWith("enable-",StringComparison.Ordinal)){
@@ -300,8 +519,8 @@ internal static partial class MsiNativePortCycle
         if(Boundary.Fault("enable-throw") || Boundary.Fault("enable-compensation-throws"))throw new ApplicationException("inert compensation enable exception");
         return Boundary.Fault("enable-result") || Boundary.Fault("enable-compensation-result")?uint.MaxValue:0;
     }
-    private static uint InterfaceSize(out uint characters,ref Guid type,string instance,uint flags){Boundary.InterfaceQueries++;characters=Boundary.Fault("interface-too-many")?400u:64u;return Boundary.Fault("interface-size-error")?13u:0;}
-    private static uint Interfaces(ref Guid type,string instance,char[] buffer,uint characters,uint flags){if(Boundary.Fault("interface-list-error"))return 26;var value=Boundary.Fault("interface-empty") || Boundary.Fault("interface-disappeared")?"\0\0":Boundary.Fault("interface-too-many")?string.Concat(Enumerable.Repeat("inert-hid\0",17))+"\0":Boundary.Fault("path-replaced")?"inert-hid-replaced\0\0":"inert-hid\0\0";value.CopyTo(0,buffer,0,value.Length);return 0;}
+    private static uint InterfaceSize(out uint characters,ref Guid type,string instance,uint flags){Boundary.InterfaceQueries++;Boundary.InterfaceTypes.Add(type);Boundary.InterfaceInstances.Add(instance);characters=Boundary.Fault("interface-too-many")?400u:64u;return Boundary.Fault("interface-size-error")?13u:0;}
+    private static uint Interfaces(ref Guid type,string instance,char[] buffer,uint characters,uint flags){if(Boundary.Fault("interface-list-error"))return 26;var rootAuthorityLost=Boundary.RootFault("authority-lost") || Boundary.Prepared && Boundary.RootFault("after-prepare-authority-lost");var value=rootAuthorityLost || Boundary.Fault("interface-empty") || Boundary.Fault("interface-disappeared")?"\0\0":Boundary.Fault("interface-too-many")?string.Concat(Enumerable.Repeat("inert-hid\0",17))+"\0":Boundary.Fault("path-replaced")?"inert-hid-replaced\0\0":"inert-hid\0\0";value.CopyTo(0,buffer,0,value.Length);return 0;}
     private static uint InterfaceProperty(string path,ref PropertyKey key,out uint type,byte[] buffer,ref uint bytes,uint flags){type=Boundary.Fault("wrong-binding-type")?0x2012u:0x12u;var text=Boundary.Fault("wrong-binding") || Boundary.Fault("binding-retired") && Boundary.Opened>0?Boundary.Target+"OTHER":Boundary.Target;var value=Encoding.Unicode.GetBytes(text+(Boundary.Fault("wrong-binding-terminator")?"":"\0"));value.CopyTo(buffer,0);bytes=(uint)value.Length;return 0;}
     private static SafeFileHandle OpenHid(string path,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template){Boundary.Opened++;return new(Boundary.Fault("open-failed")?new IntPtr(-1):new IntPtr(42),false);}
     private static bool HidAttributesRead(SafeFileHandle handle,ref HidAttributes attributes){attributes.VendorId=Convert.ToUInt16(Boundary.Root.Substring(8,4),16);attributes.ProductId=Boundary.Fault("wrong-attributes")?(ushort)1:Convert.ToUInt16(Boundary.Root.Substring(17,4),16);return !Boundary.Fault("attributes-failed");}

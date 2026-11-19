@@ -7,11 +7,13 @@
 #include <string>
 #include <thread>
 #include <cstdint>
+#include <memory>
 #include "json.hpp"
 namespace ymcc::mousePolicy {
 using Json=nlohmann::json;
 enum class Mode { Off, Auto, On };
 inline constexpr int ForegroundTransientGraceMs=250;
+inline constexpr unsigned ReleaseRetryInitialMs=1000,ReleaseRetryMaxMs=30000;
 inline const char* name(Mode m){return m==Mode::Auto?"auto":m==Mode::On?"on":"off";}
 inline Mode mode(const std::string& s){return s=="auto"?Mode::Auto:s=="on"?Mode::On:Mode::Off;}
 struct Context {
@@ -51,9 +53,22 @@ struct Deps {
  // Reuse a confirmed state while its provider and effective decision are unchanged.
  // Explicit requests, Steam handoffs and failed/unknown reads still use IO.
  std::function<bool(const Json&)> retainConfirmedState;
+ // Optional monotonic clock for the existing worker's release backoff.
+ std::function<std::chrono::steady_clock::time_point()> now;
 };
 class Runtime {
+ struct RequestGuard {
+  std::function<bool()> current;
+  std::atomic<bool> expired{false};
+  explicit RequestGuard(std::function<bool()> value):current(std::move(value)){}
+  bool valid(){
+   if(expired.load())return false;
+   try{if(current())return true;}catch(...){}
+   expired.store(true);return false;
+  }
+ };
  Deps deps;std::mutex mx;std::condition_variable cv;std::thread worker;
+ std::shared_ptr<RequestGuard> requestGuard;
  std::atomic<bool> stopping{false};std::atomic<Mode> selected{Mode::Off};std::atomic<std::uint64_t> revision{1};
  std::atomic<std::uint64_t> backendEpoch{1};
  std::atomic<bool> forced{false};bool dirty=true;std::uint64_t settled=0,sequence=0;Json last=Json::object(),history=Json::array();
@@ -62,13 +77,27 @@ class Runtime {
   return value.value("ok",false)&&value.value("stateKnown",false)&&
     value.contains("on")&&value["on"].is_boolean()&&value.value("controlAllowed",false);
  }
+ static bool knownOff(const Json& value){
+  return value.value("stateKnown",false)&&value.contains("on")&&value["on"].is_boolean()&&!value["on"].get<bool>();
+ }
  void run(){
   Context previous{};Mode priorMode=Mode::Off;bool first=true;Json confirmedState=Json::object();std::uint64_t confirmedStateEpoch=0;
+  bool releasePending=false;unsigned releaseDelay=ReleaseRetryInitialMs;Json releaseReceipt=Json::object();
+  std::chrono::steady_clock::time_point releaseDue{};
+  const auto retryNow=[&]{return deps.now?deps.now():std::chrono::steady_clock::now();};
+  const auto clearRelease=[&]{releasePending=false;releaseDelay=ReleaseRetryInitialMs;releaseReceipt=Json::object();};
   std::chrono::steady_clock::time_point unknownSince{};
   while(!stopping.load()){
    {std::unique_lock lock(mx);cv.wait_for(lock,std::chrono::seconds(1),[&]{return dirty||stopping.load();});dirty=false;}
    if(stopping.load())break;
-   const auto rev=revision.load();const Mode m=selected.load();const auto context=deps.observe();
+   std::shared_ptr<RequestGuard> guard;
+   std::uint64_t rev;Mode m;
+   {std::lock_guard lock(mx);guard=requestGuard;rev=revision.load();m=selected.load();
+    // A rejected startup request is terminal until a new explicit request.
+    // Ordinary foreground wakes cannot replay it or poll its settings claim.
+    if(guard&&guard->expired.load()){settled=revision.load();cv.notify_all();continue;}
+   }
+   const auto context=deps.observe();
    // A foreground HWND can temporarily be NULL during activation. Retain only
    // the last admitted state for a bounded transition; this never enables from
    // an unknown foreground. Real windows, explicit OFF and SD bypass the hold.
@@ -89,13 +118,33 @@ class Runtime {
       confirmedState.value("on",false)!=last.value("on",false)||
       confirmedState.value("backend",std::string{})!=last.value("backend",std::string{}));
     confirmedState=confirmedReceipt(last)?last:Json::object();
+    // A fresh physical OFF completes an outstanding release even when the
+    // original command failed. Other readbacks do not refund its backoff.
+    if(releasePending&&knownOff(last))clearRelease();
+    if(releasePending&&releaseReceipt.value("backend",std::string{})!=last.value("backend",std::string{})){clearRelease();first=true;}
     if(changed)first=true;
    }
    const bool refresh=forced.exchange(false);
-   if(!refresh&&!first&&context==previous&&m==priorMode){std::lock_guard lock(mx);settled=rev;cv.notify_all();continue;}
+   // Ordinary wakes cannot accelerate a failed release. New authority always
+   // decides afresh; no deferred OFF is carried into an allowed ON context.
+   const bool providerChanged=releasePending&&!context.steam&&!releaseReceipt.value("backend",std::string{}).empty()&&
+     deps.retainConfirmedState&&!deps.retainConfirmedState(releaseReceipt);
+   if(refresh||first||context!=previous||m!=priorMode||providerChanged){if(providerChanged)first=true;clearRelease();}
+   if(releasePending&&retryNow()<releaseDue){std::lock_guard lock(mx);settled=rev;cv.notify_all();continue;}
+   if(!refresh&&!first&&context==previous&&m==priorMode&&!releasePending){std::lock_guard lock(mx);settled=rev;cv.notify_all();continue;}
    first=false;previous=context;priorMode=m;
    // Only enable after the same desktop identity remains stable. Off is immediate.
    const auto d=decide(m,context);
+   const auto expired=[&](Json result=Json::object()){
+    guard->expired.store(true);clearRelease();confirmedState=Json::object();
+    const bool observed=result.contains("verification");
+    if(result.empty())result={{"on",false},{"stateKnown",false},{"controlAllowed",true}};
+    result["backendReadbackFresh"]=observed;if(!observed)result.erase("backendObservedAt");
+    result["ok"]=false;result["reason"]="boot_request_expired";result["superseded"]=true;
+    result["error"]="开机鼠标所属配置已变化，旧请求已停止。";
+    publish(std::move(result),m,context,rev,d,backendEpoch.load(),observed);
+   };
+   if(guard&&!guard->valid()){expired();continue;}
    // Window and diagnostic changes do not require another provider command
    // when the admitted ON/OFF decision and provider are unchanged.
    if(!refresh&&!context.steam&&!confirmedState.empty()&&
@@ -107,20 +156,39 @@ class Runtime {
    }
    confirmedState=Json::object();
    if(d.on&&m!=Mode::Off){std::unique_lock lock(mx);if(cv.wait_for(lock,std::chrono::milliseconds(180),[&]{return stopping.load()||revision.load()!=rev;})){first=true;continue;}}
-   auto valid=[this,rev,m,context]{return !stopping.load()&&revision.load()==rev&&selected.load()==m&&deps.observe()==context&&decide(m,context).on;};
-   if(d.on&&!valid()){first=true;wake();continue;}
+   auto current=[this,rev,m,context,guard]{return !stopping.load()&&revision.load()==rev&&selected.load()==m&&deps.observe()==context&&(!guard||guard->valid());};
+   // Currentness is independent of the requested ON/OFF direction.
+   auto valid=[&]{return current();};
    Json result;const auto readEpoch=backendEpoch.load();
+   if(!current()||backendEpoch.load()!=readEpoch){if(guard&&guard->expired.load()){expired();continue;}first=true;wake();continue;}
    try {result=context.steam?deps.release():deps.apply(d.on,valid);}catch(const std::exception& e){result={{"ok",false},{"on",false},{"stateKnown",false},{"error",e.what()}};}
    // Re-observe after bounded provider IO. A late enable is withdrawn immediately.
-   if(d.on&&!valid()){
+   const bool stillCurrent=current();
+   // The provider already owns withdrawal of its just-submitted enable. An
+   // expired boot claim must not add another release against a newer owner.
+   if(guard&&guard->expired.load()){expired(std::move(result));continue;}
+   if(d.on&&!stillCurrent){
     try{const auto withdrawn=deps.release();if(!withdrawn.value("ok",false)){result=withdrawn;result["ok"]=false;result["reason"]="stale_enable_cleanup_failed";publish(result,m,context,rev,d,readEpoch);}}catch(...){}
     previous={};first=true;wake();continue;
    }
-   if(revision.load()!=rev){first=true;wake();continue;}
+   if(!stillCurrent){first=true;wake();continue;}
+   // Anchor backoff to the completed IO, before observers can delay delivery.
+   const bool retryRelease=!d.on&&!knownOff(result)&&!(context.steam&&result.value("ok",false)&&!result.value("on",false));
+   const auto completedAt=retryRelease?retryNow():std::chrono::steady_clock::time_point{};
    const auto publishedEpoch=publish(result,m,context,rev,d,readEpoch);
    if(!publishedEpoch){first=true;wake();continue;}
-   // Synchronize the generation for every settled provider result, including
-   // ON, Steam and failures: unchanged contexts must never become a retry timer.
+   if(guard&&confirmedReceipt(result)){
+    std::lock_guard lock(mx);
+    if(requestGuard==guard)requestGuard.reset();
+   }
+   // A successful Steam release confirms our owned backends are released;
+   // its public UNKNOWN describes Steam output, which YMCC must not probe.
+   if(retryRelease){
+    releasePending=true;releaseReceipt=result;releaseDue=completedAt+std::chrono::milliseconds(releaseDelay);
+    releaseDelay=releaseDelay>=ReleaseRetryMaxMs/2?ReleaseRetryMaxMs:releaseDelay*2;
+   }else clearRelease();
+   // Keep the epoch fence and confirmed-state reuse. Only the outstanding
+   // release above may bypass the unchanged-context shortcut after backoff.
    {std::lock_guard lock(mx);if(backendEpoch.load()==publishedEpoch){
     confirmedStateEpoch=publishedEpoch;
     confirmedState=!context.steam&&confirmedReceipt(result)?last:Json::object();
@@ -150,9 +218,9 @@ public:
  void wake(){revision.fetch_add(1);{std::lock_guard lock(mx);dirty=true;}cv.notify_all();}
  // Admission is short and can share the settings transaction; waiting never
  // holds that external lock or delays a newer mode request.
- std::uint64_t request(Mode m){
+ std::uint64_t request(Mode m,std::function<bool()> stillValid={}){
   std::uint64_t wanted=0;
-  {std::lock_guard lock(mx);selected.store(m);forced.store(true);wanted=revision.fetch_add(1)+1;dirty=true;}
+  {std::lock_guard lock(mx);requestGuard=stillValid?std::make_shared<RequestGuard>(std::move(stillValid)):nullptr;selected.store(m);forced.store(true);wanted=revision.fetch_add(1)+1;dirty=true;}
   cv.notify_all();return wanted;
  }
  Json wait(Mode m,std::uint64_t wanted){
@@ -166,9 +234,9 @@ public:
   return out;
  }
  Json set(Mode m){return wait(m,request(m));}
- Json refresh(){
+ Json refresh(std::function<bool()> stillValid={}){
   Mode m;std::uint64_t wanted=0;
-  {std::lock_guard lock(mx);m=selected.load();forced.store(true);wanted=revision.fetch_add(1)+1;dirty=true;}
+  {std::lock_guard lock(mx);requestGuard=stillValid?std::make_shared<RequestGuard>(std::move(stillValid)):nullptr;m=selected.load();forced.store(true);wanted=revision.fetch_add(1)+1;dirty=true;}
   cv.notify_all();return wait(m,wanted);
  }
  // The caller holds the provider operation mutex across its read and this

@@ -30,7 +30,22 @@ inline Json selectVideoForDownload(const fs::path& root,const Json& request,
     auto authorization=entry;
     const auto searchedRevision=catalog.value("bindingRevision",uint64_t{0});
     const auto revision=entry.value("bindingRevision",uint64_t{0});
-    const bool retry=searchedRevision<UINT64_MAX&&revision==searchedRevision+1;
+    auto document=queue.document();
+    const auto jobs=document.value("jobs",Json::object());
+    bool publishedRetry=false;
+    if(searchedRevision<UINT64_MAX&&revision>searchedRevision+1&&jobs.contains(key)){
+        const auto& job=jobs[key];const auto choice=entry.value("selectedVideo",Json::object());
+        // Only an owned publication may advance the accepted queue receipt.
+        // A newer editor decision cannot borrow that earlier catalog token.
+        publishedRetry=!job.value("identityPending",false)&&job.value("verified",false)&&
+            job.value("appId",int64_t{0})==entry.value("appId",int64_t{0})&&
+            job.value("requestBindingRevision",uint64_t{0})==revision&&
+            document.value("manualTargetRevisions",Json::object()).value(key,uint64_t{0})==revision&&
+            !stringField(choice,"selectionToken").empty()&&
+            stringField(choice,"selectionToken")==stringField(catalog,"searchToken")&&
+            job.value("selectedVideo",Json::object())==choice;
+    }
+    const bool retry=publishedRetry||(searchedRevision<UINT64_MAX&&revision==searchedRevision+1);
     if(retry)authorization["bindingRevision"]=searchedRevision;
     auto selected=custom_steam_library::video_catalog::selection(authorization,catalog,request,now());
     // This receipt permits only an exact retry after a Store/Queue write or
@@ -38,8 +53,6 @@ inline Json selectVideoForDownload(const fs::path& root,const Json& request,
     selected["selectionToken"]=stringField(catalog,"searchToken");
     if(retry&&entry.value("selectedVideo",Json::object())!=selected)
         throw std::runtime_error("壁纸设置已更新，请重新搜索后选择");
-    auto document=queue.document();
-    const auto jobs=document.value("jobs",Json::object());
     if(!jobs.contains(key)&&jobs.size()>=10000)
         throw std::runtime_error("media-download-queue-full");
     if(downloads::scopedManual(document)&&

@@ -3,6 +3,7 @@ $ErrorActionPreference='Stop'
 $source=Join-Path (Split-Path -Parent $PSScriptRoot) 'PowerControl\steam-appearance.ps1'
 New-Item -ItemType Directory -Path $Out -Force|Out-Null
 . $source -Action Library
+function Get-AppearanceSteamSession {$null} # Explicit offline public Steam facts for this owned fixture.
 $script:PresetStateBase=Join-Path $Out 'states'
 $cases=New-Object Collections.Generic.List[string]
 function Assert($condition,[string]$message){if(!$condition){throw $message};$cases.Add($message)}

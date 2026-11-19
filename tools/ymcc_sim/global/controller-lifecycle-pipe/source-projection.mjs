@@ -29,7 +29,10 @@ const unicode=main.slice(unicodeStart,unicodeEnd)+'\n'+wide[0]+'\n'+fn('U2W');bi
 const compactBindingDeclarations=[...main.matchAll(/^static std::string g_inputHostFrameReplyBinding;\r?$/gm)];
 if(compactBindingDeclarations.length!==1)throw Error('Actual compact reply binding declaration missing/nonunique');
 bindings.push({name:'g_inputHostFrameReplyBinding',code:compactBindingDeclarations[0][0],sha256:sha(compactBindingDeclarations[0][0])});
-const compactReplySupport='#include "input_host_compact_frame_reply.h"\n'+compactBindingDeclarations[0][0]+'\n';
+const compactRequestDeclarations=[...main.matchAll(/^static bool g_inputHostCompactFrameRequest = false;\r?$/gm)];
+assert.equal(compactRequestDeclarations.length,1,'Actual compact request capability declaration missing/nonunique');
+bindings.push({name:'g_inputHostCompactFrameRequest',code:compactRequestDeclarations[0][0],sha256:sha(compactRequestDeclarations[0][0])});
+const compactReplySupport='#include "input_host_compact_frame_reply.h"\n'+compactBindingDeclarations[0][0]+'\n'+compactRequestDeclarations[0][0]+'\n';
 // Wire-only scope has no deferred visibility or OneX Start writer. Bind the
 // actual null TLS declarations; their opaque owners and Start deadline are not
 // fabricated as successful live-start consumers.
@@ -42,7 +45,31 @@ assert(startDeadlineRows.length===1,'Current OneX Start deadline signature missi
 const startDeadlineDeclaration=startDeadlineRows[0][0];
 bindings.push({name:'inputHostOneXStartDeadline-signature',code:startDeadlineDeclaration,sha256:sha(startDeadlineDeclaration),scope:'actual signature; unreachable wire-only trap body'});
 const unarmedStartWrites='struct OneXVirtualStartEpisode;\nstruct InputHostDeferredPhysicalHide;\n'+startWriteDeclarations.join('\n')+'\n'+startDeadlineDeclaration.trimEnd().replace(/;$/,'{throw std::logic_error("unexpected-OneX-Start-write-in-wire-fixture");}')+'\n';
-const replacements={REQUEST_LIFECYCLE:['inputHostRequestIsLifecycleCommand','inputHostRequestHasExecutionDeadline','inputHostProcessAliveLocked'].map(fn).join('\n'),GAME_MOTOR:[compactReplySupport,struct('InputHostGameMotorDomKeys'),fn('inputHostExpandCompactFrameReplyLocked'),fn('inputHostGameMotorFromDom'),fn('inputHostConsumeGameMotorReplyLocked'),fn('inputHostObserveGameMotorBindingLocked')].join('\n'),FRAME_SCOPE:unarmedStartWrites+struct('InputFrameTransportScope'),CONSTANTS:constants,UNICODE:unicode,NEW_ID:fn('inputHostNewId'),HASH:['inputHostCryptoProvider','inputHostSha256','inputHostCanonicalFrameHash'].map(fn).join('\n'),ENVELOPE:fn('inputHostEnvelopeLocked'),PIPE:['inputHostPipeCloseOwned','inputHostPipeRetirementProvenLocked','inputHostCreateServerPipeLocked','inputHostPipeIo','inputHostWaitClientLocked'].map(fn).join('\n'),FAST_RECEIPT:struct('InputHostFastReceipt'),SCANNER:section('namespace c7aReceiptFast {','c7aReceiptFast'),AFTER_FRAME:fn('inputHostAfterSubmitFrameAccepted'),RELEASE_TIMING_LOG:fn('inputHostReleaseTimingReceiptLog'),COMMAND_RESULT_LOG:fn('inputHostCommandResultLog'),REQUEST:fn('inputHostRequestPreparedLocked')};
+const requestPowerDeclarations=['t_inputHostRequestPower','t_inputHostRequestHardwareRequired'].map(name=>{
+ const rows=[...main.matchAll(new RegExp('^static thread_local[^\\r\\n]*\\b'+name+'[^\\r\\n]*;\\r?$','gm'))];
+ assert.equal(rows.length,1,'Actual request power TLS missing/nonunique: '+name);
+ const code=rows[0][0];bindings.push({name,code,sha256:sha(code),scope:'actual request power TLS'});return code;
+});
+const wireReadState=[
+ ['g_inputHostPrepared',/^static bool g_inputHostPrepared = false;\r?$/gm],
+ ['g_inputHostNeutralized',/^static bool g_inputHostNeutralized = false;\r?$/gm],
+ ['g_inputHostExitFence',/^static std::atomic<bool> g_inputHostExitFence\{false\};\r?$/gm],
+ ['g_inputCaptureStop',/^static std::atomic<bool> g_inputCaptureStop\{false\};\r?$/gm],
+ ['g_inputHostRecoveryIntent',/^static ymcc::inputHost::VirtualRecoveryIntent g_inputHostRecoveryIntent;\r?$/gm],
+ ['g_virtualStartProtection',/^static ymcc::VirtualStartProtection g_virtualStartProtection;\r?$/gm],
+ ['switchStartTuple',/^static thread_local std::uint64_t g_inputHostSwitchRecoveryStartRequestId=0,g_inputHostSwitchRecoveryStartPower=0;\r?$/gm],
+].map(([name,pattern])=>{
+ const rows=[...main.matchAll(pattern)];assert.equal(rows.length,1,'Actual wire read state missing/nonunique: '+name);
+ const code=rows[0][0];bindings.push({name,code,sha256:sha(code)});return code;
+});
+// Keep the actual public-power prefix; the remaining frame/Start owners are
+// deliberately unarmed by this existing wire-only fixture.
+const originalIssueGuard=fn('inputHostFrameSubmissionMayIssue');
+const issueBody=originalIssueGuard.indexOf('{')+1,issueEnd=originalIssueGuard.indexOf('    if(t_inputHostOneXStartWrite)');
+assert(issueBody>0&&issueEnd>issueBody,'Actual public-power issue prefix missing');
+const publicIssueGate=originalIssueGuard.slice(issueBody,issueEnd);
+bindings.push({name:'inputHostFrameSubmissionMayIssue-public-power-prefix',code:publicIssueGate,sha256:sha(publicIssueGate),scope:'actual public gate; unarmed wire-only remainder'});
+const replacements={WIRE_READ_STATE:[...wireReadState,fn('currentPowerGeneration'),fn('inputHostExitFenceRaised')].join('\n'),REQUEST_LIFECYCLE:['inputHostRequestIsLifecycleCommand','inputHostRequestHasExecutionDeadline','inputHostProcessAliveLocked','inputHostRequestNeedsHardwarePower','inputHostRequestNeedsPowerScope','inputHostReceiptPassedSequenceGate','inputHostRequestPowerReceiptCurrent'].map(fn).join('\n'),GAME_MOTOR:[compactReplySupport,struct('InputHostGameMotorDomKeys'),fn('inputHostExpandCompactFrameReplyLocked'),fn('inputHostGameMotorFromDom'),fn('inputHostConsumeGameMotorReplyLocked'),fn('inputHostObserveGameMotorBindingLocked')].join('\n'),FRAME_SCOPE:[unarmedStartWrites,...requestPowerDeclarations,struct('InputHostRequestPowerScope'),struct('InputFrameTransportScope')].join('\n'),PUBLIC_ISSUE_GATE:publicIssueGate,CONSTANTS:constants,UNICODE:unicode,NEW_ID:fn('inputHostNewId'),HASH:['inputHostCryptoProvider','inputHostSha256','inputHostCanonicalFrameHash'].map(fn).join('\n'),ENVELOPE:fn('inputHostEnvelopeLocked'),PIPE:['inputHostPipeCloseOwned','inputHostPipeRetirementProvenLocked','inputHostCreateServerPipeLocked','inputHostPipeIo','inputHostWaitClientLocked'].map(fn).join('\n'),FAST_RECEIPT:struct('InputHostFastReceipt'),SCANNER:section('namespace c7aReceiptFast {','c7aReceiptFast'),AFTER_FRAME:fn('inputHostAfterSubmitFrameAccepted'),RELEASE_TIMING_LOG:fn('inputHostReleaseTimingReceiptLog'),COMMAND_RESULT_LOG:fn('inputHostCommandResultLog'),REQUEST:fn('inputHostRequestPreparedLocked')};
 let cpp=template;
  for(const[name,code]of Object.entries(replacements)){
   assert.equal(cpp.split('@@'+name+'@@').length,2,name);

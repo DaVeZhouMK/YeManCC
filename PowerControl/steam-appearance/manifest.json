@@ -106,9 +106,9 @@
     },
     {
       "path": "Art Hero/shared.css",
-      "sha256": "4e4097aabcb4f102b54f49a71c46bfb2fb42c984d0084417b8a4481863991b15",
-      "bytes": 5837,
-      "contentProperty": "--ymcc-content-509e0400e6c83461"
+      "sha256": "305e94265c48f6d13ae665d433e6c03f85a58b9463c2a915f9e496b3b6652ff0",
+      "bytes": 6193,
+      "contentProperty": "--ymcc-content-0ec7833c31fa61df"
     },
     {
       "path": "Art Hero/StandardBG.css",

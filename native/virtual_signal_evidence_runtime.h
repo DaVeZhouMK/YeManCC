@@ -1,6 +1,7 @@
 #pragma once
 #include <cmath>
 #include "virtual_control_window_evidence.h"
+#include "native_signal_window_log_scope.h"
 // Included after FocusFrameContent and the ordinary capture/Host diagnostics.
 // This passive observer owns no thread, device handle, timer, or retry policy.
 // Called only for an already selected <=1 Hz witness. No title/process-image
@@ -18,8 +19,7 @@ static json inputHostSignalForegroundObservation() {
         {"windowAfter",reinterpret_cast<std::uintptr_t>(after)},
         {"windowStableDuringRead",before==after},{"pid",pid},{"threadId",thread},
         {"className",length>0 ? std::string(cls,static_cast<std::size_t>(length)) : std::string{}},
-        {"classReadSucceeded",length>0},{"classReadError",classError},
-        {"scope","selected-witness-observation;not-focus-decision-or-Xbox-session-identity"}};
+        {"classReadSucceeded",length>0},{"classReadError",classError}};
 }
 
 static void inputHostNativeSignalEvidence(const FocusFrameContent& finalContent,
@@ -42,8 +42,7 @@ static void inputHostNativeSignalEvidence(const FocusFrameContent& finalContent,
             sample?sample->readMsiSourceRevision:0,sample?sample->readMsiModeGeneration:0,
             sample!=nullptr,sample&&sample->live,sourceNonzero);
         if(!d.record)return;
-        json source={{"snapshotKnown",sample!=nullptr},{"hardwarePacketFreshnessProven",false},
-            {"padScope","selected-native-source-pad;raw-MSI-DInput-is-recorded-separately"}};
+        json source={{"snapshotKnown",sample!=nullptr},{"hardwarePacketFreshnessProven",false}};
         if(sample) {
             const auto& p=sample->pad;
             source.update({{"inputSource",sample->inputSource},{"live",sample->live},
@@ -70,7 +69,6 @@ static void inputHostNativeSignalEvidence(const FocusFrameContent& finalContent,
                 {"lxShort",p.sThumbLX},{"lyShort",p.sThumbLY},{"rxShort",p.sThumbRX},{"ryShort",p.sThumbRY}};
         };
         json composition={{"version",1},{"inputPad",padJson(inputPad)},{"outputPad",padJson(outputPad)},
-            {"padScope","post-focus-release-barrier-input;outputPad-is-actual-pre-blend-pad"},
             {"analogAdmitted",analogAdmitted},
             {"blend",{{"useMotion",blend.useMotion},{"targetLeft",blend.targetLeft},
                 {"targetStick",blend.targetLeft ? "left" : "right"},
@@ -79,17 +77,19 @@ static void inputHostNativeSignalEvidence(const FocusFrameContent& finalContent,
                 {"weightFactor",blend.weightFactor},{"outX",blend.outX},{"outY",blend.outY},
                 {"lxShort",blend.lxShort},{"lyShort",blend.lyShort},
                 {"rxShort",blend.rxShort},{"ryShort",blend.ryShort}}},
-            {"blendScope","actual-computed-stick-blend;before-final-semantic-neutral-override"},
             {"finalOverride",semanticNeutral ? "semantic-neutral" : "none"},
-            {"finalUseMotion",blend.useMotion && !semanticNeutral},
-            {"finalFrameScope","nativeFinalFrame-is-effective-frame-after-semantic-neutral-override"}};
+            {"finalUseMotion",blend.useMotion && !semanticNeutral}};
+        NativeControlWindowDrainTicket controlDrain;
+        auto finalFrame=focusIsolationAssembleFrame(finalContent);
+        // The transport omits zero; the diagnostic comparison needs an observed zero.
+        finalFrame["screenButtons"]=finalContent.screenButtons;
         json row={{"formatVersion",1},{"diagnosticOnly",true},{"observedTick",now},
             {"wireMonotonicTick",wireTick},{"wireSampleSequence",wireSample},{"protocolPowerGeneration",requestPower},{"wireClockKnown",d.wireClockKnown},{"sampleBucket",d.bucket},
             {"samplePeriodMs",ymcc::virtualSignal::Sampler::intervalMs},{"windowMs",d.elapsedMs},
             {"request",std::move(wireRequest)},{"source",std::move(source)},
-            {"composition",std::move(composition)},{"allObservedControls",nativeControlWindowSnapshot(true)},
+            {"composition",std::move(composition)},{"allObservedControls",nativeControlWindowSnapshot(&controlDrain)},
             {"foregroundObservation",inputHostSignalForegroundObservation()},
-            {"nativeFinalFrame",focusIsolationAssembleFrame(finalContent)},
+            {"nativeFinalFrame",std::move(finalFrame)},
             {"submitAttempted",attempted},{"hostAckAccepted",accepted},{"semanticNeutral",semanticNeutral},
             {"focusReleaseBarrierMask",barrierMask},
             {"window",{{"observations",d.window.observations},{"attempts",d.window.attempts},
@@ -100,10 +100,9 @@ static void inputHostNativeSignalEvidence(const FocusFrameContent& finalContent,
                 {"selectedSourceKnownReads",d.window.selectedSourceKnownReads},
                 {"selectedSourceLiveReads",d.window.selectedSourceLiveReads},
                 {"selectedSourceNonzeroReads",d.window.selectedSourceNonzeroReads}}},
-            {"sourceActivityScope","exact-nonzero-before-mapping;includes-noise;window-may-span-foregrounds;not-hardware-packet-freshness"},
-            {"counterScope","same-native-thread-since-last-witness;may-span-targets;not-total-bus-callbacks"},
-            {"frameScope","effective-native-wire-fields;join-exact-request-tuple-to-Host-SDK-witness"},
             {"physicalSuppressionProven",false},{"driverDeliveryProven",false},{"gameConsumptionProven",false}};
+        ymcc::nativeSignalWindowLogScope::write(row,d,sample&&sample->live,controlDrain.valid);
         appendNativeLifecycleLog("input-native-signal-window",std::move(row));
+        nativeControlWindowCommitDrain(controlDrain);
     }catch(...) {++g_commonFrameEvidenceFailures;}
 }

@@ -9,6 +9,7 @@ export const TOOL_AUTHORITY_SOURCES = Object.freeze([
 export const PRODUCT_SOURCES = [
   'src/bridge/monitorNoticeHost.ts', 'src/bridge/ipc.ts', 'src/bridge/shortcutActionFeedback.ts',
   'src/bridge/monitorShortcutNotice.ts', 'src/bridge/frameRateModel.ts', 'src/bridge/updateReadyNotice.ts',
+  'src/bridge/powerLifecycleState.ts',
 ];
 export const LEGACY_INPUTS = [
   'tools/ymcc_sim/global/monitor-input/adapter.mjs',

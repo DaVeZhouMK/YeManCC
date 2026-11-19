@@ -1,6 +1,7 @@
 ﻿param(
     [Parameter(Mandatory=$true)][string]$Out,
-    [string]$BeforeHeader=''
+    [string]$BeforeHeader='',
+    [ValidateSet('all','cold-single','cold-cost','cold-editor','cold-power','cold-request','cold-identity','cold-initial-failure','cold-bad-init','cold-missing-protocol','cold-public-serial','cold-public-notification','cold-public-unknown','cold-public-revision','cold-public-cache')][string]$Case='all'
 )
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
@@ -38,10 +39,10 @@ $cmd=Join-Path $Out 'compile.cmd'
 if($LASTEXITCODE -ne 0){throw 'Single-helper regression compilation failed'}
 if($BeforeHeader){
     $previousPreference=$ErrorActionPreference;$ErrorActionPreference='Continue'
-    try { & (Join-Path $Out 'before.exe') (Join-Path $Out 'before') $repo 2>&1 | Tee-Object -FilePath (Join-Path $Out 'before.log');$beforeExit=$LASTEXITCODE }
+    try { & (Join-Path $Out 'before.exe') (Join-Path $Out 'before') $repo $Case 2>&1 | Tee-Object -FilePath (Join-Path $Out 'before.log');$beforeExit=$LASTEXITCODE }
     finally {$ErrorActionPreference=$previousPreference}
-    if($beforeExit -ne 1 -or [IO.File]::ReadAllText((Join-Path $Out 'before.log')) -notmatch 'one automatic helper initialized CSS and signaled ready|resident confirmation completes with the real result mapping'){throw 'Before version did not fail at the resident launch or confirmation boundary'}
+    if($beforeExit -ne 1 -or [IO.File]::ReadAllText((Join-Path $Out 'before.log')) -notmatch 'one automatic helper initialized CSS and signaled ready|resident confirmation completes with the real result mapping|cold initialization creates exactly one temporary helper|post-Ensure editor or power/request revocation prevents DOM work and final ready|public same-generation suspend change invalidates the saved resident proof without creating a helper'){throw 'Before version did not fail at the resident launch or confirmation boundary'}
 
 }
-& (Join-Path $Out 'single.exe') (Join-Path $Out 'after') $repo 2>&1 | Tee-Object -FilePath (Join-Path $Out 'result.log')
+& (Join-Path $Out 'single.exe') (Join-Path $Out 'after') $repo $Case 2>&1 | Tee-Object -FilePath (Join-Path $Out 'result.log')
 if($LASTEXITCODE -ne 0){throw 'Single-helper regression failed'}

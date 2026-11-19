@@ -1,0 +1,13 @@
+# 复用本次队列关闭已观测的终态
+
+已写入主线，未导出部署。仅screen_touchpad_input_channel.h三个上下文，使用本次关闭调用的栈局部shutdownStatus；不是跨代或持久缓存。原首次Status读取及每次原消息泵后的更新保持，离开等待后复用已经观测到的终态，移除一次冗余终态Status ABI读取。原Started等待、Canceled/Error令cleaned=false、GetResults局部留错/资源清理及所有3repair/3episode/5秒保持。没有新增资源、timer、poll、线程、刷新率或等待。
+
+真实旧对照：原wait已经看到Completed，随后私有实际action.Close，原最终Status重读自然0x8000000E。原worker退出却queue/action引用保留、closed=false/error0，9检查4必要FAIL；旧COM债明确park至测试进程退出，不计产品归还。额外Close只存在于私有控制，未将HRESULT或State替换成故障值，也未据此认定Win5原E_UNEXPECTED的内部诱因。
+
+同CPP候选9项通过：原ShutdownCompleted事件1、TryEnqueue拒绝且新任务0运行，真实资源已关闭；不再有终态属性重读异常逃到外层，原GetResults的0x8000000E仍按既有逻辑留在State.error，queue/action/completion在原STA清空，原shutdown第一次确认资源退役。相同EXE正常参数9过、error0，0额外编译。原通道诊断/实际profile切换/恢复15项与无唤醒回调+真实pending队列11项在同最终产品通过，选择名逐项等原回执，原wait仍实际进入。
+
+4实际编译图/5实际Job关前active0，原负例businessfalse/root/自然和准确工具收尾原样分列，不把退出当COM归还，不拼默认父门或完整Native。全部私有native事件、action.Close、观察和原分配端口全头逆除同产品。独审一产品三hunk范围无阻塞，未运行测试；未独立测完整区间，不声称120/180秒内。
+
+1target+22dep全部share0同持110.5166ms/23HANDLE归还，整源正逆/导后23源同实际候选，git差异空白检查通过。main/UI/monitor/Steam/公共睡眠及正式fixture未写，前轮失败诊断和关闭修复保持。减少一次冗余关闭查询是源码层结果，本轮没有CPU测量，不声称已测CPU收益。
+
+仅下一自然匹配Native/runtime/source-PDB，未追UI R21或015012固定快照，未安装/运行实际YMCC、游戏、设备或睡眠。原首次Status/ShutdownQueueAsync异常、永久Windows队列状态及最终拥有者归还、Win5新链loaded/实体全屏触摸捕获睡眠稳定、原E_UNEXPECTED和长期CPU仍OPEN，持续修复ACTIVE。

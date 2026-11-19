@@ -23,7 +23,7 @@ Changes already integrated:
   code. The passive SDLController timer uses BCL QPC; zero-handle touchpad queries
   return zero before the native bridge, whose nonzero path is preserved. The HC
   DLL remains 2,774,016 bytes / SHA256
-  `08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583`.
+  `4cd3dea283e26db52e10f36e3de74b2514972d6b5e4e99e1ef952a0a277aa13c`.
   The later 2,238,976-byte HC type-pruning experiment is NOT approved or included:
   dynamic reflection/serialization roots remain insufficiently classified.
 - SDK projection: 1,074,688 bytes. The latest pass removes 5,088 unused private
@@ -140,3 +140,24 @@ negative fixtures are stored separately in regression-fixtures/pre-abi-repair;
 they are not production inputs. Full Build/Package/Verify and final exported
 archive checks remain required. Software checks do not prove physical hardware
 behavior or authorize installation/publication.
+
+## 2026-11-07 KUN color-order correction
+
+The approved core now includes a bounded AYANEOKUN.MapColorValues correction:
+zones 1/3 use G,R,B; zones 2/4 use G,B,R; the default stays R,G,B. The source
+is HC commit d79d1216892daad2233c7501b6c24e1b070017e7. Exactly four getter-token
+bytes differ from the preceding derivative; all other DLL bytes are identical.
+This does not add a runtime DLL or change device startup, fan, input or another
+model's protocol. The frozen upstream and historical export-baseline stay intact.
+
+Reproduction uses the existing HcDeviceCoreTrim tool command
+`kun-color-order <pinned-preimage-dll> <new-output-directory>`. Both complete input
+and output hashes are enforced; already-patched or other inputs are rejected.
+See AYANEO-KUN-COLOR-CORRECTION.json for the exact identities and evidence.
+
+The captured actual mapper IL passed 48 color/zone cases, while the old mapper
+was rejected by six of those same cases. The original five-phase fan connection
+gate also passed on the exact candidate runtime, including the actual 13 HC
+manager constructors and existing public mock Host lifecycle. These are software
+results; physical KUN color, other AYA effects and charging-indicator acceptance
+remain open. The previously delivered field package retains its original bytes.

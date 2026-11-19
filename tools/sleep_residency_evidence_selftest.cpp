@@ -1,4 +1,7 @@
 #define NOMINMAX
+#ifndef YMCC_SLEEP_TIMEOUT_NATIVE_SHARED
+#include "sleep_power_observation.h"
+#endif
 #include "sleep_residency_evidence.h"
 #include "sleep_export_diagnostics.h"
 #include <algorithm>
@@ -9,6 +12,7 @@
 #include <utility>
 #include <vector>
 using json = nlohmann::json;
+#ifndef YMCC_SLEEP_EXPORT_ONLY
 static unsigned sleepEvidenceChecks = 0;
 static void check(bool ok, const std::string& name) {
     ++sleepEvidenceChecks;
@@ -21,11 +25,12 @@ static std::string sgFormatFactFileTime(unsigned long long) { return "fixture-or
 static void (*runtimeFactObserver)(const char*,const json&)=nullptr;
 static void sgRecordFact(const char* event, const json& details) { captured.emplace_back(event, details);if(runtimeFactObserver)runtimeFactObserver(event,details); }
 #ifdef YMCC_SLEEP_TIMEOUT_NATIVE_SHARED
-static void sgSleepTimeoutObserveCompleted(const json&,unsigned long long) noexcept {}
+static void sgSleepTimeoutObserveCompleted(const json&,unsigned long long,unsigned long long,int) noexcept {}
 #else
-static void sgSleepTimeoutObserveCompleted(const json&,unsigned long long) noexcept;
+static void sgSleepTimeoutObserveCompleted(const json&,unsigned long long,unsigned long long,int) noexcept;
 #endif
-static void productionCapture(bool leaving, const std::string& xml, unsigned long long eventFileTime=123456789) {
+static void productionCapture(bool leaving, const std::string& xml, unsigned long long eventFileTime=123456789,
+                              unsigned long long callbackGeneration=771,int reason=5) {
     const unsigned long long recordedFileTime = eventFileTime;
 #include "production_capture_hook.inc"
 }
@@ -46,10 +51,31 @@ static void productionCapture(bool leaving, const std::string& xml, unsigned lon
 #ifdef YMCC_SLEEP_LATE_WAKE_ENABLE
 #include "latewake_cases.inc"
 #endif
+#else
+#include <windows.h>
+#include <atomic>
+#include <deque>
+#include "sleep_export_harness.inc"
+#endif
 int main(int argc, char** argv) {
     try {
         if (argc != 3) throw std::runtime_error("expected cases.json and result.json");
-#ifdef YMCC_SLEEP_LATE_WAKE_ONLY
+#ifdef YMCC_SLEEP_EXPORT_ONLY
+#if defined(YMCC_SLEEP_EXPORT_FINALIZATION_ONLY)
+        const auto exportChecks=sleep_export_native_fixture::captureFinalizationAdapterTests();
+#elif defined(YMCC_SLEEP_EXPORT_OUTPUT_ONLY)
+        const auto exportChecks=sleep_export_native_fixture::queryOutputTests();
+#else
+        const auto exportChecks=sleepExportDiagnosticTests();
+#endif
+        if(!exportChecks)throw std::runtime_error("empty export checks");
+        json result={{"status","passed"},{"componentScope","export"},{"cases",1},
+            {"caseResults",json::array({{{"name","original-export-helper-and-native-adapter"},{"status","passed"}}})},
+            {"sleepExportDiagnosticChecks",exportChecks},{"actualSleepCalls",0},{"hardwareCalls",0},
+            {"realWindowsPowerQuery",false},{"targetPowerState","UNKNOWN"}};
+        std::ofstream output(argv[2]);output<<result.dump(2)<<'\n';
+        std::cout<<result.dump()<<'\n';
+#elif defined(YMCC_SLEEP_LATE_WAKE_ONLY)
         std::ifstream payloadInput(argv[1]);json latePayload;payloadInput>>latePayload;
         const auto lateWakeNativeChecks=lateWakeNativeTests(latePayload);
         check(lateWakeNativeChecks>0,"late-wake exact group executes actual decisions and sender");
@@ -149,7 +175,7 @@ int main(int argc, char** argv) {
         check(staticWakeScheduleChecks>0,"static wake schedule harness executes nonzero checks");
         json result = {{"lateWakeNativeChecks",lateWakeNativeChecks},{"lateWakeNativeScenarios",lateWakeNativeScenarios},{"sleepTimeoutNativeChecks",sleepTimeoutNativeChecks},{"sleepTimeoutNativeScenarios",sleepTimeoutNativeScenarios},{"sleepActivityNativeChecks",sleepActivityNativeChecks},{"sleepExportDiagnosticChecks",sleepExportDiagnosticChecks},{"realSleepStudyQuery",false},{"conservativeProductionChecks",conservativeProductionChecks},{"historicalStagedEngineChecks",runtimeChecks},{"staticWakeScheduleChecks",staticWakeScheduleChecks},{"staticWakeChecks",staticWakeChecks},{"runtimeChecks",runtimeChecks},{"status", "passed"}, {"checks", sleepEvidenceChecks}, {"cases", fixture.at("cases").size()},
             {"caseResults", outcomes}, {"actualSleepCalls", 0}, {"hardwareCalls", 0},
-            {"scope", "actual completed507 accounting and conservative production hooks; UI event-driven activity header/native observer and fact dispatcher; staged engine is historical-only explicit StartPhase regression; static companions separately scoped; Windows boundaries mocked; export-only WindowsSleepStudy adapter uses inert commands and owned local files"}};
+            {"scope", "actual completed507 accounting and conservative production hooks; UI event-driven activity header/native observer and fact dispatcher; staged engine is historical-only explicit StartPhase regression; static companions separately scoped; Windows boundaries mocked; export-only WindowsSystemPowerReport adapter uses inert commands and owned local files"}};
         std::ofstream output(argv[2]); output << result.dump(2) << '\n';
         std::cout << json{{"status", "passed"}, {"checks", sleepEvidenceChecks}, {"cases", fixture.at("cases").size()}}.dump() << '\n';
         #endif

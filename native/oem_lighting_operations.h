@@ -5,7 +5,7 @@
 #include <string_view>
 #include "../capabilities/hc-device-catalog.generated.h"
 namespace ymcc::lighting {
-inline constexpr char kCatalogSha256[] = "7a8f3a5f3d5a33167ce944d9ddae123f14f3f24947032632fdd1f72d524dbde3";
+inline constexpr char kCatalogSha256[] = "74f233e93628ec1e3ccddb37e4c909f34e44738e1e7804880a4be23a2c786a20";
 inline constexpr const char* kExtensionLightingClasses[] = {"HandheldCompanion.Devices.OneXPlayer3", "HandheldCompanion.Devices.AYANEO3", "HandheldCompanion.Devices.AYANEONEXT2", "HandheldCompanion.Devices.OneXPlayerX2MiniPro"};
 inline bool identityMatches(std::string_view actual, std::string_view expected) noexcept {
     for (const char* cls : kExtensionLightingClasses) if (actual == cls && expected == cls) return true;
@@ -197,5 +197,28 @@ inline bool validPreset(std::string_view cls, std::string_view id) noexcept {
         return false;
     }
     return validPreset(*r,id);
+}
+enum class OemOwnershipProtocol : unsigned char { LegacyCec, CeiiRam };
+struct OemOwnership { std::string_view deviceId; OemOwnershipProtocol protocol; const char* methodOwner; bool sharedChargeIndicatorDeclared; };
+inline constexpr std::array<OemOwnership, 13> kOemOwnership = {{
+    {"hc.device.AYANEO2", OemOwnershipProtocol::LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false},
+    {"hc.device.AYANEO2S", OemOwnershipProtocol::LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false},
+    {"hc.device.AYANEOAIR", OemOwnershipProtocol::LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", true},
+    {"hc.device.AYANEOAIR1S", OemOwnershipProtocol::LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false},
+    {"hc.device.AYANEOAIRLite", OemOwnershipProtocol::LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false},
+    {"hc.device.AYANEOAIRPlusAMD", OemOwnershipProtocol::CeiiRam, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii", false},
+    {"hc.device.AYANEOAIRPlusAMDMendocino", OemOwnershipProtocol::CeiiRam, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii", false},
+    {"hc.device.AYANEOAIRPlusIntel", OemOwnershipProtocol::CeiiRam, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii", false},
+    {"hc.device.AYANEOAIRPro", OemOwnershipProtocol::LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false},
+    {"hc.device.AYANEOFlip1SKB", OemOwnershipProtocol::LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false},
+    {"hc.device.AYANEOFlipKB", OemOwnershipProtocol::LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false},
+    {"hc.device.AYANEOKUN", OemOwnershipProtocol::LegacyCec, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc", false},
+    {"hc.device.AYANEOSlide", OemOwnershipProtocol::CeiiRam, "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii", true},
+ }};
+inline const OemOwnership* oemOwnershipFor(std::string_view cls) noexcept {
+    const auto* device=ymcc::capabilities::find(cls); const auto* route=resolve(cls);
+    if(!device || !route || !route->registered)return nullptr;
+    for(const auto& row:kOemOwnership)if(row.deviceId==device->deviceId)return &row;
+    return nullptr;
 }
 } // namespace ymcc::lighting

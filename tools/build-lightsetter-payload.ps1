@@ -76,6 +76,10 @@ try{
  $coreEvaluation=$coreEvaluationText|ConvertFrom-Json;$coreEvaluationFile=Join-Path $candidate 'core-source-evaluation.json';[IO.File]::WriteAllText($coreEvaluationFile,$coreEvaluationText,[Text.UTF8Encoding]::new($false))
  $inputs+=@(Get-YmccLightingBuildSourceIdentity -ProjectRoot $project -Evaluation $coreEvaluation -ProjectRelative 'FanLab/LightSetter/DeviceCore/YeManLightDeviceCore.csproj' -RolePrefix 'Core');$inputs=@($inputs|Sort-Object path)
  Save (Join-Path $candidate 'source-inputs.json') $inputs
+ $phase='hc-runtime-pin-verification';$hcPinReceipt=Assert-YmccLightingHcRuntimePin -ProjectRoot $project
+ $programInput=@($inputs|Where-Object {$_.path -ceq 'FanLab/LightSetter/Program.cs'})
+ if($programInput.Count -ne 1 -or $programInput[0].sha256 -cne $hcPinReceipt.programSourceSha256){throw 'LIGHTING_HC_RUNTIME_PIN_SOURCE_CHANGED'}
+ Save (Join-Path $candidate 'hc-runtime-pin-check.json') $hcPinReceipt
  # An explicit prepared-core request is fail-closed before helper compilation. The ordinary default still publishes the core.
  $pinText=Get-Content -LiteralPath (Join-Path $project 'FanLab/LightSetter/LightingAssemblyPins.cs') -Raw -Encoding UTF8;$pin=[regex]::Match($pinText,'StandaloneLightingSha256\s*=\s*"([a-f0-9]{64})"').Groups[1].Value
  if($pin -notmatch '^[a-f0-9]{64}$'){throw 'LIGHTING_CANDIDATE_CORE_PIN'}

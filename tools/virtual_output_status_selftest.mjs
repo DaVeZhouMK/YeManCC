@@ -28,7 +28,8 @@ const inputs = ['src/bridge/controllerFeatureStatus.ts', 'src/bridge/virtualOutp
 report.inputs = inputs.map(file => ({ file, sha256: hash(path.join(repo, file)) }));
 function test(name, fn) { try { fn(); rows.push({ name, status: 'PASS' }); } catch (error) { rows.push({ name, status: 'FAIL', error: String(error) }); } }
 const statusBundle = path.join(out, 'status-consumer.cjs');
-esbuild.buildSync({ stdin: { contents: fs.readFileSync(sourceFile, 'utf8'), resolveDir: path.join(repo, 'src/bridge'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', outfile: statusBundle, logLevel: 'silent' });
+// Use the same esbuild service for the Node fixtures and the browser bundle.
+await esbuild.build({ stdin: { contents: fs.readFileSync(sourceFile, 'utf8'), resolveDir: path.join(repo, 'src/bridge'), loader: 'ts' }, bundle: true, platform: 'node', format: 'cjs', outfile: statusBundle, logLevel: 'silent' });
 const { virtualOutputPresentation: present, acceptVirtualOutputRuntime: accept } = require(statusBundle);
 const active = { state: 'active', requestedPersona: 'steamdeck', boundPersona: 'steamdeck', hostEpoch: 2, hostAlive: true, prepared: true, neutralized: true, frameAccepted: true, sourceLive: true, sourceCurrent: true, suppressionState: 'verified' };
 const protection = { requestId: 4, persona: 'steamdeck', locked: true, phase: 'verifying', elapsedMs: 1500, remainingMs: 28500, maxMs: 30000, settleMs: 10000, verificationPending: true, candidateOutcome: 'success' };
@@ -56,7 +57,7 @@ test('new-request-with-missing-identity-cannot-use-old-success', () => assert.eq
 test('native-off-return-failure-persists', () => assert.equal(present({ state: 'suspected-failed', physicalReturnFailed: true }, false, 'disabled').tone, 'warning'));
 test('native-off-return-work-is-pending', () => assert.equal(present({ physicalReturnPending: true, physicalReturnFailed: true }, false, 'disabled').tone, 'pending'));
 const legacyBundle = path.join(out, 'legacy-status.cjs');
-esbuild.buildSync({ entryPoints: [path.join(repo, 'tools/virtual_output_status_selftest.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: legacyBundle, logLevel: 'silent' });
+await esbuild.build({ entryPoints: [path.join(repo, 'tools/virtual_output_status_selftest.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: legacyBundle, logLevel: 'silent' });
 const legacy = spawnSync(process.execPath, [legacyBundle], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
 fs.writeFileSync(path.join(out, 'legacy-status.log'), (legacy.stdout || '') + (legacy.stderr || ''));
 test('existing-TS-presentation-regression', () => assert.equal(legacy.status, 0, legacy.stderr));
@@ -136,7 +137,7 @@ if (options.browser) {
         };
         return { contents: [...names].map(name => `export const ${name}=${defaults[name] || '()=>undefined'};`).join('\n'), loader: 'js' };
       });
-      build.onLoad({ filter: /\.vue$/ }, args => {
+      build.onLoad({ filter: /\.vue$/ }, async args => {
         let source = fs.readFileSync(args.path, 'utf8');
         if (args.path === pageFile) {
           const channelTag = source.match(/<ControllerChannelStatus\s[^>]+\/>/)?.[0];
@@ -146,7 +147,7 @@ if (options.browser) {
         }
         const { descriptor } = parse(source, { filename: args.path });
         const script = compileScript(descriptor, { id: 'status-test', inlineTemplate: true, genDefaultAs: '__component' });
-        const js = esbuild.transformSync(script.content, { loader: 'ts', format: 'esm' }).code;
+        const { code: js } = await esbuild.transform(script.content, { loader: 'ts', format: 'esm' });
         for (const match of js.matchAll(/import\s*\{([^}]+)\}\s*from\s*["']([^"']+)["']/g)) {
           const names = match[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0]).filter(Boolean);
           imports.set(match[2], new Set([...(imports.get(match[2]) || []), ...names]));

@@ -17,6 +17,7 @@
 #include <malloc.h>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -159,7 +160,11 @@ static void uiCostStageAdd(int stage,unsigned long long us) {
 static void uiCostSlotAdd(UiCostSlotTable&,int slot,unsigned long long us,UiCostOverflow&) {
     if(activeTrace)record({"cost.slot",slot,us});
 }
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+static void appendNativeLifecycleLog(const char* event,const json& detail) {
+#else
 static void appendNativeLifecycleLog(const char* event,json detail) {
+#endif
     if(activeTrace)record({"log",std::string(event),std::move(detail)});
 }
 struct LocalObservation {
@@ -273,8 +278,15 @@ static void assertTraceOracle(const Outcome& o,const std::vector<bool>& script,i
     check(o.counters[0]==static_cast<unsigned long long>(script[1]),"owned counter oracle");
     if(o.exception.empty()) {
         check(o.gateReads==4,"success must perform four distinct gate reads");
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+        // Current source preserves validation, but cannot compare a reference
+        // when its gate was closed. The historical R15 oracle stays below.
+        check(o.counters[1]==static_cast<unsigned long long>(script[2]&&script[3]),"parity counter oracle");
+        const auto mismatches=0ULL;
+#else
         check(o.counters[1]==static_cast<unsigned long long>(script[3]),"parity counter oracle");
         const auto mismatches=static_cast<unsigned long long>(!script[2]&&script[3]);
+#endif
         check(o.counters[2]==mismatches&&countTrace(o,"log")==mismatches,"successive snapshot mismatch/log oracle");
         std::vector<int> got;
         json normalized=payload.is_object()?payload:json::object();
@@ -447,16 +459,31 @@ static json runCorrectness() {
         {"productionExceptionHandlersAdded",false}};
 }
 struct Prepared { std::string ev; json data; };
-struct Measurement { double ns=0; Allocations allocations; };
+struct Measurement { double ns=0; Allocations allocations;
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+    double cycles=0;
+#endif
+};
 static Measurement measure(Emitter emitter,const json& payload,int batches,bool count) {
     constexpr int items=64;double elapsed=0;Allocations total;
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+    unsigned long long cycles=0;
+#endif
     for(int batch=0;batch<batches;++batch) {
         std::vector<Prepared> prepared;prepared.reserve(items);
         for(int i=0;i<items;++i)prepared.push_back({"gyro.telemetry",payload});
         allocationCount={};countAllocations=count;
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+        ULONG64 cycleStart=0,cycleEnd=0;
+        if(!QueryThreadCycleTime(GetCurrentThread(),&cycleStart))throw std::runtime_error("thread cycle start unavailable");
+#endif
         const auto started=std::chrono::steady_clock::now();
         for(auto& p:prepared)emitter(std::move(p.ev),std::move(p.data));
         const auto ended=std::chrono::steady_clock::now();
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+        if(!QueryThreadCycleTime(GetCurrentThread(),&cycleEnd)||cycleEnd<cycleStart)throw std::runtime_error("thread cycle end unavailable");
+        cycles+=cycleEnd-cycleStart;
+#endif
         countAllocations=false;
         elapsed+=std::chrono::duration<double,std::nano>(ended-started).count();
         total.requests+=allocationCount.requests;total.bytes+=allocationCount.bytes;
@@ -464,12 +491,19 @@ static Measurement measure(Emitter emitter,const json& payload,int batches,bool 
         // Payload/envelope/reference/dump/U2W destruction occurs inside emitter.
     }
     const auto events=static_cast<double>(batches*items);
-    return {elapsed/events,{total.requests/static_cast<std::uint64_t>(events),total.bytes/static_cast<std::uint64_t>(events)}};
+    return {elapsed/events,{total.requests/static_cast<std::uint64_t>(events),total.bytes/static_cast<std::uint64_t>(events)}
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+        ,static_cast<double>(cycles)/events
+#endif
+    };
 }
 struct Scenario {
     std::string shape;json payload;bool gate;int topology;
     std::vector<double> baseline,candidate;
     Measurement baselineAlloc,candidateAlloc;
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+    std::vector<double> baselineCycles,candidateCycles;
+#endif
 };
 static double median(std::vector<double> v) { std::sort(v.begin(),v.end());return v[v.size()/2]; }
 static void perfSetup(const Scenario& s) {
@@ -499,29 +533,76 @@ static json runBenchmarks(int batches) {
             else { b=measure(candidate_emit,s.payload,batches,false);a=measure(baseline_emit,s.payload,batches,false); }
             s.baseline.push_back(a.ns);s.candidate.push_back(b.ns);
             rounds.push_back({{"round",round+1},{"scenario",index},{"baselineFirst",baselineFirst},{"baselineNs",a.ns},{"candidateNs",b.ns}});
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+            s.baselineCycles.push_back(a.cycles);s.candidateCycles.push_back(b.cycles);
+            rounds.back()["baselineCycles"]=a.cycles;rounds.back()["candidateCycles"]=b.cycles;
+#endif
         }
     }
     json rows=json::array();bool allAccepted=true;
     for(const auto& s:scenarios) {
         int wins=0;for(int i=0;i<11;++i)wins+=(s.candidate[i]<s.baseline[i]);
         const auto bm=median(s.baseline),cm=median(s.candidate);const auto reduction=100*(bm-cm)/bm;
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+        int cycleWins=0;std::vector<double> pairedReductions;
+        for(int i=0;i<11;++i) {
+            if(s.baselineCycles[i]<=0||s.candidateCycles[i]<=0)throw std::runtime_error("nonpositive cycle measurement");
+            cycleWins+=(s.candidateCycles[i]<s.baselineCycles[i]);
+            pairedReductions.push_back(100*(s.baselineCycles[i]-s.candidateCycles[i])/s.baselineCycles[i]);
+        }
+        const auto cycleReduction=median(pairedReductions);
+        const bool accepted=s.gate ? cycleWins>=10&&cycleReduction>=5&&
+            s.candidateAlloc.allocations.requests<s.baselineAlloc.allocations.requests&&s.candidateAlloc.allocations.bytes<s.baselineAlloc.allocations.bytes :
+            cycleReduction>=-5&&s.candidateAlloc.allocations.requests==s.baselineAlloc.allocations.requests&&s.candidateAlloc.allocations.bytes==s.baselineAlloc.allocations.bytes;
+#else
         const bool accepted=wins>=10&&reduction>=5&&s.candidateAlloc.allocations.requests<s.baselineAlloc.allocations.requests&&
-            s.candidateAlloc.allocations.bytes<s.baselineAlloc.allocations.bytes;allAccepted&=accepted;
+            s.candidateAlloc.allocations.bytes<s.baselineAlloc.allocations.bytes;
+#endif
+        allAccepted&=accepted;
         rows.push_back({{"shape",s.shape},{"gate",s.gate},{"targets",s.topology==1?1:4},
             {"baselineMedianNs",bm},{"candidateMedianNs",cm},{"medianReductionPercent",reduction},{"fasterRounds",wins},
             {"baselineRequests",s.baselineAlloc.allocations.requests},{"candidateRequests",s.candidateAlloc.allocations.requests},
             {"baselineRequestedBytes",s.baselineAlloc.allocations.bytes},{"candidateRequestedBytes",s.candidateAlloc.allocations.bytes},
             {"baselineRoundsNs",s.baseline},{"candidateRoundsNs",s.candidate},{"accepted",accepted}});
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+        rows.back()["affected"]=s.gate;rows.back()["fasterCyclePairs"]=cycleWins;
+        rows.back()["baselineMedianCycles"]=median(s.baselineCycles);rows.back()["candidateMedianCycles"]=median(s.candidateCycles);
+        rows.back()["medianPairedCycleReductionPercent"]=cycleReduction;
+        rows.back()["pairedCycleReductionPercent"]=pairedReductions;
+        rows.back()["baselineRoundsCycles"]=s.baselineCycles;rows.back()["candidateRoundsCycles"]=s.candidateCycles;
+#endif
     }
     return {{"decision",allAccepted?"accept-local-candidate":"reject"},{"allScenariosAccepted",allAccepted},
         {"rounds",11},{"eventsPerTimedVariantPerRound",batches*64},{"scenarios",rows},{"schedule",rounds},
         {"allocationsCountedInSeparateRuns",true},{"rssUsedAsAllocationMetric",false},
-        {"realAtomicCounters",true},{"originalDumpAndUtf16ConversionPerTarget",true},
+        {"realAtomicCounters",true},
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+        {"currentSharedSnapshotBroadcastUnmodified",true},
+#else
+        {"originalDumpAndUtf16ConversionPerTarget",true},
+#endif
         {"includesPayloadAndEnvelopeDestruction",true},{"setupIncluded",false}};
 }
 int main(int argc,char** argv) {
     try {
         if(argc>1&&std::string(argv[1])=="--inputs") { std::cout<<inputCorpus().dump(2)<<'\n';return 0; }
+#ifdef YMCC_CURRENT_REFERENCE_COPY
+        if(argc==2&&std::string(argv[1])=="--reference-negative") {
+            // Only the directed original behavior assertions, no full positive
+            // group and no benchmark. A nonzero alone is not a negative pass.
+            configureTopology(7);const auto payload=unicodePayload();
+            const std::vector<bool> script={true,true,true,true};
+            const auto a=invoke(baseline_emit,"gyro.telemetry",payload,script);
+            const auto b=invoke(candidate_emit,"gyro.telemetry",payload,script);
+            compareOutcomes(a,b);
+            throw std::runtime_error("negative unexpectedly survived original behavior assertions");
+        }
+        if(argc==3&&std::string(argv[1])=="--cost-only") {
+            if(std::string(argv[2])!="16")throw std::runtime_error("fixed cost requires 16 batches (1024 whole-function calls)");
+            std::cout<<json({{"performance",runBenchmarks(16)},{"correctness",nullptr},{"assertions",assertionCount}}).dump(2)<<'\n';return 0;
+        }
+        if(argc!=2||std::string(argv[1])!="0")throw std::runtime_error("current correctness requires 0; costs require explicit --cost-only 16");
+#endif
         const int batches=argc>1?std::stoi(argv[1]):12;
         json result={{"correctness",runCorrectness()},{"ownership",proveCopyAndMove()}};
         result["performance"]=batches?runBenchmarks(batches):json(nullptr);

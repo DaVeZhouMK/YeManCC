@@ -2,6 +2,7 @@ import type { Router } from 'vue-router';
 import { isRadialTestingEnabled } from './testingState';
 import { invoke, isNativeRuntime, on } from '@/bridge/ipc';
 import { powerLifecycle, shell, windowApi } from '@/bridge/api';
+import { onSharedPowerLifecycle, isSharedPowerLifecycleAdmitted } from '@/bridge/powerLifecycleState';
 import { getSettingsGeneration } from '@/bridge/settingsRepository';
 import { getContinuousPerformanceSnapshot, updateContinuousPerformanceControls } from '@/bridge/performanceSchedule';
 import { getTdpExecutionCapability } from '@/bridge/yeman';
@@ -77,7 +78,7 @@ export function startRadialHost(router:Router){
   }
   async function summon(data:{source?:string;x?:number;y?:number;issuedAt?:number;expiresAt?:number;powerGeneration?:number}){
     if(ended||!isNativeRuntime||!Number.isSafeInteger(data.issuedAt)||!Number.isSafeInteger(data.expiresAt)||data.issuedAt!>Date.now()+500||data.expiresAt!<=Date.now()||data.expiresAt!-data.issuedAt!>5000)return;if(session){if(data.source==='shortcut'||data.source==='settings'||!data.source)await close();return;}if(opening)return;opening=true;const ticket=++epoch;
-    try{const [settings,power]=await Promise.all([loadRadialSettings(),powerLifecycle.get()]);if(ended||ticket!==epoch||!settings.enabled||power.phase!=='ready'||!power.inputReady||power.generation!==data.powerGeneration||data.expiresAt!<=Date.now())return;
+    try{const [settings,power]=await Promise.all([loadRadialSettings(),powerLifecycle.get()]);if(ended||ticket!==epoch||!settings.enabled||!isSharedPowerLifecycleAdmitted(power)||!power.inputReady||power.generation!==data.powerGeneration||data.expiresAt!<=Date.now())return;
       const nonce=crypto.randomUUID(),s:Session={wheelId:0,nonce,settings,generation:getSettingsGeneration(),powerGeneration:power.generation,tdp:emptyTdp(),performance:emptyRadialPerformance(),fan:emptyRadialFan(),input:emptyRadialInput(),utilities:emptyRadialUtilities(),pending:false,seen:new Set()};
       const source=data.source==='monitor'?'monitor':data.source==='fullscreen'?'fullscreen':data.source==='fullscreen-raw'?'fullscreen-raw':'shortcut';
       const receipt=await invoke<{id:number;nonce:string}>('radial.create',{nonce,source,x:Number.isFinite(data.x)?Math.round(data.x!):0,y:Number.isFinite(data.y)?Math.round(data.y!):0,frame:frame(s)},{timeoutMs:7000});
@@ -86,8 +87,8 @@ export function startRadialHost(router:Router){
     }catch(e){console.warn('[radial] summon',e);}finally{opening=false;}
   }
   async function checkpoint(s:Session){if(ended||session!==s||s.generation!==getSettingsGeneration())throw new Error('会话或设置已变化，请重新呼出。');
-    const power=await powerLifecycle.get();if(power.phase!=='ready'||power.generation!==s.powerGeneration||!power.inputReady)throw new Error('电源或输入状态已变化。');
-    if(session!==s)throw new Error('菜单已经关闭。');const current=await loadRadialSettings();if(current.revision!==s.settings.revision||!current.enabled)throw new Error('菜单设置已变化，请重新呼出。');
+    const power=await powerLifecycle.get();if(!isSharedPowerLifecycleAdmitted(power)||power.generation!==s.powerGeneration||!power.inputReady)throw new Error('电源或输入状态已变化。');
+    if(session!==s)throw new Error('菜单已经关闭。');const current=await loadRadialSettings();if(ended||session!==s||s.generation!==getSettingsGeneration()||current.revision!==s.settings.revision||!current.enabled)throw new Error('菜单设置已变化，请重新呼出。');
   }
   async function execute(data:Identity&{intent:unknown}){
     if(!matches(data))return;const s=session!,v=data.intent as Record<string,unknown>;
@@ -154,7 +155,13 @@ export function startRadialHost(router:Router){
   const offSummon=on<{source?:string;x?:number;y?:number;issuedAt?:number;expiresAt?:number;powerGeneration?:number}>('radial.summon-request',data=>{void summon(data);});
   const offIntent=on<Identity&{intent:unknown}>('radial.intent',data=>{void execute(data);});
   const offClosed=on<Identity>('radial.closed',data=>{if(matches(data)){session=null;++epoch;stopHeartbeat();}});
-  const offPower=[on('power.suspending',()=>{void close();}),on('power.resuming',()=>{void close();}),on('power.sourceChanged',()=>{void close();})];
+  let observedPowerGeneration:number|null=null;
+  const offPower=[onSharedPowerLifecycle(snapshot=>{
+    if(ended)return;
+    const changedGeneration=observedPowerGeneration!==null&&snapshot.generation!==observedPowerGeneration;
+    observedPowerGeneration=snapshot.generation;
+    if(!isSharedPowerLifecycleAdmitted(snapshot)||snapshot.inputReady===false||changedGeneration||session&&snapshot.generation!==session.powerGeneration)void close();
+  }),on('power.sourceChanged',()=>{void close();})];
   const offPad=on<{connected?:boolean}>('gamepad.state',data=>{if(data.connected===false&&session)void close();});
   const settingsChanged=()=>{void configure().catch(e=>console.warn('[radial]',e));};window.addEventListener('ymcc:radial-settings-changed',settingsChanged);
   if(isNativeRuntime)void configure().catch(e=>console.warn('[radial]',e));

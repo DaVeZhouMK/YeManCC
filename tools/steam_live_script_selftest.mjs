@@ -3,8 +3,11 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { createHash } from 'node:crypto';
 const args = process.argv.slice(2);
-assert(args.length === 0 || (args.length === 2 && args[0] === '--case-filter' && args[1] === 'light-gamepad-lease'), 'unsupported steam live case filter or arguments');
+assert(args.length === 0 || (args.length >= 2 && args[0] === '--case-filter' && ['light-gamepad-lease','decky-connection','menu-game-return','failure-diagnostics','api-descriptors'].includes(args[1]) &&
+  args.slice(2).length % 2 === 0 && args.slice(2).every((value, index) => index % 2 === 0 ? value === '--case-name' : value.length > 0)), 'unsupported steam live case filter or arguments');
 const caseFilter = args[1] ?? null;
+const selectedCaseNames = args.slice(3).filter((value, index) => index % 2 === 0);
+assert.equal(new Set(selectedCaseNames).size, selectedCaseNames.length, 'duplicate steam live case name');
 const sourceOverride = Boolean(process.env.YMCC_STEAM_LIVE_SOURCE);
 assert(!sourceOverride || caseFilter === 'light-gamepad-lease', 'YMCC_STEAM_LIVE_SOURCE requires --case-filter light-gamepad-lease');
 const sourcePath = process.env.YMCC_STEAM_LIVE_SOURCE || 'native/steam_live.js';
@@ -38,6 +41,7 @@ function fixture(options = {}) {
   return {fn,request,stats,s,cfg,group,window,settings,steamClient};
 }
 async function test(name,body) {
+  if (selectedCaseNames.length && !selectedCaseNames.includes(name)) return;
   try { await body(); results.push(name); }
   catch (error) {
     if (caseFilter === 'light-gamepad-lease') console.error(JSON.stringify({caseFilter, passed:results.length, cases:results, failedCase:name, defaultGroupExecuted:false}));
@@ -45,7 +49,128 @@ async function test(name,body) {
   }
 }
 let directedEvidence;
-if (caseFilter === 'light-gamepad-lease') {
+if (caseFilter === 'api-descriptors') {
+  const names = [
+    'fixed namespaces and literal contracts never call discovered methods',
+    'root namespace and method accessors remain uninspectable without getter calls',
+    'function length getter is not evaluated or treated as native signature',
+    'catalog output and actual visits are globally bounded',
+    'only two prototype levels are inspected',
+    'reflection exceptions and proxies stay explicit unknown',
+    'fixed diagnostic request rejects extra fields and foreign account',
+    'unsupported operation does not invoke discovered methods',
+    'bounded API cursor continuation preserves consumed indices and shadowing',
+    'API cursor rejects out of range and contract cursor without getter calls',
+    'uninspectable API cursor remains unknown after reflection failure',
+  ];
+  if (selectedCaseNames.length) for (const name of selectedCaseNames) assert(names.includes(name), 'unknown API descriptor case name');
+  const ops = ['diagnostics.apps.api.read','diagnostics.apps.contract.read'];
+  const setup = (custom = {}) => {
+    const f = fixture({globals:custom.globals ?? {}});let accountReads=0,methodCalls=0;
+    f.settings.m_CMInterface.steamid.GetAccountID=()=>{accountReads++;return 42;};
+    const method=function existingMethod(a,b,c){void a;void b;void c;methodCalls++;throw Error('discovered method must not run');};
+    f.steamClient.Apps={LaunchNonSteamApp:method,RunGame:method,RaiseWindowForGame:method,RegisterForAppOverviewChanges:method};
+    f.steamClient.User={RegisterExistingProcess:method};f.steamClient.GameSessions={RegisterForAppLifetimeNotifications:method};f.steamClient.ProcessMonitor={RegisterProcess:method};
+    for(const name of ['SteamUIStore','FocusedAppWindowStore','ControllerStore'])Object.defineProperty(f.window,name,{configurable:true,get(){throw Error('out of scope store getter');}});
+    return {...f,method,accountReads:()=>accountReads,methodCalls:()=>methodCalls};
+  };
+  await test(names[0],async()=>{for(const operation of ops){const f=setup(),r=await f.fn({operation,account:42});assert(r.ok&&!r.mutated);assert.deepEqual(Array.from(r.surfaces,x=>x.label),['SteamClient.Apps','SteamClient.User','SteamClient.GameSessions','SteamClient.ProcessMonitor']);assert.equal(r.namespaceCount,4);assert(r.methodsNotCalled&&r.discoveredMethodBodiesNotCalled);assert.equal(r.wholeRequestFunctionCallsZero,false);assert.equal(r.nativeSignaturesKnown,false);assert.equal(r.registrationAuthority,false);assert.equal(f.accountReads(),1);assert.equal(f.methodCalls(),0);if(operation===ops[1]){assert.equal(r.rows.length,5);assert(r.rows.every(x=>x.nativeSignature==='unknown'&&x.arity===3));assert.equal(r.surfaces[1].reason,'no-fixed-contract-methods');}assert(!f.window.__ymccSteamLiveBusy);assert.deepEqual(f.stats,{edits:0,saves:0,overlayWrites:0,loads:0});}});
+  await test(names[1],async()=>{for(const operation of ops){let rootCalls=0;const rootObject={};Object.defineProperty(rootObject,'SteamClient',{get(){rootCalls++;throw Error('root getter');}});const f=setup({globals:{globalThis:rootObject}});const root=await f.fn({operation,account:42});assert(root.ok);assert.equal(root.rootStatus,'uninspectable');assert.equal(rootCalls,0);assert(root.surfaces.every(x=>x.status==='uninspectable'));
+    const g=setup();let namespaceCalls=0,methodGetterCalls=0;Object.defineProperty(g.steamClient,'User',{get(){namespaceCalls++;throw Error('namespace getter');}});Object.defineProperty(g.steamClient.Apps,'RunGame',{get(){methodGetterCalls++;throw Error('method getter');}});const r=await g.fn({operation,account:42});assert(r.ok);assert.equal(namespaceCalls,0);assert.equal(methodGetterCalls,0);assert.equal(r.surfaces[1].status,'uninspectable');assert.equal(r.surfaces[1].reason,'accessor-not-invoked');const row=r.surfaces[0].rows.find(x=>x.name==='RunGame');assert(row);assert(row.descriptorKind==='accessor'||row.reason==='accessor-not-invoked');assert.equal(g.methodCalls(),0);}});
+  await test(names[2],async()=>{for(const operation of ops){const f=setup();let lengthReads=0;Object.defineProperty(f.method,'length',{get(){lengthReads++;throw Error('length getter');}});const r=await f.fn({operation,account:42});assert(r.ok);const row=r.surfaces[0].rows.find(x=>x.name==='RunGame');assert.equal(row.arity,null);assert.equal(row.arityReason,'length-accessor-not-invoked');assert.equal(row.nativeSignature,'unknown');assert.equal(lengthReads,0);assert.equal(f.methodCalls(),0);}});
+  await test(names[3],async()=>{
+    const f=setup();for(const key of ['Apps','User','GameSessions','ProcessMonitor']){f.steamClient[key]={};for(let i=0;i<300;i++)Object.defineProperty(f.steamClient[key],'RegisterExisting'+i,{value:f.method,configurable:true});}
+    const r=await f.fn({operation:ops[0],account:42});assert(r.ok&&r.truncated);assert.equal(r.matchedNames,64);assert(r.namesVisited<=256);assert.equal(r.maxNamespaceNamesVisited,64);assert.equal(r.maxNamespaceMatchedNames,16);assert.equal(r.catalogComplete,false);assert.equal(r.truncationScope,'budget-only-not-complete-api-inventory');
+    assert.equal(r.surfaces.length,4);for(const surface of r.surfaces){assert.equal(surface.rows.length,16);assert(surface.namesVisited<=64);assert(surface.truncated&&surface.status==='partial');assert(surface.rows.every(x=>x.name.startsWith('RegisterExisting')));}assert.equal(r.ownNamesAllocationBounded,false);
+    const g=setup();for(const key of ['Apps','User','GameSessions','ProcessMonitor']){g.steamClient[key]={};for(let i=0;i<300;i++)Object.defineProperty(g.steamClient[key],'unrelated'+i,{value:0});}
+    const budget=await g.fn({operation:ops[0],account:42});assert.equal(budget.namesVisited,256);assert.equal(budget.matchedNames,0);assert(budget.truncated);assert(budget.surfaces.every(x=>x.namesVisited===64));assert.equal(f.methodCalls()+g.methodCalls(),0);
+    const h=setup();h.steamClient.Apps={};for(let i=0;i<300;i++)Object.defineProperty(h.steamClient.Apps,'RegisterApp'+i,{value:h.method});const fair=await h.fn({operation:ops[0],account:42});assert.equal(fair.surfaces[0].rows.length,16);for(const key of ['SteamClient.User','SteamClient.GameSessions','SteamClient.ProcessMonitor'])assert(fair.surfaces.find(x=>x.label===key).rows.length>0,'Apps cannot starve '+key);assert.equal(h.methodCalls(),0);
+  });
+  await test(names[4],async()=>{const f=setup();let deepReads=0;const third={};Object.defineProperty(third,'RegisterTooDeep',{get(){deepReads++;throw Error('deep getter');}});const second=Object.create(third);second.RegisterParent=f.method;const first=Object.create(second);first.RegisterOwn=f.method;f.steamClient.Apps=first;const r=await f.fn({operation:ops[0],account:42});assert(r.ok);const rows=Array.from(r.surfaces[0].rows);assert(rows.some(x=>x.name==='RegisterOwn'&&x.depth===0));assert(rows.some(x=>x.name==='RegisterParent'&&x.depth===1));assert(!rows.some(x=>x.name==='RegisterTooDeep'));assert.equal(deepReads,0);assert.equal(f.methodCalls(),0);});
+  await test(names[5],async()=>{const f=setup();let trapCalls=0;f.steamClient.Apps=new Proxy({}, {ownKeys(){trapCalls++;throw Error('private trap exception');}});const r=await f.fn({operation:ops[0],account:42});assert(r.ok&&r.proxyTrapEffectsUnknown);assert.equal(r.surfaces[0].status,'uninspectable');assert.equal(r.surfaces[0].reason,'own-names-threw');assert.equal(trapCalls,1);assert.equal(JSON.stringify(r).includes('private trap exception'),false);assert.equal(f.methodCalls(),0);
+    const g=setup();g.steamClient.Apps=new Proxy({}, {getOwnPropertyDescriptor(){throw Error('descriptor denied');}});const contract=await g.fn({operation:ops[1],account:42});assert(contract.ok);assert(contract.surfaces[0].rows.every(x=>x.present===null&&x.reason==='descriptor-threw'));assert.equal(g.methodCalls(),0);});
+  await test(names[6],async()=>{for(const operation of ops){for(const extra of [{pid:123},{script:'forbidden'},{names:['RunGame']},{namespace:'Apps'},{menuGame:{id:'bad'}}]){const f=setup(),r=await f.fn({operation,account:42,...extra});assert.equal(r.ok,false);assert.equal(r.reason,'invalid-apps-api-diagnostic-request');assert.equal(r.mutated,false);assert.equal(f.methodCalls(),0);}const f=setup(),bad=await f.fn({operation,account:43});assert.equal(bad.reason,'steam-account-changed');assert.equal(f.methodCalls(),0);assert(!f.window.__ymccSteamLiveBusy);}});
+  await test('bounded API cursor continuation preserves consumed indices and shadowing',async()=>{
+    const f=setup();f.steamClient.Apps={};for(let i=0;i<300;i++)Object.defineProperty(f.steamClient.Apps,'RegisterCursor'+i,{value:f.method});let cursor=24;const returned=[];
+    for(let call=0;call<8;call++){const r=await f.fn({operation:ops[0],account:42,cursor});assert(r.ok&&r.hasMore);const apps=r.surfaces[0];assert.equal(apps.skippedNamePositions,cursor);assert.equal(apps.rows.length,16);assert.equal(apps.rows[0].name,'RegisterCursor'+cursor);assert.equal(apps.nextCursor,cursor+apps.namesVisited);assert.equal(apps.nextCursor,cursor+16);assert(apps.hasMore);assert.equal(r.skipCostProvenZero,false);assert.equal(r.crossPageAtomic,false);assert.equal(r.catalogComplete,false);assert(r.namesVisited<=256&&r.matchedNames<=64);assert(r.surfaces.every(x=>x.namesVisited<=64&&x.rows.length<=16));returned.push(...apps.rows.map(x=>x.name));cursor=apps.nextCursor;}
+    assert.equal(cursor,152);assert.deepEqual(Array.from(returned),Array.from({length:128},(_,i)=>'RegisterCursor'+(i+24)));assert.equal(f.methodCalls(),0);
+    const limit=await f.fn({operation:ops[0],account:42,cursor:255});assert(limit.ok);assert.equal(limit.surfaces[0].namesVisited,1);assert.equal(limit.surfaces[0].nextCursor,256);assert.equal(limit.surfaces[0].sequenceLimitReached,true);assert.equal(limit.surfaces[0].rows[0].name,'RegisterCursor255');
+    const g=setup(),prototype={RegisterShadow:g.method,RegisterParent:g.method},object=Object.create(prototype);Object.defineProperty(object,'RegisterShadow',{value:0});for(let i=0;i<63;i++)Object.defineProperty(object,'unrelated'+i,{value:0});g.steamClient.Apps=object;const shadow=await g.fn({operation:ops[0],account:42,cursor:64});assert(shadow.ok);assert.equal(shadow.surfaces[0].skippedNamePositions,64);assert.equal(shadow.surfaces[0].nextCursor,66);assert(shadow.surfaces[0].rows.some(x=>x.name==='RegisterParent'&&x.depth===1));assert(!shadow.surfaces[0].rows.some(x=>x.name==='RegisterShadow'));assert.equal(g.methodCalls(),0);
+    const h=setup(),implicit=await h.fn({operation:ops[0],account:42}),explicit=await h.fn({operation:ops[0],account:42,cursor:0});assert.deepEqual(implicit.surfaces,explicit.surfaces);assert.equal(implicit.cursor,0);assert.equal(explicit.cursor,0);
+  });
+  await test('API cursor rejects out of range and contract cursor without getter calls',async()=>{
+    for(const cursor of [-1,256,1.5,'24',null,true]){const f=setup();let calls=0;Object.defineProperty(f.steamClient,'Apps',{get(){calls++;throw Error('cursor getter');}});const r=await f.fn({operation:ops[0],account:42,cursor});assert.equal(r.ok,false);assert.equal(r.reason,'invalid-apps-api-diagnostic-cursor');assert.equal(calls,0);assert.equal(f.methodCalls(),0);assert(!f.window.__ymccSteamLiveBusy);}
+    for(const cursor of [0,24,255]){const f=setup(),r=await f.fn({operation:ops[1],account:42,cursor});assert.equal(r.ok,false);assert.equal(r.reason,'invalid-apps-api-diagnostic-request');assert.equal(f.methodCalls(),0);}
+    for(const extra of [{script:'forbidden'},{pid:123},{names:['RegisterCursor']},{namespace:'Apps'},{page:1}]){const f=setup(),r=await f.fn({operation:ops[0],account:42,cursor:24,...extra});assert.equal(r.ok,false);assert.equal(r.reason,'invalid-apps-api-diagnostic-request');assert.equal(f.methodCalls(),0);}
+    const unknown=setup();Object.defineProperty(unknown.steamClient,'Apps',{get(){throw Error('unreadable root');}});const r=await unknown.fn({operation:ops[0],account:42,cursor:24});assert(r.ok);assert.equal(r.surfaces[0].nextCursor,null);assert.equal(r.surfaces[0].hasMore,null);
+  });
+  await test('uninspectable API cursor remains unknown after reflection failure',async()=>{
+    for(const mode of ['own-names','prototype','descriptor','descriptor-then-budget']){const f=setup();const target={RegisterKnown:f.method};if(mode==='descriptor-then-budget')for(let i=0;i<40;i++)target['RegisterLater'+i]=f.method;let traps=0;f.steamClient.Apps=new Proxy(target,{
+      ownKeys(object){if(mode==='own-names'){traps++;throw Error('private own-names failure');}return Reflect.ownKeys(object);},
+      getPrototypeOf(object){if(mode==='prototype'){traps++;throw Error('private prototype failure');}return Reflect.getPrototypeOf(object);},
+      getOwnPropertyDescriptor(object,key){if((mode==='descriptor'||mode==='descriptor-then-budget')&&key==='RegisterKnown'){traps++;throw Error('private descriptor failure');}return Reflect.getOwnPropertyDescriptor(object,key);}
+    });const r=await f.fn({operation:ops[0],account:42,cursor:0});assert(r.ok);const apps=r.surfaces[0];assert(traps>0);assert(apps.status==='uninspectable'||apps.status==='partial');assert.equal(apps.nextCursor,null);assert.equal(apps.hasMore,null);assert.equal(apps.sequenceLimitReached,false);assert.equal(f.methodCalls(),0);assert.equal(JSON.stringify(r).includes('private own-names failure'),false);if(mode==='prototype')assert.equal(apps.rows.length,1,'observed prefix remains diagnostic only');}
+  });
+  await test(names[7],async()=>{const f=setup(),r=await f.fn({operation:'diagnostics.apps.not-supported',account:42});assert.equal(r.ok,false);assert.equal(f.methodCalls(),0);assert.equal(r.mutated,false);assert(!f.window.__ymccSteamLiveBusy);});
+  directedEvidence={caseFilter,defaultGroupExecuted:false,productionExecution:'complete private production JS on mocked namespace objects',sourcePath,sourceSha256:createHash('sha256').update(sourceBytes).digest('hex'),actualSteamObjects:false,discoveredMethodsCalled:0,normalRegistrationAuthority:false,wholeRequestFunctionCallsZero:false};
+} else if (caseFilter === 'failure-diagnostics') {
+  const header = fs.readFileSync('native/steam_live_script.h','utf8');
+  const scripts = { source };
+  for (const [name, declaration, next] of [
+    ['embedded-full','kScript','kUiModeScript'],['embedded-mode','kUiModeScript','kLightGamepadScript'],['embedded-light','kLightGamepadScript',null]]) {
+    const start=header.indexOf('inline constexpr const char '+declaration), end=next?header.indexOf('inline constexpr const char '+next):header.length;
+    assert(start>=0&&end>start);scripts[name]=[...header.slice(start,end).matchAll(/R"YMSTEAM\(([\s\S]*?)\)YMSTEAM"/g)].map(x=>x[1]).join('');assert(scripts[name]);
+  }
+  await test('failure diagnostic full embed matches actual source',async()=>assert.equal(scripts['embedded-full'],source.trimEnd()));
+  for(const [kind,script] of Object.entries(scripts)) {
+    await test(kind+': caught exception keeps original failure and bounded class',async()=>{
+      const f=fixture({source:script});const error=new TypeError('private-url-token-path-must-not-be-read');let messageReads=0;
+      Object.defineProperty(error,'message',{get(){++messageReads;throw Error('message must not be inspected');}});
+      Object.defineProperty(f.request,'nativeFocusFeedbackRead',{get(){throw error;}});
+      const result=await f.fn(f.request);assert.equal(result.reason,'live-api-error');assert.equal(result.ok,false);assert.equal(result.mutated,false);assert.equal(messageReads,0);
+      assert.equal(result.steamFailure.domain,'javascript');assert.equal(result.steamFailure.exceptionClass,'TypeError');assert.equal(result.steamFailure.exceptionClassKnown,true);assert.equal(result.steamFailure.codeKnown,false);assert(!Object.hasOwn(result.steamFailure,'code'));
+      assert.deepEqual(JSON.parse(JSON.stringify(f.stats)),{edits:0,saves:0,overlayWrites:0,loads:0});assert.equal(f.window.__ymccSteamLiveBusy,undefined);
+      assert(!JSON.stringify(result).includes('private-url-token-path'));assert(JSON.stringify(result.steamFailure).length<256);
+    });
+    await test(kind+': hostile diagnostic getter preserves original refusal',async()=>{
+      const f=fixture({source:script});const error={reason:'live-account-changed'};Object.defineProperty(error,'name',{get(){throw Error('diagnostic getter failed');}});
+      Object.defineProperty(f.request,'nativeFocusFeedbackRead',{get(){throw error;}});
+      const result=await f.fn(f.request);assert.equal(result.reason,'live-account-changed');assert.equal(result.ok,false);assert.equal(result.mutated,false);assert(!Object.hasOwn(result,'steamFailure'));assert.equal(f.window.__ymccSteamLiveBusy,undefined);
+    });
+    await test(kind+': unknown exception name is omitted without copying content',async()=>{
+      const f=fixture({source:script});const error={name:'https://private.invalid/token/'+ 'x'.repeat(200000),reason:'live-timeout'};
+      Object.defineProperty(f.request,'nativeFocusFeedbackRead',{get(){throw error;}});
+      const result=await f.fn(f.request);assert.equal(result.reason,'live-timeout');assert.equal(result.mutated,false);assert.equal(result.steamFailure.exceptionClassKnown,false);assert(!Object.hasOwn(result.steamFailure,'exceptionClass'));assert(!JSON.stringify(result).includes('private.invalid'));assert.equal(f.window.__ymccSteamLiveBusy,undefined);
+    });
+  }
+} else if (caseFilter === "menu-game-return") {
+  const begin=source.indexOf("    const returnMenuGameToRunning ="),end=source.indexOf("    const syncMenuGameState =",begin);
+  assert(begin>=0&&end>begin,"production return helper missing");
+  const body=source.slice(begin,end),facts=[];
+  function routeFixture(options={}) {
+    const id=3301072349,previousId=2555806947,logical="14177997780718452736",calls=[];
+    const previous={appid:previousId,local_per_client_data:{display_status:options.previousRunning?4:11}};
+    const apps=new Map(options.missingPrevious?[]:[[previousId,previous]]);
+    const w={LocationPathName:options.route??"/library/app/2555806947",MainRunningApp:{gameid:logical},
+      MenuStore:{GetOpenSideMenu:()=>options.menu??0},CompositionStateStore:{GetCompositionState:()=>3,GetOverridingComposition:()=>options.override??null},
+      GetShowingGlobalModal:()=>options.modal??false,m_VirtualKeyboardManager:{IsShowingVirtualKeyboard:{Value:options.keyboard??false}},
+      HeaderStore:{GetForceHeaderAfterResume:()=>options.header??false},BCanNavigate:()=>true,
+      NavigateToRunningApp(replace){calls.push({replace});if(options.throwNavigation)throw Error("native navigation failed");if(!options.unchangedRoute)this.LocationPathName="/apprunning";return options.asyncNavigation?Promise.resolve():undefined;}};
+    const ui={m_runningAppIDs:options.twoGames?[id,previousId]:[id]};
+    const window={SteamUIStore:ui,appStore:{m_mapApps:apps}};
+    const receiver={window:w,game:{appid:id,logical,registered:options.exact?logical:"2054970",current:()=>!options.retired}};
+    const consumer=vm.runInNewContext("(()=>{let stage=\"before\",mutated=false;const fail=reason=>{throw Error(reason)};"+body+";return {run:returnMenuGameToRunning,state:()=>({stage,mutated})}})()",{window});
+    return {w,calls,receiver,consumer,run(){const target={};consumer.run(receiver,target);return target;}};
+  }
+  await test("single proven game returns exited library route once",async()=>{const f=routeFixture(),r=f.run();assert.equal(f.calls.length,1);assert.equal(f.calls[0].replace,true);assert.equal(f.w.LocationPathName,"/apprunning");assert.equal(r.navigation.status,"original-running-route-restored");assert(f.consumer.state().mutated);facts.push({name:"single",navigationCalls:f.calls.length});});
+  for(const [name,options] of Object.entries({exact:{exact:true},twoGames:{twoGames:true},missingPrevious:{missingPrevious:true},previousRunning:{previousRunning:true},menuOpen:{menu:2},modal:{modal:true},keyboard:{keyboard:true},header:{header:true},override:{override:0},alreadyRunning:{route:"/apprunning"},settings:{route:"/settings"}}))
+    await test("return guard preserves "+name,async()=>{const f=routeFixture(options),r=f.run();assert.equal(f.calls.length,0);assert.equal(r.navigation,undefined);assert.equal(f.consumer.state().mutated,false);});
+  await test("retired proven receiver refuses before navigation",async()=>{const f=routeFixture({retired:true});assert.throws(()=>f.run(),/window-changed/);assert.equal(f.calls.length,0);});
+  for(const [name,options] of Object.entries({throw:{throwNavigation:true},async:{asyncNavigation:true},unconfirmed:{unchangedRoute:true}}))
+    await test("uncertain navigation "+name+" remains mutated without replay",async()=>{const f=routeFixture(options);assert.throws(()=>f.run());assert.equal(f.calls.length,1);assert.equal(f.consumer.state().mutated,true);});
+  await test("return helper is wired only after inspect exits and before original button",async()=>{const branch=source.slice(source.indexOf("    if ([\u0027menu.button\u0027"),source.indexOf("    if (request.operation === \u0027settings.get\u0027"));const inspect=branch.indexOf("if (request.operation === \u0027menu.inspect\u0027)"),call=branch.indexOf("returnMenuGameToRunning(receiver,menuTarget)"),button=branch.indexOf("await bounded(w[handler]())");assert(inspect>=0&&call>inspect&&button>call);assert(branch.slice(call-100,call).includes("request.operation===\u0027menu.button\u0027&&request.menu===\u0027quick-access\u0027"));assert.equal(source.split("returnMenuGameToRunning(receiver,menuTarget)").length,2);});
+  directedEvidence={caseFilter,defaultGroupExecuted:false,productionExecution:"exact production return helper; surrounding call site checked",sourcePath,sourceSha256:createHash("sha256").update(sourceBytes).digest("hex"),facts,navigationTerminal:"inert",realSteamMutated:false,wholeNativeOrVisualAcceptance:false};
+} else if (caseFilter === 'light-gamepad-lease') {
   const started = performance.now(), owner = 'a'.repeat(32), otherOwner = 'b'.repeat(32);
   const spPath = process.env.YMCC_STEAM_SP_JS;
   assert(spPath, 'light-gamepad-lease requires YMCC_STEAM_SP_JS pointing to a local Valve steamui/sp.js');
@@ -62,9 +187,18 @@ if (caseFilter === 'light-gamepad-lease') {
   const downSource = extract('OnButtonDown', 'OnButtonUp', managerActionTail), upSource = extract('OnButtonUp', 'BatchedUpdate', managerActionTail);
   const registerSource = extract('RegisterInputSource', 'UpdateSourceToGamepad');
   const sourceTypeMethod = extract('GetSourceType', 'SetControllerActive');
-  const nativeInputMatches = [...sp.matchAll(/\bHandleControllerInputMessages\([^)]*\)\{[\s\S]*?\}(?=\}c\(\[)/g)];
+  const nativeInputMatches = [...sp.matchAll(/\bHandleControllerInputMessages\([^)]*\)\{/g)];
   assert.equal(nativeInputMatches.length, 1, 'Valve native controller input method unavailable or ambiguous');
-  const nativeInputMethod = nativeInputMatches[0][0];
+  const nativeInputStart = nativeInputMatches[0].index;
+  let nativeInputEnd = nativeInputStart + nativeInputMatches[0][0].length, nativeInputDepth = 1;
+  while (nativeInputDepth && nativeInputEnd < sp.length) {
+    const character = sp[nativeInputEnd++];
+    assert(!['"', "'", '`'].includes(character), 'Valve native input method requires a reviewed string boundary');
+    if (character === '{') nativeInputDepth++;
+    if (character === '}') nativeInputDepth--;
+  }
+  assert.equal(nativeInputDepth, 0, 'Valve native input method boundary unavailable');
+  const nativeInputMethod = sp.slice(nativeInputStart, nativeInputEnd);
   assert.match(registerSource, /\.GetSourceType\(\)==\w+\.Vz\.GAMEPAD/);
   assert.match(nativeInputMethod, /activeButtons\[\w+\]=!1,this\.OnButtonUp\(/);
   const keyboardEnumOffset = sp.indexOf('.KEYBOARD_SIMULATOR=');
@@ -79,7 +213,7 @@ if (caseFilter === 'light-gamepad-lease') {
     assert(match, `Valve button ${name} unavailable`);
     return [name, Number(match[1])];
   }));
-  const receipts = {}, negativeControls = [];
+  const receipts = {}, negativeControls = [], stormFacts = [];
   let buttonBalance;
   function leaseFixture(code = source) {
     const timers = new Map(), scheduled = [], events = [], listeners = new Set();
@@ -107,13 +241,19 @@ if (caseFilter === 'light-gamepad-lease') {
     f.window.removeEventListener = function(type, callback) {
       assert.equal(this, f.window); assert.equal(type, 'pagehide'); listeners.delete(callback);
     };
-    const methods = vm.runInNewContext(`({${setterSource},${actionSource},${downSource},${upSource}})`, {
-      pt() {}, Gt: assert, f: { pR: Object.fromEntries(Object.entries(buttons).map(([name, value]) => [value, name])) },
-      c: { AE: (target, type, detail) => events.push({ target, type, ...detail }) }
-    });
+    const binding = (text, pattern) => { const match = text.match(pattern); assert(match, 'Valve input binding unavailable'); return match[1]; };
+    const methods = vm.runInNewContext(`({${setterSource},${actionSource},${downSource},${upSource}})`, Object.fromEntries([
+      [binding(actionSource, /\b(\w+)\("Ignoring button press/), () => {}],
+      [binding(actionSource, /\b(\w+)\(!!\w+==!!\w+/), assert],
+      [binding(actionSource, /\$\{(\w+)\.pR\[/), { pR: Object.fromEntries(Object.entries(buttons).map(([name, value]) => [value, name])) }],
+      [binding(actionSource, /\(0,(\w+)\.AE\)/), { AE: (target, type, detail) => events.push({ target, type, ...detail }) }]
+    ]));
     const foreign = () => false;
-    const sourceMethods = vm.runInNewContext(`({${sourceTypeMethod},${nativeInputMethod}})`, {
-      f:Object.fromEntries(Object.values(buttons).map(button => [button, button])), e:{pR:buttons}, i:{Hh:{}} });
+    const sourceMethods = vm.runInNewContext(`({${sourceTypeMethod},${nativeInputMethod}})`, Object.fromEntries([
+      [binding(nativeInputMethod, /const \w+=(\w+)\[/), Object.fromEntries(Object.values(buttons).map(button => [button, button]))],
+      [binding(nativeInputMethod, /(\w+)\.pR\./), {pR:buttons}],
+      [binding(nativeInputMethod, /==(\w+)\.Hh\./), {Hh:{}}]
+    ]));
     const gamepadSource = { ...sourceMethods, m_eNavigationSourceType:gamepadType, m_rgControllers: new Map([[1, { activeButtons: {} }]]) };
     const keyboardSource = { GetSourceType:sourceMethods.GetSourceType, m_eNavigationSourceType:keyboardType };
     const managerMethods = Object.create(null);
@@ -197,6 +337,31 @@ if (caseFilter === 'light-gamepad-lease') {
   });
   await test('light-gamepad-lease: wall-clock forward jump expires at the consumer even before monotonic deadline', async () => {
     const f = leaseFixture(); await f.send(1); f.clock.wall += 3001; f.assertReleased();
+  });
+  await test('light-gamepad-lease: wake gap rejects delayed requests and preserves successor input balance', async () => {
+    const f = leaseFixture();
+    assert(receipt(await f.send(1)).enabled);
+    f.dispatch(true, buttons.OK);
+    const delayedOn = f.request(2), delayedOff = f.request(3, false), oldTimer = f.scheduled[0];
+    f.clock.wall += 3001;
+    for (const request of [delayedOff, delayedOn]) {
+      const rejected = await f.fn(request);
+      assert.equal(rejected.reason, 'gamepad-lease-expired-or-too-long');
+      assert(!rejected.ok && !rejected.mutated);
+    }
+    f.dispatch(false, buttons.OK);
+    f.dispatch(true, buttons.CANCEL);
+    assert.equal(f.events.length, 2);
+    assert(receipt(await f.send(4)).enabled);
+    const current = f.window.__ymccLightGamepadLease;
+    oldTimer.callback();
+    assert.equal(f.window.__ymccLightGamepadLease, current);
+    assert.equal(f.timers.size, 1);
+    f.dispatch(false, buttons.CANCEL);
+    assert.equal(f.events.length, 3);
+    f.assertSuppressed();
+    assert(receipt(await f.send(5, false)).ok);
+    f.assertReleased();
   });
   await test('light-gamepad-lease: duplicate ON cannot extend TTL or allocate a timer', async () => {
     const f = leaseFixture(), request = f.request(1); await f.fn(request); f.advance(750);
@@ -423,6 +588,35 @@ if (caseFilter === 'light-gamepad-lease') {
     assert(!(await f.send(1, true, {owner:otherOwner})).ok);
     f.dispatch(false, buttons.OK); assert.equal(f.events.length, 0); f.assertReleased();
   });
+  for (const rollback of [false, true]) await test(`light-gamepad-lease: native bounded OFF keeps total deadline with wall rollback ${rollback}`, async () => {
+    const f = leaseFixture(); f.dispatch(true, buttons.CANCEL); await f.send(1); f.dispatch(true, buttons.OK);
+    const deadline = f.clock.mono + 3000; f.advance(500);
+    assert.equal(receipt(await f.send(2, false, {expiresAt:f.clock.wall + deadline - f.clock.mono})).remainingMs, 2500);
+    f.dispatch(false, buttons.CANCEL); assert.equal(f.events.length, 2);
+    if (rollback) f.clock.wall -= 10000;
+    for (const serial of [3, 4, 5]) {
+      f.advance(750); const current = receipt(await f.send(serial, false, {expiresAt:f.clock.wall + deadline - f.clock.mono}));
+      assert(current.ok && current.releasing && !current.enabled && current.pendingReleaseCount === 1);
+      assert.equal(current.remainingMs, deadline - f.clock.mono);
+      assert.equal(f.window.__ymccLightGamepadLease.deadline, deadline);
+      assert.equal(f.timers.size, 1); assert.equal(f.listeners.size, 1);
+      const before = f.events.length; f.dispatch(true, buttons.DIR_RIGHT); f.dispatch(false, buttons.DIR_RIGHT);
+      assert.equal(f.events.length, before + 2); f.dispatch(true, buttons.OK, gamepadType, 1, true);
+      assert.equal(f.events.length, before + 2);
+    }
+    f.advance(250); f.assertReleased(); assert(!receipt(await f.send(6, false)).releasing); f.assertReleased();
+    assert(!(await f.send(5, false)).ok); f.assertReleased();
+  });
+  await test('light-gamepad-lease: delayed old disabled serial cannot release reentered held session', async () => {
+    const f = leaseFixture(); await f.send(1); f.dispatch(true, buttons.OK); const oldRelease = f.request(2, false);
+    assert(receipt(await f.fn(oldRelease)).releasing); f.dispatch(true, buttons.CANCEL); f.advance(750);
+    assert(receipt(await f.send(3)).enabled); const replacement = f.window.__ymccLightGamepadLease;
+    const denied = await f.fn(oldRelease); assert(!denied.ok && !denied.mutated);
+    assert.equal(f.window.__ymccLightGamepadLease, replacement); assert.equal(replacement.blockedDown.size, 1);
+    assert.equal(replacement.priorUp.size, 1); f.dispatch(false, buttons.OK); assert.equal(f.events.length, 1);
+    f.dispatch(false, buttons.CANCEL); assert.equal(f.events.length, 2);
+    assert((await f.send(4, false)).ok); f.assertReleased();
+  });
   await test('light-gamepad-lease: tail reentry carries old blocked keys and newly allowed held keys', async () => {
     const f = leaseFixture(); await f.send(1); f.dispatch(true, buttons.OK); assert(receipt(await f.send(2, false)).releasing);
     f.dispatch(true, buttons.CANCEL); assert.equal(f.events.length, 1);
@@ -462,6 +656,19 @@ if (caseFilter === 'light-gamepad-lease') {
     assert.equal(f.manager.OnButtonActionInternal, foreign); assert.equal(f.window.__ymccLightGamepadLease.enabled, false);
     f.assertReleased(); assert.equal(f.manager.OnButtonActionInternal, foreign);
   });
+  for (const change of ['flags', 'accessor']) await test(`light-gamepad-lease: dispose preserves later external descriptor ${change}`, async () => {
+    const f = leaseFixture(); await f.send(1); const lease = f.window.__ymccLightGamepadLease;
+    const ours = f.manager.OnButtonActionInternal; let getterReads = 0;
+    const descriptor = change === 'flags' ? {value:ours,writable:false,configurable:true,enumerable:true} :
+      {get(){ getterReads++; return ours; },configurable:true,enumerable:true};
+    Object.defineProperty(f.manager, 'OnButtonActionInternal', descriptor);
+    const installedDescriptor = Object.getOwnPropertyDescriptor(f.manager, 'OnButtonActionInternal');
+    assert.equal(lease.dispose(), true); assert.equal(getterReads, 0, 'dispose evaluated foreign action getter');
+    assert.deepEqual(Object.getOwnPropertyDescriptor(f.manager, 'OnButtonActionInternal'), installedDescriptor);
+    assert.equal(f.timers.size, 0); assert.equal(f.listeners.size, 0);
+    assert.deepEqual(f.manager.m_rgCatchAllGamepadInput, [f.foreign]);
+    assert.equal(lease.callback(), false); f.assertReleased();
+  });
   for (const kind of ['sources', 'type-method', 'controllers', 'held-schema']) await test(`light-gamepad-lease: unsupported ${kind} fails without retaining owned resources`, async () => {
     const f = leaseFixture();
     if (kind === 'sources') delete f.manager.m_rgGamepadInputSources;
@@ -480,6 +687,93 @@ if (caseFilter === 'light-gamepad-lease') {
     assert.equal(f.events.length, 1); negativeControls.push({name:'missing-prior-up',detected:true,actualDownEvents:1,actualUpEvents:0});
     f.advance(3000); f.assertReleased();
   });
+  await test('light-gamepad-lease: bounded lifecycle storms preserve held tails and reclaim all owned resources', async () => {
+    const sequences = [[true,true,false,false,true,false], [false,true,false,true,true,false],
+      [true,false,true,false,true,true], [false,false,true,true,false,true]];
+    const stops = ['held-up', 'account', 'pagehide', 'window', 'monotonic', 'wall', 'watchdog'];
+    for (const [sequenceIndex, sequence] of sequences.entries()) for (const stop of stops) {
+      const f = leaseFixture();
+      const native = (down, button, controller = 1) => f.gamepadSource.HandleControllerInputMessages(controller, button, down, 0, 0);
+      native(true, buttons.CANCEL);
+      let serial = 1, priorHeld = true;
+      assert(receipt(await f.send(serial)).enabled);
+      native(true, buttons.OK); native(true, buttons.DIR_RIGHT, 2);
+      let nested = false;
+      const reentrant = f.manager.SetCatchAllGamepadInput(() => {
+        if (!nested) {
+          nested = true;
+          try { f.dispatch(true, buttons.CANCEL, keyboardType); } finally { nested = false; }
+        }
+        return false;
+      });
+      const beforeNested = f.events.length;
+      f.dispatch(true, buttons.OK, gamepadType, 1, true);
+      assert.equal(f.events.length, beforeNested + 1, 'nested dispatch corrupted outer suppression');
+      assert.equal(f.events.at(-1).button, buttons.CANCEL);
+      assert.equal(f.window.__ymccLightGamepadLease.dispatch, null);
+      reentrant.Unregister();
+      const deadline = f.clock.mono + 3000;
+      for (let step = 0; step < 24; step++) {
+        const enabled = sequence[step % sequence.length], previous = f.window.__ymccLightGamepadLease;
+        const oldTimer = f.scheduled.at(-1);
+        f.advance(11, false);
+        const request = f.request(++serial, enabled, {expiresAt:f.clock.wall + deadline - f.clock.mono});
+        const current = receipt(await f.fn(request));
+        assert(current.ok && current.enabled === enabled && current.releasing === !enabled);
+        assert.equal(current.pendingReleaseCount, 2);
+        assert.equal(current.remainingMs, deadline - f.clock.mono);
+        const lease = f.window.__ymccLightGamepadLease, scheduledCount = f.scheduled.length;
+        const duplicate = receipt(await f.fn(request));
+        assert(duplicate.ok && !duplicate.mutated);
+        assert.equal(f.scheduled.length, scheduledCount);
+        for (const stale of [f.request(serial - 1, !enabled), f.request(serial + 1000, false, {owner:otherOwner}),
+          f.request(serial + 1000, true, {owner:otherOwner})]) {
+          const denied = receipt(await f.fn(stale)); assert(!denied.ok && !denied.mutated);
+          assert.equal(f.window.__ymccLightGamepadLease, lease);
+        }
+        oldTimer.callback(); previous.pagehide(); assert.equal(previous.callback(), false);
+        assert.equal(f.window.__ymccLightGamepadLease, lease);
+        assert.equal(lease.deadline, deadline);
+        assert.equal(lease.dispatch, null);
+        assert.equal(f.timers.size, 1); assert.equal(f.listeners.size, 1);
+        assert.equal(f.manager.m_rgCatchAllGamepadInput.length, 2);
+        assert.equal(f.manager.m_rgCatchAllGamepadInput.filter(callback => callback === lease.callback).length, 1);
+        let before = f.events.length;
+        f.dispatch(true, buttons.OK, gamepadType, 1, true);
+        f.dispatch(true, buttons.DIR_RIGHT, gamepadType, 2, true);
+        assert.equal(f.events.length, before, 'storm leaked held repeats');
+        if (enabled && priorHeld) {
+          native(false, buttons.CANCEL); priorHeld = false;
+          assert.equal(f.events.length, before + 1, 'reentry lost natural prior UP');
+        } else if (!enabled && !priorHeld) {
+          native(true, buttons.CANCEL); priorHeld = true;
+          assert.equal(f.events.length, before + 1, 'tail blocked a fresh key');
+        }
+      }
+      if (f.window.__ymccLightGamepadLease.enabled)
+        assert(receipt(await f.send(++serial, false, {expiresAt:f.clock.wall + deadline - f.clock.mono})).releasing);
+      const tail = f.window.__ymccLightGamepadLease;
+      if (stop === 'held-up') {
+        const before = f.events.length;
+        native(false, buttons.DIR_RIGHT, 2);
+        assert.equal(tail.blockedDown.size, 1); assert.equal(f.timers.size, 1);
+        native(false, buttons.OK);
+        assert.equal(f.events.length, before, 'tail leaked matching blocked UP');
+      }
+      if (stop === 'account') { f.settings.m_CMInterface.steamid.GetAccountID = () => 43; native(false, buttons.OK); }
+      if (stop === 'pagehide') for (const callback of [...f.listeners]) callback();
+      if (stop === 'window') { f.window.closed = true; native(false, buttons.OK); }
+      if (stop === 'monotonic') { f.clock.mono = deadline + 1; f.clock.wall -= 50000; native(false, buttons.OK); }
+      if (stop === 'wall') { f.clock.wall += 3001; native(false, buttons.OK); }
+      if (stop === 'watchdog') f.advance(deadline - f.clock.mono);
+      for (const timer of f.scheduled) timer.callback();
+      assert.equal(tail.enabled, false); assert.equal(tail.releasing, false); assert.equal(tail.callback(), false);
+      assert.equal(Object.hasOwn(f.manager, 'OnButtonActionInternal'), false);
+      f.assertReleased();
+      stormFacts.push({sequence:sequenceIndex, stop, steps:24, serial, simulatedMs:264,
+        nativeHeldConsumer:true, staleTimers:f.scheduled.length, timers:0, listeners:0, ownedHooks:0, ownedWrappers:0});
+    }
+  });
   directedEvidence = { caseFilter, defaultGroupExecuted:false, productionExecution:`complete ${sourcePath}`, sourcePath, sourceOverride,
     sourceSha256:createHash('sha256').update(sourceBytes).digest('hex'), executedSourceSha256:createHash('sha256').update(source).digest('hex'),
     selftestSha256:createHash('sha256').update(fs.readFileSync('tools/steam_live_script_selftest.mjs')).digest('hex'),
@@ -487,7 +781,7 @@ if (caseFilter === 'light-gamepad-lease') {
       methods:['OnButtonActionInternal','SetCatchAllGamepadInput','OnButtonDown','OnButtonUp','GetSourceType','HandleControllerInputMessages'],
       inspectedMethods:['RegisterInputSource'], gamepadType, keyboardType,
       methodsSha256:createHash('sha256').update([setterSource,actionSource,downSource,upSource,sourceTypeMethod,nativeInputMethod,registerSource].join('\n')).digest('hex'), buttons},
-    receipts, negativeControls, buttonBalance, elapsedMs:performance.now()-started, node:process.version,
+    receipts, negativeControls, buttonBalance, stormFacts, elapsedMs:performance.now()-started, node:process.version,
     scope:'steam-gamepad-navigation', deviceOperations:0, unknown:['raw-axis-and-other-consumers','physical-input','all-SteamInput','all-analog-stick-APIs','real-Steam','native-CDP-integration','generated-header-not-run'] };
 } else {
 await test('actual embedded script is in sync',async()=>{const header=fs.readFileSync('native/steam_live_script.h','utf8');const chunks=[...header.split('inline constexpr const char kUiModeScript')[0].matchAll(/R"YMSTEAM\(([\s\S]*?)\)YMSTEAM"/g)].map(m=>m[1]);assert.equal(chunks.join(''),source.trimEnd());assert(chunks.every(c=>Buffer.byteLength(c)<=8192));});
@@ -1097,6 +1391,56 @@ await test('sleep account capture supports uint32 upper bound and remains serial
  const f=fixture();f.settings.m_CMInterface.steamid.GetAccountID=()=>0xffffffff;const r=await f.fn({operation:'sleep.session.inspect'});assert(r.ok&&!r.mutated&&r.observedAccount===0xffffffff);
  f.window.__ymccSteamLiveBusy='other-owner';const busy=await f.fn({operation:'sleep.session.inspect'});assert(!busy.ok&&!busy.mutated&&busy.reason==='live-busy');assert.equal(f.stats.loads,0);
 });
+await test('Decky official backend state is diagnostic only and reuses one socket property read',async()=>{
+ const header=fs.readFileSync('native/steam_live_script.h','utf8');
+ const scripts={source};
+ for(const [key,declaration,next] of [['embedded-full','kScript','kUiModeScript'],['embedded-mode','kUiModeScript','kLightGamepadScript']]){
+  const start=header.indexOf('inline constexpr const char '+declaration),end=header.indexOf('inline constexpr const char '+next,start+1);
+  assert(start>=0&&end>start);scripts[key]=[...header.slice(start,end).matchAll(/R"YMSTEAM\(([\s\S]*?)\)YMSTEAM"/g)].map(m=>m[1]).join('');assert(scripts[key]);
+ }
+ for(const [scriptName,script] of Object.entries(scripts)){
+  const f=fixture({source:script});f.window.top=f.window;f.window.location={origin:'https://steamloopback.host'};f.steamClient.UI={GetUIMode:async()=>4};
+  const hooks={qamBrowserViewPatch:{hasUnpatched:false},tabs:[{id:999}]};
+  f.window.__TABS_HOOK_INSTANCE=hooks;f.window.DeckyPluginLoader={tabsHook:hooks,deckyState:{publicState:()=>({versionInfo:{current:'v3.3.1'}})}};
+  f.window.__YMCC_DECKY_FRONTEND__={active:true,connectionReady:true,connectionVerified:true,qamReady:true};
+  let reads=0,code=0;const ws={get readyState(){reads++;return code;}};f.window.DeckyBackend={ws};
+  for(const [state,label] of [[0,'socket-connecting'],[1,'socket-open'],[2,'socket-closing'],[3,'socket-closed'],[4,'socket-unavailable'],[-1,'socket-unavailable'],[NaN,'socket-unavailable'],['1','socket-unavailable'],[null,'socket-unavailable']]){
+   code=state;reads=0;const result=await f.fn({operation:'ui.mode.get'});
+   assert.equal(result.deckyBackendState,label,scriptName+' exact original backend state');
+   assert.equal(reads,1,scriptName+' only existing socket property is read once');
+   assert.equal(result.deckyBackendConnected,Number.isInteger(state)?state===1:undefined);
+   assert.equal(result.deckyClientConnected,true);assert.equal(result.deckyClientVerified,true);assert.equal(result.deckyHooksInstalled,true);assert.equal(result.mutated,false);
+  }
+  delete f.window.DeckyBackend;const missing=await f.fn({operation:'ui.mode.get'});assert.equal(missing.deckyBackendState,'socket-missing');assert.equal(missing.deckyBackendConnected,undefined);
+  f.window.DeckyPluginLoader.deckyState.publicState=()=>({versionInfo:{current:'v0.0.0'}});assert.equal((await f.fn({operation:'ui.mode.get'})).deckyBackendState,undefined);
+  assert.deepEqual(f.stats,{edits:0,saves:0,overlayWrites:0,loads:0});
+ }
+});
+await test('Decky connection read rejects an open native peer with a disconnected current browser client',async()=>{
+ const f=fixture();f.window.top=f.window;f.window.location={origin:'https://steamloopback.host'};f.steamClient.UI={GetUIMode:async()=>4};
+ const hooks={qamBrowserViewPatch:{hasUnpatched:false},qamEmbeddedPatch:{hasUnpatched:false},tabs:[{id:999}]};
+ f.window.__TABS_HOOK_INSTANCE=hooks;f.window.DeckyPluginLoader={tabsHook:hooks,deckyState:{publicState:()=>({versionInfo:{current:'v3.3.1'}})}};f.window.DeckyBackend={ws:{readyState:1}};
+ const p={active:true,connectionReady:false,connectionChecking:false,qamReady:true};f.window.__YMCC_DECKY_FRONTEND__=p;
+ const disconnected=await f.fn({operation:'ui.mode.get'});assert.equal(disconnected.deckyBackendConnected,true);assert.equal(disconnected.deckyHooksInstalled,true);assert.equal(disconnected.deckyClientConnected,false);
+ p.connectionChecking=true;const pending=await f.fn({operation:'ui.mode.get'});assert.equal(pending.deckyClientChecking,true);assert.equal(pending.deckyClientConnected,false);
+ p.connectionChecking=false;p.connectionReady=true;const connected=await f.fn({operation:'ui.mode.get'});assert.equal(connected.deckyClientConnected,true);assert.equal(connected.deckyClientChecking,false);
+ assert.equal(connected.deckyClientVerified,undefined,'Legacy frontend does not fabricate native reply proof');
+ p.connectionVerified=true;assert.equal((await f.fn({operation:'ui.mode.get'})).deckyClientVerified,true);
+ p.connectionVerified=false;assert.equal((await f.fn({operation:'ui.mode.get'})).deckyClientVerified,false);
+ for(const value of [1,'true',null,{}]){p.connectionVerified=value;assert.equal((await f.fn({operation:'ui.mode.get'})).deckyClientVerified,undefined);}
+ Object.defineProperty(p,'connectionVerified',{get(){throw Error('PRIVATE');},configurable:true});
+ const verifiedFailure=await f.fn({operation:'ui.mode.get'});assert.equal(verifiedFailure.deckyClientVerified,undefined);assert.equal(verifiedFailure.deckyClientConnected,true);delete p.connectionVerified;
+ for(const broken of ['browser','embedded','console']){hooks.qamBrowserViewPatch.hasUnpatched=broken==='browser';hooks.qamEmbeddedPatch.hasUnpatched=broken==='embedded';p.qamReady=broken!=='console';assert.equal((await f.fn({operation:'ui.mode.get'})).deckyHooksInstalled,false);}
+ hooks.qamBrowserViewPatch.hasUnpatched=false;hooks.qamEmbeddedPatch.hasUnpatched=false;p.qamReady=true;p.active=false;assert.equal((await f.fn({operation:'ui.mode.get'})).deckyClientConnected,false);
+ // Finite diagnostics cannot change any original connection boolean or action.
+ p.active=true;p.connectionReady=false;
+ for(const state of ['disposed','native-run-missing','binding-run-missing','run-mismatch','socket-missing','socket-connecting','socket-closing','socket-closed','socket-unavailable','transport-unconfirmed','opening-reply-missing','connected','module-dismounted','frontend-absent','frontend-inactive','read-failed']){p.connectionState=state;const value=await f.fn({operation:'ui.mode.get'});assert.equal(value.deckyClientState,state);assert.equal(value.deckyClientConnected,false);}
+ for(const state of [null,17,{token:'PRIVATE'},'https://private/token','not-a-known-state','x'.repeat(10000)]){p.connectionState=state;const value=await f.fn({operation:'ui.mode.get'});assert.equal(value.deckyClientState,undefined);}
+ Object.defineProperty(p,'connectionState',{get(){throw Error('PRIVATE');},configurable:true});const failed=await f.fn({operation:'ui.mode.get'});assert.equal(failed.deckyClientState,'read-failed');assert.equal(failed.deckyBackendConnected,true);assert.equal(failed.deckyHooksInstalled,true);assert.equal(failed.deckyClientConnected,false);delete p.connectionState;
+ p.active=false;assert.equal((await f.fn({operation:'ui.mode.get'})).deckyClientState,'frontend-inactive');delete f.window.__YMCC_DECKY_FRONTEND__;assert.equal((await f.fn({operation:'ui.mode.get'})).deckyClientState,'frontend-absent');f.window.__YMCC_DECKY_FRONTEND__=p;
+
+ assert.deepEqual(f.stats,{edits:0,saves:0,overlayWrites:0,loads:0});
+});
 await test('Decky mode snapshot reads the current offline account without online/registry or business writes',async()=>{
  const f=fixture();f.window.top=f.window;f.window.location={origin:'https://steamloopback.host'};
  f.steamClient.UI={GetUIMode:async()=>4};f.steamClient.User={RegisterForLoginStateChange:()=>({unregister(){}}),RegisterForCurrentUserChanges:cb=>cb({strSteamID:'76561197960265770',bIsOfflineMode:true})};
@@ -1128,4 +1472,5 @@ await test('failed account-hook installation does not accumulate callback regist
  for(let i=0;i<100;i++){const r=await f.fn({operation:'ui.mode.get'});assert(r.ok&&!r.deckyAccountWatchAvailable);}assert.equal(count,1);
 });
 }
-console.log(JSON.stringify({suite:'Steam live production JS mocked',passed:results.length,cases:results,hardwareOperations:0,...directedEvidence},null,2));
+if (selectedCaseNames.length) assert.deepEqual([...results].sort(), [...selectedCaseNames].sort(), 'steam live selected case set mismatch');
+console.log(JSON.stringify({suite:'Steam live production JS mocked',passed:results.length,cases:results,selectedCaseNames,hardwareOperations:0,...directedEvidence},null,2));

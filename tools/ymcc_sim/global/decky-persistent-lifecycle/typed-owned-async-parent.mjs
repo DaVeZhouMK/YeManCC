@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
-import {reconstructTypedAsyncOriginalContract,verifyTypedAsyncReadyExtraction,validateTypedLegacySharedReference} from './typed-async-parent.mjs';
+import {reconstructTypedAsyncOriginalContract,verifyTypedAsyncReadyExtraction,verifyTypedAsyncCommittedReadyExtraction,validateTypedLegacySharedReference} from './typed-async-parent.mjs';
 import {inspectOwnedAsyncNative} from './typed-owned-async-native.mjs';
 
 const MODULE = 'tools/ymcc_sim/global/decky-persistent-lifecycle';
@@ -152,12 +152,19 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
     const bound = toolPins.get(id); assert(bound, fail('TOOL_NOT_PREBOUND:') + row.path);
     assert.equal(bound.sha256, row.sha256, fail('TOOL_PREBINDING_CHANGED')); verify(row); compilePins.set(id, row);
   }
-  const declarationPath = path.join(repo,MODULE,'typed-owned-async-source-inputs.json');
-  // Declaration is optional for older sidecar runs; every frozen source still
-  // needs an external pin, and both compiler graphs require complete membership.
-  if (sourcePins.has(MODULE+'/typed-async-source-inputs.json') && fs.existsSync(declarationPath)) {
+  const declarationPath = path.join(repo,MODULE,'typed-async-source-inputs.json');
+  // Reuse the one V1 declaration and its exact V2 consumer delta. A declared
+  // file that is missing must fail rather than silently skip membership.
+  if (sourcePins.has(MODULE+'/typed-async-source-inputs.json')) {
     assert.equal(digest(declarationPath), sourcePins.get(MODULE+'/typed-async-source-inputs.json'));
-    assert.deepEqual([...sourceSeen].sort(), [...read(declarationPath).files].sort(), fail('SOURCE_DECLARATION_MEMBERSHIP'));
+    const declared=read(declarationPath).files;
+    assert.equal(new Set(declared).size,declared.length,fail('DUPLICATE_SOURCE_DECLARATION'));
+    assert(declared.includes(V1_DRIVER+'.test.mjs'),fail('V1_SOURCE_DECLARATION_CHANGED'));
+    const expected=declared.filter(file=>file!==V1_DRIVER+'.test.mjs').concat(
+      DRIVER+'.mjs',DRIVER+'.cpp',DRIVER+'.test.mjs',
+      MODULE+'/typed-owned-async-native.mjs',MODULE+'/typed-owned-async-parent.mjs');
+    assert.equal(new Set(expected).size,expected.length,fail('V2_SOURCE_DECLARATION_OVERLAP'));
+    assert.deepEqual([...sourceSeen].sort(),expected.sort(),fail('SOURCE_DECLARATION_MEMBERSHIP'));
   }
   const originalContract = reconstructTypedAsyncOriginalContract(fs.readFileSync(path.join(repo,LEGACY),'utf8'));
   assert.deepEqual(value.originalContract, originalContract, fail('ORIGINAL_CONTRACT'));
@@ -180,7 +187,9 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
   ];
   const readyDeclared=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8').includes("originalReadyConsumer(path.join(work,'s'),{write:true})");
   if(sourceMode==='current')assert(readyDeclared,fail('CURRENT_READY_EXTRACTION_REQUIRED'));
-  assert.equal(value.generated.length, 4+(readyDeclared?1:0), fail('EXTRACTION_MEMBERSHIP'));
+  const committedDeclared=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8').includes("originalCommittedReadyConsumer(path.join(work,'s'),{write:true})");
+  if(sourceMode==='current')assert(committedDeclared,fail('CURRENT_COMMITTED_EXTRACTION_REQUIRED'));
+  assert.equal(value.generated.length, 4+(readyDeclared?1:0)+(committedDeclared?1:0), fail('EXTRACTION_MEMBERSHIP'));
   extractions.forEach((expected, i) => {
     const row = value.generated[i]; assert(expected.begin >= 0 && expected.end > expected.begin, fail('EXTRACTION_BOUNDARY'));
     assert.equal(row.origin, expected.origin); assert.equal(row.originSha256, sourcePins.get(expected.origin));
@@ -193,6 +202,7 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
   const renamed=value.generated[3],v1Text=fs.readFileSync(path.join(repo,V1_DRIVER+'.cpp'),'utf8'),entry='int main(int argc,char** argv){',replacement='int legacySameProcessMain(int argc,char** argv){';
   assert.equal(v1Text.split(entry).length,2,fail('V1_RENAME_ENTRY_UNIQUE'));assert.equal(renamed.origin,V1_DRIVER+'.cpp');assert.equal(renamed.originSha256,sourcePins.get(V1_DRIVER+'.cpp'));assert.equal(renamed.derivation,'rename-main-only');assert.equal(renamed.entry,entry);assert.equal(renamed.replacement,replacement);samePath(renamed.path,path.join(workRoot,'s/tools/typed-owned-async-legacy-body.inc'),fail('V1_DERIVED_PATH'));assert.equal(renamed.sha256,hash(Buffer.from(v1Text.replace(entry,replacement))),fail('V1_BODY_BYTE_PRESERVATION'));verify(renamed,workRoot);compilePins.set(key(renamed.path),renamed);
   if(readyDeclared){const ready=verifyTypedAsyncReadyExtraction(value.generated[4],{repo,workRoot,sourcePins});compilePins.set(key(ready.path),ready);}
+  if(committedDeclared){const committed=verifyTypedAsyncCommittedReadyExtraction(value.generated[4+(readyDeclared?1:0)],{repo,workRoot,sourcePins});compilePins.set(key(committed.path),committed);}
   assert.deepEqual(read(path.join(evidenceRoot,'GENERATED.json')), value.generated, fail('EXTRACTION_FILE'));
   const native = selectedNativeTools().native;
   const driverSource=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8');

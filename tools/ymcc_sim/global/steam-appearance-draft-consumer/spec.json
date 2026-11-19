@@ -3,7 +3,7 @@
   "id": "steam.appearance-draft-consumer",
   "producer": "tools/steam_appearance_draft_selftest.mjs",
   "productSource": "src/bridge/steamAppearanceDraft.ts",
-  "producerSha256": "762f2178cccd8578095d7e98919c9a35f535e498caf47f264ba117bf69e3ecba",
+  "producerSha256": "6ffc7937de3a25f83d5c307188ab7ad38a24b2cc695cb8bd5434ab739a40fda3",
   "caseNames": [
     "view initialization only reads and never replays startup/apply",
     "one click changes the draft immediately without waiting or locking",
@@ -28,6 +28,10 @@
     "missing acknowledgement snapshot preserves draft and stops automatic retries",
     "manual verification can clear a saved draft without another write",
     "acknowledgement with wrong flags retains intent and exhausts finite timers",
+    "ordinary global preference failure stays visible after the theme owner saved without replay",
+    "same saved choice repairs only the ordinary preference with no duplicate theme application",
+    "an unrelated successful preference cannot erase a failed choice; explicit retry repairs without another theme write",
+    "ordinary preference retry cannot replay a former theme value over a newer external change",
     "corrupt or unknown journal values never replay an operation",
     "reset waits for an in-flight writer and temporarily locks only reset",
     "reset supersedes a failing older batch without resurrecting its draft",
@@ -45,7 +49,8 @@
     "successful reset keeps the resident CSS process",
     "automatic reconciliation preserves responsive switches and one writer",
     "a click during reconciliation is saved once after repair completion",
-    "failed reconciliation preserves the observed configuration without a retry timer"
+    "failed reconciliation preserves the observed configuration without a retry timer",
+    "retired reflection journal entry is discarded while other choices remain display-only"
   ],
   "timeoutMs": 30000,
   "sourceApproval": false,

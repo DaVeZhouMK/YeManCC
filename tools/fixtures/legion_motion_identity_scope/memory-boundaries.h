@@ -45,11 +45,29 @@ inline std::map<DEVINST,Node> nodes;inline std::vector<Device> devices;inline st
 inline DWORD error=ERROR_SUCCESS;inline ULONGLONG now=100;
 inline unsigned opens=0,closes=0,preps=0,frees=0,xusb=0,hit=0,discards=0,routeRefreshes=0,enumerations=0,selectedTransitions=0,msiNotifications=0;
 inline std::wstring route=L"\\?\\usb#xusb-test";inline std::function<void()> routeHook;
+inline std::string lastRouteBase;inline unsigned rawInfoCalls=0;
+struct RawCall{bool data;UINT capacity,reported;DWORD error;};
+inline std::vector<RawCall> rawCalls;inline std::map<unsigned,std::pair<DWORD,UINT>> rawFailures;inline std::function<void(unsigned)> rawHook;
+inline std::function<void()> enumerationHook;
+
 inline HDEVINFO set(){return reinterpret_cast<void*>(std::uintptr_t{0x1234});}
 inline Device* find(const wchar_t* path){for(auto&d:devices)if(d.path==path)return &d;return nullptr;}
 }
 using PHIDP_PREPARSED_DATA=memory::Device*;
 static std::string W2U(const std::wstring& s){std::string out;for(wchar_t c:s){if(c<0||c>127)throw std::runtime_error("ASCII-only fixture boundary");out.push_back(static_cast<char>(c));}return out;}
+// This existing fixture keeps UTF-8 conversion as an ASCII-only memory leaf.
+// Real Windows Unicode conversion is verified separately, never device I/O.
+constexpr UINT CP_UTF8=65001;
+static int WideCharToMultiByte(UINT page,DWORD flags,const wchar_t* text,int length,
+                               char* output,int capacity,const char* defaultChar,int* usedDefault){
+    if(page!=CP_UTF8||flags!=0||length!=-1||defaultChar||usedDefault||!text)
+        throw std::runtime_error("unsupported UTF-8 memory conversion boundary");
+    const auto encoded=W2U(std::wstring(text));
+    const auto required=static_cast<int>(encoded.size()+1);
+    if(!output||capacity==0)return required;
+    if(capacity<required)return 0;
+    std::memcpy(output,encoded.c_str(),static_cast<std::size_t>(required));return required;
+}
 static std::wstring U2W(const std::string& s){return {s.begin(),s.end()};}
 static std::string ascii_lower(std::string s){for(auto&c:s)c=static_cast<char>(std::tolower(static_cast<unsigned char>(c)));return s;}
 static DWORD GetLastError(){return memory::error;}
@@ -69,22 +87,35 @@ static CONFIGRET CM_Get_Device_IDW(DEVINST node,wchar_t*buffer,ULONG chars,ULONG
     const auto id=U2W(it->second.id);if(id.size()+1>chars)return CR_INVALID_DEVINST;std::copy(id.begin(),id.end(),buffer);buffer[id.size()]=0;return CR_SUCCESS;}
 static CONFIGRET CM_Get_Parent(DEVINST*out,DEVINST node,ULONG){auto it=memory::nodes.find(node);if(it==memory::nodes.end())return CR_INVALID_DEVINST;if(it->second.parentResult!=CR_SUCCESS)return it->second.parentResult;if(!it->second.parent)return CR_NO_SUCH_DEVNODE;*out=it->second.parent;return CR_SUCCESS;}
 static CONFIGRET CM_Get_DevNode_Status(ULONG*status,ULONG*problem,DEVINST node,ULONG){auto it=memory::nodes.find(node);if(it==memory::nodes.end())return CR_INVALID_DEVINST;*status=it->second.status;*problem=0;return it->second.statusResult;}
-static HDEVINFO SetupDiGetClassDevsW(const GUID*,const wchar_t*,void*,DWORD){++memory::enumerations;return memory::set();}
+static HDEVINFO SetupDiGetClassDevsW(const GUID*,const wchar_t*,void*,DWORD){++memory::enumerations;auto hook=std::move(memory::enumerationHook);memory::enumerationHook={};if(hook)hook();return memory::set();}
 static int SetupDiEnumDeviceInterfaces(HDEVINFO,void*,const GUID*,DWORD index,SP_DEVICE_INTERFACE_DATA*out){if(index>=memory::devices.size()){memory::error=ERROR_NO_MORE_ITEMS;return FALSE;}out->index=index;return TRUE;}
 static int SetupDiGetDeviceInterfaceDetailW(HDEVINFO,SP_DEVICE_INTERFACE_DATA*iface,SP_DEVICE_INTERFACE_DETAIL_DATA_W*out,DWORD bytes,DWORD*required,SP_DEVINFO_DATA*data){
     auto&d=memory::devices.at(iface->index);const DWORD need=static_cast<DWORD>(offsetof(SP_DEVICE_INTERFACE_DETAIL_DATA_W,DevicePath)+(d.path.size()+1)*sizeof(wchar_t));
     if(required)*required=need;if(!out||bytes<need){memory::error=ERROR_INSUFFICIENT_BUFFER;return FALSE;}
     std::copy(d.path.begin(),d.path.end(),out->DevicePath);out->DevicePath[d.path.size()]=0;if(data)data->DevInst=d.node;return TRUE;}
 static int SetupDiDestroyDeviceInfoList(HDEVINFO){return TRUE;}
-static UINT GetRawInputDeviceInfoW(HANDLE h,UINT,void*buffer,UINT*chars){auto it=memory::rawPaths.find(h);if(it==memory::rawPaths.end())return static_cast<UINT>(-1);const UINT need=static_cast<UINT>(it->second.size()+1);if(!buffer){*chars=need;return 0;}if(*chars<need)return static_cast<UINT>(-1);auto*p=static_cast<wchar_t*>(buffer);std::copy(it->second.begin(),it->second.end(),p);p[it->second.size()]=0;*chars=need;return need;}
-static std::wstring hidHideResolveXusbInterfacePath(const std::string&){++memory::xusb;auto hook=std::move(memory::routeHook);memory::routeHook={};if(hook)hook();return memory::route;}
-struct GpHidResolveScope{void noteCacheHit(){++memory::hit;}void noteRouteRefresh(bool){++memory::routeRefreshes;}void noteGenerationDiscard(){++memory::discards;}};
+static UINT GetRawInputDeviceInfoW(HANDLE h,UINT command,void*buffer,UINT*chars){
+ ++memory::rawInfoCalls;const UINT input=*chars;if(command!=RIDI_DEVICENAME)throw std::runtime_error("wrong raw command");
+ if(buffer&&reinterpret_cast<std::uintptr_t>(buffer)%alignof(DWORD))throw std::runtime_error("raw name buffer must be DWORD aligned");
+ if(memory::rawHook)memory::rawHook(memory::rawInfoCalls);
+ const auto failure=memory::rawFailures.find(memory::rawInfoCalls);
+ if(failure!=memory::rawFailures.end()){memory::error=failure->second.first;*chars=failure->second.second;memory::rawCalls.push_back({buffer!=nullptr,input,*chars,memory::error});return static_cast<UINT>(-1);}
+ auto it=memory::rawPaths.find(h);if(it==memory::rawPaths.end()){memory::error=6;memory::rawCalls.push_back({buffer!=nullptr,input,*chars,memory::error});return static_cast<UINT>(-1);}
+ const UINT need=static_cast<UINT>(it->second.size()+1);
+ if(!buffer){*chars=need;memory::rawCalls.push_back({false,input,*chars,0});return 0;}
+ if(*chars<need){*chars=need;memory::error=ERROR_INSUFFICIENT_BUFFER;memory::rawCalls.push_back({true,input,*chars,memory::error});return static_cast<UINT>(-1);}
+ auto*p=static_cast<wchar_t*>(buffer);std::copy(it->second.begin(),it->second.end(),p);p[it->second.size()]=0;*chars=need;memory::rawCalls.push_back({true,input,*chars,0});return need;
+}
+static std::wstring hidHideResolveXusbInterfacePath(const std::string& base){memory::lastRouteBase=base;++memory::xusb;auto hook=std::move(memory::routeHook);memory::routeHook={};if(hook)hook();return memory::route;}
+struct GpHidResolveScope{void noteFillKind(int){} void noteCacheHit(){++memory::hit;}void noteRouteRefresh(bool){++memory::routeRefreshes;}void noteGenerationDiscard(){++memory::discards;}};
 struct GpHidResolveCallerScope{explicit GpHidResolveCallerScope(int){}};
 struct LogField{template<class T>LogField(const char*,const T&){}};
-static void appendNativeLifecycleLog(const char*,std::initializer_list<LogField>){}
+[[maybe_unused]] static void appendNativeLifecycleLog(const char*,std::initializer_list<LogField>){}
 static bool tickCostEnabled(){return false;}
 static std::array<std::atomic<unsigned>,2> g_gpSelectedGenerationRejects{};
 template<class A,class B>void legionMotionSelectedIdentityChanging(const A&,const B&){++memory::selectedTransitions;}
 template<class A>bool msiDinputObservePhysicalXinputReturn(const A&,ULONGLONG){++memory::msiNotifications;return false;}
 template<class A>void msiForegroundIsolationObserveNative(const A&){++memory::msiNotifications;}
 template<class A>void msiNativeForegroundObserveSource(const A&,std::uint64_t){++memory::msiNotifications;}
+
+template<class Identity>static void hidHideLogPhysicalIdentityObservation(const Identity&,std::uint64_t,bool){} // Existing fixture logging effect boundary.

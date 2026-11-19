@@ -5,16 +5,27 @@ import {getNativeLaunchNoIoToolDeclaration} from './ymcc_sim/global/decky-update
 // Default/imported execution keeps all native + UI cases. Explicit CLI
 // --native-case "exact name" (repeatable) runs only those native cases; its
 // receipt is never completeRegression. Selection is never inherited from env.
+import {steamSessionObserverPublication} from './fixtures/steam_session_observer_publication.mjs';
 import {performance} from 'node:perf_hooks';import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import assert from 'node:assert/strict';import crypto from 'node:crypto';import {spawnSync} from 'node:child_process';import {createRequire} from 'node:module';
 export async function retainedSessionRepairTests(root,out,options={}){
  const selectedCases=options.nativeCases??null;if(selectedCases!==null){assert(Array.isArray(selectedCases)&&selectedCases.length>0,"Native case selection must not be empty");assert(selectedCases.every(x=>typeof x==="string"&&x.length>0),"Native case names must be nonempty exact strings");assert.equal(new Set(selectedCases).size,selectedCases.length,"Duplicate native case selection");}
+ const nativeVariant=options.nativeVariant??null;
+ if(nativeVariant!==null){
+  assert(['recovery-budget-wire','source-return-controls'].includes(nativeVariant),'Unknown native variant');
+  assert.deepEqual(selectedCases,["actual private lifecycle child uses existing Job ownership and cancels before any product action"],'Budget wire variant requires the exact original private-child case');
+ }
+ const budgetWireSegments=[];
  fs.mkdirSync(out,{recursive:true});const require=createRequire(path.join(root,'package.json')),{transformSync}=require('esbuild'),sha=b=>crypto.createHash('sha256').update(b).digest('hex');
- const rels=[...HOST_ENVIRONMENT_SOURCE_INPUTS,'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/index.mjs','tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json','native/decky_sidebar_manual_repair.h','native/decky_sidebar_automatic_repair.h','native/steam_ui_epoch.h','native/decky_update_recovery.h','native/steam_session_observer.h','native/steam_window_event_budget.h','src/bridge/deckySidebar.ts','tools/decky_retained_session_repair_selftest.mjs','tools/ymcc_sim/global/decky-update-recovery/field-record-retained-session-rogx-20261023.json'];rels.push('tools/decky_sidebar_broker_selftest.cpp');const pins=Object.fromEntries(rels.map(p=>[p,sha(fs.readFileSync(path.join(root,p)))]));
+ const rels=['tools/fixtures/steam_session_observer_publication.mjs',...HOST_ENVIRONMENT_SOURCE_INPUTS,'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/index.mjs','tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json','native/decky_sidebar_manual_repair.h','native/decky_sidebar_automatic_repair.h','native/steam_ui_epoch.h','native/decky_update_recovery.h','native/steam_session_observer.h','native/steam_window_event_budget.h','src/bridge/deckySidebar.ts','tools/decky_retained_session_repair_selftest.mjs','tools/ymcc_sim/global/decky-update-recovery/field-record-retained-session-rogx-20261023.json'];rels.push('tools/decky_sidebar_broker_selftest.cpp');if(nativeVariant)rels.push('tools/fixtures/decky_recovery_budget_wire.h','tools/fixtures/decky_recovery_budget_cases.h','tools/fixtures/decky_recovery_budget_source.mjs');const pins=Object.fromEntries(rels.map(p=>[p,sha(fs.readFileSync(path.join(root,p)))]));
  const nativeSeen=new Set(rels);function addHeader(rel){if(nativeSeen.has(rel))return;nativeSeen.add(rel);rels.push(rel);for(const match of fs.readFileSync(path.join(root,rel),'utf8').matchAll(/#include\s+"([^"]+)"/g)){const next=path.posix.normalize(path.posix.join(path.posix.dirname(rel),match[1]));if(next.startsWith('native/')&&fs.existsSync(path.join(root,next)))addHeader(next);}}
- for(const p of ['native/decky_binding_worker_entry.h','native/decky_context_cleanup_worker.h','native/settings_baseline.h','native/steam_ui_mode_observer.h','native/decky_sidebar_diagnostics.h','native/decky_sidebar_broker.h','native/decky_sidebar_runtime.h'])addHeader(p);
+ for(const p of ['native/decky_binding_worker_entry.h','native/decky_context_cleanup_worker.h','native/settings_baseline.h','native/steam_ui_mode_observer.h','native/decky_sidebar_diagnostics.h','native/decky_sidebar_broker.h','native/decky_sidebar_runtime.h','native/steam_cssloader_guard.h'])addHeader(p);
  for(const p of [...rels].filter(p=>p.startsWith('native/'))){for(const match of fs.readFileSync(path.join(root,p),'utf8').matchAll(/#include\s+"([^"]+)"/g)){const next=path.posix.normalize(path.posix.join(path.posix.dirname(p),match[1]));if(next.startsWith('native/')&&fs.existsSync(path.join(root,next)))addHeader(next);}}
  for(const p of rels)if(!pins[p])pins[p]=sha(fs.readFileSync(path.join(root,p)));
  const frozen=path.join(out,'source/native');fs.mkdirSync(frozen,{recursive:true});for(const p of rels.filter(p=>p.startsWith('native/')))fs.copyFileSync(path.join(root,p),path.join(frozen,path.basename(p)));
+ const observerPublication=steamSessionObserverPublication(Buffer.from(fs.readFileSync(path.join(root,'native/steam_session_observer.h'),'utf8').replace(/\r\n/g,'\n')));
+ fs.writeFileSync(path.join(frozen,'steam_session_observer.h'),observerPublication.bytes);
+ const observerPublicationEvidence={original:observerPublication.original,derived:observerPublication.derived,generator:observerPublication.generator,transformation:observerPublication.transformation};
+ fs.writeFileSync(path.join(out,'observer-publication.json'),JSON.stringify(observerPublicationEvidence,null,2)+'\n',{flag:'wx'});
  const override=process.env.YMCC_RETAINED_REPAIR_HEADER_OVERRIDE;if(override)fs.copyFileSync(override,path.join(frozen,'decky_sidebar_manual_repair.h'));
  const managedOverride=process.env.YMCC_MANAGED_CONTINUATION_HEADER_OVERRIDE;if(managedOverride)fs.copyFileSync(managedOverride,path.join(frozen,'decky_update_recovery.h'));
  const cleanupOverride=process.env.YMCC_FINAL_CLEANUP_HEADER_OVERRIDE;if(cleanupOverride)fs.copyFileSync(cleanupOverride,path.join(frozen,'decky_sidebar_automatic_repair.h'));
@@ -24,11 +35,19 @@ export async function retainedSessionRepairTests(root,out,options={}){
  // orchestrators. Other main.cpp regions are not this consumer's inputs.
  const extractDispatch=()=>{
   const main=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8').replace(/\r\n/g,'\n');
-  const start='[](const auto& session,const auto& args,const auto& current)->json{';
+   const start='[beforeFirstEffect](const auto& session,const auto& args,const auto& current)->json{';
   const end='\n        },\n        []{return currentPowerGeneration();},';
   const a=main.indexOf(start),b=main.indexOf(end,a);
   assert(a>=0&&b>a&&main.indexOf(start,a+start.length)<0,'Actual typed cleanup dependency callback moved; review the original consumer');
   return main.slice(a,b+'\n        }'.length);
+ };
+ const extractCleanupAdmission=()=>{
+  const main=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8').replace(/\r\n/g,'\n');
+  const deps=main.indexOf('static ymcc::deckyrepair::Dependencies deckySidebarRepairDependencies(');
+  const end=main.indexOf('\n        {}, // Durable settings IO belongs to the isolated final-cleanup child.',deps);
+  const start=main.lastIndexOf('[](const auto& session)',end);
+  assert(deps>=0&&start>deps&&end>start&&main.slice(start,end).endsWith('},'),'Actual cleanup admission moved');
+  return main.slice(start,end-1);
  };
  const extractLifecycleWriter=()=>{
   const main=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8').replace(/\r\n/g,'\n');
@@ -50,8 +69,8 @@ export async function retainedSessionRepairTests(root,out,options={}){
  fs.writeFileSync(path.join(out,'actual-main-managed-ready-state.json'),JSON.stringify({path:'native/main.cpp',sha256:sha(Buffer.from(productionManagedReadyState)),source:productionManagedReadyState},null,2)+'\n');
  const extractStableModeCallback=()=>{
   const main=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8').replace(/\r\n/g,'\n');
-  const marker='modeObserver.stableBigPicture = ';const a=main.indexOf(marker),b=main.indexOf('\n    g_steamModeObserver.initialize(',a);
-  assert(a>=0&&b>a,'Actual stable shared-mode callback moved');const expression=main.slice(a+marker.length,b).trim();assert(expression.endsWith(';'));return expression.slice(0,-1);
+  const marker='modeObserver.stableBigPicture = ',end='\n    };';const a=main.indexOf(marker),b=main.indexOf(end,a);
+  assert(a>=0&&b>a,'Actual stable shared-mode callback moved');const expression=main.slice(a+marker.length,b+end.length).trim();assert(expression.endsWith(';'));return expression.slice(0,-1);
  };
  const productionStableModeCallback=extractStableModeCallback(),stableModeOverride=process.env.YMCC_STABLE_MODE_CALLBACK_OVERRIDE;
  const compiledStableModeCallback=stableModeOverride?fs.readFileSync(stableModeOverride,'utf8'):productionStableModeCallback;
@@ -59,7 +78,7 @@ export async function retainedSessionRepairTests(root,out,options={}){
  const extractManualReceiptCallback=()=>{
   const main=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8').replace(/\r\n/g,'\n');
   const start='[](const auto& session,const json& mode,unsigned long long power,unsigned long long manualEpoch){';
-  const a=main.indexOf(start),b=main.indexOf('\n        }};',a);
+  const a=main.indexOf(start),b=main.indexOf('\n        },',a);
   assert(a>=0&&b>a&&main.indexOf(start,a+1)<0,'Actual manual provenance callback moved');return main.slice(a,b+'\n        }'.length);
  };
  const extractParentHandleSnapshot=()=>{
@@ -87,7 +106,7 @@ export async function retainedSessionRepairTests(root,out,options={}){
  const productionLifecycleService=extractLifecycleService(),lifecycleServiceOverride=process.env.YMCC_LIFECYCLE_SERVICE_OVERRIDE;
  const serviceInput=lifecycleServiceOverride?fs.readFileSync(lifecycleServiceOverride,'utf8'):productionLifecycleService;
  let compiledLifecycleService=serviceInput;
- for(const [from,to]of [['ymcc::deckymirror::frontendBuildId','fixtureFrontendBuildId'],['ymcc::deckyrepair::cleanupworker::dispatch','fixtureLifecycleDispatch'],['GetTickCount64()','fixtureTick()']]){
+ for(const [from,to]of [['ymcc::deckymirror::frontendBuildId','fixtureFrontendBuildId'],['ymcc::deckyrepair::cleanupworker::dispatchShared(g_steamSettingsObserver,','fixtureLifecycleDispatch('],['GetTickCount64()','fixtureTick()']]){
   const count=compiledLifecycleService.split(from).length-1;assert(from==='GetTickCount64()'?count===8:count===2,'Lifecycle service IO boundary moved: '+from);compiledLifecycleService=compiledLifecycleService.replaceAll(from,to);
  }
  fs.writeFileSync(path.join(out,'actual-main-lifecycle-service.json'),JSON.stringify({path:'native/main.cpp',sourceSha256:sha(Buffer.from(productionLifecycleService)),compiledSha256:sha(Buffer.from(compiledLifecycleService)),source:productionLifecycleService,compiled:compiledLifecycleService,adaptedIo:['frontend build prefix read','private worker dispatch'],realPrivateWorkerExecutedSeparately:true},null,2)+'\n');
@@ -97,6 +116,21 @@ export async function retainedSessionRepairTests(root,out,options={}){
  const productionCleanupDispatch=extractDispatch(),dispatchOverride=process.env.YMCC_CLEANUP_DISPATCH_OVERRIDE;
  const compiledCleanupDispatch=dispatchOverride?fs.readFileSync(dispatchOverride,'utf8'):productionCleanupDispatch;
  fs.writeFileSync(path.join(out,'actual-main-cleanup-dispatch.json'),JSON.stringify({path:'native/main.cpp',sourceSha256:sha(Buffer.from(productionCleanupDispatch)),compiledSha256:sha(Buffer.from(compiledCleanupDispatch)),override:dispatchOverride?{path:dispatchOverride,sha256:sha(fs.readFileSync(dispatchOverride))}:null,productionSource:productionCleanupDispatch},null,2)+'\n');
+ const cleanupAdmission=extractCleanupAdmission();
+ fs.writeFileSync(path.join(out,'actual-main-cleanup-admission.json'),JSON.stringify({path:'native/main.cpp',sha256:sha(Buffer.from(cleanupAdmission)),source:cleanupAdmission},null,2)+'\n');
+ // Reuse the existing resource EOF proof; only adapt its authenticated
+ // pipe, request and result names to this actual cleanup-worker consumer.
+ const exitFixtureRel='tools/decky_resource_worker_selftest.cpp';pins[exitFixtureRel]=sha(fs.readFileSync(path.join(root,exitFixtureRel)));
+ const exitFixture=fs.readFileSync(path.join(root,exitFixtureRel),'utf8').replace(/\r\n/g,'\n');
+ const exitPick=(begin,end)=>{const a=exitFixture.indexOf(begin),b=exitFixture.indexOf(end,a);assert(a>=0&&b>a&&exitFixture.indexOf(begin,a+begin.length)<0,'Original exited-pipe proof moved: '+begin);return exitFixture.slice(a,b);};
+ const exitWaitSegments=[];
+ const exitAdapt=(name,source,adapt)=>{const compiled=adapt(source);exitWaitSegments.push({path:exitFixtureRel,consumer:name,sha256:sha(Buffer.from(source)),compiledSha256:sha(Buffer.from(compiled)),source,compiled});return compiled;};
+ const exitHelpers=exitAdapt('cleanupExitedPipeHelpers',exitPick('static void need(','static bool childPeer('),s=>s);
+ const exitHandles=exitAdapt('cleanupExitedPipeHandles',exitPick('static DWORD handles(){','static Json exitedResourceWait='),s=>s);
+ const exitChild=exitAdapt('cleanupExitedPipeChild',exitPick('        if(behavior==L"eof-held-endpoint"){','        if(behavior==L"eof"){'),s=>s.replaceAll('channel.pipeHandle()','borrowedPipe').replaceAll('channel.cancelEvent()','cancelEvent').replaceAll('fs::path(nonce)','home').replaceAll('YMCC_RESOURCE_EXIT_','YMCC_CLEANUP_EXIT_').replace('exit=0;return true;','ExitProcess(0);'));
+ const exitCheck=exitAdapt('cleanupExitedPipeCheck',exitPick('static Json exitedResourceWait=','static Json cases='),s=>s.replace('checkExitedResourceWait(const fs::path& steam,const fs::path& home,const fs::path& metadata)','checkExitedCleanupWait(const ymcc::steamsession::Session& steam,const Json& request,const Json& state,const fs::path& home)').replaceAll('YMCC_RESOURCE_EXIT_','YMCC_CLEANUP_EXIT_').replaceAll('YMCC_RESOURCE_WORKER_FIXTURE','YMCC_CLEANUP_WORKER_FIXTURE').replace('worker::prepare(steam,home,metadata,current,true)','ymcc::deckyrepair::cleanupworker::dispatch(steam,false,fixtureSteamIdentity(steam),request,state,current)').replaceAll('resourceWorkerDestroyed','cleanupWorkerDestroyed').replaceAll('preparation-cancelled','decky-cleanup-cancelled-unconfirmed').replace('need(exitedAt&&identityVerified', 'need(!result.value("ok",true)&&result.value("mutated",false)&&result.value("uncertain",false)&&!result.value("cleanupWorkerReplyReceived",true)&&result.value("cleanupWorkerHandles",99u)==0&&result.value("cleanupWorkerProcesses",99u)==0&&exitedAt&&identityVerified'));
+ const exitLeaf=exitAdapt('cleanupExitedPipeLeaf',exitPick(' if(argc==4&&std::wstring_view(argv[1])==L"--fixture-resource-held-endpoint")',' int code=0;if(childPeer'),s=>s.replace('std::wstring_view(argv[1])==L"','std::string_view(argv[1])=="'));
+ fs.writeFileSync(path.join(out,'actual-original-exited-pipe-fixture.json'),JSON.stringify({source:exitFixtureRel,sourceSha256:pins[exitFixtureRel],segments:exitWaitSegments,scope:'Existing source-built EOF proof, exact selected original cleanup case. Borrowed authenticated pipe, cleanup request/result and narrow main arguments adapted. No product/Steam/setting action.'},null,2)+'\n');
  const frameFixtureRel='tools/decky_binding_client_selftest.cpp';pins[frameFixtureRel]=sha(fs.readFileSync(path.join(root,frameFixtureRel)));
  const frameFixture=fs.readFileSync(path.join(root,frameFixtureRel),'utf8').replace(/\r\n/g,'\n');
  const writerAt=frameFixture.indexOf('inline bool writeRaw(ChildChannel& channel,');
@@ -134,7 +168,7 @@ export async function retainedSessionRepairTests(root,out,options={}){
  assert.equal(compiledBackendProof.split('GetExtendedTcpTable(').length-1,2,'OS query boundary changed');assert.equal(compiledBackendProof.split('==1337').length-1,1,'Listener port boundary changed');
  const classifierBackendProof=compiledBackendProof.replaceAll('GetExtendedTcpTable(','fixtureGetExtendedTcpTable(').replace('==1337','==backendPort');
  fs.writeFileSync(path.join(out,'actual-main-backend-proof.json'),JSON.stringify({path:'native/main.cpp',source:productionBackendProof,sha256:sha(Buffer.from(productionBackendProof)),compiledProductSource:compiledBackendProof,compiledProductSha256:sha(Buffer.from(compiledBackendProof)),classifierSource:classifierBackendProof,classifierSha256:sha(Buffer.from(classifierBackendProof)),adaptedIo:['ephemeral loopback test port','OS query fault wrapper; default calls actual GetExtendedTcpTable'],override:backendProofOverride?{path:backendProofOverride,sha256:sha(fs.readFileSync(backendProofOverride))}:null},null,2)+'\n');
- const native=String.raw`#include <winsock2.h>
+ let native=String.raw`#include <winsock2.h>
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
 #include "decky_sidebar_automatic_repair.h"
@@ -148,7 +182,21 @@ export async function retainedSessionRepairTests(root,out,options={}){
 #include "steam_ui_mode_observer.h"
 #include "decky_sidebar_diagnostics.h"
 #include "decky_sidebar_broker.h"
+#include "steam_cssloader_guard.h"
 using Json=nlohmann::json;using json=nlohmann::json;using namespace ymcc::deckyrepair;
+static std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> fixtureSteamIdentity(const ymcc::steamsession::Session& steam){
+ auto identity=std::make_shared<ymcc::steamsession::IdentitySnapshot>();identity->session=steam;identity->presence=1;
+ identity->registeredPid=steam.pid;identity->rootReadError=identity->registeredPidReadError=identity->accountReadError=ERROR_SUCCESS;
+ identity->windowsSessionKnown=ProcessIdToSessionId(steam.pid,&identity->windowsSession)!=FALSE;
+ identity->windowsSessionError=identity->windowsSessionKnown?ERROR_SUCCESS:GetLastError();return identity;
+}
+
+static void fixtureOwnSteamContext(ymcc::steamsession::Session& steam,Json& mode){
+ wchar_t executable[32768]{};const auto size=GetModuleFileNameW(nullptr,executable,static_cast<DWORD>(std::size(executable)));
+ if(!size||size>=std::size(executable)||std::filesystem::path(executable).filename()!=L"steam.exe")throw std::runtime_error("private Steam image fixture path is invalid");
+ steam.root=ymcc::steamlive::normalizedPath(std::filesystem::path(executable).parent_path().wstring());steam.pid=GetCurrentProcessId();steam.created=cleanupworker::processBirth(GetCurrentProcess());
+ mode["pid"]=steam.pid;mode["birth"]=std::to_string(steam.created);
+}
 
 namespace actualBrokerClient {
 using namespace ymcc::deckymirror;
@@ -208,7 +256,12 @@ static const auto actualMainManualReceiptCallback=${productionManualReceiptCallb
 static std::wstring fixtureBackendRoot(){wchar_t image[32768]{};const auto length=GetModuleFileNameW(nullptr,image,32768);if(!length||length>=32768)throw std::runtime_error("fixture backend path");return (fspath::path(std::wstring(image,length)).parent_path()/L"native-backend-proof").wstring();}
 static Json actualMainLifecycleChildGate(const cleanupworker::Request& request,const Json& fresh,const std::string& build,bool admitted=true){
  const auto& session=request.identity.steam;const auto current=[&]{return admitted;};
- Dependencies deps;deps.freshMode=[&](const auto&){return fresh;};deps.installed=[&]{return build;};deps.loader=ymcc::deckyidentity::version;
+ Dependencies deps;deps.freshMode=[&](const auto&)->Json{const auto& result=fresh;
+            // Offline/account-switch proof is rechecked inside this exact child.
+            const auto observed=ymcc::deckysession::positiveAccount(result.value("observedAccount",json()));
+            if((observed&&observed!=session.account)||(request.identity.liveUiAccount&&
+                (!result.value("deckyAccountWatchAvailable",false)||observed!=session.account)))return json{};
+            return fresh;};deps.installed=[&]{return build;};deps.loader=ymcc::deckyidentity::version;
  const std::wstring POWER_CONTROL_DIR=fixtureBackendRoot();
 ${compiledLifecycleChildGate}
  return {{"ok",false},{"mutated",false},{"reason","fixture-not-lifecycle"}};
@@ -271,15 +324,44 @@ static bool tryReply(const Json& raw,int& exit){
 }
 }
 struct ModeObservationPort {std::function<Json()> read;Json snapshot(const ymcc::steamsession::Session&)const{return read();}};
-struct NativeRuntimePort {std::function<Json()> read;Json snapshot()const{return read();}};
+struct NativeRuntimePort {
+ struct State:Json {bool enabled;explicit State(Json state):Json(std::move(state)),enabled(value("enabled",false)){}};
+ std::function<Json()> read;State snapshot()const{return State(read());}bool exitFenced()const{return false;}
+};
 static ModeObservationPort g_steamModeObserver;static NativeRuntimePort g_deckySidebarRuntime;
 static Json deckySidebarStateJson(const Json& state){return state;}
-static const auto actualMainCleanupDispatch=${compiledCleanupDispatch};
+enum class PowerLifecycle {Ready,Suspended};
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<bool> g_exitRequested{false};
+struct CleanupIdentityPort {
+ ymcc::steamsession::Session session;
+ auto sessionSnapshot()const{return session;}
+ std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> value;
+ mutable std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> publishedInput;
+ mutable ymcc::steamsession::Observer source;
+ unsigned refreshes=0;
+ auto identitySnapshot()const{
+  if(value!=publishedInput){ymcc::steamsession::IdentitySnapshot absent;
+   ymcc::steamsession::IdentityPublicationFixture::publish(source,value?*value:absent);publishedInput=value;}
+  return value?source.identitySnapshot():std::shared_ptr<const ymcc::steamsession::IdentitySnapshot>{};
+ }
+ auto delegateIdentity(const std::shared_ptr<const ymcc::steamsession::IdentitySnapshot>& expected,DWORD account,bool ui){identitySnapshot();return source.delegateIdentity(expected,account,ui);}
+ auto identityReadView()const{identitySnapshot();return source.identityReadView();}
+ bool postFactRead(std::function<void()> work,std::function<void()> done){return source.postFactRead(std::move(work),std::move(done));}
+ bool requestIdentityRefresh(){++refreshes;return true;}
+ void withdraw(){value.reset();identitySnapshot();}
+};
+static CleanupIdentityPort g_steamSettingsObserver;
+static const auto actualMainCleanupAdmission=${cleanupAdmission};
+static const auto actualMainCleanupDispatch=[](const std::function<bool()>& beforeFirstEffect){
+ return ${compiledCleanupDispatch};
+}(std::function<bool()>{});
 namespace lifecycleServiceFixture {
 struct RuntimeState {bool enabled=true,steamKnown=true,steamRunning=true;DWORD pid=0;std::string phase="frontend-attached",reason="retained-frontend-connected";};
-struct RuntimePort {RuntimeState state;std::atomic<unsigned> connectionWakes{0};std::function<bool()> ownerWake;RuntimeState snapshot()const{return state;}bool ownsLiveProcess(HANDLE process)const{return process&&WaitForSingleObject(process,0)==WAIT_TIMEOUT;}bool requestConnectionCheck(){if(ownerWake&&!ownerWake())return false;++connectionWakes;return true;}bool requestLaunchAdmissionRefresh(){return !state.pid;}};
-struct SessionPort {ymcc::steamsession::Session value;auto sessionSnapshot()const{return value;}};
-struct ModePort {Json value;ymcc::steamui::ModeObserver* actual=nullptr;mutable ymcc::steamsession::Session lastRequested;mutable std::function<void()> afterSnapshot;Json snapshot(const ymcc::steamsession::Session& session)const{lastRequested=session;auto result=actual?actual->snapshot(session):value;auto callback=afterSnapshot;afterSnapshot={};if(callback)callback();return result;}};
+struct RuntimePort {RuntimeState state;std::atomic<unsigned> connectionWakes{0};std::function<bool()> ownerWake;RuntimeState snapshot()const{return state;}bool ownsLiveProcess(HANDLE process)const{return process&&WaitForSingleObject(process,0)==WAIT_TIMEOUT;}bool requestConnectionCheck(){if(ownerWake&&!ownerWake())return false;++connectionWakes;return true;}bool requestLaunchAdmissionRefresh(bool retainedFrontendVerified=false,ymcc::deckysidebar::AdmissionRefreshReceipt* receipt=nullptr){if(receipt)*receipt={};return !state.pid&&!(retainedFrontendVerified&&state.phase=="frontend-attached"&&state.reason=="retained-frontend-connected");}};
+struct SessionPort {ymcc::steamsession::Session value;auto sessionSnapshot()const{return value;}auto identitySnapshot()const{return fixtureSteamIdentity(value);}bool requestIdentityRefresh(){return true;}};
+struct ModePort {Json value;ymcc::steamui::ModeObserver* actual=nullptr;mutable ymcc::steamsession::Session lastRequested;mutable std::function<void()> afterSnapshot;Json snapshot(const ymcc::steamsession::Session& session,ymcc::steamui::ModeCacheMiss* miss=nullptr,ymcc::steamui::ModeCacheTiming* timing=nullptr)const{lastRequested=session;if(miss)*miss={};if(timing)*timing={};auto result=actual?actual->snapshot(session,miss,timing):value;auto callback=afterSnapshot;afterSnapshot={};if(callback)callback();return result;}};
+static void deckySidebarAdmissionWakeDiagnostic(ymcc::deckysidebar::AdmissionRefreshReceipt){} // This fixture has no native log writer.
 enum class PowerLifecycle{Ready,Suspended};
 static AutomaticRepair g_deckyAutomaticRepair;
 static unsigned long long tick=1000;static auto fixtureTick(){return tick;}
@@ -288,13 +370,26 @@ static std::atomic<bool> g_exitRequested{false};static std::atomic<PowerLifecycl
 static unsigned long long power=1;static auto currentPowerGeneration(){return power;}
 static ymcc::deckyupdate::Recovery g_deckyUpdateRecovery;
 static ymcc::deckyupdate::ManualBaseline g_deckyManualBaseline;
-struct BrokerPort {Json value={{"active",true},{"connected",true},{"runId",std::string(32,'c')},{"connection","1"}};ymcc::deckymirror::Broker* actual=nullptr;Json status()const{return actual?actual->status():value;}bool reply(const std::string& conn,const Json& message){return actual&&actual->reply(conn,message);}};
+struct BrokerPort {Json value={{"active",true},{"connected",true},{"runId",std::string(32,'c')},{"connection","1"}};ymcc::deckymirror::Broker* actual=nullptr;Json status()const{return actual?actual->status():value;}bool reply(const std::string& conn,const Json& message,const std::function<bool()>& owner={}){return actual&&actual->reply(conn,message,owner);}};
 struct MirrorCostPort{std::atomic<unsigned> replies{0};void reply(const Json&,ULONGLONG){++replies;}};static MirrorCostPort g_deckyCostContext;
 static BrokerPort g_deckyMirrorBroker;
+// Boot HUD ownership is outside this consumer. Refuse scoped writes; ordinary mirror replies have no borrowed boot owner.
+static std::function<bool()> monitorHudBootOwnerCheck(const Json& args){return args.contains("bootContext")?std::function<bool()>([]{return false;}):std::function<bool()>{};}
 ${compiledManagedReadyState}
 static bool backendReady=false;static unsigned backendReads=0;static DWORD fixtureBackendPid=61;static unsigned long long fixtureBackendBirth=1234;
 static std::function<void()> afterBackendRead;static bool backendAbsenceCertified=true;
 static bool deckySidebarAcquireManagedBackend(DeckyManagedBackendLease& value,bool* absent=nullptr){if(absent)*absent=false;++backendReads;const auto callback=afterBackendRead;if(callback)callback();if(!backendReady){if(absent)*absent=backendAbsenceCertified;return false;}value.pid=fixtureBackendPid;value.birth=fixtureBackendBirth;if(fixtureBackendPid!=61){value.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,fixtureBackendPid);if(!value.value)return false;}return true;} // actual Runtime Job/OS listener checks are separate IO boundaries
+   struct BackendControl{HANDLE job=nullptr,process=nullptr,thread=nullptr;bool stop(){if(job){CloseHandle(job);job=nullptr;}bool stopped=true;if(process){stopped=WaitForSingleObject(process,2000)==WAIT_OBJECT_0;if(!stopped){TerminateProcess(process,0);stopped=WaitForSingleObject(process,2000)==WAIT_OBJECT_0;}CloseHandle(process);process=nullptr;}if(thread){CloseHandle(thread);thread=nullptr;}fixtureBackendPid=61;fixtureBackendBirth=1234;return stopped;}~BackendControl(){stop();}};
+template<class Need>static void startFixtureBackendControl(BackendControl& control,const Need& need){
+   wchar_t ownImage[32768]{};const auto ownLength=GetModuleFileNameW(nullptr,ownImage,32768);need(ownLength&&ownLength<32768,"same-host fixture image path missing");
+   const auto backendDir=fspath::path(fixtureBackendRoot())/L"decky";fspath::create_directories(backendDir);const auto backendImage=backendDir/L"PluginLoader_noconsole.exe";
+   need(CopyFileW(ownImage,backendImage.c_str(),FALSE)!=FALSE,"same-host suspended control copy failed");
+   control.job=CreateJobObjectW(nullptr,nullptr);need(control.job!=nullptr,"same-host test backend Job missing");JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;need(SetInformationJobObject(control.job,JobObjectExtendedLimitInformation,&limits,sizeof(limits))!=FALSE,"same-host Job containment failed");
+   STARTUPINFOW backendStartup{};backendStartup.cb=sizeof(backendStartup);PROCESS_INFORMATION backendProcess{};std::wstring backendCommand=L"\""+backendImage.wstring()+L"\" --inert-never-resumed";
+   need(CreateProcessW(backendImage.c_str(),backendCommand.data(),nullptr,nullptr,FALSE,CREATE_SUSPENDED|CREATE_NO_WINDOW,nullptr,nullptr,&backendStartup,&backendProcess)!=FALSE,"same-host suspended backend process failed");
+   control.process=backendProcess.hProcess;control.thread=backendProcess.hThread;need(AssignProcessToJobObject(control.job,control.process)!=FALSE,"same-host suspended backend not in test Job");
+   fixtureBackendPid=backendProcess.dwProcessId;fixtureBackendBirth=cleanupworker::processBirth(control.process);need(fixtureBackendBirth!=0,"same-host suspended backend birth unavailable");
+}
 static const std::wstring POWER_CONTROL_DIR=L"inert-lifecycle-service";
 static Json ledger,responseOverride,lastPrivateState;static bool currentAfterReply=false;
 static bool useActualPrivateChild=false,holdActualPrivateChild=false,dropNextConfirmReply=false;static Json privateMain,privateBackup,privateResults=Json::array(),privateModeOverride;static std::string build;static unsigned fileReads=0,dispatches=0;static std::function<void()> beforeReply,afterPrivateReply,afterDroppedConfirm;static Json lostConfirmReplyOverride,ownedInspectReplyOverride;static std::string ownedInspectBirthOverride;static unsigned rawReplyKind=0;static unsigned postSnapshotRaceReads=0;static bool postSnapshotRaceRan=false;
@@ -302,7 +397,7 @@ static std::string fixtureFrontendBuildId(const std::wstring&){++fileReads;retur
 static Json deckySidebarStateJson(const RuntimeState& state){return {{"enabled",state.enabled},{"pid",state.pid},{"phase",state.phase},{"reason",state.reason},{"steamKnown",true},{"steamRunning",true},{"revision",7u}};}
 static bool captureManagedGuard=false;static Json managedGuardDiagnostics=Json::array();
 static void deckySidebarDiagnostic(const char* event,const Json& detail,bool=false){if(captureManagedGuard&&std::string(event)=="managed-lifecycle")managedGuardDiagnostics.push_back(ymcc::deckydiag::record(event,detail));}
-static Json fixtureLifecycleDispatch(const ymcc::steamsession::Session& steam,bool fromUi,const Json& args,const Json& privateState,const std::function<bool()>& current,DWORD window,const char* schema){
+static Json fixtureLifecycleDispatch(const ymcc::steamsession::Session& steam,bool fromUi,const std::shared_ptr<const ymcc::steamsession::IdentitySnapshot>& identity,const Json& args,const Json& privateState,const std::function<bool()>& current,DWORD window,const char* schema){
  ++dispatches;lastPrivateState=privateState;if(!current())throw std::runtime_error("service fixture entered non-current boundary");
  if(useActualPrivateChild){
   auto isolated=privateState;isolated["fixtureActualLifecycle"]=true;isolated["fixtureMode"]=privateModeOverride.is_object()?privateModeOverride:(g_steamModeObserver.actual?g_steamModeObserver.actual->snapshot(steam):g_steamModeObserver.value);
@@ -312,7 +407,7 @@ static Json fixtureLifecycleDispatch(const ymcc::steamsession::Session& steam,bo
   ymcc::deckybinding::detail::Handle rawEntered;
   if(rawKind){const auto name=L"Local\\YMCC-ActualRawReply-"+std::to_wstring(steam.pid)+L"-"+std::to_wstring(rawKind);
    rawEntered.value=CreateEventW(nullptr,TRUE,FALSE,name.c_str());if(!rawEntered.value)throw std::runtime_error("raw reply event unavailable");isolated["fixtureRawReplyKind"]=rawKind;}
-  const auto result=cleanupworker::dispatch(steam,fromUi,transportedArgs,isolated,current,window,schema);
+  const auto result=cleanupworker::dispatch(steam,fromUi,identity,transportedArgs,isolated,current,window,schema);
   const bool rawObserved=rawKind&&WaitForSingleObject(rawEntered.value,0)==WAIT_OBJECT_0;
   if(afterPrivateReply)afterPrivateReply();
   privateResults.push_back({{"task",args.at("task")},{"modeEpoch",args.at("modeEpoch")},{"transportedArgs",transportedArgs},{"result",result},{"rawReplyKind",rawKind},{"rawReplyPreBusinessChildEntered",rawObserved&&rawKind<=8},{"rawReplyAfterActualReadonlyInspect",rawObserved&&rawKind>=9}});currentAfterReply=current();
@@ -333,6 +428,9 @@ static const auto actualNativeMirrorReply=${compiledNativeMirrorReply};
 static void actualManagedObserverGuard(){
 ${productionManagedObserverGuard}
 }
+// Wallpaper owns this notification. Its IO is outside the retained-session fixture.
+static void steamWallpaperForegroundWake(){}
+static ymcc::steamcss::Runtime g_steamCssGuard; // Uninitialized actual owner: no helper/thread/network starts.
 static const auto actualStableModeCallback=${compiledStableModeCallback};
 }
 
@@ -399,12 +497,41 @@ static Json run(){
 }
 }
 
+namespace exitwaitfixture {
+namespace fs=std::filesystem;
+${exitHelpers}
+${exitHandles}
+static void heldRoot(HANDLE borrowedPipe,HANDLE cancelEvent,const fs::path& home){
+ const auto behavior=env(L"YMCC_CLEANUP_WORKER_FIXTURE");
+${exitChild}
+ need(false,"cleanup held-root mode missing");
+}
+${exitCheck}
+}
 int main(int argc,char** argv){
+${exitLeaf}
  if(argc==3&&std::string(argv[1])=="--joint-plain-process-control")return jointresource::plainProcessCreationControl(std::filesystem::path(argv[2]));
  int workerExit=0;
- if(ymcc::deckybinding::entry::tryRunCommandLine(GetCommandLineW(),workerExit,[](const Json& raw,HANDLE cancel,const auto& emit,int& exit){
+ if(ymcc::deckybinding::entry::tryRunCommandLine<true>(GetCommandLineW(),workerExit,[](const Json& raw,HANDLE cancel,const auto& emit,int& exit){
   if(actualRawReply::tryReply(raw,exit))return true;
   return ymcc::deckyrepair::cleanupworker::tryRun(raw,cancel,emit,exit,[](const auto& request,HANDLE cancel)->Json{
+   // New normal requests execute the real child lease. Existing unmarked legacy
+   // fixture requests retain their original inert OS/session boundary.
+   std::unique_ptr<ymcc::deckybinding::worker::SteamLease> delegatedLease;
+   if(request.identity.delegatedIdentity){delegatedLease=std::make_unique<ymcc::deckybinding::worker::SteamLease>(request.identity,L"Software\\YMCC-NONEXISTENT-CLEANUP-FIXTURE",nullptr,cancel);
+    if(!delegatedLease->current())throw std::runtime_error("delegated private Steam lease not current");}
+   if(request.identity.delegatedIdentity&&request.args.at("modeEpoch")=="delegation-held:1"){
+    const auto name=L"Local\\YMCC-Cleanup-Delegation-"+std::to_wstring(request.identity.steam.pid);
+    HANDLE entered=OpenEventW(EVENT_MODIFY_STATE,FALSE,name.c_str());if(!entered)throw std::runtime_error("delegation entry marker absent");SetEvent(entered);CloseHandle(entered);
+    WaitForSingleObject(cancel,5000);
+    return {{"ok",false},{"mutated",false},{"reason",delegatedLease->current()?"delegation-not-cancelled":"steam-delegation-revoked"}};
+   }
+   if(!request.lifecycle&&request.args.at("modeEpoch")=="exit-held-endpoint:1"){
+    int count=0;auto** arguments=CommandLineToArgvW(GetCommandLineW(),&count);
+    if(!arguments||count!=4)throw std::runtime_error("cleanup authenticated pipe arguments missing");
+    const auto borrowedPipe=reinterpret_cast<HANDLE>(static_cast<UINT_PTR>(std::stoull(arguments[2])));LocalFree(arguments);
+    exitwaitfixture::heldRoot(borrowedPipe,cancel,std::filesystem::path(request.state.at("fixtureExitHome").template get<std::string>()));
+   }
    if(request.lifecycle&&request.state.value("fixturePlainProcessControl",false))return Json{{"ok",true},{"mutated",false},{"fixtureWorkerPid",GetCurrentProcessId()},{"plainWin32Control",jointresource::runPlainProcessControl()}};
    if(request.lifecycle&&request.state.value("fixtureActualLifecycle",false)){
     fixtureSettings[YM_SETTINGS_FILE]=request.state.at("fixtureMain").dump();fixtureSettings[YM_SETTINGS_BACKUP_FILE]=request.state.at("fixtureBackup").dump();fixtureReads=fixtureWrites=fixtureFailWrite=0;
@@ -420,17 +547,17 @@ int main(int argc,char** argv){
     result["fixtureSavedMain"]=ymcc::settingsBaseline::parseDocument(fixtureSettings[YM_SETTINGS_FILE]);result["fixtureSavedBackup"]=ymcc::settingsBaseline::parseDocument(fixtureSettings[YM_SETTINGS_BACKUP_FILE]);
     return result;
    }
-   if(request.lifecycle)return Json{{"ok",true},{"mutated",false},{"fixtureTask",request.args.at("task")},{"nativeHost",request.state.at("cleanupNativeHost")}};
+   if(request.lifecycle)return Json{{"ok",true},{"mutated",false},{"fixtureTask",request.args.at("task")},{"nativeHost",request.state.at("cleanupNativeHost")},{"delegatedIdentity",request.identity.delegatedIdentity}};
    if(request.args.at("modeEpoch")=="hang-document:1"){
     const auto name=L"Local\\YMCC-Cleanup-Hang-"+std::to_wstring(request.identity.steam.pid);
     HANDLE entered=OpenEventW(EVENT_MODIFY_STATE,FALSE,name.c_str());if(entered){SetEvent(entered);CloseHandle(entered);}Sleep(INFINITE);
    }
    if(request.args.at("modeEpoch")=="slow-document:1")Sleep(4000);
-   return {{"ok",true},{"mutated",true},{"requestDispatched",true},{"verifiedAccount",request.identity.steam.account},{"fromUi",request.identity.liveUiAccount}}; // inert child only, no Steam API
+   return {{"ok",true},{"mutated",true},{"requestDispatched",true},{"verifiedAccount",request.identity.steam.account},{"fromUi",request.identity.liveUiAccount},{"delegatedIdentity",request.identity.delegatedIdentity}}; // inert child only, no Steam API
   });
  }))return workerExit;
  std::set<std::string> selectedCases;for(int i=2;i<argc;++i)selectedCases.insert(argv[i]);
- Json declaredCases=Json::array(),cases=Json::array(),upgradeActions=Json::array(),cleanupActions=Json::array(),workerResults=Json::array();auto check=[&](const char* name,auto run){declaredCases.push_back(name);if(argc>2&&!selectedCases.contains(name))return;try{run();cases.push_back({{"name",name},{"pass",true}});}catch(const std::exception& e){cases.push_back({{"name",name},{"pass",false},{"error",e.what()}});}};
+ Json declaredCases=Json::array(),cases=Json::array(),upgradeActions=Json::array(),cleanupActions=Json::array(),workerResults=Json::array();auto check=[&](const char* name,auto run){declaredCases.push_back(name);if(argc>2&&!selectedCases.contains(name))return;const auto caseStarted=std::chrono::steady_clock::now();try{run();cases.push_back({{"name",name},{"pass",true}});}catch(const std::exception& e){cases.push_back({{"name",name},{"pass",false},{"error",e.what()}});}cases.back()["elapsedMs"]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-caseStarted).count();};
  auto need=[](bool value,const char* reason){if(!value)throw std::runtime_error(reason);};
  const auto initial=Json{{"enabled",true},{"pid",0u},{"steamKnown",true},{"steamRunning",true},{"phase","unavailable"},{"reason","mirror-bootstrap-session-changed"},{"revision",7u}};
  check("field failure preserves manual availability without admitting other failures",[&]{need(repairable(initial),"ROGX session rejection hides manual repair");for(const auto& [key,value]:std::vector<std::pair<std::string,Json>>{{"enabled",false},{"pid",5u},{"steamKnown",false},{"steamRunning",false},{"phase","failed"},{"reason","resource-hash-mismatch"}}){auto bad=initial;bad[key]=value;need(!repairable(bad),"unrelated failure admitted");}});
@@ -448,6 +575,27 @@ int main(int argc,char** argv){
  check("automatic path never rebuilds Steam after this failure",[&]{reset();ManualRepair r;const auto reads=freshReads,actions=transports,checks=preflights;auto automatic=args;automatic.erase("userInitiated");automatic["automatic"]=true;auto result=r.request(automatic,deps,Origin::Automatic);need(result.value("reason",std::string{})=="steam-ui-refresh-requires-user"&&freshReads==reads&&transports==actions&&preflights==checks,"automatic refresh or IO admitted");});
  check("future stable upgrades use numeric observed-document pinning",[&]{for(const auto& versions:std::vector<std::pair<std::string,std::string>>{{"v3.3.1","v3.3.0"},{"v3.4.0","v3.3.1"},{"v4.0.0","v3.4.0"},{"v3.10.0","v3.9.0"}}){reset();deps.loader=versions.first;mode["deckyUpdateResidue"]["loaderVersion"]=versions.second;const auto action=target(session,mode,build,deps.loader);need(!action.is_null()&&action.at("loaderVersion")==versions.second,"future upgrade lost actual document identity");upgradeActions.push_back({{"installedLoader",versions.first},{"loadedLoader",versions.second},{"action",action}});ymcc::deckyupdate::Recovery recovery;need(!recovery.allowsRetainedFrontend(session,mode,build,deps.loader),"mixed future version auto rebound");}deps.loader="v3.3.0";});
  check("upgrade alternation never trusts stale frontend or Loader receipts",[&]{reset();ymcc::deckyupdate::Recovery recovery;mode["deckyUpdateResidue"]["loaderVersion"]="v3.3.1";need(recovery.allowsRetainedFrontend(session,mode,build,"v3.3.1"),"matching new context refused");need(!recovery.allowsRetainedFrontend(session,mode,build,"v3.3.0"),"old installed receipt accepted newer document");mode["deckyUpdateResidue"]["frontendBuildId"]=std::string(64,'b');need(!recovery.allowsRetainedFrontend(session,mode,build,"v3.3.1"),"old build receipt accepted different new frontend");mode["deckyUpdateResidue"]["frontendBuildId"]=build;auto foreign=session;++foreign.created;need(!recovery.allowsRetainedFrontend(foreign,mode,build,"v3.3.1"),"stale new-process receipt trusted");recovery.veto();need(!recovery.allowsRetainedFrontend(session,mode,build,"v3.3.1"),"OFF lost across alternating update state");});
+ check("verified same Loader frontend update pins the prior native-granted plugin",[&]{
+  reset();const auto prior=std::string(64,'b');mode["deckyUpdateResidue"]["frontendBuildId"]=prior;mode["deckyBackendConnected"]=true;
+  auto source=[&]<class T>(T& r,const auto& s,const auto& m,const std::string& installed,const std::string& loader)->std::string{
+   if constexpr(requires{r.frontendUpdateSource(s,m,installed,loader);})return r.frontendUpdateSource(s,m,installed,loader);else return {};
+  };
+  ymcc::deckyupdate::Recovery recovery;
+  need(source(recovery,session,mode,build,deps.loader).empty(),"ordinary-read-granted-module-update");
+  need(recovery.consider(session,mode,build,true,deps.loader)=="updated-decky-frontend-pending","native-update-not-detected");
+  need(!recovery.allowsRetainedFrontend(session,mode,build,deps.loader),"ordinary-exact-build-gate-weakened");
+  need(source(recovery,session,mode,build,deps.loader)==prior,"verified-prior-plugin-update-not-admitted");
+  auto bad=mode;bad.erase("deckyBackendConnected");need(source(recovery,session,bad,build,deps.loader).empty(),"unknown-backend-update-admitted");
+  bad=mode;bad["deckyBackendConnected"]=false;need(source(recovery,session,bad,build,deps.loader).empty(),"closed-backend-update-admitted");
+  for(const auto& value:std::vector<Json>{nullptr,1,"true",std::vector<int>{}}){bad=mode;bad["deckyBackendConnected"]=value;need(source(recovery,session,bad,build,deps.loader).empty(),"malformed-backend-update-admitted");}
+  bad=mode;bad["deckyUpdateResidue"]["loaderVersion"]="v3.2.10";need(source(recovery,session,bad,build,deps.loader).empty(),"mixed-loader-update-admitted");
+  bad=mode;bad["deckyUpdateResidue"]["active"]=false;need(source(recovery,session,bad,build,deps.loader).empty(),"inactive-plugin-update-admitted");
+  bad=mode;bad["mode"]="desktop";need(source(recovery,session,bad,build,deps.loader).empty(),"desktop-plugin-update-admitted");
+  bad=mode;bad["deckyFrontendLoaded"]=false;need(source(recovery,session,bad,build,deps.loader).empty(),"unloaded-plugin-update-admitted");
+  bad=mode;bad["deckyUpdateResidue"]["frontendBuildId"]=build;need(source(recovery,session,bad,build,deps.loader).empty(),"matching-plugin-gained-reload-authority");
+  auto other=session;++other.created;need(source(recovery,other,mode,build,deps.loader).empty(),"other-steam-birth-borrowed-update");
+  recovery.veto();need(source(recovery,session,mode,build,deps.loader).empty(),"OFF-revived-plugin-update");
+ });
  check("manual old-document refresh acknowledges dispatch without claiming connection",[&]{reset();deps.loader="v3.3.1";ManualRepair r;const auto before=state;const auto result=r.request(args,deps);deps.loader="v3.3.0";need(result.value("ok",false)&&state==before&&state.at("phase")=="unavailable","request acknowledgement fabricated a ready backend");});
  check("stale revision pid and birth reject before context read",[&]{for(const auto& [key,value]:std::vector<std::pair<std::string,Json>>{{"revision",6u},{"pid",42u},{"birth","old"},{"userInitiated",false}}){reset();ManualRepair r;auto bad=args;bad[key]=value;const auto reads=freshReads,actions=transports;need(!r.request(bad,deps).value("ok",true)&&freshReads==reads&&transports==actions,"stale request admitted");}});
  check("OFF sleeping and exit veto manual recovery",[&]{for(int n=0;n<3;++n){reset();ManualRepair r;const auto actions=transports;if(n==0)state["enabled"]=false;else ending=true;need(!r.request(args,deps).value("ok",true)&&transports==actions,"OFF or exit admitted");}});
@@ -490,7 +638,23 @@ int main(int argc,char** argv){
 
  check("actual same-image cleanup child returns receipt and releases all owned resources",[&]{
   arm();auto own=session;own.pid=GetCurrentProcessId();auto request=Json{{"finalCleanup",true},{"pid",own.pid},{"birth",std::to_string(own.created)},{"revision",7u},{"modeEpoch","current-document:1"}};
-  const auto result=cleanupworker::dispatch(own,false,request,state,[]{return true;});workerResults.push_back({{"kind","receipt"},{"result",result}});
+  const auto validIdentity=fixtureSteamIdentity(own);unsigned receiptRefusals=0;
+  for(unsigned variant=0;variant<7;++variant){
+   std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> identity;
+   if(variant){auto bad=std::make_shared<ymcc::steamsession::IdentitySnapshot>(*validIdentity);
+    if(variant==1)bad->presence=-1;if(variant==2)bad->windowsSessionKnown=false;
+    if(variant==3)++bad->session.pid;if(variant==4)++bad->session.created;
+    if(variant==5)bad->session.root+=L"-foreign";if(variant==6){bad->session.pid=0;bad->session.created=0;}identity=bad;
+   }
+   const auto rejected=cleanupworker::dispatch(own,false,identity,request,state,[]{return true;});
+   need(!rejected.value("ok",true)&&!rejected.value("mutated",true)&&!rejected.value("uncertain",false)&&
+    rejected.value("reason",std::string{})=="decky-cleanup-worker-session-invalid"&&
+    rejected.value("cleanupWorkerDestroyed",false)&&rejected.value("cleanupWorkerHandles",99u)==0&&rejected.value("cleanupWorkerProcesses",99u)==0,
+    "unconfirmed common receipt must refuse before any private worker");++receiptRefusals;
+  }
+  auto uiIdentity=std::make_shared<ymcc::steamsession::IdentitySnapshot>(*validIdentity);++uiIdentity->session.account;
+  const auto result=cleanupworker::dispatch(own,false,uiIdentity,request,state,[]{return true;});
+  workerResults.push_back({{"kind","receipt"},{"result",result},{"sharedReceiptRefusals",receiptRefusals},{"accountCandidateDifferenceAllowed",true}});
   need(result.value("cleanupWorkerReplyReceived",false),"actual parsed private reply was not distinguished from transport loss");
   need(result.value("ok",false)&&result.value("cleanupWorkerDestroyed",false)&&result.value("cleanupWorkerHandles",99u)==0&&result.value("cleanupWorkerProcesses",99u)==0,"same-image final cleanup owner leaked or lost receipt");
   // Current installed-upgrade field: the reserved page-cleanup ledger refuses
@@ -534,7 +698,7 @@ int main(int argc,char** argv){
    need(pages==beforePage&&reopens==beforeReopen&&manualRuns==beforeManual,"nested origin entered another dispatch");
    if(!cleanupDocumentAvailable(durableMain,selected,"origin-document","deckyBigPictureRecovery")||!cleanupDocumentAvailable(durableBackup,selected,"origin-document","deckyBigPictureRecovery"))return refusal();
    durableMain["deckyBigPictureRecovery"]=reserved;durableBackup["deckyBigPictureRecovery"]=reserved;++independentReservations;++childRuns;
-   return cleanupworker::dispatch(selected,false,action,initial,admit); // Real existing same-image child, inert Steam ports.
+   return cleanupworker::dispatch(selected,false,fixtureSteamIdentity(selected),action,initial,admit); // Real existing same-image child, inert Steam ports.
   };
   need(!durableMain.contains("deckyBigPictureRecovery")&&!durableBackup.contains("deckyBigPictureRecovery"),"independent recovery ledger must start absent");
   const auto deniedPage=originRepair.request(page,originDeps,Origin::FinalCleanup);
@@ -562,7 +726,7 @@ int main(int argc,char** argv){
   arm();auto own=session;own.pid=GetCurrentProcessId();auto request=Json{{"finalCleanup",true},{"pid",own.pid},{"birth",std::to_string(own.created)},{"revision",7u},{"modeEpoch","hang-document:1"}};
   const auto name=L"Local\\YMCC-Cleanup-Hang-"+std::to_wstring(own.pid);HANDLE entered=CreateEventW(nullptr,TRUE,FALSE,name.c_str());std::atomic<bool> keep{true},ran{false};
   std::thread off([&]{ran=WaitForSingleObject(entered,2000)==WAIT_OBJECT_0;keep=false;cleanupworker::Active::cancel();});
-  const auto started=GetTickCount64();const auto result=cleanupworker::dispatch(own,false,request,state,[&]{return keep.load();});const auto elapsed=GetTickCount64()-started;
+  const auto started=GetTickCount64();const auto result=cleanupworker::dispatch(own,false,fixtureSteamIdentity(own),request,state,[&]{return keep.load();});const auto elapsed=GetTickCount64()-started;
   off.join();CloseHandle(entered);need(result.contains("cleanupWorkerReplyReceived")&&!result.at("cleanupWorkerReplyReceived").get<bool>(),"actual cancelled private worker incorrectly reported a parsed reply");workerResults.push_back({{"kind","stuck"},{"result",result},{"entered",ran.load()},{"elapsedMs",elapsed}});need(ran&&elapsed<3200&&result.value("cleanupWorkerDestroyed",false)&&result.value("cleanupWorkerHandles",99u)==0&&result.value("cleanupWorkerProcesses",99u)==0,"stuck final-cleanup callback escaped original stop deadline or leaked its child Job");
   // Runtime's explicit cancel hook must independently stop the bounded call;
   // a lagging upstream state predicate can still report true after cancellation.
@@ -571,13 +735,14 @@ int main(int argc,char** argv){
   HANDLE cancelEvent=CreateEventW(nullptr,TRUE,FALSE,name.c_str()),cancelDone=CreateEventW(nullptr,TRUE,FALSE,nullptr);
   std::thread explicitCancel([&]{cancelEntered=WaitForSingleObject(cancelEvent,2000)==WAIT_OBJECT_0;cleanupworker::Active::cancel();
    if(WaitForSingleObject(cancelDone,2000)==WAIT_TIMEOUT){cancelFallback=true;allow=false;}});
-  const auto cancelStarted=GetTickCount64();const auto cancelResult=cleanupworker::dispatch(own,false,request,state,[&]{return allow.load();});const auto cancelElapsed=GetTickCount64()-cancelStarted;
+  const auto cancelStarted=GetTickCount64();const auto cancelResult=cleanupworker::dispatch(own,false,fixtureSteamIdentity(own),request,state,[&]{return allow.load();});const auto cancelElapsed=GetTickCount64()-cancelStarted;
   SetEvent(cancelDone);explicitCancel.join();CloseHandle(cancelEvent);CloseHandle(cancelDone);
   workerResults.push_back({{"kind","explicit-cancel-upstream-still-current"},{"result",cancelResult},{"entered",cancelEntered.load()},{"emergencyPredicateChangeRequired",cancelFallback.load()},{"elapsedMs",cancelElapsed}});
   need(cancelEntered&&!cancelFallback&&cancelElapsed<3200&&!cancelResult.value("ok",true)&&cancelResult.value("uncertain",false)&&cancelResult.value("cleanupWorkerDestroyed",false)&&cancelResult.value("cleanupWorkerHandles",99u)==0&&cancelResult.value("cleanupWorkerProcesses",99u)==0,"explicit cleanup cancellation required a later upstream predicate change");
   // Same existing child, this time cancellation must come from the production
   // ManualRepair power-generation predicate while the Ready level stays true.
-  arm();currentSession.pid=GetCurrentProcessId();mode["pid"]=currentSession.pid;mode["modeEpoch"]="hang-document:1";
+  arm();fixtureOwnSteamContext(currentSession,mode);mode["pid"]=currentSession.pid;mode["modeEpoch"]="hang-document:1";
+  g_steamSettingsObserver.value=fixtureSteamIdentity(currentSession);
   g_steamModeObserver.read=[&]{return mode;};g_deckySidebarRuntime.read=[&]{return state;};
   std::atomic<unsigned long long> generation{1};std::atomic<bool> powerEntered{false},fallback{false};
   const auto originalExit=deps.exiting;deps.exiting=[&]{return fallback.load();}; // Emergency fixture escape only; healthy Ready remains false.
@@ -590,15 +755,20 @@ int main(int argc,char** argv){
   ManualRepair repair;const auto powerStarted=GetTickCount64();const auto powerResult=repair.request(action,deps,Origin::FinalCleanup);const auto powerElapsed=GetTickCount64()-powerStarted;
   SetEvent(done);transition.join();CloseHandle(powerEvent);CloseHandle(done);deps.cleanupWorker={};deps.powerGeneration={};deps.exiting=originalExit;
   workerResults.push_back({{"kind","actual-main-power-generation-cancel"},{"result",powerResult},{"entered",powerEntered.load()},{"emergencyCancelRequired",fallback.load()},{"elapsedMs",powerElapsed}});
-  need(powerEntered&&!fallback&&powerElapsed<3200&&powerResult.value("reason",std::string{})=="decky-cleanup-cancelled-unconfirmed"&&powerResult.value("cleanupWorkerDestroyed",false)&&powerResult.value("cleanupWorkerHandles",99u)==0&&powerResult.value("cleanupWorkerProcesses",99u)==0,"completed power transition failed to cancel actual native cleanup child without emergency fallback");});
+  need(powerEntered&&!fallback&&powerElapsed<3200&&powerResult.value("reason",std::string{})=="decky-cleanup-cancelled-unconfirmed"&&powerResult.value("cleanupWorkerDestroyed",false)&&powerResult.value("cleanupWorkerHandles",99u)==0&&powerResult.value("cleanupWorkerProcesses",99u)==0,"completed power transition failed to cancel actual native cleanup child without emergency fallback");
+  arm();own=session;own.pid=GetCurrentProcessId();request={{"finalCleanup",true},{"pid",own.pid},{"birth",std::to_string(own.created)},{"revision",7u},{"modeEpoch","exit-held-endpoint:1"}};
+  const auto exitHome=std::filesystem::absolute(std::filesystem::path(argv[1])).parent_path()/L"exit-wait-home";auto exitState=state;exitState["fixtureExitHome"]=exitHome.string();
+  exitwaitfixture::checkExitedCleanupWait(own,request,exitState,exitHome);
+  workerResults.push_back({{"kind","exited-cleanup-held-endpoint"},{"measurement",exitwaitfixture::exitedResourceWait}});
+ });
  check("silent stuck cleanup is bounded by the original worker deadline and fully reclaimed",[&]{
   arm();auto own=session;own.pid=GetCurrentProcessId();auto request=Json{{"finalCleanup",true},{"pid",own.pid},{"birth",std::to_string(own.created)},{"revision",7u},{"modeEpoch","hang-document:1"}};
-  const auto started=GetTickCount64();const auto result=cleanupworker::dispatch(own,false,request,state,[]{return true;},250);const auto elapsed=GetTickCount64()-started;
+  const auto started=GetTickCount64();const auto result=cleanupworker::dispatch(own,false,fixtureSteamIdentity(own),request,state,[]{return true;},250);const auto elapsed=GetTickCount64()-started;
   workerResults.push_back({{"kind","deadline"},{"result",result},{"elapsedMs",elapsed}});
   need(elapsed<3200&&result.value("reason",std::string{})=="decky-cleanup-worker-deadline"&&result.value("cleanupWorkerDestroyed",false)&&result.value("cleanupWorkerHandles",99u)==0&&result.value("cleanupWorkerProcesses",99u)==0,"silent cleanup exceeded original 3200ms boundary or kept resources");});
  check("production recovery window accepts a real reply after the old 3.2 second cutoff",[&]{
   arm();auto own=session;own.pid=GetCurrentProcessId();auto request=Json{{"finalCleanup",true},{"pid",own.pid},{"birth",std::to_string(own.created)},{"revision",7u},{"modeEpoch","slow-document:1"}};
-  const auto started=GetTickCount64();const auto result=cleanupworker::dispatch(own,false,request,state,[]{return true;});const auto elapsed=GetTickCount64()-started;
+  const auto started=GetTickCount64();const auto result=cleanupworker::dispatch(own,false,fixtureSteamIdentity(own),request,state,[]{return true;});const auto elapsed=GetTickCount64()-started;
   workerResults.push_back({{"kind","late-recovery-reply"},{"result",result},{"elapsedMs",elapsed},{"defaultRecoveryWindowMs",cleanupworker::recoveryWindowMs}});
   need(elapsed>=4000&&result.value("ok",false)&&result.value("cleanupWorkerDestroyed",false)&&cleanupworker::recoveryWindowMs==30000,"old tight recovery window discarded a valid delayed reply");});
  check("slow recovery does not consume the following connection confirmation window",[&]{
@@ -706,14 +876,109 @@ int main(int argc,char** argv){
    now+=20000;pending.observe(repair,deps);need(gentle==2&&cleanupDispatches==0,"pending same-account handoff lost its second gentle step");
   }});
  check("actual native dependency callback carries verified offline account through the existing child protocol",[&]{
-  arm();currentSession.pid=GetCurrentProcessId();currentSession.account=0;mode["pid"]=currentSession.pid;mode["observedAccount"]=10u;mode["deckyAccountWatchAvailable"]=true;
+  arm();fixtureOwnSteamContext(currentSession,mode);currentSession.account=0;mode["pid"]=currentSession.pid;mode["observedAccount"]=10u;mode["deckyAccountWatchAvailable"]=true;
+  g_steamSettingsObserver.value=fixtureSteamIdentity(currentSession);
   g_steamModeObserver.read=[&]{return mode;};g_deckySidebarRuntime.read=[&]{return state;};
   const Json action={{"finalCleanup",true},{"pid",currentSession.pid},{"birth",std::to_string(currentSession.created)},{"revision",state.at("revision")},{"modeEpoch",mode.at("modeEpoch")}};
-  deps.cleanupWorker=actualMainCleanupDispatch;ManualRepair r;const auto result=r.request(action,deps,Origin::FinalCleanup);
+  const auto expectedIdentity=g_steamSettingsObserver.value;g_steamSettingsObserver.value={};const auto beforeRefresh=g_steamSettingsObserver.refreshes;
+  const auto refused=actualMainCleanupDispatch(currentSession,action,[]{return true;});
+  need(!refused.value("ok",true)&&!refused.value("mutated",true)&&g_steamSettingsObserver.refreshes==beforeRefresh+1,"actual main callback must refresh missing shared fact without independent discovery");
+  need(refused.value("awaitCurrentIdentity",false)&&refused.value("cleanupNotStarted",false),"pre-child shared identity gap must preserve the original recovery wait");
+   g_steamSettingsObserver.value=expectedIdentity;
+   deps.cleanupWorker=actualMainCleanupDispatch;ManualRepair r;
+   // Recovery already saw the old Big Picture fact. The observer invalidates
+   // its cache before the actual parent admission, not during child startup.
+   g_steamSettingsObserver.session=currentSession;
+   const Json withdrawn={{"known",true},{"running",true},{"pid",currentSession.pid},
+       {"birth",std::to_string(currentSession.created)},{"mode","unknown"},{"reason","shared-mode-pending"}};
+   unsigned modeReads=0,consentCalls=0;
+   g_steamModeObserver.read=[&]{++modeReads;return withdrawn;};
+   const auto priorAllowed=deps.cleanupAllowed;
+   const auto priorConsent=deps.consent;
+   deps.consent=[&](const auto& session){++consentCalls;return priorConsent(session);};
+   deps.cleanupAllowed=actualMainCleanupAdmission;
+   const auto unstarted=r.request(action,deps,Origin::FinalCleanup);
+   ymcc::steamfailure::FailureContext failure;failure.phase=ymcc::steamfailure::Phase::Finished;
+   failure.operation=ymcc::steamfailure::Operation::RebuildDocument;
+   const auto accountTrace=ymcc::deckydiag::failureRecord(unstarted,failure);
+   workerResults.push_back({{"kind","parent-mode-cache-loss"},{"result",unstarted},{"trace",accountTrace},{"modeReads",modeReads},{"consentCalls",consentCalls}});
+   need(unstarted.value("ok",true)==false&&unstarted.value("mutated",true)==false&&
+        unstarted.value("sessionCheck",std::string{})=="parent-account-source"&&
+        unstarted.value("awaitCurrentIdentity",false)&&unstarted.value("cleanupNotStarted",false),
+        "admitted parent mode cache loss must be a typed unstarted wait");
+   need(!unstarted.contains("cleanupWorkerDestroyed")&&!reservations&&modeReads==1&&consentCalls==0&&
+        accountTrace.value("cleanupUnstartedIdentityWait",false),"parent cache loss lost no-child proof or trace");
+   // Preserve the original D307 proof-loss race after initial admission.
+   g_steamModeObserver.read=[&]{return ++modeReads==2?mode:withdrawn;};
+   ManualRepair afterAdmission;
+   const auto laterLoss=afterAdmission.request(action,deps,Origin::FinalCleanup);
+   need(laterLoss==unstarted&&modeReads==3&&consentCalls==1,"late parent admission cache loss must retain its original receipt");
+   g_steamModeObserver.read=[&]{++modeReads;return mode;};now+=5000;
+   const auto result=r.request(action,deps,Origin::FinalCleanup);
+   need(modeReads==5&&consentCalls==2,"restored proof must pass admission and late recheck before the child");
+   for(unsigned control=0;control<6;++control){
+    auto contrary=mode;g_steamSettingsObserver.session=currentSession;
+    if(control==0)contrary["mode"]="desktop";
+    if(control==1)contrary["birth"]="1";
+    if(control==2)g_powerLifecycle=PowerLifecycle::Suspended;
+    if(control==3)state["enabled"]=false;
+    if(control==4)g_exitRequested=true;
+    if(control==5)++g_steamSettingsObserver.session.created;
+    g_steamModeObserver.read=[&]{++modeReads;return contrary;};const auto readsBefore=modeReads;
+    ManualRepair reject;const auto denied=reject.request(action,deps,Origin::FinalCleanup);
+    workerResults.push_back({{"kind","cleanup-admission-control"},{"control",control},{"result",denied},{"modeReads",modeReads-readsBefore}});
+    g_powerLifecycle=PowerLifecycle::Ready;state["enabled"]=true;g_exitRequested=false;
+    need(denied.value("ok",true)==false&&!denied.contains("awaitCurrentIdentity")&&!denied.contains("cleanupWorkerDestroyed")&&consentCalls==2&&
+         modeReads-readsBefore==(control<2?1:0),"known ineligibility must not retry or start a child");
+   }
+   g_steamSettingsObserver.session=currentSession;deps.cleanupAllowed=priorAllowed;deps.consent=priorConsent;g_steamModeObserver.read=[&]{return mode;};
   workerResults.push_back({{"kind","actual-main-offline-dispatch"},{"result",result}});
-  need(result.value("ok",false)&&result.value("verifiedAccount",0u)==10&&result.value("fromUi",false)&&result.value("cleanupWorkerDestroyed",false),"actual native callback lost verified offline account or protocol child ownership");deps.cleanupWorker={};});
+  need(result.value("ok",false)&&result.value("verifiedAccount",0u)==10&&result.value("fromUi",false)&&result.value("delegatedIdentity",false)&&result.value("cleanupWorkerDestroyed",false),"actual native callback lost verified offline account or protocol child ownership");
+  // Real AutomaticRepair + ManualRepair must resume after a missing common
+  // publication, preserving durable history and the existing finite wait.
+  arm();fixtureOwnSteamContext(currentSession,mode);currentSession.account=0;
+  mode["pid"]=currentSession.pid;mode["observedAccount"]=10u;mode["deckyAccountWatchAvailable"]=true;
+  g_steamSettingsObserver.value={};deps.cleanupWorker=actualMainCleanupDispatch;
+  AutomaticRepair pending;ManualRepair nativeRepair;escalate(pending,nativeRepair);
+  need(pending.snapshot(now).value("phase",std::string{})=="waiting"&&!pending.snapshot(now).value("attempted",true)&&
+       reservations==0&&cleanupDispatches==0&&pending.nextTimeout(now)==30000,
+       "missing shared identity permanently spent automatic recovery");
+  const auto parkedRefreshes=g_steamSettingsObserver.refreshes;
+  for(unsigned i=0;i<1000;++i)pending.observe(nativeRepair,deps);
+  need(g_steamSettingsObserver.refreshes==parkedRefreshes&&reservations==0,"identity wait storm caused extra reads or reservation");
+  g_steamSettingsObserver.value=fixtureSteamIdentity(currentSession);
+  Json resumed;deps.cleanupWorker=[&](const auto& selected,const auto& args,const auto& current){return resumed=actualMainCleanupDispatch(selected,args,current);};
+  now+=30000;pending.observe(nativeRepair,deps);now+=30000;pending.observe(nativeRepair,deps);now+=30000;pending.observe(nativeRepair,deps);
+  need(resumed.value("ok",false)&&resumed.value("verifiedAccount",0u)==10&&resumed.value("fromUi",false)&&
+       resumed.value("delegatedIdentity",false)&&resumed.value("cleanupWorkerDestroyed",false)&&resumed.value("cleanupWorkerHandles",99u)==0&&resumed.value("cleanupWorkerProcesses",99u)==0,
+       "recovered shared identity could not resume original actual native child");
+  workerResults.push_back({{"kind","shared-identity-wait-restored"},{"result",resumed},{"stormEvents",1000},{"noReservationDuringWait",true}});
+  // Demonstrate the old independent registry route failing in the same image
+  // without changing or deleting any real Steam key. The delegated child above
+  // already succeeded with this deliberately absent read-only registry scope.
+  ymcc::deckybinding::worker::Request legacyRequest;legacyRequest.steam=currentSession;legacyRequest.steam.account=10;
+  legacyRequest.liveUiAccount=true;ProcessIdToSessionId(currentSession.pid,&legacyRequest.windowsSession);
+  std::string legacyCheck;bool legacyRefused=false;
+  try{ymcc::deckybinding::worker::BasicSteamLease<true> legacy(legacyRequest,L"Software\\YMCC-NONEXISTENT-CLEANUP-FIXTURE",&legacyCheck);}
+  catch(...){legacyRefused=true;}
+  need(legacyRefused&&legacyCheck=="steam-root","old independent registry lease did not reproduce the absent-root refusal");
+  workerResults.push_back({{"kind","legacy-cleanup-registry-route-refused"},{"check",legacyCheck},{"registryWrites",0}});
+  // The unchanged original case also checks the common publication revoking
+  // an already-entered private child; current() itself remains true here.
+  const auto self=fixtureSteamIdentity(currentSession);g_steamSettingsObserver.value=self;
+  const auto shared=g_steamSettingsObserver.identitySnapshot();
+  const auto name=L"Local\\YMCC-Cleanup-Delegation-"+std::to_wstring(currentSession.pid);
+  ymcc::deckybinding::detail::Handle entered{CreateEventW(nullptr,TRUE,FALSE,name.c_str())};need(entered.value!=nullptr,"delegation entry event unavailable");
+  auto heldAction=action;heldAction["modeEpoch"]="delegation-held:1";
+  auto verified=currentSession;verified.account=10;
+  std::atomic<bool> revoked{false};std::thread retire([&]{if(WaitForSingleObject(entered.value,3000)==WAIT_OBJECT_0){g_steamSettingsObserver.withdraw();revoked=true;}});
+  const auto held=cleanupworker::dispatchShared(g_steamSettingsObserver,verified,true,shared,heldAction,state,[]{return true;},5000);
+  retire.join();need(revoked.load()&&!held.value("ok",true)&&held.value("cleanupWorkerDestroyed",false)&&held.value("cleanupWorkerHandles",99u)==0&&held.value("cleanupWorkerProcesses",99u)==0,"common identity revocation did not reclaim the original private child");
+  workerResults.push_back({{"kind","shared-cleanup-delegation-revoked"},{"result",held},{"actualPublicationUsed",true}});
+  deps.cleanupWorker={};});
  check("new offline account receives both full grace windows before actual native child dispatch",[&]{
-  arm();currentSession.pid=GetCurrentProcessId();currentSession.account=0;mode["pid"]=currentSession.pid;mode["observedAccount"]=9u;mode["deckyAccountWatchAvailable"]=true;
+  arm();fixtureOwnSteamContext(currentSession,mode);currentSession.account=0;mode["pid"]=currentSession.pid;mode["observedAccount"]=9u;mode["deckyAccountWatchAvailable"]=true;
+  g_steamSettingsObserver.value=fixtureSteamIdentity(currentSession);
   g_steamModeObserver.read=[&]{return mode;};g_deckySidebarRuntime.read=[&]{return state;};Json actualResult;unsigned actualDispatches=0;
   deps.cleanupWorker=[&](const auto& selected,const auto& action,const auto& current){++actualDispatches;return actualResult=actualMainCleanupDispatch(selected,action,current);};
   AutomaticRepair a;ManualRepair r;a.observe(r,deps);now+=30000;a.observe(r,deps);mode["observedAccount"]=10u;now+=30000;a.observe(r,deps);
@@ -723,8 +988,39 @@ int main(int argc,char** argv){
  check("missing current UI witness never spends native final-cleanup reservation",[&]{
   arm();mode["deckyAccountWatchAvailable"]=false;ManualRepair r;
   const Json args={{"finalCleanup",true},{"pid",session.pid},{"birth",std::to_string(session.created)},{"revision",state.at("revision")},{"modeEpoch",mode.at("modeEpoch")}};
+  const auto* key="cleanupPreflightBackendState";
+  mode["deckyBackendState"]="socket-closed";
   const auto result=r.request(args,deps,Origin::FinalCleanup);need(!result.value("ok",true)&&reservations==0&&cleanupDispatches==0,"unready current-user callback consumed durable cleanup fuse");
-  mode["deckyAccountWatchAvailable"]=true;need(r.request(args,deps,Origin::FinalCleanup).value("ok",false)&&reservations==1&&cleanupDispatches==1,"later verified identity could not use original unspent reservation");});
+  need(!result.contains(key),"unadmitted cleanup claimed a backend observation");
+  mode["deckyAccountWatchAvailable"]=true;
+  const auto before=freshReads;
+  const auto resumed=r.request(args,deps,Origin::FinalCleanup);
+  need(resumed.value("ok",false)&&reservations==1&&cleanupDispatches==1,"later verified identity could not use original unspent reservation");
+  need(freshReads==before+1&&resumed.value(key,Json())=="socket-closed","initial fresh preflight socket state missing or duplicate mode read");
+  using namespace ymcc::steamfailure;
+  FailureContext context;context.phase=Phase::Finished;context.operation=Operation::RebuildDocument;
+  const auto project=[&](const Json& reply){return ymcc::deckydiag::failureRecord(reply,context);};
+  const Json business={{"ok",true},{"mutated",true},{"requestDispatched",true}};
+  auto withoutDiagnostic=resumed;withoutDiagnostic.erase(key);need(withoutDiagnostic==business,"preflight diagnostics changed the original action receipt");
+  need(project(resumed).value(key,Json())=="socket-closed","preflight evidence was dropped by the real action projector");
+  for(const auto* sample:{"socket-connecting","socket-open","socket-closing","socket-missing","socket-unavailable"}){
+   arm();mode["deckyBackendState"]=sample;const auto reads=freshReads;ManualRepair next;
+   const auto reply=next.request(args,deps,Origin::FinalCleanup);
+   need(freshReads==reads+1&&reservations==1&&cleanupDispatches==1&&project(reply).value(key,Json())==sample,"typed backend states were collapsed or changed action admission");
+  }
+  for(const auto& sample:std::vector<Json>{nullptr,7,"opaque-private-string"}){
+   arm();if(!sample.is_null())mode["deckyBackendState"]=sample;ManualRepair next;
+   const auto reply=next.request(args,deps,Origin::FinalCleanup);
+   need(reply.value("ok",false)&&project(reply).value(key,Json())=="unconfirmed","missing or malformed backend state escaped the bounded diagnostic");
+   auto malformed=reply;malformed[key]=sample;need(!project(malformed).contains(key),"invalid wire value escaped the action projector");
+  }
+  arm();mode["deckyBackendState"]="socket-connecting";auto reopen=args;reopen.erase("finalCleanup");reopen["reopenBigPicture"]=true;
+  deps.reopenBigPicture=[&](const auto& current){need(current(),"reopen lost existing authority");mode["deckyBackendState"]="socket-open";(void)deps.freshMode(session);return business;};
+  ManualRepair next;const auto reopened=next.request(reopen,deps,Origin::ReopenBigPicture);deps.reopenBigPicture={};
+  context.operation=Operation::ReopenBigPicture;
+  need(reopened.value("ok",false)&&project(reopened).value(key,Json())=="socket-connecting","reopen readback overwrote its preflight observation");
+  context.phase=Phase::Started;need(!project(reopened).contains(key),"preflight state attached to an unfinished action");
+  context.phase=Phase::Finished;context.operation=Operation::Binding;need(!project(reopened).contains(key),"non-recovery event inherited cleanup diagnostic");});
  check("known registry account with an unconfirmed UI witness parks automatic gentle attempts",[&]{
   arm();mode["deckyAccountWatchAvailable"]=false;AutomaticRepair a;ManualRepair r;escalate(a,r);
   need(gentle==0&&reservations==0&&cleanupDispatches==0&&a.nextTimeout(now)==0xfffffffful,"registry identity alone spent UI-refresh recovery attempts");});
@@ -768,15 +1064,7 @@ int main(int argc,char** argv){
   // Automatic/ManualRepair and lifecycle service/actual private child/writer are
   // real. UI rebuild and durable reservation IO remain explicit fixture ports.
   {namespace f=lifecycleServiceFixture;auto live=session;live.pid=GetCurrentProcessId();live.created=cleanupworker::processBirth(GetCurrentProcess());need(live.created!=0,"same-host fixture birth missing");
-   wchar_t ownImage[32768]{};const auto ownLength=GetModuleFileNameW(nullptr,ownImage,32768);need(ownLength&&ownLength<32768,"same-host fixture image path missing");
-   const auto backendDir=fspath::path(fixtureBackendRoot())/L"decky";fspath::create_directories(backendDir);const auto backendImage=backendDir/L"PluginLoader_noconsole.exe";
-   need(CopyFileW(ownImage,backendImage.c_str(),FALSE)!=FALSE,"same-host suspended control copy failed");
-   struct BackendControl{HANDLE job=nullptr,process=nullptr,thread=nullptr;bool stop(){if(job){CloseHandle(job);job=nullptr;}bool stopped=true;if(process){stopped=WaitForSingleObject(process,2000)==WAIT_OBJECT_0;if(!stopped){TerminateProcess(process,0);stopped=WaitForSingleObject(process,2000)==WAIT_OBJECT_0;}CloseHandle(process);process=nullptr;}if(thread){CloseHandle(thread);thread=nullptr;}f::fixtureBackendPid=61;f::fixtureBackendBirth=1234;return stopped;}~BackendControl(){stop();}}control;
-   control.job=CreateJobObjectW(nullptr,nullptr);need(control.job!=nullptr,"same-host test backend Job missing");JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;need(SetInformationJobObject(control.job,JobObjectExtendedLimitInformation,&limits,sizeof(limits))!=FALSE,"same-host Job containment failed");
-   STARTUPINFOW backendStartup{};backendStartup.cb=sizeof(backendStartup);PROCESS_INFORMATION backendProcess{};std::wstring backendCommand=L"\""+backendImage.wstring()+L"\" --inert-never-resumed";
-   need(CreateProcessW(backendImage.c_str(),backendCommand.data(),nullptr,nullptr,FALSE,CREATE_SUSPENDED|CREATE_NO_WINDOW,nullptr,nullptr,&backendStartup,&backendProcess)!=FALSE,"same-host suspended backend process failed");
-   control.process=backendProcess.hProcess;control.thread=backendProcess.hThread;need(AssignProcessToJobObject(control.job,control.process)!=FALSE,"same-host suspended backend not in test Job");
-   f::fixtureBackendPid=backendProcess.dwProcessId;f::fixtureBackendBirth=cleanupworker::processBirth(control.process);need(f::fixtureBackendBirth!=0,"same-host suspended backend birth unavailable");
+   f::BackendControl control;f::startFixtureBackendControl(control,need);
    const auto nativeHost=cleanupworker::nativeHost(),loader=std::string(ymcc::deckyidentity::version);const auto baseline=Json{{"schemaVersion",1},{"extensions",{{"deckySidebar",{{"enabled",true}}}}},{"businessOpaque","preserve"}};
    auto view=initialMode;view["pid"]=live.pid;view["birth"]=std::to_string(live.created);view["modeEpoch"]="samehost-recovery-0:1";view["deckyAccountWatchAvailable"]=true;view["observedAccount"]=live.account;view["deckyUpdateResidue"]["loaderVersion"]=loader;
    // Existing schema operation, two strictly separated inspect shapes. An
@@ -1286,7 +1574,7 @@ int main(int argc,char** argv){
   // never-resumed children inherit the existing exact private worker Job.
   const auto controlArgs=Json{{"task","inspect"},{"modeEpoch","joint-control:1"},{"frontendBuildId",build},{"loaderVersion",ymcc::deckyidentity::version},{"backendPid",0u},{"backendBirth","0"}};
   auto controlState=initial;controlState["fixturePlainProcessControl"]=true;
-  const auto calibration=cleanupworker::dispatch(own,false,controlArgs,controlState,[]{return true;},cleanupworker::recoveryWindowMs,cleanupworker::lifecycleSchema);
+  const auto calibration=cleanupworker::dispatch(own,false,fixtureSteamIdentity(own),controlArgs,controlState,[]{return true;},cleanupworker::recoveryWindowMs,cleanupworker::lifecycleSchema);
   need(calibration.value("ok",false)&&calibration.value("cleanupWorkerDestroyed",false)&&calibration.value("cleanupWorkerHandles",99u)==0&&calibration.value("cleanupWorkerProcesses",99u)==0&&calibration.at("plainWin32Control").at("rows").size()==3,"plain Win32 control did not finish inside the original private worker subtree");
   GetProcessHandleCount(GetCurrentProcess(),&parentAfter);
   need(parentAfter==afterFirstCreation,"plain Win32 control dispatch left additional parent handles after the original first-creation observation");
@@ -1345,6 +1633,36 @@ int main(int argc,char** argv){
   auto saved=ymSettingsReadUnlocked();need(saved.at("opaqueUserSetting")=="preserve"&&saved.at("deckyContextCleanup")==completed,"manual baseline changed business settings or lost owned-ready identity");
   auto freshView=view;freshView["modeEpoch"]="manual-legacy-after:1";Recovery next;
   need(next.continueManaged(session,freshView,completed,completed,"504:10004",build,"v3.3.0"),"next ordinary host could not continue the newly completed explicit manual lifecycle");
+  // The field machine retained this exact v1 migration sentinel in both copies.
+  // Consume the same actual manual callback, writer and continuation as above.
+  const Json unknown={{"schemaVersion",1},{"history","unconfirmed"}};
+  need(managed::completed(unknown,session,"manual-legacy-after","502:10002",build,"v3.3.0").is_null(),"ordinary observation refunded unknown history");
+  need(managed::completed(unknown,session,original,"502:10002",build,"v3.3.0",original).is_null(),"same-document manual origin refunded unknown history");
+  const auto unknownCompleted=managed::completed(unknown,session,"manual-legacy-after","502:10002",build,"v3.3.0",original);
+  need(unknownCompleted==completed,"exact unknown sentinel blocked a proven new explicit manual lifecycle");
+  auto unknownConfig=config;unknownConfig["deckyContextCleanup"]=unknown;
+  fixtureSettings[YM_SETTINGS_FILE]=unknownConfig.dump();fixtureSettings[YM_SETTINGS_BACKUP_FILE]=unknownConfig.dump();fixtureWrites=fixtureFailWrite=fixtureReads=0;
+  const auto unknownCommitted=deckySidebarManagedLifecycleRecord(native,[]{return true;});
+  need(unknownCommitted.value("ok",false)&&fixtureWrites==2,"actual writer failed new manual lifecycle after the exact unknown sentinel");
+  need(ymSettingsReadUnlocked().at("opaqueUserSetting")=="preserve"&&ymcc::settingsBaseline::parseDocument(ymSettingsReadRaw(YM_SETTINGS_BACKUP_FILE)).at("deckyContextCleanup")==completed,"unknown migration damaged business data or missed backup");
+  for(unsigned n=0;n<8;++n){
+   auto malformed=unknown;
+   if(n==0)malformed["extra"]=true;if(n==1)malformed["history"]="other";if(n==2)malformed["schemaVersion"]=2;
+   if(n==3)malformed["schemaVersion"]=1.0;if(n==4)malformed.erase("schemaVersion");if(n==5)malformed["history"]=nullptr;
+   if(n==6)malformed=nullptr;if(n==7)malformed={{"schemaVersion",2},{"status","reserved"}};
+   // Explicit null is fenced by the actual writer; a missing key is a separate legacy contract.
+   auto badConfig=unknownConfig;badConfig["deckyContextCleanup"]=malformed;
+   fixtureSettings[YM_SETTINGS_FILE]=badConfig.dump();fixtureSettings[YM_SETTINGS_BACKUP_FILE]=badConfig.dump();fixtureWrites=fixtureFailWrite=0;
+   const auto rejected=deckySidebarManagedLifecycleRecord(native,[]{return true;});
+   need(!rejected.value("ok",true)&&fixtureWrites==0,"malformed history gained manual migration writes");
+  }
+  fixtureSettings[YM_SETTINGS_FILE]=unknownConfig.dump();fixtureSettings[YM_SETTINGS_BACKUP_FILE]=config.dump();fixtureWrites=0;
+  need(!deckySidebarManagedLifecycleRecord(native,[]{return true;}).value("ok",true)&&fixtureWrites==0,"disagreeing unknown copies gained a manual migration");
+  fixtureSettings[YM_SETTINGS_FILE]=unknownConfig.dump();fixtureSettings[YM_SETTINGS_BACKUP_FILE]=unknownConfig.dump();fixtureWrites=0;fixtureFailWrite=2;
+  const auto partialUnknown=deckySidebarManagedLifecycleRecord(native,[]{return true;});
+  need(!partialUnknown.value("ok",true)&&partialUnknown.value("uncertain",false),"partial manual unknown migration claimed confirmed success");
+  fixtureFailWrite=0;
+
   g_deckyManualBaseline.clear();need(g_deckyManualBaseline.origin(session,"manual-legacy-after",generation).empty(),"OFF retained manual legacy provenance");
   for(unsigned n=0;n<7;++n){receipt={{"ok",true},{"mutated",true},{"requestDispatched",true}};doAdmit=true;callbacks=0;g_deckyManualBaseline.clear();stop=false;generation=60;
    if(n==0)receipt["ok"]=false;if(n==1)receipt["mutated"]=false;if(n==2)receipt.erase("requestDispatched");if(n==3)receipt["uncertain"]=true;if(n==4)doAdmit=false;
@@ -1374,9 +1692,14 @@ int main(int argc,char** argv){
   f::g_deckyManagedReady={session,61,77,"manual-legacy-after",session.account,std::string(32,'c'),"1"};f::g_deckyManualBaseline.clear();f::g_deckyManualBaseline.capture(session,original,77,f::g_deckyManualBaseline.epoch());
   f::deckySidebarServiceManagedLifecycle();
   need(f::dispatches==1&&f::lastPrivateState.value("manualRecoveryDocument",std::string{})==original,"actual native service dropped explicit-manual origin before the private confirmation child");
-  readyView["modeEpoch"]="manual-legacy-after-race:1";f::g_deckyManagedReady.document="manual-legacy-after-race";
+  need(f::g_deckyManagedReady.finished,"first native confirmation did not retire its original witness");
+  readyView["modeEpoch"]="manual-legacy-after-race:1";
+  // A new document needs a fresh fixture-owned native-ready witness, not the finished prior one.
+  f::g_deckyManagedReady={session,61,77,"manual-legacy-after-race",session.account,std::string(32,'c'),"1"};
   f::g_deckyManualBaseline.capture(session,original,77,f::g_deckyManualBaseline.epoch());f::currentAfterReply=true;
-  f::beforeReply=[]{f::g_deckyManualBaseline.clear();};f::deckySidebarServiceManagedLifecycle();
+  const auto beforeRaceDispatches=f::dispatches;bool replyRaceEntered=false;
+  f::beforeReply=[&]{replyRaceEntered=true;f::g_deckyManualBaseline.clear();};f::deckySidebarServiceManagedLifecycle();
+  need(replyRaceEntered&&f::dispatches==beforeRaceDispatches+1,"OFF race never reached its newly dispatched private confirmation");
   need(!f::currentAfterReply,"OFF cleared native manual origin but left its already-dispatched private confirmation admitted");
   f::beforeReply={};f::g_deckyManualBaseline.clear();
  });
@@ -1406,6 +1729,36 @@ int main(int argc,char** argv){
   auto observed=initialMode;observed["modeEpoch"]="managed-writer:1";Recovery next;
   need(!next.continueManaged(session,observed,left,right,"503:10003",build,"v3.3.0"),"partial completion refilled recovery on next host");
   resetFiles(pending);result=deckySidebarManagedLifecycleRecord(request,[]{return true;});need(result.value("ok",false)&&fixtureWrites==2,"actual writer could not finish the exact current host reservation on a different document");
+  // Existing actual writer/real diagnostic filter, seven previously ambiguous
+  // no-op refusals. No private history or account/build values are exported.
+  request.args["task"]="inspect";
+  const char* inspectStages[]={"ledger-missing","ledger-invalid","reservation-pending","document-changed","steam-session-changed","frontend-changed","loader-changed"};
+  const auto ready=managed::record(session,"managed-writer","502:10002",build,"v3.3.0","ready");
+  for(unsigned n=0;n<7;++n){auto document=original;auto ledger=ready;
+   if(n==1)ledger={{"schemaVersion",1},{"steamSession",ticket(session)}};
+   if(n==2)ledger["status"]="reserved";
+   if(n==3)ledger["document"]="different-document";
+   if(n==4){auto different=session;++different.created;ledger["steamSession"]=ticket(different);}
+   if(n==5)ledger["frontendBuildId"]=std::string(64,build.front()=='a'?'b':'a');
+   if(n==6)ledger["loaderVersion"]="v3.3.1";
+   if(n)document["deckyContextCleanup"]=ledger;
+   resetFiles(document);result=deckySidebarManagedLifecycleRecord(request,[]{return true;});
+   need(!result.value("ok",true)&&!result.value("mutated",true)&&fixtureWrites==0&&result.value("reason",std::string{})=="decky-managed-continuation-unconfirmed","inspect diagnostics changed original no-op refusal");
+   need(result.value("managedInspectFailure",std::string{})==inspectStages[n],"actual inspect refusal lost its fixed cause");
+   const auto logged=ymcc::deckydiag::record("managed-lifecycle",result);
+   need(logged.value("managedInspectFailure",std::string{})==inspectStages[n]&&!logged.contains("ledger"),"actual log filter lost fixed cause or exported history");
+   auto business=result;business.erase("managedInspectFailure");
+   need(business==Json({{"ok",false},{"mutated",false},{"reason","decky-managed-continuation-unconfirmed"}}),"optional cause altered original result fields");
+  }
+  auto healthy=original;healthy["deckyContextCleanup"]=ready;resetFiles(healthy);result=deckySidebarManagedLifecycleRecord(request,[]{return true;});
+  need(result.value("ok",false)&&!result.contains("managedInspectFailure")&&fixtureWrites==0,"healthy inspect acquired a failure diagnostic or write");
+  for(const auto& bad:std::vector<nlohmann::json>{nullptr,true,7,std::vector<int>{},std::map<std::string,int>{},"raw-ledger-content",std::string("ledger-missing")+char(10)+"raw"}){
+   const auto logged=ymcc::deckydiag::record("managed-lifecycle",Json{{"managedInspectFailure",bad},{"ledger",ready}});
+   need(!logged.contains("managedInspectFailure")&&!logged.contains("ledger"),"inspect diagnostics accepted bad types or private content");
+  }
+  const auto other=ymcc::deckydiag::record("connection",Json{{"managedInspectFailure","ledger-missing"}});
+  need(!other.contains("managedInspectFailure"),"inspect diagnostic escaped the original event");
+
  });
  check("actual native lifecycle service rejects late document account OFF and power replies without IO storms",[&]{
   namespace f=lifecycleServiceFixture;using namespace ymcc::deckyupdate;
@@ -1445,7 +1798,12 @@ int main(int argc,char** argv){
   f::tick=2000;f::deckySidebarServiceManagedLifecycle();need(f::backendReads==2&&f::deckySidebarConnectionRecoveryTimeout()==2000,"missing listener did not retain the original next proof deadline");
   f::backendReady=true;f::tick=4000;f::deckySidebarServiceManagedLifecycle();
   need(f::dispatches==1&&f::fileReads==1&&f::deckySidebarConnectionRecoveryTimeout()==INFINITE,"late owned backend did not record success and return Runtime to an infinite idle wait");
-  for(unsigned n=0;n<256;++n)f::deckySidebarServiceManagedLifecycle();need(f::dispatches==1&&f::backendReads==3&&f::fileReads==1,"successful confirmation became steady-state polling");
+  unsigned closedModeCopies=0;
+  for(unsigned n=0;n<256;++n){f::g_steamModeObserver.afterSnapshot=[&]{++closedModeCopies;};f::deckySidebarServiceManagedLifecycle();}
+  f::g_steamModeObserver.afterSnapshot={};
+  workerResults.push_back({{"kind","closed-ready-mode-copies"},{"wakeCount",256},{"modeCopies",closedModeCopies}});
+  need(f::dispatches==1&&f::backendReads==3&&f::fileReads==1,"successful confirmation became steady-state polling");
+  need(closedModeCopies==0,"completed native ready unnecessarily copied the shared Steam mode");
   setup(1);for(const auto at:{1000ull,2000ull,4000ull,9000ull,21000ull,31000ull}){f::tick=at;f::deckySidebarServiceManagedLifecycle();}
   need(f::backendReads==6&&f::dispatches==0&&f::deckySidebarConnectionRecoveryTimeout()==INFINITE,"absent backend escaped the bounded thirty-second proof window");
   for(unsigned n=0;n<256;++n){f::g_steamModeObserver.value["modeEpoch"]="slow-ready-1:"+std::to_string(n+2);f::tick+=1000;f::deckySidebarServiceManagedLifecycle();}
@@ -1707,7 +2065,7 @@ int main(int argc,char** argv){
   // proof, or retire a genuinely foreign identity; private IO is not entered.
   for(unsigned variant=0;variant<4;++variant){const auto direction=variant%2;const bool foreign=variant>=2;auto [before,full]=setupSource(80+variant,direction?9:0);auto after=before;after.account=foreign?10:(direction?0:9);
    f::deckySidebarQueueManagedReady(before,61,std::string(32,'c'),"1");f::g_steamModeObserver.value["mode"]="unknown";f::g_steamModeObserver.value.erase("modeEpoch");f::deckySidebarServiceManagedLifecycle();
-   f::g_steamModeObserver.value=full;f::g_steamModeObserver.afterSnapshot=[after]{f::g_steamSettingsObserver.value=after;};f::actualStableModeCallback(before);
+   f::g_steamModeObserver.value=full;f::g_steamModeObserver.afterSnapshot=[after]{f::g_steamModeObserver.afterSnapshot=[after]{f::g_steamSettingsObserver.value=after;};};f::actualStableModeCallback(before);
    need(f::g_deckySidebarRuntime.connectionWakes==1&&f::dispatches==0&&f::g_deckyManagedModePending.load()!=foreign,"source changed during Resume snapshot but stale proof was consumed");
    if(!foreign){f::actualStableModeCallback(after);need(f::g_deckySidebarRuntime.connectionWakes==2&&f::g_deckyManagedReady.session==after,"compatible second source snapshot failed to resume its own proof");f::deckySidebarServiceManagedLifecycle();need(f::dispatches==1,"second-source own proof did not finish original confirmation");}
    else{f::g_steamModeObserver.value["observedAccount"]=10u;f::actualStableModeCallback(after);need(f::g_deckySidebarRuntime.connectionWakes==1&&f::dispatches==0,"foreign second source revived the retired receipt");}
@@ -1752,16 +2110,68 @@ int main(int argc,char** argv){
    need(f::g_deckySidebarRuntime.connectionWakes==0&&f::dispatches==0&&f::deckySidebarSameManagedReady(prior,f::g_deckyManagedReady)&&f::g_deckyManagedModePending.load()==pending,"stale Queue hint bypassed native source/owned backend/peer/lifecycle admission");
   }
   // An initially unbound offline receipt may learn its first account later.
-  // A positive registry/UI disagreement still cannot bind that empty witness.
-  for(unsigned conflict=0;conflict<2;++conflict){auto [before,full]=setupSource(5+conflict,0);auto after=before;after.account=9;
+  // Prefer verified current-process UI account over stale ActiveUser, but
+  // do not consume an unbound receipt until that proof is actually available.
+  for(unsigned proof=0;proof<5;++proof){auto [before,full]=setupSource(5+proof,0);auto after=before;after.account=9;
    f::g_steamModeObserver.value["mode"]="unknown";f::g_steamModeObserver.value.erase("modeEpoch");f::g_steamModeObserver.value["deckyAccountWatchAvailable"]=false;f::g_steamModeObserver.value.erase("observedAccount");
    f::deckySidebarQueueManagedReady(before,61,std::string(32,'c'),"1");need(f::g_deckyManagedReady.account==0&&f::g_deckyManagedModePending.load()&&f::g_deckySidebarRuntime.connectionWakes==0,"initially unknown account receipt gained premature proof");
    f::g_steamSettingsObserver.value=after;f::g_steamModeObserver.value=full;
-   if(conflict){f::g_steamModeObserver.value["observedAccount"]=10u;f::actualStableModeCallback(after);
-    need(f::g_deckyManagedReady.initialProof&&f::g_deckySidebarRuntime.connectionWakes==0&&f::dispatches==0,"positive registry/UI disagreement bound an unknown-account receipt");f::g_steamModeObserver.value=full;}
-   f::actualStableModeCallback(after);need(f::g_deckyManagedReady.session==after&&f::g_deckyManagedReady.account==9&&!f::g_deckyManagedReady.initialProof&&f::g_deckySidebarRuntime.connectionWakes==1,"first positive account proof failed across registry handoff");
-   f::deckySidebarServiceManagedLifecycle();need(f::dispatches==1,"first positive account handoff never reached native confirmation");
+   const auto expectedAccount=proof==1?10u:9u;full["observedAccount"]=expectedAccount;
+   if(proof>=2){auto unverified=full;
+    unverified["observedAccount"]=10u;
+    if(proof==2)unverified["deckyAccountWatchAvailable"]=false;
+    if(proof==3)unverified["birth"]=std::to_string(after.created+1);
+    if(proof==4)unverified["pid"]=after.pid+1;
+    f::g_steamModeObserver.value=unverified;f::actualStableModeCallback(after);f::deckySidebarServiceManagedLifecycle();
+    need(f::g_deckyManagedReady.initialProof&&f::g_deckyManagedReady.account==0&&f::g_deckyManagedModePending.load()&&f::g_deckySidebarRuntime.connectionWakes==0&&f::dispatches==0&&f::backendReads==0&&f::fileReads==0,"unverified UI account bound an initially unknown receipt");}
+   f::g_steamModeObserver.value=full;f::actualStableModeCallback(after);
+   need(f::g_deckyManagedReady.session==after&&f::g_deckyManagedReady.account==expectedAccount&&!f::g_deckyManagedReady.initialProof&&f::g_deckySidebarRuntime.connectionWakes==1,"first verified UI account proof failed across registry handoff");
+   f::deckySidebarServiceManagedLifecycle();
+   need(f::dispatches==1&&f::currentAfterReply,"first verified UI account handoff did not confirm current native context");
+   workerResults.push_back({{"kind","first-verified-ui-account"},{"proof",proof},{"registryAccount",after.account},{"confirmedAccount",f::g_deckyManagedReady.account},{"dispatches",f::dispatches}});
   }
+  // A current positive ActiveUser can be stale before the receipt or while it
+  // waits for UI proof. Only the same authenticated receipt/process may resume.
+  for(unsigned proof=0;proof<8;++proof){auto [raw,full]=setupSource(520+proof,9);full["observedAccount"]=10u;
+   if(proof==1){auto pending=full;pending["deckyAccountWatchAvailable"]=false;pending.erase("observedAccount");f::g_steamModeObserver.value=pending;
+    raw.account=0;f::g_steamSettingsObserver.value=raw;}
+   else f::g_steamModeObserver.value=full;
+   f::deckySidebarQueueManagedReady(raw,61,std::string(32,'c'),"1");
+   if(proof==1){f::deckySidebarServiceManagedLifecycle();
+    need(f::g_deckyManagedReady.account==0&&f::g_deckyManagedModePending.load()&&f::dispatches==0&&f::backendReads==0,"unverified positive registry fallback spent account authority");
+    raw.account=9;f::g_steamSettingsObserver.value=raw;f::g_steamModeObserver.value=full;f::actualStableModeCallback(raw);}
+   need(f::g_deckyManagedReady.account==10&&!f::g_deckyManagedReady.initialProof&&f::g_deckySidebarRuntime.connectionWakes==1,"verified current-UI account could not queue through stale ActiveUser");
+   if(proof==2)f::g_steamSettingsObserver.value.account=0;
+   if(proof==3)f::g_steamSettingsObserver.value.account=10;
+   if(proof==4)f::g_steamSettingsObserver.value.account=11;
+   if(proof==5)f::g_steamModeObserver.value["observedAccount"]=11u;
+   if(proof==6)f::g_steamModeObserver.value["deckyAccountWatchAvailable"]=false;
+   if(proof==7)++f::g_steamSettingsObserver.value.created;
+   for(unsigned replay=0;replay<64;++replay){f::deckySidebarQueueManagedReady(proof==7?raw:f::g_steamSettingsObserver.value,61,std::string(32,'c'),"1");f::deckySidebarServiceManagedLifecycle();}
+   need(f::g_deckyManagedReady.account==10&&f::g_deckySidebarRuntime.connectionWakes==1&&
+    f::dispatches==(proof<4?1u:0u)&&f::backendReads==(proof<4?1u:0u),"stale-ActiveUser retry crossed account/process or repeated private work");
+   workerResults.push_back({{"kind","stale-active-user-confirmation"},{"proof",proof},{"dispatches",f::dispatches}});
+  }
+  // Exercise the existing owned child protocol and actual native writer/child
+  // gate. Registry and fresh mode are explicit inputs, not installed Steam.
+  {f::BackendControl control;f::startFixtureBackendControl(control,need);
+  for(unsigned switched=0;switched<2;++switched){auto [raw,full]=setupSource(540+switched,9);fixtureOwnSteamContext(raw,full);full["observedAccount"]=10u;
+   const auto host=cleanupworker::nativeHost();
+   f::g_steamSettingsObserver.value=raw;f::g_steamModeObserver.value=full;
+   f::g_deckySidebarRuntime.state.pid=f::fixtureBackendPid;
+   f::privateMain={{"schemaVersion",1},{"extensions",{{"deckySidebar",{{"enabled",true}}}}},{"businessOpaque","preserve"}};f::privateBackup=f::privateMain;
+   f::useActualPrivateChild=true;f::privateResults=Json::array();f::privateModeOverride=full;
+   if(switched)f::privateModeOverride["observedAccount"]=11u;
+   f::deckySidebarQueueManagedReady(raw,f::fixtureBackendPid,std::string(32,'c'),"1");f::deckySidebarServiceManagedLifecycle();
+   need(f::dispatches==1&&f::privateResults.size()==1,"stale ActiveUser did not reach the single owned private child");
+   const auto actual=f::privateResults.back().at("result");
+   need(actual.value("fixtureWorkerPid",0u)&&actual.value("fixtureWorkerPid",0u)!=raw.pid&&actual.value("cleanupWorkerDestroyed",false)&&actual.value("cleanupWorkerHandles",99u)==0&&actual.value("cleanupWorkerProcesses",99u)==0,"stale ActiveUser private process/Job did not return");
+   if(!switched){need(actual.value("ok",false)&&actual.value("fixtureSettingsWrites",99u)==2&&actual.at("fixtureSavedMain")==actual.at("fixtureSavedBackup")&&actual.at("fixtureSavedMain").at("businessOpaque")=="preserve"&&actual.at("fixtureSavedMain").at("deckyContextCleanup").at("host")==host,"verified UI account did not record matching owned metadata");}
+   else need(!actual.value("ok",true)&&!actual.value("mutated",true)&&actual.value("reason",std::string{})=="decky-managed-context-changed"&&actual.value("fixtureSettingsReads",99u)==0&&actual.value("fixtureSettingsWrites",99u)==0,"switched UI account in the child crossed the settings boundary");
+   workerResults.push_back({{"kind","stale-active-user-owned-child"},{"switched",switched},{"result",actual}});
+   f::useActualPrivateChild=false;f::privateModeOverride=nullptr;
+  }
+  need(control.stop(),"stale ActiveUser fixture backend did not retire");}
   // Changing registry provenance neither refills the original proof schedule nor
   // bypasses a pending first observation of an already owned backend listener.
   for(unsigned expiry=0;expiry<2;++expiry){auto [selected,full]=setupSource(10+expiry,0);f::backendReady=false;
@@ -1920,26 +2330,75 @@ int main(int argc,char** argv){
  });
  check("actual private lifecycle child uses existing Job ownership and cancels before any product action",[&]{
   auto own=session;own.pid=GetCurrentProcessId();const auto life=Json{{"task","inspect"},{"modeEpoch","managed-private:1"},{"frontendBuildId",build},{"loaderVersion","v3.3.0"},{"backendPid",0u},{"backendBirth","0"}};
-  const auto result=cleanupworker::dispatch(own,false,life,initial,[]{return true;},cleanupworker::recoveryWindowMs,cleanupworker::lifecycleSchema);
+  const auto result=cleanupworker::dispatch(own,false,fixtureSteamIdentity(own),life,initial,[]{return true;},cleanupworker::recoveryWindowMs,cleanupworker::lifecycleSchema);
   need(result.value("ok",false)&&result.value("fixtureTask",std::string{})=="inspect"&&ymcc::deckyupdate::validTicket(result.value("nativeHost",std::string{}))&&result.value("cleanupWorkerDestroyed",false)&&result.value("cleanupWorkerHandles",99u)==0&&result.value("cleanupWorkerProcesses",99u)==0,"private lifecycle request did not return through actual owned child and release resources");
-  const auto cancelled=cleanupworker::dispatch(own,false,life,initial,[]{return false;},cleanupworker::recoveryWindowMs,cleanupworker::lifecycleSchema);
+  const auto cancelled=cleanupworker::dispatch(own,false,fixtureSteamIdentity(own),life,initial,[]{return false;},cleanupworker::recoveryWindowMs,cleanupworker::lifecycleSchema);
   need(!cancelled.value("ok",true)&&!cancelled.value("mutated",true),"cancelled lifecycle request entered its child");
+  // Extend this original lifecycle case through the current normal shared wire.
+  // The existing legacy success/cancellation assertions above remain intact.
+  Json ownMode=Json::object();fixtureOwnSteamContext(own,ownMode);
+  g_steamSettingsObserver.value=fixtureSteamIdentity(own);
+  auto shared=g_steamSettingsObserver.identitySnapshot();
+  auto inspectResult=cleanupworker::dispatchShared(g_steamSettingsObserver,own,false,shared,life,initial,[]{return true;},cleanupworker::recoveryWindowMs,cleanupworker::lifecycleSchema);
+  need(inspectResult.value("ok",false)&&inspectResult.value("delegatedIdentity",false)&&inspectResult.value("fixtureTask",std::string{})=="inspect"&&inspectResult.value("cleanupWorkerDestroyed",false)&&inspectResult.value("cleanupWorkerHandles",99u)==0&&inspectResult.value("cleanupWorkerProcesses",99u)==0,"shared inspect did not execute the inherited-cancel child lease and release resources");
+  workerResults.push_back({{"kind","shared-lifecycle-inspect"},{"result",inspectResult}});
+  auto confirm=life;confirm["task"]="confirm";confirm["backendPid"]=own.pid;confirm["backendBirth"]=std::to_string(own.created);
+  auto readyState=initial;readyState["pid"]=own.pid;readyState["phase"]="loader-started";
+  const auto confirmed=cleanupworker::dispatchShared(g_steamSettingsObserver,own,false,shared,confirm,readyState,[]{return true;},cleanupworker::recoveryWindowMs,cleanupworker::lifecycleSchema);
+  need(confirmed.value("ok",false)&&confirmed.value("delegatedIdentity",false)&&confirmed.value("fixtureTask",std::string{})=="confirm"&&confirmed.value("cleanupWorkerDestroyed",false)&&confirmed.value("cleanupWorkerHandles",99u)==0&&confirmed.value("cleanupWorkerProcesses",99u)==0,"shared confirmation did not use the normal inherited-cancel protocol");
+  workerResults.push_back({{"kind","shared-lifecycle-confirm"},{"result",confirmed}});
+  const auto stopped=cleanupworker::dispatchShared(g_steamSettingsObserver,own,false,shared,life,initial,[]{return false;},cleanupworker::recoveryWindowMs,cleanupworker::lifecycleSchema);
+  need(!stopped.value("ok",true)&&!stopped.value("mutated",true)&&stopped.value("reason",std::string{})=="decky-cleanup-cancelled","OFF before shared lifecycle admission reached a private child");
+  workerResults.push_back({{"kind","shared-lifecycle-cancel-before-child"},{"result",stopped}});
+  const auto name=L"Local\\YMCC-Cleanup-Delegation-"+std::to_wstring(own.pid);
+  ymcc::deckybinding::detail::Handle entered{CreateEventW(nullptr,TRUE,FALSE,name.c_str())};need(entered.value!=nullptr,"lifecycle revocation marker unavailable");
+  auto held=life;held["modeEpoch"]="delegation-held:1";
+  std::atomic<bool> withdrew{false};std::thread withdraw([&]{if(WaitForSingleObject(entered.value,3000)==WAIT_OBJECT_0){g_steamSettingsObserver.withdraw();withdrew=true;}});
+  const auto revoked=cleanupworker::dispatchShared(g_steamSettingsObserver,own,false,shared,held,initial,[]{return true;},5000,cleanupworker::lifecycleSchema);
+  withdraw.join();need(withdrew.load()&&!revoked.value("ok",true)&&revoked.value("cleanupWorkerDestroyed",false)&&revoked.value("cleanupWorkerHandles",99u)==0&&revoked.value("cleanupWorkerProcesses",99u)==0,"shared publication withdrawal did not cancel and reclaim the actual lifecycle child");
+  workerResults.push_back({{"kind","shared-lifecycle-revoked-after-entry"},{"actualPublicationUsed",true},{"result",revoked}});
+
  });
  for(const auto& name:selectedCases)if(std::find(declaredCases.begin(),declaredCases.end(),name)==declaredCases.end())cases.push_back({{"name",name},{"pass",false},{"error","unknown native case selection"}});
  if(cases.empty())cases.push_back({{"name","selection"},{"pass",false},{"error","empty native case selection"}});
- const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& r){return r.at("pass")==true;});const Json result={{"pass",passed==static_cast<int>(cases.size())},{"cases",cases},{"count",cases.size()},{"passed",passed},{"realSteamActions",0},{"hardwareWrites",0},{"selection",{{"mode",argc>2?"exact-native-cases":"full"},{"availableCount",declaredCases.size()},{"requested",selectedCases},{"completeNativeCoverage",argc==2}}},{"upgradeActions",upgradeActions},{"cleanupActions",cleanupActions},{"workerResults",workerResults},{"jointPrivateTrace",lifecycleServiceFixture::privateResults}};std::ofstream out(argv[1]);out<<result.dump(2)<<'\n';std::cout<<result.dump()<<std::endl;return result.at("pass")==true?0:2;}
+ const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& r){return r.at("pass")==true;});const Json result={{"pass",passed==static_cast<int>(cases.size())},{"cases",cases},{"count",cases.size()},{"passed",passed},{"realSteamActions",0},{"hardwareWrites",0},{"selection",{{"mode",argc>2?"exact-native-cases":"full"},{"availableCount",declaredCases.size()},{"requested",selectedCases},{"completeNativeCoverage",argc==2}}},{"upgradeActions",upgradeActions},{"cleanupActions",cleanupActions},{"workerResults",workerResults},{"exitedCleanupWait",exitwaitfixture::exitedResourceWait},{"jointPrivateTrace",lifecycleServiceFixture::privateResults}};std::ofstream out(argv[1]);out<<result.dump(2)<<'\n';std::cout<<result.dump()<<std::endl;return result.at("pass")==true?0:2;}
 `;
+ if(nativeVariant){
+  const {prepareRecoveryBudgetSource}=await import('./fixtures/decky_recovery_budget_source.mjs');
+  const generated=prepareRecoveryBudgetSource(root,out);assert.equal(generated.baseline,false,'Current diagnostic reservation source required');
+  const main=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8').replace(/\r\n/g,'\n');
+  const slice=(begin,end)=>{const a=main.indexOf(begin),b=main.indexOf(end,a);assert(a>=0&&b>a&&main.indexOf(begin,a+1)<0,'Actual recovery trace callback moved: '+begin);return main.slice(a+begin.length,b).trim().replace(/;$/,'');};
+  const context=slice('    config.failureContext=','\n    config.failureDiagnostic=');
+  const diagnostic=slice('    config.failureDiagnostic=','\n\n    config.launchAdmission=');
+  const stamp='if(!failure)line["nativePowerGeneration"]=g_powerGeneration.load(std::memory_order_acquire);\n        else line["writerPowerGeneration"]=g_powerGeneration.load(std::memory_order_acquire);';assert.equal(main.split(stamp).length,2,'Original writer power stamp moved');
+  let helper=fs.readFileSync(path.join(root,'tools/fixtures/decky_recovery_budget_wire.h'),'utf8');
+  for(const [marker,value]of [['/*YMCC_ACTUAL_FAILURE_CONTEXT*/',context],['/*YMCC_ACTUAL_FAILURE_DIAGNOSTIC*/',diagnostic],['/*YMCC_ACTUAL_WRITER_POWER_STAMP*/',stamp]]){assert.equal(helper.split(marker).length,2);helper=helper.replace(marker,value);}
+  budgetWireSegments.push({path:'native/main.cpp',consumer:'budgetWireFailureContext',source:context,sha256:sha(Buffer.from(context))},{path:'native/main.cpp',consumer:'budgetWireFailureDiagnostic',source:diagnostic,sha256:sha(Buffer.from(diagnostic))},{path:'native/main.cpp',consumer:'budgetWireWriterPowerStamp',source:stamp,sha256:sha(Buffer.from(stamp))},{path:'native/main.cpp',consumer:'budgetWireActualReservation',source:generated.record.original,sha256:generated.record.originalSha256,compiledSha256:generated.record.compiledSha256});
+  const inject=(from,to)=>{assert.equal(native.split(from).length,2,'Exact explicit budget variant anchor moved');native=native.replace(from,to);};
+  const counter=`#include <windows.h>\n#include <atomic>\nstatic std::atomic<unsigned> budgetWireRegistryReads{0};\nstatic LSTATUS WINAPI budgetWireRegGetValueW(HKEY key,LPCWSTR sub,LPCWSTR value,DWORD flags,LPDWORD type,PVOID data,LPDWORD size){++budgetWireRegistryReads;return ::RegGetValueW(key,sub,value,flags,type,data,size);}\n#define RegGetValueW budgetWireRegGetValueW\n`;
+  inject('#include "decky_sidebar_automatic_repair.h"',counter+'#include "decky_sidebar_automatic_repair.h"');
+  inject('using Json=nlohmann::json;using json=nlohmann::json;using namespace ymcc::deckyrepair;',`#undef RegGetValueW\n#define YMCC_DECKY_BUDGET_PORTS_ONLY\n#define YMCC_DECKY_BUDGET_SOURCE "${generated.header.replaceAll('\\','/')}"\n#include "${path.join(root,'tools/fixtures/decky_recovery_budget_cases.h').replaceAll('\\','/')}"\n#include <cstring>\nusing Json=nlohmann::json;using json=nlohmann::json;using namespace ymcc::deckyrepair;`);
+  inject('int main(int argc,char** argv){',helper+'\nint main(int argc,char** argv){');
+  const child='   if(request.identity.delegatedIdentity&&request.args.at("modeEpoch")=="delegation-held:1"){';
+  inject(child,'   if(!request.lifecycle&&request.state.contains("fixtureBudgetMode"))return budgetwirefixture::child(request,cancel,delegatedLease.get());\n'+child);
+  const original=' check("actual private lifecycle child uses existing Job ownership and cancels before any product action",[&]{';
+  inject(original,original+'\n  workerResults.push_back(budgetwirefixture::run(session,'+(nativeVariant==='source-return-controls')+'));return;');
+  fs.writeFileSync(path.join(out,'budget-wire-source.json'),JSON.stringify({reservation:generated.record,segments:budgetWireSegments,helperSha256:sha(Buffer.from(helper)),variant:nativeVariant},null,2)+'\n',{flag:'wx'});
+ }
  const availableCases=[...native.matchAll(/check\("([^"\n]+)",\[&\]/g)].map(match=>match[1]);assert(availableCases.length>0,"Missing native case catalog");
- const selection={mode:selectedCases===null?'full':'exact-native-cases',availableCount:availableCases.length,requested:selectedCases??availableCases,completeNativeCoverage:selectedCases===null};
+ const selection={...(nativeVariant?{variant:nativeVariant}:{}),mode:selectedCases===null?'full':'exact-native-cases',availableCount:availableCases.length,requested:selectedCases??availableCases,completeNativeCoverage:selectedCases===null};
  fs.writeFileSync(path.join(out,'selection.json'),JSON.stringify(selection,null,2)+'\n');
  if(selectedCases!==null)for(const name of selectedCases)assert(availableCases.includes(name),'Unknown native case: '+name);
  const cpp=path.join(out,'retained-repair.cpp');fs.writeFileSync(cpp,native);const declaration=getNativeLaunchNoIoToolDeclaration();assert(!declaration.blockedReason,declaration.blockedReason);const tools=selectedNativeTools().native;const compilerPin={path:tools.compiler,sha256:sha(fs.readFileSync(tools.compiler))};
  const env=Object.fromEntries(Object.entries(process.env).map(([k,v])=>[k.toUpperCase(),v]));Object.assign(env,{PATH:path.dirname(tools.compiler)+';'+process.env.SystemRoot+'/System32',INCLUDE:tools.include.join(';'),LIB:tools.lib.join(';'),CL:'',_CL_:'',LINK:'',_LINK_:''});
  const sdkSupplemental=[];for(const name of ['ws2tcpip.h','iphlpapi.h','iphlpapi.lib']){const dirs=name.endsWith('.h')?tools.include:tools.lib;const file=dirs.map(d=>path.join(d,name)).find(p=>fs.existsSync(p));assert(file,'Actual IP Helper SDK input missing '+name);sdkSupplemental.push({path:file,sha256:sha(fs.readFileSync(file)),bytes:fs.statSync(file).size});}
  fs.writeFileSync(path.join(out,'backend-sdk-supplemental-inputs.json'),JSON.stringify({rows:sdkSupplemental,scope:'Known actual added SDK header/import library pinned before/after compile. Original tool declaration remains independently validated; exact whole SDK/include closure is not claimed.'},null,2)+'\n');
- const exe=path.join(out,'retained-repair.exe'),buildStartedAtUtc=new Date().toISOString(),buildStart=performance.now();const build=spawnSync(tools.compiler,['/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/DNOMINMAX','/DUNICODE','/D_UNICODE','/I'+frozen,'/I'+path.join(root,'deps/json'),cpp,'/Fo'+path.join(out,'retained-repair.obj'),'/Fe'+exe,'/link','advapi32.lib','user32.lib','shell32.lib','winhttp.lib','iphlpapi.lib','ws2_32.lib','bcrypt.lib'],{cwd:out,env,encoding:'utf8',windowsHide:true,timeout:60000});const buildElapsedMs=performance.now()-buildStart,buildEndedAtUtc=new Date().toISOString();fs.writeFileSync(path.join(out,'compile.log'),(build.stdout||'')+(build.stderr||'')+(build.error?.stack??''));fs.writeFileSync(path.join(out,'compile-process.json'),JSON.stringify({compiler:compilerPin,toolInputCount:declaration.artifactInputs.length,startedAtUtc:buildStartedAtUtc,endedAtUtc:buildEndedAtUtc,elapsedMs:buildElapsedMs,pid:build.pid??null,exitCode:build.status,signal:build.signal,error:build.error?.message??null,timeoutMs:60000},null,2)+'\n');assert.equal(build.status,0,'Native manual recovery compile failed: '+(build.error?.message??'')+(build.stdout??'')+(build.stderr??''));
+ const exe=path.join(out,'steam.exe'),buildStartedAtUtc=new Date().toISOString(),buildStart=performance.now();const build=spawnSync(tools.compiler,['/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/DNOMINMAX','/DUNICODE','/D_UNICODE','/I'+frozen,'/I'+path.join(root,'deps/json'),cpp,'/sourceDependencies',path.join(out,'source-dependencies.json'),'/Fo'+path.join(out,'retained-repair.obj'),'/Fe'+exe,'/link','advapi32.lib','user32.lib','shell32.lib','winhttp.lib','iphlpapi.lib','ws2_32.lib','bcrypt.lib','/verbose:lib'],{cwd:out,env,encoding:'utf8',windowsHide:true,timeout:60000});const buildElapsedMs=performance.now()-buildStart,buildEndedAtUtc=new Date().toISOString();fs.writeFileSync(path.join(out,'compile.log'),(build.stdout||'')+(build.stderr||'')+(build.error?.stack??''));fs.writeFileSync(path.join(out,'compile-process.json'),JSON.stringify({compiler:compilerPin,toolInputCount:declaration.artifactInputs.length,startedAtUtc:buildStartedAtUtc,endedAtUtc:buildEndedAtUtc,elapsedMs:buildElapsedMs,pid:build.pid??null,exitCode:build.status,signal:build.signal,error:build.error?.message??null,timeoutMs:60000},null,2)+'\n');assert.equal(build.status,0,'Native manual recovery compile failed: '+(build.error?.message??'')+(build.stdout??'')+(build.stderr??''));
  for(const row of sdkSupplemental)assert.equal(sha(fs.readFileSync(row.path)),row.sha256,'IP Helper SDK input changed during compile');
- const nativeStartedAtUtc=new Date().toISOString(),nativeStart=performance.now();const nativeRun=spawnSync(exe,[path.join(out,'native.json'),...(selectedCases??[])],{encoding:'utf8',windowsHide:true,timeout:10000});const nativeElapsedMs=performance.now()-nativeStart,nativeEndedAtUtc=new Date().toISOString();fs.writeFileSync(path.join(out,'native.log'),(nativeRun.stdout||'')+(nativeRun.stderr||''));fs.writeFileSync(path.join(out,'native-process.json'),JSON.stringify({executable:exe,sha256:sha(fs.readFileSync(exe)),args:[path.join(out,'native.json'),...(selectedCases??[])],startedAtUtc:nativeStartedAtUtc,endedAtUtc:nativeEndedAtUtc,elapsedMs:nativeElapsedMs,pid:nativeRun.pid??null,exitCode:nativeRun.status,signal:nativeRun.signal,error:nativeRun.error?.message??null,timeoutMs:10000},null,2)+'\n');assert.equal(nativeRun.status,0,'Actual native manual recovery regression failed');
+ // Whole-suite collection envelope: two real4s boundary cases plus backend/cleanup work measured9.992s.
+ // Per-case recovery/stop assertions and the outer shared deadline are unchanged.
+ const nativeCollectorTimeoutMs=selectedCases===null||selectedCases.length===availableCases.length?15000:10000;
+ const nativeStartedAtUtc=new Date().toISOString(),nativeStart=performance.now();const nativeRun=spawnSync(exe,[path.join(out,'native.json'),...(selectedCases??[])],{encoding:'utf8',windowsHide:true,timeout:nativeCollectorTimeoutMs});const nativeElapsedMs=performance.now()-nativeStart,nativeEndedAtUtc=new Date().toISOString();fs.writeFileSync(path.join(out,'native.log'),(nativeRun.stdout||'')+(nativeRun.stderr||''));fs.writeFileSync(path.join(out,'native-process.json'),JSON.stringify({executable:exe,sha256:sha(fs.readFileSync(exe)),args:[path.join(out,'native.json'),...(selectedCases??[])],startedAtUtc:nativeStartedAtUtc,endedAtUtc:nativeEndedAtUtc,elapsedMs:nativeElapsedMs,pid:nativeRun.pid??null,exitCode:nativeRun.status,signal:nativeRun.signal,error:nativeRun.error?.message??null,timeoutMs:nativeCollectorTimeoutMs,previousCollectorCapMs:10000,budgetScope:'whole-native-suite-process'},null,2)+'\n');assert.equal(nativeRun.status,0,'Actual native manual recovery regression failed');
  const ui=[];if(selectedCases===null){
  const module={exports:{}};vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'src/bridge/deckySidebar.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,require:name=>{assert.equal(name,'./ipc');return {invoke(){throw Error('Unexpected real IPC')},on(){throw Error('Unexpected listener')}}}});const api=module.exports;
  const field=JSON.parse(fs.readFileSync(path.join(root,'tools/ymcc_sim/global/decky-update-recovery/field-record-retained-session-rogx-20261023.json'),'utf8'));assert.equal(field.id,'decky-retained-session-repair-rogx-20261023');const state=field.observed.runtime;assert.equal(api.deckySidebarCanRepair(state),true);ui.push('exact field failure preserves enabled manual repair');assert.match(api.deckyConnectionSummary(state).detail,/手动修复.*验证/);assert(!api.deckyConnectionSummary(state).label.includes('已连接'));ui.push('failure explains fresh validation and cannot claim connected');
@@ -1955,10 +2414,10 @@ int main(int argc,char** argv){
  assert.equal(sha(Buffer.from(extractLifecycleService())),sha(Buffer.from(productionLifecycleService)),'Actual main lifecycle service changed during native regression');
  assert.equal(sha(Buffer.from(extractLifecycleWriter())),sha(Buffer.from(productionLifecycleWriter)),'Actual main lifecycle writer changed during native regression');
  assert.equal(sha(Buffer.from(extractDispatch())),sha(Buffer.from(productionCleanupDispatch)),'Actual main cleanup dependency changed during native regression');
- for(const [p,pin]of Object.entries(pins))assert.equal(sha(fs.readFileSync(path.join(root,p))),pin,'Source changed during regression '+p);const n=JSON.parse(fs.readFileSync(path.join(out,'native.json'),'utf8'));assert.equal(sha(fs.readFileSync(tools.compiler)),compilerPin.sha256,'Manual recovery compiler changed during regression');const result={pass:true,completeRegression:selectedCases===null,selection,compiler:compilerPin,toolInputCount:declaration.artifactInputs.length,nativeCases:n.count,uiCases:ui.length,ui,sourceHashes:pins,sourceSegments:[{path:'native/main.cpp',consumer:'backendProof',sha256:sha(Buffer.from(productionBackendProof)),compiledSha256:sha(Buffer.from(compiledBackendProof)),classifierSha256:sha(Buffer.from(classifierBackendProof)),adaptedIo:['ephemeral port','query fault wrapper']},{path:'native/main.cpp',consumer:'connectionRecoveryTimeout',sha256:sha(Buffer.from(productionRecoveryTimeout)),compiledSha256:sha(Buffer.from(compiledRecoveryTimeout)),adaptedIo:['clock']},{path:'native/main.cpp',consumer:'nativeMirrorReplyProducer',sha256:sha(Buffer.from(productionNativeMirrorReply)),compiledSha256:sha(Buffer.from(compiledNativeMirrorReply))},{path:'tools/decky_sidebar_broker_selftest.cpp',consumer:'originalBrokerLoopbackClient',sha256:sha(Buffer.from(originalBrokerClient)),compiledSha256:sha(Buffer.from(originalBrokerClient))},{path:'native/main.cpp',consumer:'managedReadyState',sha256:sha(Buffer.from(productionManagedReadyState)),compiledSha256:sha(Buffer.from(compiledManagedReadyState))},{path:'native/main.cpp',consumer:'stableModeCallback',sha256:sha(Buffer.from(productionStableModeCallback)),compiledSha256:sha(Buffer.from(compiledStableModeCallback))},{path:'tools/decky_binding_runtime_selftest.cpp',consumer:'parentHandleSnapshot',sha256:sha(Buffer.from(productionParentHandleSnapshot)),compiledSha256:sha(Buffer.from(productionParentHandleSnapshot)),scope:'Exact existing helper slice only, not the full Runtime suite'},{path:'native/main.cpp',consumer:'manualReceiptCallback',sha256:sha(Buffer.from(productionManualReceiptCallback)),compiledSha256:sha(Buffer.from(productionManualReceiptCallback))},{path:'native/main.cpp',consumer:'lifecycleChildGate',sha256:sha(Buffer.from(productionLifecycleChildGate)),compiledSha256:sha(Buffer.from(compiledLifecycleChildGate)),scope:'Actual mode/build/backend identity branch before settings metadata IO'},{path:'native/main.cpp',consumer:'lifecycleService',sha256:sha(Buffer.from(productionLifecycleService)),compiledSha256:sha(Buffer.from(compiledLifecycleService)),adaptedIo:['frontendBuildId','private dispatch']},{path:'native/main.cpp',consumer:'lifecycleWriter',sha256:sha(Buffer.from(productionLifecycleWriter)),compiledSha256:sha(Buffer.from(compiledLifecycleWriter))},{path:'native/main.cpp',consumer:'cleanupWorker',sha256:sha(Buffer.from(productionCleanupDispatch)),compiledSha256:sha(Buffer.from(compiledCleanupDispatch))}],realSteamActions:0,hardwareWrites:0,settingsWrites:0,automaticUiRebuilds:0,finalCleanupActions:n.cleanupActions.length,sourceOverrides:Object.fromEntries([["backendProof",backendProofOverride],["runtimeScheduler",runtimeOverride],["nativeMirrorReplyProducer",nativeMirrorReplyOverride],["managedReadyState",readyStateOverride],["stableModeCallback",stableModeOverride],["lifecycleChildGate",childGateOverride],["lifecycleService",lifecycleServiceOverride],["managed",managedOverride],["lifecycleWriter",lifecycleWriterOverride],["manual",override],["automatic",cleanupOverride],["cleanupWorker",workerOverride],["cleanupDispatch",dispatchOverride]].filter(([,p])=>p).map(([kind,p])=>[kind,{path:p,sha256:sha(fs.readFileSync(p))}])),scope:selectedCases===null?'Actual ManualRepair compiled and TS consumer executed; memory session/mode/preflight/dispatch, no installed or physical acceptance':'EXACT NATIVE CASES ONLY; UI and other native cases NOT_RUN; no full regression or installed acceptance'};fs.writeFileSync(path.join(out,'retained-session-repair.json'),JSON.stringify(result,null,2)+'\n');return result;
+ for(const [p,pin]of Object.entries(pins))assert.equal(sha(fs.readFileSync(path.join(root,p))),pin,'Source changed during regression '+p);const n=JSON.parse(fs.readFileSync(path.join(out,'native.json'),'utf8'));assert.equal(sha(fs.readFileSync(tools.compiler)),compilerPin.sha256,'Manual recovery compiler changed during regression');const result={pass:true,observerPublication:observerPublicationEvidence,completeRegression:selectedCases===null,selection,compiler:compilerPin,toolInputCount:declaration.artifactInputs.length,nativeCases:n.count,uiCases:ui.length,ui,sourceHashes:pins,sourceSegments:[...budgetWireSegments,...exitWaitSegments,{path:'native/main.cpp',consumer:'backendProof',sha256:sha(Buffer.from(productionBackendProof)),compiledSha256:sha(Buffer.from(compiledBackendProof)),classifierSha256:sha(Buffer.from(classifierBackendProof)),adaptedIo:['ephemeral port','query fault wrapper']},{path:'native/main.cpp',consumer:'connectionRecoveryTimeout',sha256:sha(Buffer.from(productionRecoveryTimeout)),compiledSha256:sha(Buffer.from(compiledRecoveryTimeout)),adaptedIo:['clock']},{path:'native/main.cpp',consumer:'nativeMirrorReplyProducer',sha256:sha(Buffer.from(productionNativeMirrorReply)),compiledSha256:sha(Buffer.from(compiledNativeMirrorReply))},{path:'tools/decky_sidebar_broker_selftest.cpp',consumer:'originalBrokerLoopbackClient',sha256:sha(Buffer.from(originalBrokerClient)),compiledSha256:sha(Buffer.from(originalBrokerClient))},{path:'native/main.cpp',consumer:'managedReadyState',sha256:sha(Buffer.from(productionManagedReadyState)),compiledSha256:sha(Buffer.from(compiledManagedReadyState))},{path:'native/main.cpp',consumer:'stableModeCallback',sha256:sha(Buffer.from(productionStableModeCallback)),compiledSha256:sha(Buffer.from(compiledStableModeCallback))},{path:'tools/decky_binding_runtime_selftest.cpp',consumer:'parentHandleSnapshot',sha256:sha(Buffer.from(productionParentHandleSnapshot)),compiledSha256:sha(Buffer.from(productionParentHandleSnapshot)),scope:'Exact existing helper slice only, not the full Runtime suite'},{path:'native/main.cpp',consumer:'manualReceiptCallback',sha256:sha(Buffer.from(productionManualReceiptCallback)),compiledSha256:sha(Buffer.from(productionManualReceiptCallback))},{path:'native/main.cpp',consumer:'lifecycleChildGate',sha256:sha(Buffer.from(productionLifecycleChildGate)),compiledSha256:sha(Buffer.from(compiledLifecycleChildGate)),scope:'Actual mode/build/backend identity branch before settings metadata IO'},{path:'native/main.cpp',consumer:'lifecycleService',sha256:sha(Buffer.from(productionLifecycleService)),compiledSha256:sha(Buffer.from(compiledLifecycleService)),adaptedIo:['frontendBuildId','private dispatch']},{path:'native/main.cpp',consumer:'lifecycleWriter',sha256:sha(Buffer.from(productionLifecycleWriter)),compiledSha256:sha(Buffer.from(compiledLifecycleWriter))},{path:'native/main.cpp',consumer:'cleanupWorker',sha256:sha(Buffer.from(productionCleanupDispatch)),compiledSha256:sha(Buffer.from(compiledCleanupDispatch))}],realSteamActions:0,hardwareWrites:0,settingsWrites:0,automaticUiRebuilds:0,finalCleanupActions:n.cleanupActions.length,sourceOverrides:Object.fromEntries([["backendProof",backendProofOverride],["runtimeScheduler",runtimeOverride],["nativeMirrorReplyProducer",nativeMirrorReplyOverride],["managedReadyState",readyStateOverride],["stableModeCallback",stableModeOverride],["lifecycleChildGate",childGateOverride],["lifecycleService",lifecycleServiceOverride],["managed",managedOverride],["lifecycleWriter",lifecycleWriterOverride],["manual",override],["automatic",cleanupOverride],["cleanupWorker",workerOverride],["cleanupDispatch",dispatchOverride]].filter(([,p])=>p).map(([kind,p])=>[kind,{path:p,sha256:sha(fs.readFileSync(p))}])),scope:selectedCases===null?'Actual ManualRepair compiled and TS consumer executed; memory session/mode/preflight/dispatch, no installed or physical acceptance':'EXACT NATIVE CASES ONLY; UI and other native cases NOT_RUN; no full regression or installed acceptance'};fs.writeFileSync(path.join(out,'retained-session-repair.json'),JSON.stringify(result,null,2)+'\n');return result;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===import.meta.filename){
- assert(process.argv[2]&&!process.argv[2].startsWith('--'),'Evidence output directory required');const root=path.resolve(import.meta.dirname,'..'),out=path.resolve(process.argv[2]);let nativeCases;
- for(let i=3;i<process.argv.length;++i){assert.equal(process.argv[i],'--native-case','Unknown CLI argument');assert(i+1<process.argv.length&&!process.argv[i+1].startsWith('--'),'--native-case requires an exact nonempty name');(nativeCases??=[]).push(process.argv[++i]);}
- const result=await retainedSessionRepairTests(root,out,nativeCases?{nativeCases}:{});console.log('Retained session repair PASS mode='+result.selection.mode+' native='+result.nativeCases+' ui='+result.uiCases);
+ assert(process.argv[2]&&!process.argv[2].startsWith('--'),'Evidence output directory required');const root=path.resolve(import.meta.dirname,'..'),out=path.resolve(process.argv[2]);let nativeCases,nativeVariant;
+ for(let i=3;i<process.argv.length;++i){const flag=process.argv[i];assert(flag==='--native-case'||flag==='--native-variant','Unknown CLI argument');assert(i+1<process.argv.length&&!process.argv[i+1].startsWith('--'),flag+' requires an exact nonempty value');const value=process.argv[++i];if(flag==='--native-case')(nativeCases??=[]).push(value);else{assert.equal(nativeVariant,undefined,'Duplicate native variant');nativeVariant=value;}}
+ const result=await retainedSessionRepairTests(root,out,{...(nativeCases?{nativeCases}:{}),...(nativeVariant?{nativeVariant}:{})});console.log('Retained session repair PASS mode='+result.selection.mode+' native='+result.nativeCases+' ui='+result.uiCases);
 }

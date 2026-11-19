@@ -31,9 +31,9 @@ export function normalizeOemInputUsage(raw: unknown): OemInputUsage | null {
       failed: requested && f.pending === false && f.lastOutcomeKnown === true && f.lastOutcomeOk === false },
   };
 }
-/** OneX short-edge receipt: observational only, never a synthetic held state. */
+/** Existing OneX/AYA/AOKZOE/GPD edge receipt: model-interpreted input, never a physical-origin or held-state claim. */
 export function oneXOemObservationKeys(raw: unknown, usage?: OemKeysSnapshot | null): string[] {
-  if (!usage?.deviceClass || !usage.supported || usage.familyId !== 'onexplayer' || !raw || typeof raw !== 'object') return [];
+  if (!usage?.deviceClass || !usage.supported || (usage.familyId !== 'onexplayer' && usage.familyId !== 'ayanero' && usage.familyId !== 'aokzoe' && usage.familyId !== 'gpd') || !raw || typeof raw !== 'object') return [];
   const value = raw as Record<string, unknown>;
   if (value.schemaVersion !== 1 || value.familyId !== usage.familyId || value.deviceClass !== usage.deviceClass || !Array.isArray(value.observedKeys)) return [];
   const known = new Set(usage.keys.filter(key => key.captureImplemented !== false).map(key => key.keyId));
@@ -86,7 +86,7 @@ function keysStatus(id: 'back' | 'dedicated', context: ControllerFeatureContext)
   const wmiMissing = usage.familyId === 'msi-claw' && id === 'dedicated' && !usage.runtime.msiWmiCurrent;
   const qsFallback = wmiMissing && keyboardReady && implemented.some(key => key.keyId === 'qs');
   const wmiDetail = wmiMissing
-    ? (usage.runtime.msiWmiState === 3 ? '当前WMI事件订阅失败。' : '当前WMI事件订阅尚未有效。') +
+    ? (usage.runtime.msiWmiState === 3 ? '查询时WMI事件订阅失败。' : '查询时WMI事件订阅尚未有效。') +
       (qsFallback ? 'QS仍可尝试已有Win+G／Win+Tab兼容采集，是否由本机固件输出需按键确认；CLAW仍需WMI事件。' : '') +
       '是否受官方软件影响需结合日志确认。' : '';
   const detail = registration + output + mappingDetail + wmiDetail + frontendDetail(usage) + '收到按键信号不等于快捷动作已执行或游戏已收到。';

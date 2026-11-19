@@ -12,10 +12,11 @@ const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const args=process.argv.slice(2);
 // Fail closed before output creation, source freezing, toolchain discovery or native work.
 const valueOptions=new Set(['--case','--profiles','--source-root','--variants','--output','--ui-from-native']);
-const switchOptions=new Set(['--fixed-only']);const seenOptions=new Set();
+const switchOptions=new Set(['--fixed-only','--prepare-only']);const seenOptions=new Set();
 for(let i=0;i<args.length;++i){const flag=args[i];assert(valueOptions.has(flag)||switchOptions.has(flag),'Unknown argument: '+flag);assert(!seenOptions.has(flag),'Duplicate argument: '+flag);seenOptions.add(flag);if(valueOptions.has(flag)){assert(args[i+1]&&!args[i+1].startsWith('--'),flag+' requires a value');++i;}}
 
 function option(flag){const at=args.indexOf(flag);if(at<0)return null;assert(args[at+1]&&!args[at+1].startsWith('--'),flag+' requires a value');return args[at+1];}
+const prepareOnly=args.includes('--prepare-only');
 const selectedCase=option('--case');
 const selectedCases=selectedCase?.split(',')??[];
 assert(new Set(selectedCases).size===selectedCases.length&&selectedCases.every(Boolean),'Invalid original case selection');
@@ -27,7 +28,7 @@ const originalVariants=['fixed','old-handoff','omit-deferred-pending','ignore-so
 const allowedVariants=[...originalVariants,'cache-ignores-source','cache-ignores-protection','retain-rejected-wait','clear-wrong-context','edge-ignores-request','edge-ignores-phase','edge-ignores-lock','inactive-frame-cache-off','inactive-frame-ignore-persona'];
 const variants=option('--variants')?.split(',')??(args.includes('--fixed-only')?['fixed']:originalVariants);
 assert(variants.length&&new Set(variants).size===variants.length&&variants.every(v=>allowedVariants.includes(v)),'Invalid explicit native variants');
-if(savedNativeUi) assert(!selectedCase&&!args.includes('--fixed-only')&&!option('--variants')&&!option('--profiles'),'saved UI bridge does not execute native selections');
+if(savedNativeUi) assert(!prepareOnly&&!selectedCase&&!args.includes('--fixed-only')&&!option('--variants')&&!option('--profiles'),'saved UI bridge does not execute native selections');
 const outputArg=process.argv.indexOf('--output');
 const out=path.resolve(outputArg>=0?process.argv[outputArg+1]:path.join(repo,'../../../Build/Validation/VirtualController-Lifecycle-20261019/player-switch-lock12/transition-status-'+Date.now()));
 assert(!fs.existsSync(out),'Fresh output directory required; preserve prior evidence');
@@ -53,8 +54,11 @@ if(savedNativeUi){
  result.sourceChangedDuringRun=inputs.filter(row=>sha(fs.readFileSync(row.sourceFile))!==row.sha256).map(row=>row.file);if(result.sourceChangedDuringRun.length)result.passed=false;
  result.completedAt=new Date().toISOString();fs.writeFileSync(path.join(out,'RESULT.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));process.exit(result.passed?0:1);
 }
-const runtime=readVirtualControllerSource(path.join(repo,'native/main.cpp')); 
-const files=['native/main.cpp','native/input_host_lifecycle_claim.h','native/controller_persona.h','native/virtual_target_policy.h','native/virtual_output_status.h','native/virtual_output_transition_status.h','src/bridge/virtualOutputStatus.ts','src/bridge/virtualTargetPolicy.ts','tools/virtual_output_status_selftest.ts','tools/virtual_output_transition_status_selftest.mjs','deps/json/json.hpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/virtual_controller_runtime_source.mjs','native/virtual_start_protection.h','native/virtual_controller_queued_start_runtime.h','native/virtual_controller_runtime_contract.h','native/ps_endpoint_ownership.h','tools/controller_snapshot_wire_selftest.cpp',...runtime.inputs.slice(1).map(row=>path.relative(repo,row.file).replaceAll('\\','/'))];
+const runtime=readVirtualControllerSource(path.join(repo,'native/main.cpp'));
+const files=['native/main.cpp','native/input_host_lifecycle_claim.h','native/controller_persona.h','native/virtual_target_policy.h','native/virtual_output_status.h','native/virtual_output_transition_status.h','src/bridge/virtualOutputStatus.ts','src/bridge/virtualTargetPolicy.ts','tools/virtual_output_status_selftest.ts','tools/virtual_output_transition_status_selftest.mjs','deps/json/json.hpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/virtual_controller_runtime_source.mjs','native/virtual_start_protection.h','native/virtual_controller_queued_start_runtime.h','native/virtual_controller_runtime_contract.h','native/ps_endpoint_ownership.h','native/input_host_diagnostic_dispatch.h','tools/controller_snapshot_wire_selftest.cpp',...runtime.inputs.slice(1).map(row=>path.relative(repo,row.file).replaceAll('\\','/'))];
+files.push('native/input_application_receipt.h','native/virtual_recovery_intent.h','native/game_input_override.h','native/sleep_power_state.h','native/sleep_power_observation.h');
+const snapshotVersionEnabled=fs.readFileSync(path.join(candidateRoot??repo,'native/main.cpp'),'utf8').includes('static ymcc::virtualOutputPublication::SnapshotVersion g_virtualOutputSnapshotVersion;');
+if(snapshotVersionEnabled)files.push('native/virtual_output_publication_cache.h');
 const frozen=path.join(out,'frozen-source');const manifest=[];
 for(const rel of files){const override=candidateRoot?path.resolve(candidateRoot,rel):null;const sourceFile=override&&fs.existsSync(override)?override:path.join(repo,rel);const b=fs.readFileSync(sourceFile);const target=path.join(frozen,rel);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,b);manifest.push({file:rel,sourceFile,sha256:sha(b),bytes:b.length});}
 fs.writeFileSync(path.join(out,'source-manifest.json'),JSON.stringify({capturedAt:new Date().toISOString(),repo,files:manifest},null,2)+'\n');
@@ -66,18 +70,26 @@ const masked=main.replace(/\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\
 const ranges=[];
 function record(name,a,b){assert(a>=0&&b>a,'missing '+name);const code=main.slice(a,b);ranges.push({name,startLine:main.slice(0,a).split('\n').length,endLine:main.slice(0,b).split('\n').length,sha256:sha(code),code});return code;}
 function endBrace(a){assert.equal(masked[a],'{');let d=0;for(let i=a;i<masked.length;i++){if(masked[i]==='{')d++;if(masked[i]==='}'&&--d===0)return i+1;}throw Error('unclosed brace');}
-function extract(name){for(const m of main.matchAll(new RegExp('^static[^\\r\\n]*\\b'+name+'\\s*\\(','gm'))){const a=masked.indexOf('{',m.index),semi=masked.indexOf(';',m.index);if(semi>=0&&semi<a)continue;return record(name,m.index,endBrace(a));}throw Error('missing '+name);}
+function extract(name,from=0){for(const m of main.matchAll(new RegExp('^static[^\\r\\n]*\\b'+name+'\\s*\\(','gm'))){if(m.index<from)continue;const a=masked.indexOf('{',m.index),semi=masked.indexOf(';',m.index);if(semi>=0&&semi<a)continue;return record(name,m.index,endBrace(a));}throw Error('missing '+name);}
 function between(name,a,b,from=0){const begin=main.indexOf(a,from),end=main.indexOf(b,begin);return record(name,begin,end);}
 const snapshot=extract('virtualOutputRuntimeSnapshot');
+const applicationSnapshot=extract('inputApplicationSnapshot');
+const applicationView=between('actual application view declaration','struct InputApplicationView {','// Existing UI publication lane only.');
+const snapshotVersion=snapshotVersionEnabled?between('actual snapshot version','#include "virtual_output_publication_cache.h"','static const json& virtualOutputRuntimeSnapshot('):'';
+const inactiveOwner=extract('inputCaptureInactiveHostFrameOwner');
 const inactiveFrame=extract('inputCaptureInactiveHostFrame');
 const snapshotAt=main.indexOf(snapshot);
 const protectionJson=main.includes('static json inputHostStartProtectionJson(')?extract('inputHostStartProtectionJson'):'';
 // Exact disjoint presentation slices. Independent recovery-health continuity
 // producer is executed by its own source-exact verifier, not stubbed here.
 const producerAt=main.indexOf('static void gamepadReadStateUnlocked(');
+const readWindowTail='        if(inputSource=="msi-dinput")msiDinputApplyCanonicalReadProof(';
+const fallbackReadWrite='        g_inputHostFallbackXinputRead=';
+const readWindowStart=main.indexOf('        g_inputCaptureGamepadSnapshot.readAttemptSequence=++diagnosticReadSequence;',producerAt);
+const fallbackReadAt=main.indexOf(fallbackReadWrite,readWindowStart);
 const sourceCapture=between('existing canonical read-window metadata',
  '        g_inputCaptureGamepadSnapshot.readAttemptSequence=++diagnosticReadSequence;',
- '        if(inputSource=="msi-dinput")msiDinputApplyCanonicalReadProof(',producerAt)+
+ fallbackReadAt>=0&&fallbackReadAt<main.indexOf(readWindowTail,readWindowStart)?fallbackReadWrite:readWindowTail,producerAt)+
  between('existing presentation read-window copy','        statusSourceWindow =',
  '\n#ifdef YMCC_MSI_REPORT_CHAIN_DIAGNOSTIC',producerAt);
 const sourceCheck=between('display-only source confidence assignment',
@@ -92,7 +104,12 @@ const protectionSnapshot=extract('inputHostStartProtectionSnapshot');
 const getRequest=extract('inputHostPresentationRequest');
 const setDeferred=extract('inputHostPresentationDeferred');
 const sourceLess=extract('inputHostCanCreateTargetWithoutPhysicalSource');
-const queueWork=extract('inputHostQueueLifecycleWorkInternal');
+// Start at the queue implementation section, after any default-argument declaration.
+const sleepQueueAt=main.indexOf('static bool inputHostSleepRepairWork(');
+assert(sleepQueueAt>=0,'Missing lifecycle queue implementation section');
+const queueWork=extract('inputHostQueueLifecycleWorkInternal',sleepQueueAt);
+const queueEntry=between('owned lifecycle queue entry','struct InputHostLifecycleWork {','static std::deque<InputHostLifecycleWork>');
+const sleepRepairWork=extract('inputHostSleepRepairWork');
 const fenceRaised=extract('inputHostExitFenceRaised');
 const cleanupWork=extract('inputHostLifecycleWorkIsCleanup');
 const fenceBlocks=extract('inputHostExitFenceBlocks');
@@ -108,11 +125,14 @@ const protectionEdge=between('actual state-feed protection edge','    // Event-o
 const publicationAt=main.indexOf('    if (g_gamepadStatePublished && externalPriorityRevision == publishedExternalPriorityRevision');
 const publicationStart=main.indexOf('(protectionLocked ? ymcc::virtualOutputPublicationEquivalent(',publicationAt),publicationEnd=main.indexOf(' && backendFault == publishedBackendFault',publicationStart);
 const publicationCompare=record('actual virtual-output publication comparison',publicationStart,publicationEnd);
+const publicationAssignStart=main.indexOf(snapshotVersionEnabled?'    publishedVirtualOutputCache.assign(':'    publishedVirtualOutput = virtualOutput;',publicationAt);
+const publicationAssign=record('actual virtual-output owning assignment',publicationAssignStart,main.indexOf('    publishedBackendFault =',publicationAssignStart));
 fs.writeFileSync(path.join(out,'source-ranges.json'),JSON.stringify(ranges,null,2)+'\n');
 const allocationBody=fs.readFileSync(path.join(frozen,'tools/controller_snapshot_wire_selftest.cpp'),'utf8').split('static thread_local bool trackAlloc=false;')[1]?.split('#include "baseline.inc"')[0];
 assert(allocationBody,'Original allocation counter body missing');
 const allocationCounter='static thread_local bool trackAlloc=false;'+allocationBody;
-const cpp=`#include <atomic>
+const cpp=`#include "sleep_power_observation.h"
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -122,6 +142,7 @@ const cpp=`#include <atomic>
 #include <memory>
 #include "virtual_start_protection.h"
 #include "ps_endpoint_ownership.h"
+#include "input_host_diagnostic_dispatch.h"
 #include <functional>
 #include <deque>
 #include <mutex>
@@ -133,6 +154,8 @@ const cpp=`#include <atomic>
 #include "json.hpp"
 #include "virtual_output_status.h"
 #include "virtual_output_transition_status.h"
+#include "input_application_receipt.h"
+#include "virtual_recovery_intent.h"
 #include "input_host_lifecycle_claim.h"
 #include "controller_persona.h"
 #include "virtual_target_policy.h"
@@ -143,6 +166,13 @@ struct InputHostMutex {bool deny=false;unsigned tries=0,blocks=0;std::function<v
 static InputHostMutex g_inputHostMx;
 static std::mutex g_inputHostPersonaMx,g_virtualOutputObservationMx;
 static ymcc::VirtualOutputAdmissionStatus g_inputHostAdmissionStatus;
+static ymcc::inputHost::VirtualRecoveryIntent g_inputHostRecoveryIntent;
+static const std::string& gameInputOwnerSession(){static const std::string session="offline-transition-fixture";return session;}
+static const bool nativeWriterWaitMayQueue=false; // No GPD native writer in this existing XInput-only fixture.
+static Flag g_wakeHoldPhysicalUnhide;
+static std::atomic<unsigned long long> g_inputHostVirtualIntentRevision{0};
+static std::atomic<unsigned> g_inputHostVirtualIntentWriters{0};
+static ymcc::InputApplicationReceipt g_inputApplicationReceipt;
 static struct {bool enabled=true,virtualTargetEnabled=true;std::string virtualTargetPersona="elite";} g_realStickTest;
 static Flag g_externalPriorityVirtualSuspended,g_inputHostFaultHoldsStart,g_inputHostLifecycleWorkRequested,g_inputHostLifecycleWorkInFlight,g_inputHostRecoveryPending,g_msiOwnedReturnWorking,g_msiOwnedReturnFailed,g_sleepRecoveryOutputWanted;
 static std::atomic<unsigned long long> g_inputHostPresentationWorkGeneration{0},g_inputHostEpochMirror{42};
@@ -180,14 +210,24 @@ ${protectionSnapshot}
 ${getRequest}
 ${setDeferred}
 static void configureProduction(const std::string& configuredPersona,bool targetEnabled){
+ const json input=json::object(); // Existing base-config fixture has no game overlay.
 ${setter}
 }
+${applicationView}
+${applicationSnapshot}
+${snapshotVersion}
 ${snapshot}
+${inactiveOwner}
 ${inactiveFrame}
 struct XINPUT_GAMEPAD {std::uint16_t wButtons=0;std::uint8_t bLeftTrigger=0,bRightTrigger=0;std::int16_t sThumbLX=0,sThumbLY=0,sThumbRX=0,sThumbRY=0;};
-static struct {unsigned physicalReaderPid=0,physicalReaderPacket=0,physicalReaderActualSlot=4;unsigned long long physicalReaderSequence=0;XINPUT_GAMEPAD physicalReaderRawPad{};unsigned long long readAttemptSequence=0,readPowerGeneration=0,readMsiSourceRevision=0;ULONGLONG readStartedTick=0,readCompletedTick=0;unsigned readTopologyGeneration=0,readIdentityGeneration=0;bool readContextStable=false;} g_inputCaptureGamepadSnapshot;
+static struct {ymcc::sleeppower::SharedPowerV1 sharedPower;unsigned physicalReaderPid=0,physicalReaderPacket=0,physicalReaderActualSlot=4;unsigned long long physicalReaderSequence=0;XINPUT_GAMEPAD physicalReaderRawPad{};unsigned long long readAttemptSequence=0,readPowerGeneration=0,readMsiSourceRevision=0;ULONGLONG readStartedTick=0,readCompletedTick=0;unsigned readTopologyGeneration=0,readIdentityGeneration=0;bool readContextStable=false;} g_inputCaptureGamepadSnapshot;
 static ULONGLONG mockReadStarted=0;static unsigned long long mockReadPower=0;static unsigned mockReadTopology=0;
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t bytes){
+ if(!out||bytes!=sizeof(*out))return 0;*out={};out->generation=mockReadPower;out->publicationRevision=1;out->flags=ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed;return 1;
+}
 static ymcc::VirtualOutputSourceWindow captureProduction(){
+    ymcc::sleeppower::SharedPowerV1 diagnosticReadSharedPower;
+    const bool diagnosticReadPowerKnown=ymcc::sleeppower::capturePowerObservation(&readSharedSystemPower,diagnosticReadSharedPower);
     ymcc::VirtualOutputSourceWindow statusSourceWindow;
     static unsigned long long diagnosticReadSequence=0;
     const auto probeNow=mockReadStarted;
@@ -234,7 +274,10 @@ static std::atomic<unsigned long long> g_inputHostExitFenceRefusals{0},g_inputHo
 static constexpr unsigned long long kInputHostExitFenceRefusalRowMax=8;
 static unsigned long long g_exitSessionId=1;
 static std::mutex g_inputHostLifecycleWorkMx;
-static std::deque<std::string> g_inputHostLifecycleWorkQueue;
+// Player-only fixture: an unexpected shared sleep grant is unsupported.
+namespace ymcc::inputHost::sharedPower {struct Scope {bool current() const {throw std::logic_error("sleep grant outside player queue fixture");}};}
+${queueEntry}
+static std::deque<InputHostLifecycleWork> g_inputHostLifecycleWorkQueue;
 static std::uint64_t g_inputHostSwitchRecoveryStartDeadline=0,g_inputHostSwitchRecoveryStartRequestId=0,g_inputHostSwitchRecoveryStartPower=0;
 static json timeoutNotes=json::array(),queueBoundaryReceipts=json::array();
 static void inputHostRecordSwitchTimeout(const ymcc::VirtualStartProtection::View& view){timeoutNotes.push_back({{"requestId",view.requestId},{"phase",view.phase},{"remainingMs",view.remainingMs}});}
@@ -251,8 +294,10 @@ static bool inputHostLateHideReuseQueuedPublication(InputHostLateHidePublication
 static void inputHostLateHideCommitQueuedPublication(InputHostLateHidePublication*){throw std::runtime_error("unmodeled MSI commit port");}
 static bool msiNativeRearIntentCurrent(const std::string&){return false;} // no native rear owner in these cases
 static void inputHostSwitchAuditEnqueue(const std::string&,std::size_t){}
+${sleepRepairWork}
 ${queueWork}
-static bool inputHostQueueLifecycleWork(const char* reason){++queueCalls;queueReasons.push_back(reason);if(beforeQueue)beforeQueue();return inputHostQueueLifecycleWorkInternal(reason,nullptr,nullptr);}
+static bool queueWithoutSleepGrant(const char* reason,bool* coalesced=nullptr){return inputHostQueueLifecycleWorkInternal(reason,coalesced,nullptr,{});}
+static bool inputHostQueueLifecycleWork(const char* reason){++queueCalls;queueReasons.push_back(reason);if(beforeQueue)beforeQueue();return queueWithoutSleepGrant(reason);}
 static void xinputSlotsMarkDiscoveryDirty(){++dirtyCalls;}
 static void admissionProduction(){const bool personaTransition=mockPersonaTransition;
 ${decision}
@@ -262,7 +307,72 @@ static void require(bool ok,const char* message){++assertions;if(!ok)throw std::
 static json snap(bool live=true){return virtualOutputRuntimeSnapshot(live,mockSourceWindow);}
 static json statusChurnReceipts=json::array(),statusConstructionReceipts=json::array(),inactiveFrameConstructionReceipts=json::array();
 static bool publicationEquivalentProduction(const json& virtualOutput,const json& publishedVirtualOutput){
+ ${snapshotVersionEnabled?'g_virtualOutputSnapshotVersion.invalidate(); ymcc::virtualOutputPublication::PublishedCache publishedVirtualOutputCache;':''}
  const bool protectionLocked=virtualOutput.at("startProtection").at("locked").get<bool>();(void)protectionLocked;return ${publicationCompare};
+}
+struct PublicationLane {
+ json publishedVirtualOutput;
+ ${snapshotVersionEnabled?'ymcc::virtualOutputPublication::PublishedCache publishedVirtualOutputCache;':''}
+ unsigned comparisons=0,copies=0,sends=0;bool initialized=false;
+ bool equivalent(const json& virtualOutput){
+  const bool protectionLocked=virtualOutput.at("startProtection").at("locked").get<bool>();(void)protectionLocked;
+  return ${publicationCompare.replace('return virtualOutput == publishedVirtualOutput;','++comparisons; return virtualOutput == publishedVirtualOutput;').replace(': virtualOutput == publishedVirtualOutput)',': (++comparisons, virtualOutput == publishedVirtualOutput))')};
+ }
+ void assign(const json& virtualOutput){
+ ${publicationAssign.replace('publishedVirtualOutput = virtualOutput;','++copies; publishedVirtualOutput = virtualOutput;')}
+ }
+ bool observe(bool live=true,bool otherFieldChanged=false){
+  const auto& value=virtualOutputRuntimeSnapshot(live,mockSourceWindow);
+  const bool same=initialized&&equivalent(value);
+  if(!same||otherFieldChanged){++sends;assign(value);initialized=true;}
+  return same;
+ }
+};
+static void reset();
+static void publicationMemoBoundaryCases(){
+ reset();PublicationLane lane;lane.observe();const json first=lane.publishedVirtualOutput;
+ const auto hostTries=g_inputHostMx.tries;
+ for(unsigned i=0;i<1000;++i)require(lane.observe(),"same real producer snapshot remains publication-equivalent");
+ require(lane.comparisons==${snapshotVersionEnabled?1:1000},"unchanged snapshot comparison count matches selected source");
+ require(lane.copies==1&&lane.sends==1,"unchanged producer never republishes");
+ require(g_inputHostMx.tries==hostTries+1000,"memo never skips current Host try-lock observations");
+ lane.observe(true,true);require(lane.sends==2&&lane.copies==${snapshotVersionEnabled?1:2},"other field publishes while same owned snapshot copy may be reused");
+ require(lane.publishedVirtualOutput==first,"other-field publication retains the owning snapshot");
+ mockAlive=false;require(!lane.observe(),"Host death invalidates previous publication equality");require(lane.publishedVirtualOutput["hostAlive"]==false,"Host death is copied and published");
+ mockAlive=true;require(!lane.observe(),"Host recovery cannot reuse earlier A version after B");
+ g_inputHostMx.deny=true;mockTick+=5000;mockReadStarted=mockTick-1;mockSourceWindow=captureProduction();require(lane.observe(),"Host observation inclusive boundary stays current with a fresh physical read");
+ ++mockTick;mockReadStarted=mockTick-1;mockSourceWindow=captureProduction();require(!lane.observe(),"expired unknown Host observation remains visible independently of fresh source");
+ g_inputHostMx.deny=false;mockReadStarted=mockTick-1;mockSourceWindow=captureProduction();require(!lane.observe(),"current read recovers expired observation");
+ ++g_inputHostEpoch;g_inputHostEpochMirror.store(g_inputHostEpoch);require(!lane.observe(),"Host epoch invalidates published facts");
+ g_inputHostFaultHoldsStart.store(true);require(!lane.observe(),"fault hold invalidates published facts");g_inputHostFaultHoldsStart.store(false);require(!lane.observe(),"fault recovery is not hidden");
+ g_externalPriorityVirtualSuspended.store(true);lane.observe();require(lane.publishedVirtualOutput["state"]=="external-priority","external-priority early branch remains visible");
+ g_externalPriorityVirtualSuspended.store(false);lane.observe();
+ const auto request=g_virtualStartProtection.admit("elite",mockTick);require(request.accepted,"memo case uses actual locked request");lane.observe();
+ const auto copied=lane.copies;lane.observe(true,true);require(lane.copies==copied+1,"locked snapshot always follows original copy path");
+ require(lane.publishedVirtualOutput["startProtection"]["locked"].get<bool>(),"locked state is retained");
+ ${snapshotVersionEnabled?`
+ // Use the actual extracted comparison/assignment with arbitrary source trees
+ // only after minting a distinct immutable interval for each write.
+ g_virtualOutputSnapshotVersion.invalidate();g_virtualOutputSnapshotVersion.publish();
+ json synthetic={{"startProtection",{{"locked",false}}},{"value",std::numeric_limits<double>::quiet_NaN()}};
+ PublicationLane numeric;numeric.assign(synthetic);require(!numeric.equivalent(synthetic)&&!numeric.equivalent(synthetic),"actual NaN equality remains false across a memo hit");
+ g_virtualOutputSnapshotVersion.invalidate();synthetic["value"]=1;g_virtualOutputSnapshotVersion.publish();numeric.assign(synthetic);require(numeric.equivalent(synthetic),"integer owning snapshot compares normally");
+ g_virtualOutputSnapshotVersion.invalidate();synthetic["value"]=1.0;g_virtualOutputSnapshotVersion.publish();require(numeric.equivalent(synthetic),"equal numeric storage retains original equality");numeric.assign(synthetic);require(numeric.publishedVirtualOutput["value"].is_number_float(),"new source interval still copies changed numeric representation");
+ const auto owned=numeric.publishedVirtualOutput;g_virtualOutputSnapshotVersion.invalidate();synthetic["value"]=2.0;g_virtualOutputSnapshotVersion.publish();require(!numeric.equivalent(synthetic),"new source B differs from owning A");numeric.assign(synthetic);require(numeric.equivalent(synthetic),"successful copy must replace prior false comparison with a fresh true result");require(owned["value"]==1.0,"source updates cannot mutate previous owning JSON");
+ g_virtualOutputSnapshotVersion.invalidate();synthetic["value"]=3.0;require(!numeric.equivalent(synthetic),"zero interval compares current changed tree");numeric.assign(synthetic);synthetic["value"]=4.0;require(!numeric.equivalent(synthetic),"zero interval cannot hit an earlier comparison");
+ ymcc::virtualOutputPublication::SnapshotVersion version;ymcc::virtualOutputPublication::PublishedCache memo;
+ unsigned compared=0,copiedOwn=0;version.publish();const auto a=version.value();
+ const auto falseCompare=[&]{++compared;return false;};
+ require(!memo.equivalent(a,falseCompare)&&!memo.equivalent(a,falseCompare)&&compared==1,"false equality result must be reused as false");
+ memo.assign(a,[&]{++copiedOwn;});memo.assign(a,[&]{++copiedOwn;});require(copiedOwn==1,"exact copied source version is reused");
+ require(!memo.equivalent(a,falseCompare)&&compared==2,"owning assignment invalidates prior comparison");
+ version.invalidate();for(unsigned i=0;i<2;++i)require(!memo.equivalent(version.value(),falseCompare),"invalid source preserves original comparison");require(compared==4,"zero version is never a comparison hit");
+ version.publish();const auto b=version.value();bool threw=false;volatile bool failCopy=true;try{memo.assign(b,[&]{if(failCopy)throw std::bad_alloc();});}catch(const std::bad_alloc&){threw=true;}
+ require(threw,"copy failure boundary exercised");memo.assign(b,[&]{++copiedOwn;});require(copiedOwn==2,"failed copy cannot install successful identity");
+ ymcc::virtualOutputPublication::SnapshotVersion exhausted((std::numeric_limits<std::uint64_t>::max)()-1);
+ exhausted.publish();require(exhausted.value()==(std::numeric_limits<std::uint64_t>::max)(),"last nonzero version is distinct");exhausted.invalidate();exhausted.publish();require(exhausted.value()==0,"exhaustion falls back without wrap");exhausted.publish();require(exhausted.value()==0,"exhausted identity never revives old generation");
+ `:''}
+ reset();
 }
 static void sourceReceipt(const char* id,const json& receipt,const char* tone){presentationReceipts.push_back({{"id",id},{"receipt",receipt},{"expectedTone",tone}});}
 static auto context(){return ymcc::VirtualOutputAdmissionStatus::Context{g_inputHostEpochMirror.load(),currentPowerGeneration(),g_inputHostPresentationWorkGeneration.load()};}
@@ -279,7 +389,7 @@ int main(){
  test("deferred-source",[]{dead();admissionProduction();auto s=snap(false);require(s["state"]=="starting"&&s["switchPending"]==true,"actual missing-source defer remains pending");require(g_hidHideStartDeferredLogged&&lifecycleNotes.size()==1,"existing defer note retained");require(admissionCalls==1&&boundaryCalls==1&&queueCalls==0,"actual admission decision unchanged");admissionProduction();require(lifecycleNotes.size()==1,"no repeated idle log");require(waiting(),"wait remains request bound");});
  test("deferred-old-persona",[]{mockBound="steamdeck";mockPersonaTransition=true;admissionProduction();const auto s=snap(false);require(s["state"]=="starting"&&s["switchPending"]==true,"waiting new persona is not a mismatch failure");require(queueCalls==0,"no admission bypass");});
  test("missing-source-alone-is-not-pending",[]{dead();const auto s=snap(false);require(s["state"]=="suspected-failed"&&s["switchPending"]==false,"saved intent alone cannot invent wait");});
- test("queue-clears-wait-after-requested-published",[]{dead();admissionProduction();require(waiting(),"wait established");mockSourceAdmitted=true;mockTick+=3000;admissionProduction();require(queueCalls==1&&dirtyCalls==1&&admissionCalls==2,"same production admission/queue calls");require(g_inputHostLifecycleWorkRequested.load()&&!waiting(),"queue handoff retires wait after busy publication");require(snap()["switchPending"]==true,"queue handoff remains pending");const auto depth=g_inputHostLifecycleWorkQueue.size();bool coalesced=false;require(inputHostQueueLifecycleWorkInternal("initial-target-admission",&coalesced,nullptr)&&coalesced,"same-reason production merge remains accepted");require(g_inputHostLifecycleWorkQueue.size()==depth&&g_inputHostLifecycleWorkRequested.load(),"merge retains one queue owner");});
+ test("queue-clears-wait-after-requested-published",[]{dead();admissionProduction();require(waiting(),"wait established");mockSourceAdmitted=true;mockTick+=3000;admissionProduction();require(queueCalls==1&&dirtyCalls==1&&admissionCalls==2,"same production admission/queue calls");require(g_inputHostLifecycleWorkRequested.load()&&!waiting(),"queue handoff retires wait after busy publication");require(snap()["switchPending"]==true,"queue handoff remains pending");const auto depth=g_inputHostLifecycleWorkQueue.size();bool coalesced=false;require(queueWithoutSleepGrant("initial-target-admission",&coalesced)&&coalesced,"same-reason production merge remains accepted");require(g_inputHostLifecycleWorkQueue.size()==depth&&g_inputHostLifecycleWorkRequested.load(),"merge retains one queue owner");});
  test("backend-cooldown-retains-real-wait",[]{dead();admissionProduction();mockSourceAdmitted=true;g_hidHideLastStartAttemptTick=mockTick-100;admissionProduction();require(queueCalls==0&&waiting(),"actual admission cooldown still owns current wait");require(snap()["switchPending"]==true,"cooldown does not expose old host failure");});
  test("rejected-queue-does-not-retain-wait",[]{
   dead();const auto t0=mockTick;const auto player=g_virtualStartProtection.admit("elite",t0);require(player.accepted&&player.requestId,"real player request admitted");
@@ -292,9 +402,45 @@ int main(){
   require(std::any_of(lifecycleNotes.begin(),lifecycleNotes.end(),[](const json& n){return n["event"]=="input-host-player-start-work"&&n["fields"].value("reason",std::string{})=="expired-player-start-cannot-become-policy-work";}),"real terminal refusal reason recorded");
   require(!waiting()&&!g_inputHostLifecycleWorkRequested.load()&&g_inputHostLifecycleWorkQueue.empty(),"denied queue retires old wait");require(after["state"]=="suspected-failed"&&!after["switchPending"].get<bool>(),"no fake pending after denied queue");require(!g_inputHostLifecycleWorkInFlight.load()&&dirtyCalls==0&&queueCalls==1,"refusal starts no worker/discovery");
   // Fence can rise after the outer admission guard; independent cleanup/return ownership remains.
-  reset();dead();admissionProduction();mockSourceAdmitted=true;g_inputHostReleaseQuarantined=true;g_msiOwnedReturnWorking.store(true);beforeQueue=[] {g_inputHostExitFence.store(true);bool merged=false;if(!inputHostQueueLifecycleWorkInternal("startup-owned-return",&merged,nullptr))throw std::runtime_error("cleanup must survive fence");};mockTick+=3000;admissionProduction();
-  const auto fenced=snap();queueBoundaryReceipts.push_back({{"scenario","fence-with-cleanup"},{"after",fenced},{"queueNotes",lifecycleNotes},{"requested",g_inputHostLifecycleWorkRequested.load()},{"queue",g_inputHostLifecycleWorkQueue}});
+  reset();dead();admissionProduction();mockSourceAdmitted=true;g_inputHostReleaseQuarantined=true;g_msiOwnedReturnWorking.store(true);beforeQueue=[] {g_inputHostExitFence.store(true);if(!queueWithoutSleepGrant("startup-owned-return"))throw std::runtime_error("cleanup must survive fence");};mockTick+=3000;admissionProduction();
+  const auto fenced=snap();json fencedQueue=json::array();for(const auto& item:g_inputHostLifecycleWorkQueue)fencedQueue.push_back(item.reason);
+  queueBoundaryReceipts.push_back({{"scenario","fence-with-cleanup"},{"after",fenced},{"queueNotes",lifecycleNotes},{"requested",g_inputHostLifecycleWorkRequested.load()},{"queue",fencedQueue}});
   require(g_inputHostExitFenceRefusals.load()==1&&!waiting(),"real fence refusal retires matching display wait");require(g_inputHostLifecycleWorkQueue.size()==1&&g_inputHostLifecycleWorkQueue.front()=="startup-owned-return"&&g_inputHostLifecycleWorkRequested.load(),"independent queued cleanup remains owned");require(g_inputHostReleaseQuarantined&&g_msiOwnedReturnWorking.load()&&fenced["switchPending"]==true,"independent release/return debt stays pending");
+  // Win5 184416: a prepared SteamDeck target still lacks an accepted source/first frame.
+  reset();mockBound="steamdeck";configureProduction("steamdeck",true);g_inputHostActive=false;mockSourceWindow={};
+  const auto playerOn=g_virtualStartProtection.admit("steamdeck",mockTick);
+  const auto on=g_virtualStartProtection.view(mockTick);const auto onDeadline=mockTick+on.remainingMs;
+  const auto hostEpoch=g_inputHostEpoch;const auto power=currentPowerGeneration();
+  require(playerOn.accepted&&playerOn.created&&on.remainingMs==30000,"mounted-control retains the original player period");
+  namespace work=ymcc::inputHost::queuedPlayerStart;
+  work::Work originalWork;mockTick=onDeadline-1;
+  require(work::decode(work::bind("initial-target-admission"),originalWork)&&originalWork.bound&&
+      originalWork.request==playerOn.requestId&&originalWork.power==power&&originalWork.deadline==onDeadline&&
+      !work::stale(originalWork),"original same-power work is eligible one tick before expiry");
+  const auto preExpiry=snap(false);
+  require(preExpiry["hostAlive"]==true&&preExpiry["sourceCurrent"]==false&&
+      preExpiry["startProtection"]["phase"]=="pending"&&preExpiry["state"]!="active","already prepared is not active before first frame");
+  mockTick=onDeadline;const char* staleReason=work::stale(originalWork);
+  require(staleReason&&std::string_view(staleReason)=="original-player-period-finished","captured queue work cannot execute at the deadline");
+  bool merged=true;const bool admitted=queueWithoutSleepGrant("initial-target-admission",&merged);
+  const auto expired=g_virtualStartProtection.view(mockTick);const auto postExpiry=snap(false);
+  queueBoundaryReceipts.push_back({{"scenario","mounted-source-unconfirmed-expired-player"},{"playerId",playerOn.requestId},
+      {"originalDeadline",onDeadline},{"tick",mockTick},{"hostEpoch",hostEpoch},{"powerGeneration",power},
+      {"before",preExpiry},{"after",postExpiry},{"timeoutNotes",timeoutNotes},{"queueNotes",lifecycleNotes},
+      {"accepted",admitted},{"coalesced",merged},{"requested",g_inputHostLifecycleWorkRequested.load()},
+      {"inFlight",g_inputHostLifecycleWorkInFlight.load()},{"queueDepth",g_inputHostLifecycleWorkQueue.size()}});
+  require(!admitted&&!merged&&g_inputHostLifecycleWorkQueue.empty()&&!g_inputHostLifecycleWorkRequested.load()&&
+      !g_inputHostLifecycleWorkInFlight.load(),"expired work for a mounted target cannot be requeued as ordinary work");
+  require(expired.requestId==playerOn.requestId&&expired.phase=="expired"&&!expired.locked&&expired.remainingMs==0&&
+      expired.candidateOutcome.empty()&&expired.fallbackAttempts==on.fallbackAttempts,"expiry cannot renew the ticket or manufacture success");
+  require(postExpiry["hostAlive"]==true&&postExpiry["sourceCurrent"]==false&&postExpiry["state"]!="active"&&
+      !postExpiry["switchPending"].get<bool>()&&g_inputHostEpoch==hostEpoch&&currentPowerGeneration()==power,
+      "no new operation or healthy output is projected after expiry");
+  require(std::any_of(lifecycleNotes.begin(),lifecycleNotes.end(),[&](const json& n){
+      const auto& f=n.at("fields");return n.at("event")=="input-host-player-start-work"&&f.value("action",std::string{})=="rejected"&&
+      f.value("reason",std::string{})=="expired-player-start-cannot-become-policy-work"&&f.at("requestId")==playerOn.requestId&&
+      f.at("powerGeneration")==power&&f.at("newHostCreated")==false&&f.at("budgetRenewed")==false;
+  }),"expiry emits a same-ticket and same-generation rejection without budget renewal");
  });
  test("new-persona-invalidates-old-wait",[]{dead();admissionProduction();const auto old=inputHostPresentationRequest();const auto c=context();configureProduction("dualsense-edge",true);inputHostPresentationDeferred(old,c,true);require(!waiting(),"late old-persona writer ignored");require(snap()["state"]=="suspected-failed","old wait does not mask new failure");configureProduction("elite",true);require(!waiting(),"persona ABA cannot revive wait");});
  test("same-persona-off-on-aba",[]{dead();admissionProduction();const auto old=inputHostPresentationRequest();const auto c=context();configureProduction("elite",false);configureProduction("elite",true);const auto next=inputHostPresentationRequest();require(next.generation!=old.generation,"real config assignment captures unseen OFF/ON");inputHostPresentationDeferred(old,c,true);require(!waiting(),"old same-persona request rejected");require(snap()["state"]=="suspected-failed","new request failure remains visible");admissionProduction();require(snap()["switchPending"]==true,"new actual defer may become pending");inputHostPresentationDeferred(old,c,false);require(waiting(),"old clear cannot erase new request wait");});
@@ -310,6 +456,7 @@ int main(){
  test("hid-and-locked-xbox-admission-not-changed",[]{configureProduction("steamdeck",true);dead();admissionProduction();require(queueCalls==1&&!waiting(),"HID source-less allowance unchanged");reset();dead();g_xinputPhysicalSourceLocked=true;admissionProduction();require(queueCalls==1&&!waiting(),"locked Xbox source-less allowance unchanged");reset();dead();g_msiDinputRouteDinputArmed.store(true);admissionProduction();require(queueCalls==1&&!waiting(),"managed route allowance unchanged");});
  test("zero-power-cannot-establish-wait",[]{dead();mockPower=0;admissionProduction();require(!waiting(),"unknown power cannot create durable pending");});
  test("steady-status-no-extra-host-blocking-or-publication",[]{
+  publicationMemoBoundaryCases();
   const auto first=snap();const auto blocks=g_inputHostMx.blocks;bool same=true;
   allocationRequests=allocationBytes=0;trackAlloc=true;const auto began=std::chrono::steady_clock::now();
   for(int i=0;i<1000;++i){const auto& current=virtualOutputRuntimeSnapshot(true,mockSourceWindow);same=same&&(current==first);}
@@ -407,6 +554,7 @@ int main(){
 function command(name,exe,args,expected=0){const r=spawnSync(exe,args,{cwd:out,encoding:'utf8',timeout:60000,windowsHide:true});fs.writeFileSync(path.join(out,name+'.log'),[JSON.stringify({exe,args,status:r.status,error:r.error?.message}),r.stdout||'',r.stderr||''].join('\n'));assert(!r.error,name+' timed out');if(expected!==null)assert.equal(r.status,expected,name+' failed; see log');return r;}
 const vcvars=process.env.YMCC_VCVARS64??'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';
 assert(fs.existsSync(vcvars),'MSVC x64 not found');
+const preparedSources=[];
 const results={profiles:{},mutations:{},hardwareOperations:0,networkOperations:0,selectedCase,selectedProfiles,selectedVariants:variants,sourceRoot:candidateRoot??repo,fullOriginalMatrix:!selectedCase&&variants.length===originalVariants.length&&variants.every((v,i)=>v===originalVariants[i])};
 for(const profile of selectedProfiles){
  for(const variant of variants){
@@ -419,13 +567,13 @@ for(const profile of selectedProfiles){
   if(variant==='raw-inspection-clock'){const from='{"verificationRemainingMs",view.locked ? ((view.verificationRemainingMs+999)/1000)*1000 : 0}';assert(source.includes(from));source=source.replace(from,'{"verificationRemainingMs",view.verificationRemainingMs}');}
   if(variant==='raw-publication-equality'){assert(source.includes(publicationCompare));source=source.replace(publicationCompare,'(virtualOutput == publishedVirtualOutput)');}
   if(variant==='omit-ps-return-status'){const from='(!facts.enabled && current && previous.psReturnPending)';assert(source.includes(from));source=source.replace(from,'(false && !facts.enabled && current && previous.psReturnPending)');}
-  if(variant==='cache-ignores-source'){const from='    if (!protectionView.locked && previousKey && *previousKey == key) return snapshot;';assert(source.includes(from));source=source.replace(from,'    key.facts.sourceCurrent = true;\n'+from);}
-  if(variant==='cache-ignores-protection'){const from='    if (!protectionView.locked && previousKey && *previousKey == key) return snapshot;';assert(source.includes(from));source=source.replace(from,'    key.protection = ymcc::VirtualStartProtection::View{};\n'+from);}
+  if(variant==='cache-ignores-source'){const from='    const SnapshotState state{current ? previous.epoch : 0, facts, steamPresence,';assert(source.includes(from));source=source.replace(from,'    facts.sourceCurrent = true;\n'+from);}
+  if(variant==='cache-ignores-protection'){const from='    const SnapshotState state{current ? previous.epoch : 0, facts, steamPresence,';assert(source.includes(from));source=source.replace(from,'    displayedProtection = ymcc::VirtualStartProtection::View{};\n'+from);}
    if(variant==='retain-rejected-wait'){const from='                    inputHostPresentationDeferred(admissionStatusRequest, admissionStatusContext, false);';assert(source.includes(from));source=source.replace(from,'                    if(queuedStart)inputHostPresentationDeferred(admissionStatusRequest, admissionStatusContext, false);');}
    if(variant==='clear-wrong-context'){const from='else g_inputHostAdmissionStatus.clear(request, context);';assert(source.includes(from));source=source.replace(from,'else g_inputHostAdmissionStatus.clear(request);');}
   if(variant.startsWith('edge-ignores-')){const field=variant==='edge-ignores-request'?'0':variant==='edge-ignores-phase'?'1':'2';const names={'0':'protectionRequest','1':'protectionPhase','2':'protectionLock'};const term='publishedStartProtectionEdge['+field+'] != '+names[field];assert(source.includes(term));source=source.replace(term,'((void)'+names[field]+', false)');}
   if(variant==='inactive-frame-cache-off'){
-   const signature='static const json& inputCaptureInactiveHostFrame(';
+   const signature='static std::shared_ptr<const json> inputCaptureInactiveHostFrameOwner(';
    const condition='if (!cache.ready || cache.key.hostActive != hostActive ||';
    assert(source.includes(signature)&&source.includes(condition));
    source=source.replace(signature,'static bool mockDisableInactiveFrameReuse=true;\n'+signature);
@@ -435,12 +583,14 @@ for(const profile of selectedProfiles){
   const name=profile+'-'+variant;const sourcePath=path.join(out,name+'.cpp'),exe=path.join(out,name+'.exe');fs.writeFileSync(sourcePath,source);
   const opts=['/nologo','/std:c++20','/utf-8','/EHsc','/W4','/WX','/permissive-','/GF','/MT',...(profile==='Release'?['/O2','/DNDEBUG']:['/Od','/RTC1']),'/I"'+path.join(frozen,'native')+'"','/I"'+path.join(frozen,'deps/json')+'"','"'+sourcePath+'"','/Fo"'+path.join(out,name+'.obj')+'"','/Fe"'+exe+'"'];
   const batch=path.join(out,name+'.cmd');fs.writeFileSync(batch,calibrationToolchainPreamble(vcvars)+'cl '+opts.join(' ')+'\r\nexit /b %errorlevel%\r\n');
+  if(prepareOnly){preparedSources.push({profile,variant,path:sourcePath,sha256:sha(Buffer.from(source)),bytes:Buffer.byteLength(source)});continue;}
   command(name+'-build','cmd.exe',['/d','/c',batch]);const r=command(name+'-execute',exe,[],null);const report=JSON.parse(r.stdout);fs.writeFileSync(path.join(out,name+'-results.json'),JSON.stringify(report,null,2)+'\n');
   if(variant==='fixed'){results.profiles[profile]={passed:r.status===0&&report.passed,failedCases:report.cases.filter(c=>!c.passed),tests:report.tests,assertions:report.assertions,exeSha256:sha(fs.readFileSync(exe)),statusConstructionReceipts:report.statusConstructionReceipts,inactiveFrameConstructionReceipts:report.inactiveFrameConstructionReceipts};}
   else{const requiredCase=variant==='old-handoff'?'claim-handoff':variant==='ignore-source-window'?'source-window-crossed-topology':variant==='raw-cycle-clock'?'completed-lifecycle-status-stable-success':variant==='omit-early-protection'?'external-priority-publishes-protection-contract':variant==='raw-inspection-clock'?'active-lifecycle-publication-bounded-verifying':variant==='raw-publication-equality'?'publication-expiry-only-ignored-with-current-valid-lock':variant==='omit-ps-return-status'?'retired-PS-return-is-visible-without-MSI':variant==='cache-ignores-source'?'source-window-age-bound-and-recovery':variant==='cache-ignores-protection'?'completed-lifecycle-status-stable-failure':variant==='retain-rejected-wait'?'rejected-queue-does-not-retain-wait':variant==='clear-wrong-context'?'new-attempt-failure-without-new-host-epoch':variant.startsWith('inactive-frame-')?'steady-status-no-extra-host-blocking-or-publication':variant.startsWith('edge-ignores-')?'external-priority-publishes-protection-contract':'deferred-source';assert(r.status!==0&&report.cases.some(c=>c.id===requiredCase&&!c.passed),'mutation not killed: '+name);results.mutations[name]={killed:true,failedCases:report.cases.filter(c=>!c.passed).map(c=>c.id)};}
   console.log(name+': '+(variant==='fixed'?(report.passed?'PASS ':'FAIL ')+report.tests+'/'+report.assertions:'MUTATION_KILLED'));
  }
 }
+if(prepareOnly){fs.writeFileSync(path.join(out,'PREPARATION.json'),JSON.stringify({status:'PREPARED_NOT_COMPILED',sources:preparedSources,selectedCases,selectedProfiles,variants,snapshotVersionEnabled,nativeExecuted:false,sourceReady:false},null,2)+'\n');console.log(JSON.stringify({status:'PREPARED_NOT_COMPILED',sources:preparedSources.length}));process.exit(0);}
 if(!selectedCase&&variants.includes('fixed')&&selectedProfiles.includes('Release')){
 const require=createRequire(path.join(repo,'package.json'));const esbuild=require('esbuild');const frontend=path.join(out,'virtual_output_status_selftest.mjs');esbuild.buildSync({entryPoints:[path.join(frozen,'tools/virtual_output_status_selftest.ts')],bundle:true,platform:'node',format:'esm',outfile:frontend,logLevel:'silent'});const front=command('frontend-existing',process.execPath,[frontend]);results.frontend=front.stdout.trim();
 

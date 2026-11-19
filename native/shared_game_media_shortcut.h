@@ -1,8 +1,16 @@
 #pragma once
 // Display identity only: parse the active account's file, never write Steam data.
 #include "shared_game_media.h"
+#include "steam_account_facts.h"
 #include <map>
 namespace ymcc::media {
+// Consume the one Steam publisher and its same-process UI facts. This is only
+// a read-only shortcuts path; it never discovers accounts or derives SteamID64.
+inline steamsession::Session shortcutSteamSession(const std::shared_ptr<const steamsession::IdentitySnapshot>& identity,const Json& mode){
+    if(!identity||identity->presence!=1||!identity->session.pid||!identity->session.created||identity->session.root.empty()||identity->rootReadError!=ERROR_SUCCESS)return {};
+    const auto selected=steamaccount::select(steamaccount::project(*identity,mode),steamaccount::Policy::UiLocal);
+    if(!selected.value)return {};auto result=identity->session;result.account=selected.value;return result;
+}
 class ShortcutVdf {
     std::string bytes_; size_t at_=0, nodes_=0;
     uint64_t number(size_t count) { if(at_+count>bytes_.size())throw std::runtime_error("media-shortcut-truncated");uint64_t value=0;for(size_t i=0;i<count;i++)value|=uint64_t(static_cast<unsigned char>(bytes_[at_++]))<<(8*i);return value; }

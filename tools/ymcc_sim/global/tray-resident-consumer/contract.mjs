@@ -42,8 +42,29 @@ export function semanticVerdict(plan,child,trace,stdout,stderr,controlsOk){
  const failures=trace.assertions;
  return child.exitCode===1&&failures.length===1&&failures[0].method==='rejects'&&failures[0].code==='ERR_ASSERTION'&&failures[0].message===spec.fault.expectedAssertion&&failures[0].stack.includes('tray_resident_selftest.mjs:'+spec.fault.producerLine+':')&&stderr.includes('Missing expected rejection.')&&!stdout.includes('11 checks passed.');
 }
-export function verifyReceipt(receipt){try{need(receipt.accepted===true,'RECEIPT_NOT_ACCEPTED');validateView(receipt.plan);need(JSON.stringify(outputFiles(receipt.plan.caseDir).map(r=>r.path).filter(p=>path.basename(p)!=='receipt.json').sort())===JSON.stringify(receipt.outputAfter.map(r=>r.path).sort()),'OUTPUT_MEMBERS_CHANGED');need(unchanged([...receipt.plan.sourceInputs,...receipt.plan.viewInputs,...receipt.plan.tools,...receipt.plan.implementationInputs,...receipt.plan.controlInputs,...receipt.outputAfter]),'RECEIPT_IDENTITY_CHANGED');return true;}catch{return false;}}
-export function outputFiles(root){const rows=[];function walk(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){const f=path.join(dir,e.name);if(e.isSymbolicLink()){need(path.basename(f)==='esbuild'&&path.basename(dir)==='node_modules','OUTPUT_LINK_REJECTED');continue;}if(e.isDirectory())walk(f);else{need(e.isFile(),'OUTPUT_SPECIAL_FILE');rows.push(fingerprint(f,'owned-output'));}}}walk(root);return rows;}
+export function verifyReceipt(receipt){
+ try{
+  need(receipt.accepted===true,'RECEIPT_NOT_ACCEPTED');validateView(receipt.plan);
+  const wrapper=path.resolve(receipt.plan.caseDir,'receipt.json');
+  const members=outputPaths(receipt.plan.caseDir).filter(file=>file!==wrapper).sort();
+  need(JSON.stringify(members)===JSON.stringify(receipt.outputAfter.map(row=>row.path).sort()),'OUTPUT_MEMBERS_CHANGED');
+  need(unchanged([...receipt.plan.sourceInputs,...receipt.plan.viewInputs,...receipt.plan.tools,...receipt.plan.implementationInputs,...receipt.plan.controlInputs,...receipt.outputAfter]),'RECEIPT_IDENTITY_CHANGED');
+  return true;
+ }catch{return false;}
+}
+function outputPaths(root){
+ const files=[];
+ function walk(dir){
+  for(const entry of fs.readdirSync(dir,{withFileTypes:true})){
+   const file=path.join(dir,entry.name);
+   if(entry.isSymbolicLink()){need(entry.name==='esbuild'&&path.basename(dir)==='node_modules','OUTPUT_LINK_REJECTED');continue;}
+   if(entry.isDirectory())walk(file);
+   else{need(entry.isFile(),'OUTPUT_SPECIAL_FILE');files.push(file);}
+  }
+ }
+ walk(path.resolve(root));return files;
+}
+export function outputFiles(root){return outputPaths(root).map(file=>fingerprint(file,'owned-output'));}
 
 /** Only this unchanged native text is consumed; main.cpp is never compiled by the tray producer. */
 export function verifyTraySourceIdentity(row,bytes){

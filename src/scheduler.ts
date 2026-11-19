@@ -14,7 +14,10 @@
 //   · **无任务或全暂停 ⇒ 无 timer**：不空转唤醒；可见性/任务集变化时重新对账。
 //
 // 声明周期是前端刷新语义（可见时按声明周期唤醒），不承诺浏览器精确实时。
-import { isUiVisible, onUiVisibilityChange } from './bridge/uiLifecycle';
+// Public system Ready is a separate periodic-work gate. Already-started work
+// retains its original owner/cancellation; hiding a page never cancels it here.
+import { isUiVisible, isUiPowerReady, onUiVisibilityChange } from './bridge/uiLifecycle';
+import { onSharedPowerLifecycle } from './bridge/powerLifecycleState';
 
 export interface ScheduledTaskOptions {
   pauseWhenHidden?: boolean;
@@ -33,20 +36,51 @@ interface ScheduledTask {
 const tasks = new Map<string, ScheduledTask>();
 let timer: number | null = null;
 let pumping = false;
-let visibilityBound = false;
-let stopUiVisibilityBinding: (() => void) | null = null;
+let powerReady = false;
+type LifecycleBinding = { stops: Array<() => void> };
+let lifecycleBinding: LifecycleBinding | null = null;
 
 function ensureVisibilityBinding(): void {
-  if (visibilityBound) return;
-  stopUiVisibilityBinding = onUiVisibilityChange(onVisibilityChange);
-  visibilityBound = true;
+  if (lifecycleBinding) return;
+  const binding: LifecycleBinding = { stops: [] };
+  lifecycleBinding = binding;
+  // Initial observations are synchronous. A runImmediately callback may
+  // unregister its last task before subscribe() returns its disposer.
+  const bind = (subscribe: () => () => void): void => {
+    const stop = subscribe();
+    if (lifecycleBinding === binding) binding.stops.push(stop);
+    else stop();
+  };
+  try {
+  bind(() => onSharedPowerLifecycle(state => {
+    if (lifecycleBinding !== binding) return;
+    const next = isUiPowerReady(state);
+    if (powerReady === next) return;
+    powerReady = next;
+    scheduleNext();
+    if (powerReady) void runPump();
+  }));
+  if (lifecycleBinding !== binding) return;
+  bind(() => onUiVisibilityChange(() => {
+    if (lifecycleBinding === binding) onVisibilityChange();
+  }));
+  } catch (error) {
+    if (lifecycleBinding === binding) {
+      lifecycleBinding = null;
+      powerReady = false;
+      clearTimer();
+    }
+    for (const stop of binding.stops) { try { stop(); } catch {} }
+    throw error;
+  }
 }
 
 function removeVisibilityBindingIfIdle(): void {
-  if (!visibilityBound || tasks.size > 0) return;
-  stopUiVisibilityBinding?.();
-  stopUiVisibilityBinding = null;
-  visibilityBound = false;
+  if (!lifecycleBinding || tasks.size > 0) return;
+  const old = lifecycleBinding;
+  lifecycleBinding = null;
+  powerReady = false;
+  for (const stop of old.stops) { try { stop(); } catch {} }
 }
 
 function clearTimer(): void {
@@ -63,7 +97,7 @@ function advanceDeadline(planned: number, periodMs: number, now: number): number
 }
 
 function taskRunnable(task: ScheduledTask): boolean {
-  return !task.busy && (!task.pauseWhenHidden || isUiVisible());
+  return powerReady && !task.busy && (!task.pauseWhenHidden || isUiVisible());
 }
 
 // 单一最早截止 timer：无任务或全暂停时不布防（后者由可见性变化重新对账）。
@@ -73,7 +107,7 @@ function scheduleNext(): void {
   const now = performance.now();
   let earliest: number | null = null;
   for (const task of tasks.values()) {
-    if (task.pauseWhenHidden && !isUiVisible()) continue;
+    if (!taskRunnable(task)) continue;
     const deadline = task.nextDueAt > now ? task.nextDueAt : now;
     if (earliest === null || deadline < earliest) earliest = deadline;
   }
@@ -167,7 +201,12 @@ export function registerScheduledTask(
     busy: false,
   };
   tasks.set(name, task);
-  ensureVisibilityBinding();
+  try { ensureVisibilityBinding(); }
+  catch (error) {
+    if (tasks.get(name) === task) tasks.delete(name);
+    reconcileTimer();
+    throw error;
+  }
   if (options.runImmediately) task.nextDueAt = performance.now();
   reconcileTimer();
   if (options.runImmediately) void runPump();

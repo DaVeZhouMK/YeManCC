@@ -59,6 +59,33 @@ test('a source changed while running invalidates the receipt', async () => {
   const result=await executeAdapter(item, options());
   assert.equal(result.sourceChanged,true); assert.equal(result.status,'FAIL');
 });
+test('UTF-8 capture preserves split characters independently in stdout and stderr', async () => {
+  const expected = { stdout: '中🙂', stderr: '文🚀' };
+  const body = `const out=Buffer.from(${JSON.stringify(expected.stdout)}),err=Buffer.from(${JSON.stringify(expected.stderr)});let i=0;function next(){if(i===out.length)return;process.stdout.write(out.subarray(i,i+1));process.stderr.write(err.subarray(i,i+1));i++;setTimeout(next,60);}next();`;
+  const result = await runProcess(process.execPath, ['-e', body], { timeoutMs: 5000, outputLimit: 14 });
+  assert.equal(result.exitCode, 0); assert.equal(result.timedOut, false);
+  assert.equal(result.stdout, expected.stdout); assert.equal(result.stderr, expected.stderr);
+  assert.equal(result.outputTruncated, false);
+});
+
+test('UTF-8 capture retains the byte cap when a character crosses the cap', async () => {
+  const body = "process.stdout.write(Buffer.from([0xe4,0xb8]));setTimeout(()=>process.stdout.write(Buffer.from([0xad])),60);";
+  const result = await runProcess(process.execPath, ['-e', body], { timeoutMs: 5000, outputLimit: 2 });
+  assert.equal(result.exitCode, 0); assert.equal(result.timedOut, false);
+  assert.equal(result.stdout, Buffer.from([0xe4,0xb8]).toString('utf8'));
+  assert.equal(result.stderr, ''); assert.equal(result.outputTruncated, true);
+  assert.equal(evaluateResult(result), 'FAIL');
+});
+
+test('UTF-8 capture flushes incomplete tails and preserves malformed-byte replacement', async () => {
+  const body = "process.stdout.write(Buffer.from([0xe4,0xb8]));process.stderr.write(Buffer.from([0xff,0x61,0xc3]));";
+  const result = await runProcess(process.execPath, ['-e', body], { timeoutMs: 5000 });
+  assert.equal(result.exitCode, 0); assert.equal(result.timedOut, false);
+  assert.equal(result.stdout, Buffer.from([0xe4,0xb8]).toString('utf8'));
+  assert.equal(result.stderr, Buffer.from([0xff,0x61,0xc3]).toString('utf8'));
+  assert.equal(result.outputTruncated, false);
+});
+
 test('truncated stdout cannot silently hide a failure', async () => {
   const result=await runProcess(process.execPath,['-e',"console.log('x'.repeat(2000))"],{timeoutMs:1500,outputLimit:100});
   assert.equal(result.outputTruncated,true); assert.equal(evaluateResult(result),'FAIL');

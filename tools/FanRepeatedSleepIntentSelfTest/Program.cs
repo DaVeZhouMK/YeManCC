@@ -5,6 +5,16 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Text.Json;
 
+if (args.Length > 0 && args[0] == "--remote-scope-only")
+{
+#if YEMAN_FAN_REMOTE_SCOPE_SELFTEST
+    RemotePowerScopeCases.Run(args.Skip(1).ToArray());
+    return Environment.ExitCode;
+#else
+    throw new InvalidOperationException("Explicit remote-scope tests require the private source-linked test recipe");
+#endif
+}
+
 // Exercises the production engine, not a duplicate curve-selection function.
 // All engines use the explicit mock backend. Initial curve and successful Close
 // are fixtures; no HC/WMI/ACPI calls or native IPC; loopback HTTP is exercised below.
@@ -84,16 +94,118 @@ void DisposeFixture(object engine)
     Call(engine, "Dispose");
 }
 
+// Explicit joint scope: use the original Native WinHTTP resume executable
+// against this actual packaged Host/HttpListener. Native facts/process checks
+// and Host device writes remain declared fixtures; no installed process runs.
+if (args.Length > 4 && args[4] == "native-http-joint")
+{
+    if (args.Length != 5 || args[3] is not ("normal" or "resleep" or "pending-observation"))
+        throw new ArgumentException("Unknown Native/Host joint selection");
+    var selection = args[3];
+    var nativeKind = selection == "pending-observation" ? "shared-owner-pending" : "normal";
+    var token = "fixture-" + nativeKind;
+    var desired = Curve(34, 52, 71, 93);
+    var (jointEngine, jointOptions) = NewEngine(600);
+    SeedActive(jointEngine, desired);
+    using var portProbe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+    portProbe.Start();var port = ((System.Net.IPEndPoint)portProbe.LocalEndpoint).Port;portProbe.Stop();
+    SetProperty(jointOptions, "Port", port);SetProperty(jointOptions, "SessionToken", token);
+    var jointDiagnostics = Activator.CreateInstance(diagnosticType, flags, null, new object[] { Path.Combine(evidence, "joint-logs"), 0 }, null)!;
+    var server = Activator.CreateInstance(T("LocalFanHostServer"), flags, null, new[] { jointEngine, jointOptions, jointDiagnostics }, null)!;
+    var serving = (Task)Call(server, "RunAsync")!;
+    System.Diagnostics.Process? native = null;
+    try
+    {
+        Check("joint-listener-ready", Wait(() => Events().Contains("listener.ready")));
+        using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+        JsonElement Power(string endpoint, long generation)
+        {
+            using var message = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, $"http://127.0.0.1:{port}/api/{endpoint}");
+            message.Headers.Add("X-YeMan-Fan-Session", token);
+            message.Content = new System.Net.Http.StringContent(JsonSerializer.Serialize(new {generation, source="native.power"}), System.Text.Encoding.UTF8, "application/json");
+            using var response = client.Send(message);response.EnsureSuccessStatusCode();
+            using var body = JsonDocument.Parse(response.Content.ReadAsStringAsync().GetAwaiter().GetResult());return body.RootElement.Clone();
+        }
+        _ = Power("suspend", 1);
+        Check("joint-initial-tagged-suspend", P(Call(jointEngine, "Snapshot")!, "State") == "Suspended");
+        ResetEvents();
+        var start = new ProcessStartInfo(Path.GetFullPath(args[2])) { UseShellExecute=false, CreateNoWindow=true, RedirectStandardOutput=true, RedirectStandardError=true };
+        start.ArgumentList.Add(port.ToString());start.ArgumentList.Add("resume");start.ArgumentList.Add(nativeKind);
+        native = Process.Start(start) ?? throw new InvalidOperationException("Native child not started");
+        var stdout = native.StandardOutput.ReadToEndAsync();var stderr = native.StandardError.ReadToEndAsync();
+        Check("joint-native-enters-actual-host-worker", Wait(() => Events().Contains("power.resume-mock-slow-rebuild-window")));
+        if (selection == "resleep")
+        {
+            _ = Power("suspend", 2);
+            Check("joint-new-suspend-keeps-actual-host-suspended", P(Call(jointEngine, "Snapshot")!, "State") == "Suspended");
+            Check("joint-resleep-worker-returns", ((Task)Field(jointEngine, "resumeTask")!).Wait(4000));
+            Check("joint-resleep-old-worker-no-enable", !Events().Contains("api.enable.success"));
+        }
+        var finished = native.WaitForExit(18000);
+        Check("joint-native-owned-child-returned", finished && native.ExitCode == 0);
+        if (!finished) throw new TimeoutException("Original Native resume deadline did not settle");
+        var output = stdout.GetAwaiter().GetResult();
+        File.WriteAllText(Path.Combine(evidence, "native.stdout.txt"), output);
+        File.WriteAllText(Path.Combine(evidence, "native.stderr.txt"), stderr.GetAwaiter().GetResult());
+        using var nativeResult = JsonDocument.Parse(output);
+        var recovered = nativeResult.RootElement.GetProperty("lifecycle").EnumerateArray()
+            .Any(row => row.GetProperty("event").GetString() == "fan-host-resume-native-trigger" && row.GetProperty("details").GetProperty("terminal").GetString() == "recovered");
+        if (selection == "normal")
+        {
+            Check("joint-native-observes-real-host-recovered", recovered);
+            Check("joint-restores-exact-user-curve", CurveJson(Field(jointEngine, "activeCurve")) == CurveJson(desired));
+            Check("joint-host-resume-writer-once", Events().Count(e => e == "api.enable.success") == 1);
+            Check("joint-placeholder-lease-retired", Field(jointEngine, "state")!.GetType().GetProperty("Lease")!.GetValue(Field(jointEngine, "state")) is null);
+        }
+        else if (selection == "resleep")
+        {
+            Check("joint-old-native-does-not-claim-recovered", !recovered);
+            _ = Power("resume", 2);
+            Check("joint-next-tagged-host-recovery-reachable", Wait(() => P(Call(jointEngine, "Snapshot")!, "State") == "Ready"));
+            Check("joint-next-recovery-retains-exact-curve", CurveJson(Field(jointEngine, "activeCurve")) == CurveJson(desired));
+        }
+        else
+        {
+            Check("joint-pending-retires-native-observation", !recovered);
+            Check("joint-accepted-host-worker-settles", ((Task)Field(jointEngine, "resumeTask")!).Wait(4000));
+            // Record the boundary rather than confusing transport cancellation
+            // with revocation of an already accepted autonomous Host operation.
+            File.WriteAllText(Path.Combine(evidence, "accepted-host-boundary.json"), JsonSerializer.Serialize(new {
+                nativeRecovered=recovered, hostState=P(Call(jointEngine, "Snapshot")!, "State"),
+                hostEnableCount=Events().Count(e=>e=="api.enable.success"),
+                nativeObservationIsNotHostCancellation=true, hardwareWrites=0,
+                scope="Native shared pending fixture only; no new Host suspend was sent; device leaf is mock"
+            },new JsonSerializerOptions{WriteIndented=true}));
+        }
+    }
+    catch (Exception error) { Check("joint-no-unexpected-exception", false);Console.Error.WriteLine(error); }
+    finally
+    {
+        if (native is not null) { if (!native.HasExited) { native.Kill(entireProcessTree:false);native.WaitForExit(2000); }native.Dispose(); }
+        Call(server, "Dispose");Check("joint-listener-returns-within-bound", serving.Wait(4000));DisposeFixture(jointEngine);
+    }
+    var jointResult = new {selection,ok,count=checks.Count,checks,
+        hostAssemblyPath=assembly.Location,hostAssemblySha256=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(assembly.Location))).ToLowerInvariant(),
+        nativeExecutable=Path.GetFullPath(args[2]),nativeExecutableSha256=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(args[2]))).ToLowerInvariant(),
+        scope="actual extracted Native WinHTTP owner plus actual packaged Host auth/server/engine; Native power/identity and HC/device are fixtures; new suspend injected by fixture HttpClient; no installed process or physical sleep"};
+    File.WriteAllText(Path.Combine(evidence,"result.json"),JsonSerializer.Serialize(jointResult,new JsonSerializerOptions{WriteIndented=true}));
+    Console.WriteLine($"NATIVE-HOST-JOINT selection={selection} ok={ok} checks={checks.Count}");return ok?0:1;
+}
+
 // Journal-only extension of this original production-engine consumer. No Host
 // Main, HTTP server, Node, HC runtime, native API or device is started here.
 if (args.Length > 4 && args[4] == "journals")
 {
     var failures=new List<object>();var results=new List<object>();
+    var journalSelection = args.Length > 5 ? args[5] : "all";
+    if (journalSelection is not ("all" or "acceptance-close-absent" or "acceptance-close")) throw new ArgumentException("Unknown journal selection: " + journalSelection);
     var nativeAttempts=new List<string>();
     System.Runtime.InteropServices.NativeLibrary.SetDllImportResolver(assembly,(name,_,_)=>{lock(nativeAttempts)nativeAttempts.Add(name);throw new DllNotFoundException("FAN_JOURNAL_NATIVE_FORBIDDEN");});
     void Assert(bool value,string message="assertion failed"){if(!value)throw new Exception(message);}
     void Case(string name,Action body)
     {
+        if (journalSelection == "acceptance-close-absent" && name != "accepted close journal race: absent") return;
+        if (journalSelection == "acceptance-close" && !name.StartsWith("accepted close journal race: ", StringComparison.Ordinal)) return;
         try{body();results.Add(new {name,passed=true});Console.WriteLine("PASS journal "+name);}
         catch(Exception e){failures.Add(new {name,error=e.ToString()});results.Add(new {name,passed=false,error=e.Message});Console.WriteLine("FAIL journal "+name+": "+e.Message);}
     }
@@ -358,7 +470,97 @@ if (args.Length > 4 && args[4] == "journals")
         }
         finally { File.SetAttributes(CyclePath(dir), FileAttributes.Normal); Stop(e); }
     });
-    var journalResult=new {ok=failures.Count==0,count=results.Count,checks=results,failures,nativeAttempts,physicalWrites=0,networkUsed=false,productionHostMainInvoked=false,hostAssemblyPath=assembly.Location,hostAssemblySha256=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(assembly.Location))).ToLowerInvariant(),scope="journal-only; original reflection consumer and production engine mock backend; owned paths; no HTTP/Node/native/device"};
+
+    // Deterministic extension of this original journal consumer: the real gate,
+    // parent-exit acceptance, Close and atomic journal writer execute unchanged.
+    var raceNames = new[] { "absent", "completed", "inherited", "foreign", "missing", "higher-debt", "corrupt" };
+    foreach (var race in raceNames)
+    Case("accepted close journal race: " + race, () =>
+    {
+        var (e, dir) = JournalEngine("acceptance-close-" + race);
+        var probe = assembly.GetType("YeManFanHost.JournalPublicationProbe", false)?.GetField("Task");
+        probe?.SetValue(null, null);
+        Task? PublicationTask() => e.GetType().GetField("recoveryCyclePublicationTask", flags)?.GetValue(e) as Task ?? probe?.GetValue(null) as Task;
+        var engineGate = Field(e, "gate")!;
+        var negative = race is "foreign" or "missing" or "higher-debt" or "corrupt";
+        byte[]? changed = null;
+        string acceptedCycle = "";
+        string acceptedClock = "";
+        int acceptedAttempts = -1, acceptedReplacements = -1;
+        try
+        {
+            lock (engineGate)
+            {
+                if (race != "absent")
+                {
+                    var prior = System.Text.Json.Nodes.JsonNode.Parse(Cycle())!.AsObject();
+                    if (race == "completed") prior["completed"] = true;
+                    prior["opaqueAnnotation"] = new System.Text.Json.Nodes.JsonObject { ["retain"] = 17 };
+                    File.WriteAllText(CyclePath(dir), prior.ToJsonString());
+                }
+                var before = File.Exists(CyclePath(dir)) ? File.ReadAllBytes(CyclePath(dir)) : null;
+                Call(e, "MarkCloseBoundaryClaimedForSelfTest");
+                var clock = Stopwatch.StartNew();
+                var handoff = Task.Run(() => Call(e, "BeginParentExitHandoff"));
+                Assert(handoff.Wait(2000), "parent-exit waited on held engine gate");
+                using var ack = JsonDocument.Parse(JsonSerializer.Serialize(handoff.Result));
+                Assert(ack.RootElement.GetProperty("recoveryAccepted").GetBoolean(), "acceptance was not bound");
+                Assert(!ack.RootElement.GetProperty("queuedNow").GetBoolean(), "second Close worker was queued");
+                Assert(clock.ElapsedMilliseconds < 2000, "fast ACK exceeded original bound");
+                acceptedCycle = ack.RootElement.GetProperty("acceptedRecoveryCycleId").GetString()!;
+                var cycle = Field(e, "recoveryCycle")!;
+                acceptedClock = P(cycle, "StartedAtUtc"); acceptedAttempts = int.Parse(P(cycle, "Attempts")); acceptedReplacements = int.Parse(P(cycle, "Replacements"));
+                Assert(P(cycle, "CycleId") == acceptedCycle);
+                Assert(before is null ? !File.Exists(CyclePath(dir)) : File.ReadAllBytes(CyclePath(dir)).SequenceEqual(before), "ACK published before gate owner continued");
+                var repeat = Call(e, "BeginParentExitHandoff")!;
+                using var duplicate = JsonDocument.Parse(JsonSerializer.Serialize(repeat));
+                Assert(duplicate.RootElement.GetProperty("acceptedRecoveryCycleId").GetString() == acceptedCycle, "duplicate ACK changed identity");
+                if (negative)
+                {
+                    if (race == "missing") File.Delete(CyclePath(dir));
+                    else if (race == "corrupt") File.WriteAllText(CyclePath(dir), "{");
+                    else
+                    {
+                        var foreign = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(CyclePath(dir)))!.AsObject();
+                        if (race == "foreign") foreign["cycleId"] = "foreign-cycle";
+                        else foreign["attempts"] = acceptedAttempts + 1;
+                        File.WriteAllText(CyclePath(dir), foreign.ToJsonString());
+                    }
+                    changed = File.Exists(CyclePath(dir)) ? File.ReadAllBytes(CyclePath(dir)) : null;
+                }
+                Exception? closeFailure = null;
+                try { Call(e, "Close"); } catch (Exception x) { closeFailure = x; }
+                if (negative) Assert(closeFailure is not null, "changed/missing predecessor was settled");
+                else Assert(closeFailure is null, "same accepted Close failed before durable publication: " + closeFailure?.Message);
+            }
+            PublicationTask()?.GetAwaiter().GetResult();
+            var retained = Field(e, "recoveryCycle")!;
+            Assert(P(retained, "CycleId") == acceptedCycle && P(retained, "StartedAtUtc") == acceptedClock, "cycle or original clock changed");
+            Assert(int.Parse(P(retained, "Attempts")) == acceptedAttempts && int.Parse(P(retained, "Replacements")) == acceptedReplacements, "budget changed");
+            if (negative)
+            {
+                Assert((bool)Field(e, "recoveryJournalBlocked")!, "publisher failure did not retain blocked debt");
+                Assert(P(retained, "Completed") == "False");
+                Assert(changed is null ? !File.Exists(CyclePath(dir)) : File.ReadAllBytes(CyclePath(dir)).SequenceEqual(changed), "late publisher overwrote external debt");
+            }
+            else
+            {
+                using var durable = JsonDocument.Parse(File.ReadAllText(CyclePath(dir)));
+                Assert(durable.RootElement.GetProperty("cycleId").GetString() == acceptedCycle && durable.RootElement.GetProperty("completed").GetBoolean());
+                Assert(durable.RootElement.GetProperty("attempts").GetInt32() == acceptedAttempts && durable.RootElement.GetProperty("replacements").GetInt32() == acceptedReplacements);
+                if (race != "absent") Assert(durable.RootElement.GetProperty("opaqueAnnotation").GetProperty("retain").GetInt32() == 17);
+                Assert(P(Field(e, "state")!, "State") == "Stopped");
+            }
+            Assert(nativeAttempts.Count == 0);
+        }
+        finally
+        {
+            PublicationTask()?.GetAwaiter().GetResult();
+            Stop(e);
+        }
+    });
+
+    var journalResult=new {selection=journalSelection,ok=failures.Count==0,count=results.Count,checks=results,failures,nativeAttempts,physicalWrites=0,networkUsed=false,productionHostMainInvoked=false,hostAssemblyPath=assembly.Location,hostAssemblySha256=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(assembly.Location))).ToLowerInvariant(),scope="journal-only; original reflection consumer and production engine mock backend; owned paths; no HTTP/Node/native/device"};
     File.WriteAllText(Path.Combine(evidence,"result.json"),JsonSerializer.Serialize(journalResult,new JsonSerializerOptions{WriteIndented=true}));Console.WriteLine($"JOURNALS ok={journalResult.ok} checks={journalResult.count} failed={failures.Count}");return journalResult.ok?0:1;
 }
 

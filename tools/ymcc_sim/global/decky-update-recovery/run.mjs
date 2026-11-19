@@ -1,3 +1,5 @@
+import {getBaselineSourceFiles} from './baseline-source-inputs.mjs';
+import {prepareNativeSource,uniqueAnchor,cppBlock} from './native-source-admission.mjs';
 import {executeBaselineResources} from './resource-execution.mjs';
 import {observeOnlyHarness,validateObserveOnlyFailure} from './observe-only-negative.mjs';
 import {packageMaintenanceEnvironment,resourceFixtureEnvironment} from '../decky-persistent-lifecycle/baseline-environment.mjs';
@@ -21,77 +23,28 @@ const baselineStartedAt=Date.now();
 import {verifyPackageFixtureTools} from './package-fixture-tools.mjs';import path from 'node:path';import crypto from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {fileURLToPath} from 'node:url';import {readTests} from './read-selftest.mjs';import {clientTests} from './client-selftest.mjs';import {noRepeatContextTests} from '../../../decky_no_repeat_context_selftest.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url)),root=path.resolve(here,'../../../..'),args=process.argv.slice(2),at=args.indexOf('--evidence-dir'),out=path.resolve(at<0?process.env.YMCC_DECKY_ARTIFACT_ROOT||'work/decky-update-recovery':args[at+1]);fs.mkdirSync(out,{recursive:true});
 const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-// Exact current C++ blocks; neighboring config fields never define a body boundary.
-function uniqueAnchor(source,needle,label){const at=source.indexOf(needle);if(at<0||source.indexOf(needle,at+needle.length)>=0)throw Error('Review unique native '+label+' anchor');return at;}
-function cppBlock(source,open,label){
- if(source[open]!=='{')throw Error('Native '+label+' body missing');
- let depth=0,state='code',escaped=false;
- for(let i=open;i<source.length;i++){
-  const c=source[i],next=source[i+1];
-  if(state==='line'){if(c==='\n')state='code';continue;}
-  if(state==='block'){if(c==='*'&&next==='/'){state='code';i++;}continue;}
-  if(state==='string'||state==='character'){
-   if(escaped){escaped=false;continue;}if(c==='\\'){escaped=true;continue;}
-   if(c===(state==='string'?'"':"'"))state='code';continue;
-  }
-  if(c==='/'&&next==='/'){state='line';i++;continue;}
-  if(c==='/'&&next==='*'){state='block';i++;continue;}
-  if(c==='R'&&next==='"')throw Error('Review raw literal in native '+label);
-  if(c==='"'){state='string';continue;}if(c==="'"){state='character';continue;}
-  if(c==='{')depth++;else if(c==='}'&&--depth===0)return {open,end:i+1,body:source.slice(open+1,i)};
- }
- throw Error('Unterminated native '+label+' body');
-}
 
-function closure(file,seen=new Set()) {if(seen.has(file)||!fs.existsSync(file))return seen;seen.add(file);for(const m of fs.readFileSync(file,'utf8').matchAll(/^\s*#include\s+"([^"\n]+)"/gm)){const candidate=[path.resolve(path.dirname(file),m[1]),path.join(root,'native',m[1]),path.join(root,'deps/json',m[1])].find(fs.existsSync);if(candidate&&candidate.startsWith(root+path.sep))closure(candidate,seen);}return seen;}
-const files=[path.join(root,'tools/ymcc_sim/global/decky-persistent-lifecycle/baseline-environment.mjs'),path.join(root,'tools/decky_wake_chain_selftest.mjs'),path.join(root,'tools/fixtures/decky_mirror_host_fixture.mjs'),path.join(root,'src/bridge/deckyMirrorRelay.ts'),path.join(root,'tools/decky_sidebar_frontend_boot_selftest.mjs'),path.join(root,'native/decky_sidebar_frontend_update.js'),path.join(root,'native/decky_sidebar_frontend_update_script.h'),path.join(root,'tools/decky_manual_repair_selftest.mjs'),path.join(root,'src/bridge/deckySidebar.ts'),path.join(root,'native/decky_sidebar_manual_repair.h'),...new Set([...closure(path.join(here,'native-fixture.cpp')),...closure(path.join(root,'native/decky_update_recovery.h')),path.join(root,'native/main.cpp'),path.join(root,'native/steam_live.js'),path.join(root,'native/steam_live_script.h'),path.join(root,'native/steam_ui_mode.h'),...fs.readdirSync(here).filter(f=>!f.endsWith('.md')&&fs.statSync(path.join(here,f)).isFile()).map(f=>path.join(here,f))])];
-for(const relative of ["native/steam_native_launch.h","native/steam_native_launch_windows.h","tools/steam_native_launch_selftest.cpp","tools/steam_native_launch_selftest.ps1","tools/steam_native_launch_regression.mjs","tools/steam_launch_admission_selftest.mjs","tools/steam_linked_launch_selftest.mjs","src/views/PowerView.vue",'tools/decky_no_repeat_context_selftest.mjs','decky-plugin/vendor/decky-loader.lock.json','tools/steam_appearance_automatic_refresh_selftest.ps1','tools/ymcc_sim/global/decky-update-recovery/appearance-library-fixture.ps1','tools/steam_startup_observation_selftest.ps1','tools/steam_startup_observation_extract.mjs','tools/steam_startup_observation_selftest.cpp','tools/steam_cssloader_use_selftest.ps1','tools/steam_cssloader_resume_selftest.ps1','tools/steam_cssloader_resume_selftest.cpp','tools/steam_cssloader_resume_extract.mjs','tools/steam_appearance_render_plan_selftest.ps1','native/steam_cssloader_legacy_links.h','tools/steam_cssloader_legacy_links_selftest.cpp','tools/steam_cssloader_legacy_links_selftest.ps1','tools/steam_css_addon_retired_selftest.mjs','src/bridge/yeman.ts','src/views/SteamView.vue','PowerControl/YeManSteam.vbs','native/steam_cssloader_mode.h','native/steam_cssloader_guard.h','PowerControl/steam-appearance.ps1','PowerControl/steam-appearance/preset.ps1','PowerControl/steam-appearance/idle.ps1','PowerControl/steam-appearance/resident.ps1','PowerControl/steam-appearance/manifest.json'])files.push(path.join(root,relative));
-for(const relative of ["native/decky_sidebar_setup.h","tools/decky_sidebar_setup_selftest.cpp","tools/decky_sidebar_runtime_preparation_selftest.cpp","tools/decky_sidebar_runtime_regression.mjs","tools/decky_sidebar_runtime_lifecycle_probe.mjs","tools/ymcc_sim/global/decky-update-recovery/field-record-native-startup-20261022.json"]){const file=path.join(root,relative);if(!files.includes(file))files.push(file);}
-for(const relative of NATIVE_LAUNCH_NOIO_SOURCE_INPUTS){const file=path.join(root,relative);if(!files.includes(file))files.push(file);}
-for(const relative of ["decky-plugin/src/index.tsx","decky-plugin/src/PerformanceControls.tsx","decky-plugin/src/performanceIntentQueue.ts","decky-plugin/src/performanceModel.ts","decky-plugin/src/fanChoiceDebounce.ts","tools/decky_slider_stability_selftest.mjs","tools/decky_sidebar_client_selftest.mjs","tools/fixtures/decky_game_memory_store.mjs","tools/decky_performance_intent_selftest.mjs","tools/decky_sidebar_slider_drag_selftest.mjs","tools/fixtures/decky_task_paths.mjs"]){const file=path.join(root,relative);if(!files.includes(file))files.push(file);}
-for(const relative of ['tools/decky_trainer_foreground_selftest.mjs','tools/game_trainer_foreground_selftest.ps1','src/bridge/gameTrainer.ts','src/bridge/deckyTrainerActions.ts','src/bridge/deckyMirrorHost.ts','PowerControl/Trainer/TrainerForeground.ps1','PowerControl/Trainer/TrainerLaunch.ps1','PowerControl/Trainer/TrainerBackend.psm1','PowerControl/YeManTrainerLaunch.ps1']){const file=path.join(root,relative);if(!files.includes(file))files.push(file);}
-for(const relative of ["tools/decky_trainer_recovery_selftest.mjs","tools/fixtures/game_trainer_recovery_fixture.mjs","tools/fixtures/trainer_ready_tmnt_20261022.json","src/bridge/gameTrainerRecovery.ts","src/bridge/gameTrainerAuto.ts"]){const file=path.join(root,relative);if(!files.includes(file))files.push(file);}
-// The unchanged foreground consumer imports the Trainer module and copies all
-// of its PowerShell files into a negative fixture. These are runtime inputs too.
-for(const relative of [...fs.readdirSync(path.join(root,'PowerControl/Trainer')).filter(name=>/\.(?:ps1|psm1)$/.test(name)).map(name=>'PowerControl/Trainer/'+name),'PowerControl/GameTitlePolicy.ps1','PowerControl/GameTitlePolicy.json']){const file=path.join(root,relative);if(!files.includes(file))files.push(file);}
-for(const relative of ['tools/steam_cssloader_exit_selftest.ps1','tools/steam_cssloader_exit_selftest.cpp','tools/steam_cssloader_exit_extract.mjs']){const file=path.join(root,relative);if(!files.includes(file))files.push(file);}
-for(const relative of ["native/steam_cssloader_launch.h","tools/steam_cssloader_manual_observation_selftest.cpp","tools/steam_cssloader_manual_observation_selftest.ps1","tools/steam_cssloader_manual_observation_extract.mjs","tools/steam_appearance_manual_observation_selftest.ps1","tools/steam_appearance_content_update.mjs","tools/steam_appearance_use_service_selftest.mjs"]){const file=path.join(root,relative);if(!files.includes(file))files.push(file);}
-// Original resource consumers freeze their reviewed compiler authority as data.
-files.push(path.join(root,'tools/ymcc_sim/global/decky-persistent-lifecycle/owned-tools.json'));
-// Bundler alias configuration is an input even for wholly inert consumers.
-for(const relative of ['tsconfig.json','tsconfig.node.json','package.json']){const file=path.join(root,relative);if(!files.includes(file))files.push(file);}
-// The unchanged memory-store consumer reads these source modules directly.
-// Declare them as inputs so selected-source runs and drift checks cover them.
-for(const relative of ['src/bridge/performanceControls.ts','src/bridge/controllerPersona.ts','src/bridge/virtualTargetPolicy.ts','src/bridge/settingsSnapshot.ts','src/bridge/settingsRepository.ts','src/bridge/performanceSchedule.ts','src/bridge/quickActionLock.ts','src/bridge/gamePolicyHysteresis.ts','PowerControl/GameTitlePolicy.json','src/bridge/gamedetect.ts','src/bridge/frameRateModel.ts','PowerControl/decky/PluginLoader_noconsole.exe']){const file=path.join(root,relative);if(!files.includes(file))files.push(file);}
-const appearancePack=JSON.parse(fs.readFileSync(path.join(root,'PowerControl/steam-appearance/manifest.json'),'utf8'));for(const file of appearancePack.files)files.push(path.join(root,'PowerControl/steam-appearance/themes',file.path));
-files.push(path.join(root,'tools/decky_retained_session_repair_selftest.mjs'),path.join(root,'native/decky_package_maintenance.ps1'),path.join(root,'native/decky_package_maintenance_script.h'),path.join(root,'tools/decky_package_maintenance_embed.mjs'),path.join(root,'tools/decky_package_maintenance_selftest.ps1'));
-files.push(...NATIVE_LAUNCH_WORKER_SOURCE_INPUTS.map(relative=>path.join(root,relative)));
-for(const relative of ['tools/ymcc_sim/global/decky-update-recovery/css-required-forwarding.mjs',...CSS_APPEARANCE_WORKER_SOURCE_INPUTS,...getCssAppearanceInputs(root)]){const file=path.join(root,relative);if(!files.includes(file))files.push(file);}
-files.push(path.join(root,'tools/ymcc_sim/global/decky-update-recovery/resource-fixture-tools.json'),path.join(root,'tools/ymcc_sim/global/decky-update-recovery/resource-fixture-tools.mjs'));
-files.push(...['tools/decky_resource_cache_selftest.mjs','tools/decky_resource_cache_selftest.cpp','tools/decky_resource_worker_selftest.mjs','tools/decky_resource_worker_selftest.cpp','native/decky_resource_worker.h','native/decky_sidebar_resource_cache.h','native/decky_binding_worker_entry.h','native/decky_binding_process_owner.h','native/decky_binding_client.h'].map(relative=>path.join(root,relative)));
-// Close repository-local literal reads and static local module imports. This
-// includes source modules bundled by nested consumers; assertions stay unchanged.
-const literalSeen=new Set();
-const resolveLocalInput=candidate=>[candidate,...['.mjs','.js','.ts','.tsx','.vue','.json','.css','/index.mjs','/index.js','/index.ts'].map(ext=>candidate+ext)].find(file=>fs.existsSync(file)&&fs.statSync(file).isFile());
-for(let index=0;index<files.length;index++){
- const owner=files[index];if(!/\.(?:mjs|js|ts|tsx|vue)$/.test(owner)||literalSeen.has(owner))continue;literalSeen.add(owner);
- const source=fs.readFileSync(owner,'utf8'),candidates=[];
- for(const match of source.matchAll(/(?:path\.join\(root,\s*|functions\(\s*)['"]([^'"\r\n]+)['"]/g)){
-  const relative=match[1];if(path.isAbsolute(relative)||relative.split(/[\\/]/).includes('..'))throw Error('Literal source input escaped repository: '+relative);
-  candidates.push(path.resolve(root,relative));
+if(args.includes('--committed-delivery-only')||args.includes('--shared-power-revocation-only')||args.includes('--shared-power-projection-only')||args.includes('--recovery-shared-power-only')){
+ const mode=args.includes('--recovery-shared-power-only')?'--recovery-shared-power-only':args.includes('--shared-power-projection-only')?'--shared-power-projection-only':args.includes('--shared-power-revocation-only')?'--shared-power-revocation-only':'--committed-delivery-only';
+ if(at<0||args.filter(arg=>arg===mode).length!==1||args.filter(arg=>arg==='--case').length>1||args.filter(arg=>arg==='--evidence-dir').length!==1)throw Error('INVALID_COMMITTED_SELECTION_SHAPE');
+ const selected=args.indexOf('--case');
+ const permitted=new Set(['--evidence-dir',mode,'--case']);
+ for(let i=0;i<args.length;i++){if(!permitted.has(args[i]))throw Error('UNKNOWN_COMMITTED_SELECTION_ARGUMENT');if(args[i]!==mode){if(!args[i+1]||args[i+1].startsWith('--'))throw Error('MISSING_COMMITTED_SELECTION_VALUE');i++;}}
+ if(mode==='--recovery-shared-power-only'){const {runRecoverySharedPower}=await import('../../../fixtures/recovery_shared_power.mjs');runRecoverySharedPower({repo:root,out:path.join(out,'committed-delivery'),selectedCase:selected<0?null:args[selected+1]});}else{
+ const {runCommittedDelivery}=await import('./committed-delivery.mjs');
+ runCommittedDelivery({repo:root,out:path.join(out,'committed-delivery'),selectedCase:selected<0?null:args[selected+1],sharedPowerRevocation:mode==='--shared-power-revocation-only',sharedPowerProjection:mode==='--shared-power-projection-only'});
  }
- for(const match of source.matchAll(/(?:from\s*|import\s*(?:\(\s*)?|require\(\s*|new URL\(\s*)['"]((?:\.|@\/)[^'"\r\n]+)['"]/g)){
-  const specifier=match[1].split('?')[0];candidates.push(specifier.startsWith('@/')?path.resolve(root,'src',specifier.slice(2)):path.resolve(path.dirname(owner),specifier));
- }
- for(const candidate of candidates){if(!candidate.toLowerCase().startsWith((root+path.sep).toLowerCase()))throw Error('Local module input escaped repository: '+candidate);const resolved=resolveLocalInput(candidate);if(resolved&&!files.includes(resolved))files.push(resolved);}
+ process.exit(process.exitCode??0);
 }
-// Nested native consumers compile their own source trees, not only the main
-// recovery fixture. Close every declared native translation unit/header too.
-const nestedNative=new Set();for(const file of [...files])if(/\.(?:cpp|h)$/.test(file)&&file!==path.join(root,'native/main.cpp'))closure(file,nestedNative);
-for(const file of nestedNative)if(!files.includes(file))files.push(file);
+const files=getBaselineSourceFiles(root);
 const inputs=files.map(file=>({path:path.relative(root,file).replaceAll('\\','/'),sha256:hash(file)}));const report={passed:false,fieldRegression:'decky-update-disconnect-20261020',additionalFieldRegressions:['decky-native-prewarm-startup-orders-20261022','decky-null-window-20261021','decky-tdp-qam-reentry-20261021','decky-multi-qam-visibility-20261021','decky-reentrant-transport-fence-20261021'],realSteamActions:0,userSettingsWrites:0,hardwareWrites:0,sourceInputs:inputs,sourceHashes:inputs};
 let nativeLaunchWorker=null,cssAppearanceWorker=null;
 try{
+ const admissionStartedAt=performance.now();
+ const main=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8');
+ const nativeSource=prepareNativeSource({main,template:fs.readFileSync(path.join(here,'native-fixture.cpp'),'utf8'),repairHeader:fs.readFileSync(path.join(root,'native/decky_sidebar_manual_repair.h'),'utf8'),automaticHeader:fs.readFileSync(path.join(root,'native/decky_sidebar_automatic_repair.h'),'utf8'),mainSha256:hash(path.join(root,'native/main.cpp'))});
+ report.nativeCallbackExtraction=nativeSource.extraction;
+ report.nativeSourceAdmission={beforeHeavyProducers:true,elapsedMs:performance.now()-admissionStartedAt,preparedFiles:nativeSource.outputs.size,compilations:0,businessRuns:0};
  nativeLaunchWorker=startNativeLaunchWorker({repo:root,callerEvidence:out,deadlineMs:baselineStartedAt+240000});
  cssAppearanceWorker=startCssAppearanceWorker({repo:root,callerEvidence:out,deadlineMs:baselineStartedAt+240000});
  report.communityRegressionSources=JSON.parse(fs.readFileSync(path.join(here,'field-record-community-maintenance-20261023.json'),'utf8'));
@@ -138,45 +91,7 @@ try{
  report.trainerForeground=await trainerForegroundTests(path.join(out,'trainer-foreground'));
  report.trainerRecovery=await trainerRecoveryTests(path.join(out,'trainer-recovery'));
  report.manualRepairCases=await manualRepairTests(root,out,{upgradeActionsFile:path.join(out,'retained-session-repair/native.json')});const boot=await frontendBootTests(root,out);report.frontendBootCases=boot.cases;report.frontendBootNegativeDetected=boot.negativeDetected;
- const main=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8');
- const a=uniqueAnchor(main,'[]() -> ymcc::deckysidebar::LaunchAdmission {','launch admission'),m=uniqueAnchor(main,'modeObserver.changed = []','mode observer');
- const admissionBlock=cppBlock(main,main.indexOf('{',a),'launch admission'),changedBlock=cppBlock(main,main.indexOf('{',m),'mode observer');
- const stableAt=uniqueAnchor(main,'modeObserver.stableBigPicture = []','stable Big Picture'),stableBlock=cppBlock(main,main.indexOf('{',stableAt),'stable Big Picture');
- const stable=stableBlock.body;
- const admission=admissionBlock.body,changed=changedBlock.body,template=fs.readFileSync(path.join(here,'native-fixture.cpp'),'utf8');
- report.nativeCallbackExtraction={method:'unique anchor and lexical balanced C++ body',mainSha256:hash(path.join(root,'native/main.cpp')),admission:{begin:admissionBlock.open,end:admissionBlock.end,sha256:crypto.createHash('sha256').update(admission).digest('hex')},modeChanged:{begin:changedBlock.open,end:changedBlock.end,sha256:crypto.createHash('sha256').update(changed).digest('hex')},stableBigPicture:{begin:stableBlock.open,end:stableBlock.end,sha256:crypto.createHash('sha256').update(stable).digest('hex')}};
- const wakeBegin=main.indexOf('    case WM_POWER_RESUME_COMMIT:'),wakeEnd=main.indexOf('    case WM_POWER_INPUT_RECOVER:',wakeBegin);
- if(wakeBegin<0||wakeEnd<0)throw Error('Review native committed wake source boundary');
- const wakeBody=main.slice(wakeBegin+'    case WM_POWER_RESUME_COMMIT:'.length,wakeEnd),wakeMessage=main.split('\n').find(l=>l.startsWith('#define WM_POWER_INPUT_RECOVER '));
- if(!wakeMessage||!wakeBody.includes('return 0;'))throw Error('Missing native wake completion contract');
- const readyStart=uniqueAnchor(main,'static bool deckySidebarResumeAfterIntent(','shared Decky Ready consumer'),readyBlock=cppBlock(main,main.indexOf('{',readyStart),'shared Decky Ready consumer');
- const prewarmStart=uniqueAnchor(main,'static std::string deckySidebarPrepareEnvironment(','native environment preparation'),prewarmBlock=cppBlock(main,main.indexOf('{',prewarmStart),'native environment preparation'),prewarmEnd=prewarmBlock.end;
- const diagnosticStart=uniqueAnchor(main,'static void deckySidebarSessionDiagnostic(','session diagnostic'),diagnosticBlock=cppBlock(main,main.indexOf('{',diagnosticStart),'session diagnostic');
- const fixed=template.replace('/*__SESSION_DIAGNOSTIC__*/',main.slice(diagnosticStart,diagnosticBlock.end)).replace('/*__PREPARE_ENVIRONMENT__*/',main.slice(prewarmStart,prewarmEnd)).replace('/*__WAKE_READY__*/',main.slice(readyStart,readyBlock.end)).replace('/*__ADMISSION__*/',admission).replace('/*__MODE_CHANGED__*/',changed).replace('/*__STABLE_BIGPICTURE__*/',stable).replace('/*__WAKE_COMMIT__*/',wakeBody).replace('/*__WAKE_MESSAGE__*/',wakeMessage);fs.writeFileSync(path.join(out,'fixed.cpp'),fixed);
- const legacy=fixed.replace('if (mode == "bigpicture") {','if (mode == "bigpicture") { if(!g_steamLinkAdmission.allows(session)&&!g_deckyUpdateRecovery.allows(session))return {false,"ymcc-startup-observation-only",false};');if(legacy===fixed)throw Error('Legacy origin-gate mutation anchor changed');fs.writeFileSync(path.join(out,'legacy.cpp'),legacy);
- const retainedNegative=fixed.replace('return {true,"retained-frontend-rebind",false,{},true};','return {false,"decky-context-already-loaded",false};');if(retainedNegative===fixed)throw Error('Retained frontend admission mutation missing');fs.writeFileSync(path.join(out,'retained-negative.cpp'),retainedNegative);
- const repairHeader=fs.readFileSync(path.join(root,'native/decky_sidebar_manual_repair.h'),'utf8');
- const uncertainHeader=repairHeader.replace('dispatchEntered=true;','dispatchEntered=false;');
- if(uncertainHeader===repairHeader)throw Error('Uncertain-dispatch mutation anchor missing');
- fs.writeFileSync(path.join(out,'uncertain-manual.h'),uncertainHeader);fs.writeFileSync(path.join(out,'uncertain-auto.h'),fs.readFileSync(path.join(root,'native/decky_sidebar_automatic_repair.h'),'utf8').replace('#include "decky_sidebar_manual_repair.h"','#include "uncertain-manual.h"'));
- fs.writeFileSync(path.join(out,'repair-uncertain-negative.cpp'),fixed.replace('#include "decky_sidebar_manual_repair.h"','#include "uncertain-manual.h"').replace('#include "decky_sidebar_automatic_repair.h"','#include "uncertain-auto.h"'));
- const retainedRepairHeader=repairHeader.replace('(runtime.at("phase")=="frontend-attached"&&runtime.at("reason")=="retained-frontend-connected")','false');
- if(retainedRepairHeader===repairHeader)throw Error('Retained backend repair mutation anchor missing');
- fs.writeFileSync(path.join(out,'retained-manual.h'),retainedRepairHeader);fs.writeFileSync(path.join(out,'retained-auto.h'),fs.readFileSync(path.join(root,'native/decky_sidebar_automatic_repair.h'),'utf8').replace('#include "decky_sidebar_manual_repair.h"','#include "retained-manual.h"'));
- fs.writeFileSync(path.join(out,'repair-retained-negative.cpp'),fixed.replace('#include "decky_sidebar_manual_repair.h"','#include "retained-manual.h"').replace('#include "decky_sidebar_automatic_repair.h"','#include "retained-auto.h"'));
- const staleHeader=repairHeader.replace('origin!=Origin::Automatic&&deps.freshMode?deps.freshMode(session):deps.mode(session)','deps.mode(session)');if(staleHeader===repairHeader)throw Error('Manual stale-cache mutation anchor missing');
- fs.writeFileSync(path.join(out,'stale-manual.h'),staleHeader);fs.writeFileSync(path.join(out,'stale-auto.h'),fs.readFileSync(path.join(root,'native/decky_sidebar_automatic_repair.h'),'utf8').replace('#include "decky_sidebar_manual_repair.h"','#include "stale-manual.h"'));
- fs.writeFileSync(path.join(out,'repair-stale-mode-negative.cpp'),fixed.replace('#include "decky_sidebar_manual_repair.h"','#include "stale-manual.h"').replace('#include "decky_sidebar_automatic_repair.h"','#include "stale-auto.h"'));
- const noPowerGate=fixed.replace('if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready)', 'if (true)');if(noPowerGate===fixed)throw Error('Native wake power guard mutation missing');fs.writeFileSync(path.join(out,'wake-power-guard-negative.cpp'),noPowerGate);
- const noWakeBinding=fixed.replace('const auto rebound=g_deckySidebarRuntime.requestBindingRefresh(generation);','const auto rebound=false;');if(noWakeBinding===fixed)throw Error('Native wake binding mutation missing');fs.writeFileSync(path.join(out,'wake-binding-negative.cpp'),noWakeBinding);
- const noReadyEvent=fixed.replace('ipc_emit("power.resumed",','ipc_emit("power.pending",');if(noReadyEvent===fixed)throw Error('Native wake ready event mutation missing');fs.writeFileSync(path.join(out,'wake-ready-event-negative.cpp'),noReadyEvent);
- const noAutoGuard=repairHeader.replace('if(origin==Origin::Automatic)return refuse("steam-ui-refresh-requires-user");','');if(noAutoGuard===repairHeader)throw Error('Automatic UI guard anchor missing');
- fs.writeFileSync(path.join(out,'unsafe-automatic-manual.h'),noAutoGuard);fs.writeFileSync(path.join(out,'unsafe-automatic.h'),fs.readFileSync(path.join(root,'native/decky_sidebar_automatic_repair.h'),'utf8').replace('#include "decky_sidebar_manual_repair.h"','#include "unsafe-automatic-manual.h"'));
- fs.writeFileSync(path.join(out,'repair-auto-ui-negative.cpp'),fixed.replace('#include "decky_sidebar_manual_repair.h"','#include "unsafe-automatic-manual.h"').replace('#include "decky_sidebar_automatic_repair.h"','#include "unsafe-automatic.h"'));
- const automaticHeader=fs.readFileSync(path.join(root,'native/decky_sidebar_automatic_repair.h'),'utf8'),repeatHeader=automaticHeader.replace('if(spent_||','if(false||');if(automaticHeader===repeatHeader)throw Error('Automatic budget mutation anchor missing');
- fs.writeFileSync(path.join(out,'repeat-auto.h'),repeatHeader);fs.writeFileSync(path.join(out,'repair-auto-repeat-negative.cpp'),fixed.replace('#include "decky_sidebar_automatic_repair.h"','#include "repeat-auto.h"'));
- const prewarmBlocked=fixed.replace('static std::string deckySidebarPrepareEnvironment(const std::function<bool()>& current) {','static std::string deckySidebarPrepareEnvironment(const std::function<bool()>& current) {\n    if(g_steamSettingsObserver.steamPresence()!=1)return "preparation-deferred";');if(prewarmBlocked===fixed)throw Error('Native prewarm negative anchor missing');fs.writeFileSync(path.join(out,'prewarm-negative.cpp'),prewarmBlocked);
- const wakePreparationMissing=fixed.replace('g_deckySidebarRuntime.requestPreparationRefresh(generation)','false');if(wakePreparationMissing===fixed)throw Error('Committed preparation negative anchor missing');fs.writeFileSync(path.join(out,'wake-preparation-negative.cpp'),wakePreparationMissing);
+ for(const [name,text] of nativeSource.outputs)fs.writeFileSync(path.join(out,name),text);
  const vc=process.env.VCToolsInstallDir||'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\',sdk=process.env.WindowsSdkDir||'C:\\Program Files (x86)\\Windows Kits\\10\\',version=process.env.WindowsSDKVersion||'10.0.26100.0\\';
  const environment=['@echo off','set "SystemRoot=C:\\Windows"','set "WINDIR=C:\\Windows"',`set "PATH=${path.join(vc,'bin/Hostx64/x64')};C:\\Windows\\System32;C:\\Windows"`,`set "INCLUDE=${path.join(vc,'include')};${['ucrt','shared','um','winrt','cppwinrt'].map(n=>path.join(sdk,'Include',version,n)).join(';')}"`,`set "LIB=${path.join(vc,'lib/x64')};${path.join(sdk,'Lib',version,'ucrt/x64')};${path.join(sdk,'Lib',version,'um/x64')}"`];
  const modes=['fixed','prewarm-negative','wake-preparation-negative','legacy','retained-negative','repair-uncertain-negative','repair-retained-negative','repair-auto-repeat-negative','repair-auto-ui-negative','repair-stale-mode-negative','wake-power-guard-negative','wake-binding-negative','wake-ready-event-negative'];

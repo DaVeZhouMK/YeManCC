@@ -5,20 +5,86 @@ import fs from 'node:fs';import path from 'node:path';import http from 'node:htt
 import {outputDirectory,repo,fixture,hash,fingerprints,runtimeBundle,listenBootFixture} from './boot_modes_fixture/harness.mjs';
 import {buildBrowser} from './boot_modes_fixture/buildBrowser.mjs';
 import {prepareDiskSettings,createDiskRuntime,nativeInputs} from './boot_modes_fixture/diskSettings.mjs';
+import * as touchProfilePreparation from './boot_modes_fixture/touchProfilesNative.mjs';
+import {productionTouchBridge,runTouchProfilesFileCases} from './boot_modes_fixture/touchProfilesFileCases.mjs';
+import {editSoftwareOwner,verifySoftwareOwner} from './boot_modes_fixture/softwareOwnerUi.mjs';
+import {inspectLegacyOrigin,adoptLegacyOrigin} from './boot_modes_fixture/legacyOriginUi.mjs';
 const out=outputDirectory(process.argv.slice(2),'file-ui');
-const report={schema:1,suite:'boot-modes-file-ui',pass:false,caseId:'settings.boot-modes-file-ui',scope:'Actual Vue/PowerView shell and gamepad engine -> actual boot bridge/settings repository -> production Win32 atomic file IO/metadata and native delta/CAS writers -> native startup policy -> fresh frontend repository. System app mutex, InputHost admission, services, registry and hardware owners are isolated. No installed app or physical reboot.',assertions:[],policyFailures:[],presetObservations:[],navigationFailures:[],sourceHashes:{},pageErrors:[],networkRejected:[],screenshots:[],coverage:[],timing:{}};
+const softwareOwnerOnly=process.argv.includes('--software-owner-only'),legacyOriginOnly=process.argv.includes('--legacy-origin-only'),collectFailures=process.argv.includes('--collect-failures');
+const uiOnly=process.argv.includes('--ui-only');
+const nativeFileOnly=process.argv.includes('--native-file-only');
+const boundedUiOnly=softwareOwnerOnly||legacyOriginOnly||uiOnly;
+const resolutionArgs=process.argv.filter(value=>value.startsWith('--resolution='));
+assert(resolutionArgs.length<=1&&resolutionArgs.every(value=>/^--resolution=(720|800)$/.test(value)),'Choose exactly one supported UI resolution');
+const resolutions=resolutionArgs.length?[Number(resolutionArgs[0].split('=')[1])]:[720,800];
+const selectedResolutionOnly=resolutions.length===1;
+if([uiOnly,softwareOwnerOnly,legacyOriginOnly,nativeFileOnly,process.argv.includes('--touch-profiles-only'),process.argv.includes('--preparation-only')].filter(Boolean).length>1)throw Error('Choose one exact file/UI scope');
+assert(!nativeFileOnly||!selectedResolutionOnly,'Native file scope does not take a resolution');
+const finalReplacementOnly=process.argv.includes('--preparation-final-replacement-only');
+assert(!finalReplacementOnly||process.argv.includes('--preparation-only')&&!selectedResolutionOnly,'Preparation replacement requires the preparation file scope');
+if(process.argv.includes('--preparation-only')){
+ const {runPreparationFileEntry}=await import('./boot_modes_fixture/preparation.mjs');
+ await runPreparationFileEntry(out,{finalReplacementOnly});
+}else if(process.argv.includes('--touch-profiles-only')){
+ const {runTouchProfilesFileEntry}=await import('./boot_modes_fixture/touchProfilesFileCases.mjs');
+ await runTouchProfilesFileEntry(out,process.argv.slice(2));
+}else{
+const report={selection:softwareOwnerOnly?'software-owner':legacyOriginOnly?'legacy-origin':'all',wholeSuite:boundedUiOnly?'NOT_RUN':'executed',notRun:boundedUiOnly?['touch profile group','native-first migration group','invalid input group','transaction group',...(uiOnly?[]:['non-custom UI cases'])]:[],schema:1,suite:'boot-modes-file-ui',pass:false,caseId:'settings.boot-modes-file-ui',scope:'Actual Vue/PowerView shell and gamepad engine -> actual boot bridge/settings repository -> production Win32 atomic file IO/metadata and native delta/CAS writers -> native startup policy -> fresh frontend repository. System app mutex, InputHost admission, services, registry and hardware owners are isolated. No installed app or physical reboot.',assertions:[],policyFailures:[],presetObservations:[],navigationFailures:[],sourceHashes:{},pageErrors:[],networkRejected:[],screenshots:[],coverage:[],timing:{}};
+if(nativeFileOnly){
+ report.selection='native-file-only';report.wholeSuite='NOT_RUN_EXACT_SELECTION';report.notRun=['touch profile group','browser UI cases'];
+ report.scope='Production Win32 settings file IO and native startup policy with the real frontend repository; isolated files and no browser, devices or installed application.';
+}
 const started=performance.now(),ids=['global','xbox','steam','xbox-steam'];let browser,server,active,native;
+// Keep bounded progress even if the original parent deadline terminates this
+// process before its final summary. This does not change coverage or budgets.
+const progressFile=out+'/file-ui-progress.jsonl';fs.closeSync(fs.openSync(progressFile,'wx'));
+const progress=(stage,detail={})=>fs.appendFileSync(progressFile,JSON.stringify({stage,elapsedMs:performance.now()-started,...detail})+'\n');
+const uiCalls=[];const backendTasks=new Set();
+const rangeArgs=process.argv.filter(value=>/^--case-(from|through)=/.test(value));
+assert(rangeArgs.length<=2&&new Set(rangeArgs.map(value=>value.split('=')[0])).size===rangeArgs.length,'Duplicate UI range option');
+const rangeFrom=rangeArgs.find(value=>value.startsWith('--case-from='))?.slice('--case-from='.length),rangeThrough=rangeArgs.find(value=>value.startsWith('--case-through='))?.slice('--case-through='.length);
+assert(!rangeArgs.length||uiOnly&&selectedResolutionOnly,'Exact UI ranges require ui-only and one resolution');
+const listArgs=process.argv.filter(value=>value.startsWith('--case-list='));
+assert(listArgs.length<=1&&(!listArgs.length||uiOnly&&!rangeArgs.length),'Exact UI list requires ui-only and cannot be combined with a range');
+let selectedUiNames;
+if(selectedResolutionOnly){report.selection+='@'+resolutions[0];report.wholeSuite='NOT_RUN_SELECTED_RESOLUTION';report.notRun.push('other resolution UI cases');}
 const fileRead=f=>JSON.parse(fs.readFileSync(f,'utf8'));
 const sources=new Set([...nativeInputs,'tools/boot_modes_file_ui_selftest.mjs','tools/boot_modes_fixture/diskSettings.mjs','tools/boot_modes_fixture/diskApiPort.ts','tools/boot_modes_fixture/fileBrowserPorts.ts','PowerControl/settings-defaults-v1.json','tools/boot_modes_fixture/fixtures/win5-unconfigured-20261025.json']);
 const pinned=new Map();const pin=p=>{const value=hash(path.join(repo,p));if(pinned.has(p))assert.equal(value,pinned.get(p),'source changed during UI round '+p);else pinned.set(p,value);sources.add(p);};const collect=a=>a.inputs.forEach(pin);
-const command=async(page,action)=>{await page.evaluate(action=>window.__bootGamepad.command(action),action);if(action==='confirm'||action==='back')await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));};
+const command=async(page,action)=>{await page.evaluate(async action=>{window.__bootGamepad.command(action);if(action==='confirm'||action==='back'){await window.__bootAfterRender();await window.__bootFileAfterIO();}},action);};
 const focus=async(page,locator)=>locator.evaluate(el=>window.__bootGamepad.focus(el));
 const chooseButton=page=>page.getByRole('button',{name:'设为开机模式',exact:true});
+const reloadButton=page=>page.getByRole('button',{name:'重新读取',exact:true});
+async function assertQuietOverviewFailure(page,warnings,from,action,detail){
+ await reloadButton(page).waitFor();
+ assert.equal(await page.locator('.boot-panel-content').locator('.boot-error,.boot-status,.boot-boot-notice,[role="alert"],[role="status"],[aria-live]').count(),0);
+ assert.equal(await reloadButton(page).evaluate(button=>!!button.previousElementSibling?.matches('.boot-summary')),true,'Recovery belongs below the summary');
+ const observed=warnings.slice(from);
+ assert(observed.some(text=>text.includes(`[开机模式] ${action}：`)&&(!detail||text.includes(detail))),JSON.stringify(observed));
+}
+async function retryQuietOverview(page,from){
+ await focus(page,from);await command(page,'nav-down');
+ assert.equal(await reloadButton(page).evaluate(button=>button===document.activeElement),true,'Down must reach the recovery button');
+ await command(page,'confirm');await reloadButton(page).waitFor({state:'detached'});
+ await page.waitForFunction(()=>document.querySelector('.boot-panel-actions .primary')?.disabled===false);
+}
 async function choose(page,mode){
- const cards=page.locator('.boot-mode-cards button');await focus(page,cards.nth(0));for(let i=0;i<ids.indexOf(mode);i++)await command(page,'nav-right');assert.equal(await cards.nth(ids.indexOf(mode)).evaluate(el=>el===document.activeElement),true,'mode row gamepad reachability');await command(page,'confirm');
- const before=fs.readFileSync(active.file,'utf8');await command(page,'nav-down');if(!await chooseButton(page).evaluate(el=>el===document.activeElement))await command(page,'nav-right');assert.equal(await chooseButton(page).evaluate(el=>el===document.activeElement),true,'mode -> startup action natural direction');assert.equal(fs.readFileSync(active.file,'utf8'),before,'preview selection wrote settings');
+ // Dispatch the same consecutive directions in the page, avoiding an IPC
+ // round trip per key. Selection and navigation still cross the original
+ // independent on-disk no-write assertion boundary below.
+ const reached=await page.evaluate(async index=>{
+  const cards=document.querySelectorAll('.boot-mode-cards button');window.__bootGamepad.focus(cards[0]);
+  for(let i=0;i<index;i++)window.__bootGamepad.command('nav-right');
+  const reached=cards[index]===document.activeElement;
+  window.__bootGamepad.command('confirm');await window.__bootAfterRender();return reached;
+ },ids.indexOf(mode));assert.equal(reached,true,'mode row gamepad reachability');
+ const before=fs.readFileSync(active.file,'utf8');
+ const actionReached=await page.evaluate(()=>{
+  const button=[...document.querySelectorAll('button')].find(el=>el.textContent?.trim()==='设为开机模式');
+  window.__bootGamepad.command('nav-down');if(button!==document.activeElement)window.__bootGamepad.command('nav-right');return button===document.activeElement;
+ });assert.equal(actionReached,true,'mode -> startup action natural direction');assert.equal(fs.readFileSync(active.file,'utf8'),before,'preview selection wrote settings');
  await command(page,'confirm');
- await page.waitForFunction(()=>document.querySelector('[data-gp-modal="boot-mode-connection"]')||document.querySelector('.boot-status')||document.querySelector('.boot-error'));
+ await page.waitForFunction(()=>document.querySelector('[data-gp-modal="boot-mode-connection"]')||document.querySelector('.boot-panel-actions > button:enabled'));
  if(await page.locator('[data-gp-modal="boot-mode-connection"]').count()){
   const modal=page.locator('[data-gp-modal="boot-mode-connection"]');await focus(page,modal.getByRole('button',{name:'仍保存开机模式',exact:true}));await command(page,'confirm');await modal.waitFor({state:'detached'});
  }
@@ -29,10 +95,11 @@ async function choose(page,mode){
 async function editorPeek(page,mode,height){
  const edit=page.getByRole('button',{name:'编辑配置',exact:true});await focus(page,edit);await command(page,'confirm');await page.locator('.boot-workbench').waitFor();
  assert.equal(await page.locator('.boot-workbench').evaluate(el=>el.scrollWidth<=el.clientWidth+1),true,'editor horizontal overflow');
+ await page.waitForFunction(()=>[...document.querySelectorAll('.boot-workbench img')].every(image=>image.complete&&image.naturalWidth>0));
  const file=path.join(out,height+'-'+mode+'-editor.png');await page.screenshot({path:file});report.screenshots.push(file);
  await command(page,'back');await page.locator('.boot-workbench').waitFor({state:'detached'});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));const returned=await edit.evaluate(el=>el===document.activeElement),actual=await page.evaluate(()=>({tag:document.activeElement?.tagName,text:document.activeElement?.textContent?.trim().slice(0,80),className:document.activeElement?.className}));if(!returned)report.navigationFailures.push({height,mode,expected:'edit trigger',actual,rule:'B must restore focus to the reachable opener after asynchronous loading'});return {returned,actual};
 }
-async function editPersonaThroughUi(page,mode,persona){
+async function editPersonaThroughUi(page,mode,persona,softwareCheck=false){
  const labels={disabled:'关闭虚拟手柄',elite:'Xbox',steamdeck:'SteamDeck','dualsense-edge':'PS5'};
  const card=page.locator('.boot-mode-cards button').nth(ids.indexOf(mode));await focus(page,card);await command(page,'confirm');
  const edit=page.getByRole('button',{name:'编辑配置',exact:true});await focus(page,edit);await command(page,'confirm');await page.locator('.boot-workbench').waitFor();
@@ -42,10 +109,11 @@ async function editPersonaThroughUi(page,mode,persona){
  const dropdown=page.locator('[data-field="input.persona"] button');assert.equal(await dropdown.isEnabled(),true,'persona input locked');await focus(page,dropdown);await command(page,'confirm');await page.locator('[role="listbox"]').waitFor();
  const positions=await page.getByRole('option').evaluateAll((nodes,label)=>({current:nodes.findIndex(el=>el===document.activeElement),target:nodes.findIndex(el=>el.textContent.trim()===label)}),labels[persona]);assert(positions.current>=0&&positions.target>=0,'persona option is not reachable');
  for(let n=0;n<Math.abs(positions.target-positions.current);n++)await command(page,positions.target>positions.current?'nav-down':'nav-up');await command(page,'confirm');await page.locator('[role="listbox"]').waitFor({state:'detached'});assert.equal((await dropdown.innerText()).trim(),labels[persona]);
+ const softwareOwner=softwareCheck?await editSoftwareOwner({page,mode,focus,command,read:active.read,ids}):null;
  const beforeRevision=active.read().extensions?.bootModes?.revision??0,save=page.locator('.boot-workbench-top button').filter({hasText:'保存预设'});await focus(page,save);await command(page,'confirm');await page.waitForFunction(revision=>window.__bootFileDocument?.revision>revision,beforeRevision);
  const saved=active.read().extensions.bootModes;assert.equal(active.a.model.resolveBootMode(saved,mode).input.persona,persona,'save replaced the chosen persona');await command(page,'back');await page.locator('.boot-workbench').waitFor({state:'detached'});
- await focus(page,edit);await command(page,'confirm');await page.locator('.boot-workbench').waitFor();await focus(page,category);await command(page,'confirm');assert.equal((await page.locator('[data-field="input.persona"] button').innerText()).trim(),labels[persona],'reopening reset the saved persona');await command(page,'back');await page.locator('.boot-workbench').waitFor({state:'detached'});
- return {changedThroughDropdown:true,savedOnce:true,reopened:true,persona};
+ await focus(page,edit);await command(page,'confirm');await page.locator('.boot-workbench').waitFor();await focus(page,category);await command(page,'confirm');assert.equal((await page.locator('[data-field="input.persona"] button').innerText()).trim(),labels[persona],'reopening reset the saved persona');const software=softwareOwner?await verifySoftwareOwner({page,mode,owner:softwareOwner,saved:active.read().extensions.bootModes,focus,command,read:active.read}):undefined;await command(page,'back');await page.locator('.boot-workbench').waitFor({state:'detached'});
+ return {changedThroughDropdown:true,savedOnce:true,reopened:true,persona,...(software?{software}:{})};
 }
 const cases=[];
 for(const target of ids)cases.push({kind:'absent',source:'global',target});
@@ -55,8 +123,39 @@ for(const source of ids)for(const target of ids)cases.push({kind:'transition',so
 for(const target of ids)cases.push({kind:'custom',source:'global',target,custom:{global:'elite',xbox:'disabled',steam:'steamdeck','xbox-steam':'dualsense-edge'}[target]});
 for(const target of ids)cases.push({kind:'fault',source:'global',target,fault:'malformed-module'});
 for(const fault of ['write-failure','corrupt-backup','corrupt-no-backup','future-schema'])cases.push({kind:'fault',source:'global',target:'xbox-steam',fault});
+if(softwareOwnerOnly){const selected=cases.filter(row=>row.kind==='custom');assert.equal(selected.length,4);cases.splice(0,cases.length,...selected);}
+if(legacyOriginOnly){const selected=cases.filter(row=>row.kind==='transition'&&row.target==='global');assert.equal(selected.length,4);cases.splice(0,cases.length,...selected);}
+if(rangeArgs.length||listArgs.length){
+ const names=resolutions.flatMap(height=>cases.map(c=>height+'-'+c.kind+'-'+c.source+'-to-'+c.target+(c.fault?'-'+c.fault:'')+(c.kind==='field-win5'&&c.custom?'-custom-'+c.custom:'')));
+ if(listArgs.length){
+  const requested=listArgs[0].slice('--case-list='.length).split(',');
+  assert(new Set(requested).size===requested.length&&requested.every(name=>names.includes(name)),'Unknown or duplicate original UI case');
+  selectedUiNames=names.filter(name=>requested.includes(name));report.selection+=':list';
+ }else{
+  const first=rangeFrom===undefined?0:names.indexOf(rangeFrom),last=rangeThrough===undefined?names.length-1:names.indexOf(rangeThrough);
+  assert(first>=0&&last>=first,'Unknown, empty or reversed original UI case range');selectedUiNames=names.slice(first,last+1);report.selection+=':range:'+selectedUiNames[0]+'..'+selectedUiNames.at(-1);
+ }
+ report.selectedUiCaseNames=selectedUiNames;report.wholeSuite='NOT_RUN_EXACT_SELECTION';report.notRun.push('original UI cases outside explicit selection');
+}
+let touchBridge;
 try{
- for(const p of sources)pin(p);const workspaceParent=path.resolve(repo,'../../..','Testing/YMCC/Workspace/BootModeFileUI');fs.mkdirSync(workspaceParent,{recursive:true});report.storageWorkspace=fs.mkdtempSync(path.join(workspaceParent,'run-'));native=prepareDiskSettings(out+'/native',{storageRoot:report.storageWorkspace});const seedRuntime=await runtimeBundle(out),seed=await seedRuntime.boot.captureBootModeSnapshot();collect(seedRuntime);
+ sources.add('tools/boot_modes_fixture/softwareOwnerUi.mjs');sources.add('tools/boot_modes_fixture/legacyOriginUi.mjs');
+ for(const p of ['tools/boot_modes_fixture/touchProfilesNative.mjs','tools/boot_modes_fixture/touchProfilesFileCases.mjs'])sources.add(p);
+ progress('native-prepare-start');
+ for(const p of sources)pin(p);
+ if(process.argv.includes('--owned-native-reuse')){
+  const provider=globalThis.__bootFileUiNativeProvider;assert.equal(typeof provider,'function','Explicit UI native reuse requires the owned native provider');
+  const prepared=await provider(out);assert(prepared?.native&&typeof prepared.native.invoke==='function'&&typeof prepared.native.close==='function','Invalid UI owned native provider');
+  report.storageWorkspace=path.resolve(prepared.native.root);native=prepared.native;
+  fs.mkdirSync(out+'/native',{recursive:true});fs.copyFileSync(prepared.touchSource,out+'/native/touch-source.json',fs.constants.COPYFILE_EXCL);
+ }else{
+ for(const p of sources)pin(p);const workspaceParent=path.resolve(repo,'../../..','Testing/YMCC/Workspace/BootModeFileUI');fs.mkdirSync(workspaceParent,{recursive:true});report.storageWorkspace=fs.mkdtempSync(path.join(workspaceParent,'run-'));native=prepareDiskSettings(out+'/native',{storageRoot:report.storageWorkspace,touchProfiles:true,touchProfilePreparation});
+ }
+ progress('native-prepare-end');
+ for(const row of JSON.parse(fs.readFileSync(out+'/native/touch-source.json','utf8')).headers)pin(row.path);
+ report.touchProfileCoverage=boundedUiOnly||nativeFileOnly?[]:await runTouchProfilesFileCases(native,out,report.assertions);
+ const seedRuntime=await runtimeBundle(out),seed=await seedRuntime.boot.captureBootModeSnapshot();collect(seedRuntime);
+ if(!boundedUiOnly){
  // Native runs before the renderer on a real launch. Deliberately keep the
  // materialized cache stale; choosing/saving through the new UI first would
  // hide the v1 upgrade defect this boundary must exercise.
@@ -114,17 +213,43 @@ try{
   transactionRows.push({mode,fault,pass:true,templatesIsolated:true,noLiveApply:true});disk.flush();
  }
  report.assertions.push({name:'four modes reject stale atomic writes and recover after a committed acknowledgement is lost',pass:true,evidence:transactionRows});
+ }
+ if(!nativeFileOnly){
+ progress('ui-build-start');
  const ui=out+'/ui';fs.mkdirSync(ui,{recursive:true});const built=await buildBrowser(ui,seed,{bootBridgePath:fixture+'/fileBrowserPorts.ts'});for(const p of built.inputs)pin(p);
+ progress('ui-build-end');
  report.timing.buildMs=performance.now()-started;const publicRoot=path.join(repo,'public');
  server=http.createServer((req,res)=>{const relative=decodeURIComponent((req.url||'/').split('?')[0]).replace(/^\//,'')||'index.html';let file;if(['index.html','boot-browser.js','boot-browser.css'].includes(relative))file=path.join(ui,relative);else{const candidate=path.resolve(publicRoot,relative);if(candidate.startsWith(publicRoot+path.sep)&&fs.existsSync(candidate)&&fs.statSync(candidate).isFile()){file=candidate;pin(path.relative(repo,file).replaceAll('\\','/'));}}if(!file){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.svg')?'image/svg+xml':file.endsWith('.mp4')?'video/mp4':file.endsWith('.jpg')?'image/jpeg':'text/html');res.end(fs.readFileSync(file));});await listenBootFixture(server);const origin='http://127.0.0.1:'+server.address().port;
  const {chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_boot_preview.cjs')('playwright');browser=await chromium.launch({channel:'msedge',headless:true});
- for(const height of [720,800]){
+ uiResolutionLoop: for(const height of resolutions){
   const page=await browser.newPage({viewport:{width:1280,height}});page.setDefaultTimeout(2500);page.on('pageerror',e=>report.pageErrors.push({height,error:e.message}));
-  await page.exposeFunction('__bootFileBackend',async(operation,args)=>{const allowed=['loadBootModes','saveBootModes','chooseBootMode','readBootModeSupport','bootModeConnections','addBootSharedApplication'];assert(allowed.includes(operation),'forbidden UI call '+operation);active.bind();const value=await active.a.boot[operation](...args);return structuredClone(value);});
+  const warnings=[];page.on('console',msg=>{if(msg.type()==='warning'&&msg.text().startsWith('[开机模式]'))warnings.push(msg.text());});
+  // The real Vue panel and boot bridge share opaque object identity. This
+  // isolated browser/Node transport must round-trip only issued source tokens.
+  const initialSources=new WeakMap();let initialSourceSequence=0;
+  await page.exposeFunction('__bootFileBackend',async(operation,args)=>{
+   const began=performance.now(),allowed=['loadBootModes','saveBootModes','chooseBootMode','readBootModeSupport','bootModeConnections','addBootSharedApplication'];
+   assert(allowed.includes(operation),'forbidden UI call '+operation);active.bind();
+   let scope=initialSources.get(active);if(!scope){scope={tokens:new Map()};initialSources.set(active,scope);}
+   if(operation==='saveBootModes'||operation==='chooseBootMode'){
+    const index=operation==='saveBootModes'?2:3,wire=args[index];
+    if(wire!==undefined){assert(wire&&Object.keys(wire).length===1&&Number.isSafeInteger(wire.fixtureInitialSource),'Unknown fixture source token');
+     assert(scope.tokens.has(wire.fixtureInitialSource),'Foreign/unissued fixture source token');args[index]=scope.tokens.get(wire.fixtureInitialSource);}
+   }
+   const request=Promise.resolve(active.a.boot[operation](...args));backendTasks.add(request);
+   try{const value=await request;
+    if(operation==='loadBootModes'&&value.initialSource){const id=++initialSourceSequence;scope.tokens.set(id,value.initialSource);return {...structuredClone(value),initialSource:{fixtureInitialSource:id}};}
+    return structuredClone(value);
+   }finally{backendTasks.delete(request);uiCalls.push({operation,elapsedMs:performance.now()-began});}
+  });
   await page.route('**/*',async route=>{if(route.request().url().startsWith(origin+'/')||route.request().url().startsWith('data:'))await route.continue();else{report.networkRejected.push(route.request().url());await route.abort();}});
   for(let index=0;index<cases.length;index++){
    const c=cases[index],name=height+'-'+c.kind+'-'+c.source+'-to-'+c.target+(c.fault?'-'+c.fault:'')+(c.kind==='field-win5'&&c.custom?'-custom-'+c.custom:''),dir=out+'/files/'+name;let next;
+   if(selectedUiNames&&!selectedUiNames.includes(name))continue;
+   const steamTarget=c.target==='steam'||c.target==='xbox-steam';
    const entry={name,height,...c,pass:false};let began=performance.now();
+   const firstWarning=warnings.length;
+   const firstUiCall=uiCalls.length;progress('ui-case-start',{name});
    try{
     active=await createDiskRuntime(dir,native,{storageDirectory:path.join(report.storageWorkspace,height+'-'+String(index).padStart(2,'0')),moduleDirectory:out+'/runtime-module'});collect(active.a);const defaults=JSON.parse(fs.readFileSync(repo+'/PowerControl/settings-defaults-v1.json','utf8'));
     if(c.kind==='field-win5')active.writeRaw(JSON.parse(fs.readFileSync(repo+'/tools/boot_modes_fixture/fixtures/win5-unconfigured-20261025.json','utf8')));
@@ -132,9 +257,9 @@ try{
     else if(c.kind!=='absent'){defaults.future={sentinel:'keep'};active.writeRaw(defaults);}
     entry.fileExistedBeforeRead=fs.existsSync(active.file);
     if(c.fault==='corrupt-no-backup'||c.fault==='future-schema'){
-     const original=c.fault==='corrupt-no-backup'?'{broken-original':JSON.stringify({...defaults,schemaVersion:99});active.writeRaw(original);await page.goto(origin+'/');
+     const original=c.fault==='corrupt-no-backup'?'{broken-original':JSON.stringify({...defaults,schemaVersion:99});active.writeRaw(original);await page.goto(origin+'/',{waitUntil:'domcontentloaded'});
      if(c.fault==='future-schema'){
-      await page.locator('.boot-error').waitFor();assert.equal(fs.readFileSync(active.file,'utf8'),original,'unsupported original overwritten');assert.equal(await chooseButton(page).isEnabled(),false);entry.readRejected=true;
+      await assertQuietOverviewFailure(page,warnings,firstWarning,'读取未完成');assert.equal(fs.readFileSync(active.file,'utf8'),original,'unsupported original overwritten');assert.equal(await chooseButton(page).isEnabled(),false);entry.readRejected=true;
      }else{
       await chooseButton(page).waitFor();await page.waitForFunction(()=>window.__bootFileDocument!==undefined);assert.equal(await chooseButton(page).isEnabled(),true);
       const archives=fs.readdirSync(active.config).filter(name=>name.startsWith('yeman-settings.json.')&&fs.readFileSync(path.join(active.config,name),'utf8')===original);assert(archives.length>0,'recovered corrupt original has no byte-identical archive');entry.originalArchives=archives;
@@ -145,30 +270,40 @@ try{
     if(c.fault==='malformed-module'){
      const document=active.a.model.createBootModeDocument(seed);document.boot=c.target;document.bootEnabled=true;
      const snapshot=c.target==='global'?document.global:(document.scenes[c.target].overrides);snapshot.softwareLaunch={paths:{bad:'not-a-list'}};
-     const value={...defaults,extensions:{...defaults.extensions,bootModes:document}},original=JSON.stringify(value);active.writeRaw(original);await page.goto(origin+'/');await page.locator('.boot-error').filter({hasText:'softwareLaunch.paths'}).waitFor();assert.equal(await chooseButton(page).isEnabled(),false);
+     const value={...defaults,extensions:{...defaults.extensions,bootModes:document}},original=JSON.stringify(value);active.writeRaw(original);await page.goto(origin+'/',{waitUntil:'domcontentloaded'});await assertQuietOverviewFailure(page,warnings,firstWarning,'读取未完成','softwareLaunch.paths');assert.equal(await chooseButton(page).isEnabled(),false);
      const normalized=active.read();assert.deepEqual(normalized.extensions.bootModes,value.extensions.bootModes,'bad mode intent overwritten');assert.equal(normalized.extensions.bootModesAppliedBoot,undefined);
      const before=fs.readFileSync(active.file,'utf8');await assert.rejects(active.a.boot.chooseBootMode(c.target,document),/数据格式异常/);assert.equal(fs.readFileSync(active.file,'utf8'),before);
-     snapshot.softwareLaunch={paths:[],timing:'scene',delay:0};active.writeRaw({...normalized,extensions:{...normalized.extensions,bootModes:document}});await page.getByRole('button',{name:'重新读取',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.boot-error')&&document.querySelector('.boot-panel-actions .primary')?.disabled===false);assert.equal(await chooseButton(page).isEnabled(),true);
+     snapshot.softwareLaunch={paths:[],timing:'scene',delay:0};active.writeRaw({...normalized,extensions:{...normalized.extensions,bootModes:document}});await retryQuietOverview(page,page.locator('.boot-mode-cards button').first());assert.equal(await chooseButton(page).isEnabled(),true);
      entry.pass=true;entry.badIntentPreserved=true;entry.retryRecoveredWithoutRemount=true;entry.noStartupCommit=true;report.assertions.push(entry);continue;
     }
     if(c.fault==='corrupt-backup'){fs.writeFileSync(active.file+'.bak',JSON.stringify(defaults));active.writeRaw('{broken-recoverable');}
     const loaded=await active.a.repository.loadSettings();Object.assign(active.a.ports.settings,loaded);
     if(c.kind==='transition'){
+     if(steamTarget){
+      // The real factory profile is already Steam keys; start from a stored
+      // OFF so these transitions must actually commit the new scene value.
+      const bank=await native.invoke(active.file,{operation:'touchDefaults'});
+      bank.profiles.disabled.standaloneSpecialMode='off';
+      active.writeRaw({...active.read(),screenTouchpads:bank});
+      active.a.ports.state.touch=structuredClone(bank.profiles);
+     }
      const document=active.a.model.createBootModeDocument(await active.a.boot.captureBootModeSnapshot());document.current=c.source;document.boot=c.source;document.bootEnabled=true;
+     const originalPerformance=structuredClone(legacyOriginOnly?seed.performance:document.global.performance);
+     if(legacyOriginOnly){if(c.source!=='global'){const own=structuredClone(originalPerformance);own.controls.ac.tdpCeiling=55;own.schedule.controls.ac.tdpCeiling=55;document.scenes[c.source].overrides.performance=own;}delete document.global.performance;entry.legacyGlobalMissing=true;}
      if(c.custom){const module=c.target==='global'?document.global.input:(document.scenes[c.target].overrides.input??={});Object.assign(module,{persona:c.custom,mouse:c.custom==='steamdeck'?'steamdeck':'off',outputTarget:{...document.global.input.outputTarget,persona:c.custom,buttonMappingEnabled:c.custom!=='disabled'}});}
      if(c.source==='xbox-steam'&&c.target==='global'){delete document.global.input.ownership;delete document.global.input.outputTarget.descriptorHash;entry.savedOptionalFieldsAbsent=true;}
      if(c.source==='xbox-steam'&&c.target==='xbox-steam'){document.scenes[c.source].overrides.controller={name:'Own mode rules',rules:[{id:'own-mode-shortcut',origin:'custom',enabled:true,inputs:[],actionId:'keyboard.key',params:{key:'F10'}}]};entry.ownShortcuts=true;}
      entry.templatesBeforeSelection={global:structuredClone(document.global),scenes:structuredClone(document.scenes)};
-     const current=active.a.model.resolveBootMode(document,c.source);document.activeSnapshot=current;const globalControllerRules=[{id:'ordinary-global-rule',origin:'custom',enabled:true,inputs:[],actionId:'keyboard.key',params:{key:'F8'}}];
-     await active.a.repository.updateSettings(s=>{s.extensions={...s.extensions,bootModes:document,bootModesAppliedBoot:'fixture-windows-boot-1'};s.input.outputTarget={...s.input.outputTarget,...current.input.outputTarget,persona:current.input.persona};s.input.buttonMapping.rules={...s.input.buttonMapping.rules,shortcutRules:globalControllerRules,shortcutRulesInitialized:true};s.input.startupObservedBoot='fixture-windows-boot-1';s.input.bootModeShortcuts=entry.ownShortcuts?{schema:1,mode:c.source,boot:'fixture-windows-boot-1',rules:document.scenes[c.source].overrides.controller.rules}:null;s.input.startupAppliedBoot='fixture-windows-boot-1';s.startupDesired.virtualGamepadPersona='disabled';});
+     const current=active.a.model.resolveBootMode(legacyOriginOnly?active.a.model.normalizeBootModeDocument(document,seed):document,c.source);document.activeSnapshot=current;const globalControllerRules=[{id:'ordinary-global-rule',origin:'custom',enabled:true,inputs:[],actionId:'keyboard.key',params:{key:'F8'}}];
+     await active.a.repository.updateSettings(s=>{s.extensions={...s.extensions,bootModes:document,bootModesAppliedBoot:'fixture-windows-boot-1'};s.input.outputTarget={...s.input.outputTarget,...current.input.outputTarget,persona:current.input.persona};s.input.buttonMapping.rules={...s.input.buttonMapping.rules,shortcutRules:globalControllerRules,shortcutRulesInitialized:true};s.input.startupObservedBoot='fixture-windows-boot-1';s.input.bootModeShortcuts=entry.ownShortcuts?{schema:1,mode:c.source,boot:'fixture-windows-boot-1',rules:document.scenes[c.source].overrides.controller.rules}:null;s.input.startupAppliedBoot='fixture-windows-boot-1';s.startupDesired.virtualGamepadPersona='disabled';if(legacyOriginOnly){s.performanceSchedule=structuredClone(originalPerformance.schedule);s.performanceSchedule.controls.ac.tdpCeiling=49;}});
      const globalNewRule={...globalControllerRules[0],id:'saved-global-after-mode-start',origin:'custom',enabled:true};
      const ordinary=await active.a.repository.loadSettings(),globalPatch={buttonMapping:{rules:{schemaVersion:2,closure:'UNENCLOSED',shortcutRules:[...globalControllerRules,globalNewRule]}}};
      const originalBytes=fs.readFileSync(active.file,'utf8');const rejected=await active.a.repository.compareAndSwapInputSettings(ordinary.input.revision+1,globalPatch,undefined,{globalShortcuts:true});assert.equal(rejected.ok,false);assert.equal(fs.readFileSync(active.file,'utf8'),originalBytes,'failed shortcut save changed the file');
      const committed=await active.a.repository.compareAndSwapInputSettings(ordinary.input.revision,globalPatch,undefined,{globalShortcuts:true});assert.equal(committed.ok,true);assert(committed.globalShortcutRules.shortcutRules.some(r=>r.id===globalNewRule.id));assert(committed.value.buttonMapping.rules.shortcutRules.some(r=>r.id===globalNewRule.id));const nativeCurrent=await native.invoke(active.file,{operation:'shortcutRules'});assert.equal(nativeCurrent.rules.some(r=>r.id===globalNewRule.id),true);assert.equal(Object.hasOwn(active.read().extensions.bootModes.global,'controller'),false);assert.equal(active.read().extensions.bootModeGlobalShortcutsBackup,undefined);entry.retiredModeControllerParametersRemoved=true;
-     Object.assign(document,(await active.a.repository.loadSettings()).extensions.bootModes);entry.sharedShortcutSaved=globalNewRule.id;entry.templatesBeforeSelection={global:structuredClone(document.global),scenes:structuredClone(document.scenes)};
+     Object.assign(document,(await active.a.repository.loadSettings()).extensions.bootModes);const templateView=legacyOriginOnly?active.a.model.normalizeBootModeDocument(document,seed):document;entry.sharedShortcutSaved=globalNewRule.id;entry.templatesBeforeSelection={global:structuredClone(templateView.global),scenes:structuredClone(templateView.scenes)};
      if(entry.ownShortcuts){const nativeInput=structuredClone(committed.value);for(const boot of ['another-windows-boot','fixture-windows-boot-1'])for(const rules of [[],[{id:'mode-only',enabled:true}]]){nativeInput.startupObservedBoot=boot;nativeInput.bootModeShortcuts={schema:1,mode:'xbox-steam',boot,rules};assert((await native.invoke(active.file,{operation:'shortcutRules',input:nativeInput})).rules.some(r=>r.id===globalNewRule.id),'retired mode override must always use global rules');}entry.nativeStaleEmptyAndInvalidRulesVerified=true;}
      if(c.target==='global'){
-      entry.savedTemplatesBeforeLiveEdit={global:structuredClone(document.global),scenes:structuredClone(document.scenes)};
+      entry.savedTemplatesBeforeLiveEdit={global:structuredClone(templateView.global),scenes:structuredClone(templateView.scenes)};
       // Ordinary controller-page edit after a preset exists. It changes current
       // input only, and must never become mode 1's next-boot intent on editor open.
       await active.a.repository.updateSettings(s=>{s.input.outputTarget={...s.input.outputTarget,persona:'steamdeck',buttonMappingEnabled:true};s.input.revision++;s.gamepad.mouseMode='on';});
@@ -176,7 +311,7 @@ try{
      }
      Object.assign(active.a.ports.settings,await active.a.repository.loadSettings());
     }
-    await page.goto(origin+'/');await page.waitForFunction(()=>!document.querySelector('.boot-panel-actions button')?.disabled&&!!window.__bootFileDocument);
+    await page.goto(origin+'/',{waitUntil:'domcontentloaded'});await page.waitForFunction(()=>!document.querySelector('.boot-panel-actions button')?.disabled&&!!window.__bootFileDocument);
     const before=active.read(),currentPersona=before.input.outputTarget.persona;entry.currentPersonaBefore=currentPersona;entry.homeBefore=active.a.ports.state.homeApp;entry.xboxFlagBefore=active.a.ports.state.xbox;
     if(c.kind==='field-win5'){assert.equal(before.extensions?.bootModes,undefined);assert.equal(before.startupDesired.virtualGamepadPersona,'disabled');entry.fieldState='boot marker exists without boot-mode document; legacy preference off';}
     if(c.kind==='absent'){
@@ -188,16 +323,22 @@ try{
      const category=page.locator('[data-boot-category="input"]');await focus(page,category);await command(page,'confirm');
      assert.equal((await page.locator('[data-field="input.persona"] button').innerText()).trim(),'关闭虚拟手柄','mode 1 editor imported the running SteamDeck persona');
      const loadedTemplates=await page.evaluate(()=>{const global=structuredClone(window.__bootFileDocument.global);delete global.controller;return {global,scenes:window.__bootFileDocument.scenes};});assert.deepEqual(loadedTemplates,entry.savedTemplatesBeforeLiveEdit,'opening the editor imported live settings into a saved preset');
+     if(legacyOriginOnly)entry.unresolvedEditor=await inspectLegacyOrigin({page,focus,command,read:active.read});
      await command(page,'back');await page.locator('.boot-workbench').waitFor({state:'detached'});entry.editorPreservedDefaultOff=true;
     }
-    if(c.kind==='custom'||c.kind==='field-win5'&&c.custom)entry.realEdit=await editPersonaThroughUi(page,c.target,c.custom);
+    if(c.kind==='custom'||c.kind==='field-win5'&&c.custom){
+     entry.realEdit=await editPersonaThroughUi(page,c.target,c.custom,c.kind==='custom');
+     const actualSettings=await active.a.repository.loadSettings(),staleContext={input:structuredClone(actualSettings.input),extensions:structuredClone(actualSettings.extensions)};staleContext.input.revision++;
+     const mouseBefore=JSON.stringify(active.a.ports.state.mouse),refused=await active.a.ports.setMouseModeEnabled(false,staleContext);
+     assert(refused.ok===false&&refused.superseded===true&&refused.reason==='boot_request_expired','Authoritative file mirror must still reject a stale context');assert.equal(JSON.stringify(active.a.ports.state.mouse),mouseBefore,'Expired fixture owner changed mouse state');entry.expiredMouseContextRejected=true;
+    }
     entry.editorSavesBeforeSelection=await page.evaluate(()=>window.__bootFileCalls.filter(op=>op==='saveBootModes').length);const requested=await page.evaluate(()=>window.__bootFileDocument);entry.requestedPersona=active.a.model.resolveBootMode(requested,c.target).input.persona;
     if(c.fault==='write-failure')active.faults.failWrite=true;
     await choose(page,c.target);
     if(c.fault==='write-failure'){
-     await page.locator('.boot-error').waitFor();assert.equal(active.read().extensions?.bootModes?.bootEnabled??false,before.extensions?.bootModes?.bootEnabled??false,'failed commit changed startup state');assert.equal(await chooseButton(page).isEnabled(),true);
-     active.faults.dropWriteAck=true;await choose(page,c.target);await page.locator('.boot-error').filter({hasText:'acknowledgement lost'}).waitFor();assert.equal(active.read().extensions.bootModes.boot,c.target);assert.equal(active.a.ports.calls.some(call=>call.op==='startup.xbox'),false,'unconfirmed commit prepared OS startup');
-     await page.getByRole('button',{name:'重新读取',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.boot-error')&&document.querySelector('.boot-panel-actions .primary')?.disabled===false);assert.equal(await chooseButton(page).isEnabled(),true);await choose(page,c.target);entry.lostAckRecoveredThroughUi=true;
+     await assertQuietOverviewFailure(page,warnings,firstWarning,'保存开机模式未完成');assert.equal(active.read().extensions?.bootModes?.bootEnabled??false,before.extensions?.bootModes?.bootEnabled??false,'failed commit changed startup state');assert.equal(await chooseButton(page).isEnabled(),true);
+     const beforeLostAck=warnings.length;active.faults.dropWriteAck=true;await choose(page,c.target);await assertQuietOverviewFailure(page,warnings,beforeLostAck,'保存开机模式未完成','acknowledgement lost');assert.equal(active.read().extensions.bootModes.boot,c.target);assert.equal(active.a.ports.calls.some(call=>call.op==='startup.xbox'),false,'unconfirmed commit prepared OS startup');
+     await retryQuietOverview(page,chooseButton(page));assert.equal(await chooseButton(page).isEnabled(),true);await choose(page,c.target);entry.lostAckRecoveredThroughUi=true;
     }
     await page.waitForFunction(mode=>window.__bootFileDocument?.boot===mode&&window.__bootFileDocument?.bootEnabled,c.target);
     const selected=active.read();assert.equal(selected.extensions.bootModes.boot,c.target);assert.equal(selected.extensions.bootModes.bootEnabled,true);assert.equal(selected.input.outputTarget.persona,currentPersona,'selection hot-applied the controller');assert.equal(selected.extensions.bootModes.current,before.extensions?.bootModes?.current||'global');assert.equal(await page.evaluate(()=>window.__bootFileCalls.filter(op=>op==='saveBootModes').length),entry.editorSavesBeforeSelection,'selection performed an extra editor save');
@@ -210,21 +351,68 @@ try{
     report.presetObservations.push({name,height,mode:c.target,requestedPersona:entry.requestedPersona,savedPersona:entry.savedPersona,custom:c.custom??null});
     const same=await active.startup('fixture-windows-boot-1','same-boot-new-process');assert.equal(same.ok,true);assert.equal(JSON.parse(same.content).input.outputTarget.persona,currentPersona,'app restart replayed next boot');
     const first=await active.startup('fixture-windows-boot-2','first-process-after-reboot');assert.equal(first.ok,true);assert.equal(JSON.parse(first.content).input.outputTarget.persona,expected);entry.firstBootPersona=JSON.parse(first.content).input.outputTarget.persona;
-    next=await active.moduleAt('next-boot');collect(next);Object.assign(next.ports.settings,await next.repository.loadSettings());next.ports.hooks.bootIdentity=()=> 'fixture-windows-boot-2';await next.boot.restoreSelectedBootMode();const restored=active.read();assert.equal(restored.extensions.bootModes.current,c.target);assert.equal(restored.input.outputTarget.persona,expected);if(c.kind!=='absent')assert.deepEqual(restored.future,{sentinel:'keep'});entry.restoredPersona=restored.input.outputTarget.persona;
+    next=await active.moduleAt('next-boot');collect(next);Object.assign(next.ports.settings,await next.repository.loadSettings());next.ports.hooks.bootIdentity=()=> 'fixture-windows-boot-2';
+    if(steamTarget){
+     touchBridge??=await productionTouchBridge(out);Object.keys(touchBridge.sourceHashes).forEach(pin);
+     const disk=active, runtime=next;
+     runtime.ports.state.touch=(await native.invoke(disk.file,{operation:'touchDefaults'})).profiles;
+     if(c.kind==='transition')assert.equal(runtime.ports.state.touch.disabled.standaloneSpecialMode,'off','Fixture must begin the next boot with the stored OFF profile');
+     runtime.ports.hooks.touchWrite=async context=>{
+      const request=runtime.ports.calls.filter(row=>row.op==='touch.saveProfiles').at(-1).value;
+      const prior=globalThis.__bootTouchWire;
+      let reply;
+      globalThis.__bootTouchWire={async invoke(op,args){
+       assert.equal(op,'screenTouchpads.saveProfiles');
+       reply=await native.invoke(disk.file,{operation:'touchProfiles',args,controls:{observedBoot:'fixture-windows-boot-2',active:-1}});
+       (entry.nativeTouchWrites??=[]).push(reply);
+       return reply.result;
+      }};
+      try{
+       const result=await touchBridge.bridge.screenTouchpadsSaveProfiles(request.profiles,request.expectedProfiles,context);
+       // Refresh the fixture's memory mirror from the current locked file transaction.
+       Object.assign(runtime.ports.settings,await runtime.repository.loadSettings());
+       return result;
+      }finally{globalThis.__bootTouchWire=prior;}
+     };
+    }
+    await next.boot.restoreSelectedBootMode();const restored=active.read();assert.equal(restored.extensions.bootModes.current,c.target);assert.equal(restored.input.outputTarget.persona,expected);if(c.kind!=='absent')assert.deepEqual(restored.future,{sentinel:'keep'});entry.restoredPersona=restored.input.outputTarget.persona;
     if(!c.custom&&(c.kind==='absent'||c.kind==='legacy'||c.kind==='field-win5')){assert.equal(expected,'disabled','fresh modes must not enable virtual output');entry.defaultVirtualOff=true;}
-    if(c.target==='steam'||c.target==='xbox-steam'){const profile=restored.extensions.bootModes.scenes[c.target].overrides.touch.profiles.disabled;assert.equal(profile.standaloneSpecialMode,'steamdeck');assert.equal(profile.masterEnabled,true);assert.equal(profile.layout,'off');assert.equal(profile.specialMask,0);assert.deepEqual(next.ports.state.touch.disabled,profile);entry.standaloneSteamKeysApplied=true;}
+    if(steamTarget){
+     const profile=restored.extensions.bootModes.scenes[c.target].overrides.touch.profiles.disabled;
+     assert.equal(profile.standaloneSpecialMode,'steamdeck');assert.equal(profile.masterEnabled,true);assert.equal(profile.layout,'off');assert.equal(profile.specialMask,0);
+     assert.deepEqual((await native.invoke(active.file,{operation:'touchDefaults'})).profiles.disabled,profile,'Effective native profile differs from the Steam scene');
+     assert.deepEqual(next.ports.state.touch.disabled,profile);
+     if(c.kind==='transition'){
+      assert.deepEqual(restored.screenTouchpads?.profiles?.disabled,profile,'Native file did not retain the Steam touch profile');
+      assert.equal(entry.nativeTouchWrites?.length,1);assert.equal(entry.nativeTouchWrites[0].mainCommits,1);assert.equal(entry.nativeTouchWrites[0].result.settingsSaved,true);
+     }
+     entry.standaloneSteamKeysApplied=true;
+    }
     if(entry.templatesBeforeSelection){assert.deepEqual({global:restored.extensions.bootModes.global,scenes:restored.extensions.bootModes.scenes},entry.templatesBeforeSelection,'startup imported current runtime values into stored mode templates');entry.templatesUnchangedThroughStartup=true;}
     if(entry.sharedShortcutSaved){assert.equal(Object.hasOwn(restored.extensions.bootModes.global,'controller'),false);assert.deepEqual(restored.extensions.bootModeGlobalShortcutsBackup,entry.retiredShortcutBackup,'retired backup was duplicated or replaced');assert(restored.input.buttonMapping.rules.shortcutRules.some(r=>r.id===entry.sharedShortcutSaved));const effective=await native.invoke(active.file,{operation:'shortcutRules'});assert.equal(effective.rules.some(r=>r.id===entry.sharedShortcutSaved),true,'restart lost a shared global shortcut');entry.sharedShortcutSurvivedRestart=true;entry.nativeEffectiveRulesVerified=true;entry.noModeShortcutBackup=true;}
     const revision=restored.extensions.bootModes.revision;await next.boot.restoreSelectedBootMode();assert.equal(active.read().extensions.bootModes.revision,revision,'same boot restored more than once');const reopened=await active.startup('fixture-windows-boot-2','another-process-after-wake');assert.equal(reopened.ok,true);assert.equal(JSON.parse(reopened.content).input.outputTarget.persona,expected);
     fs.copyFileSync(active.file,dir+'/restored-settings.json');
     if(c.kind==='absent'){const screenshot=out+'/'+height+'-'+c.target+'-overview.png';await page.screenshot({path:screenshot});report.screenshots.push(screenshot);}
+    if(legacyOriginOnly){
+     assert.equal(restored.extensions.bootModes.global.performance.controls,undefined);
+     assert(restored.extensions.bootModes.unresolvedGlobal.includes('performance'));
+     assert.equal(restored.extensions.bootModesStartupResult.modules.performance.state,'waiting');
+     assert.equal(restored.performanceSchedule.controls.ac.tdpCeiling,49);
+     assert.equal(next.ports.calls.filter(row=>row.op==='performance.apply').length,0);
+     active.a.ports.hooks.bootIdentity=()=> 'fixture-windows-boot-2';
+     entry.legacyOrigin=await adoptLegacyOrigin({page,focus,command,read:active.read,out,name});
+     report.screenshots.push(...entry.legacyOrigin.screenshots);fs.copyFileSync(active.file,dir+'/adopted-settings.json');
+    }
     entry.noExtraEditorSave=true;entry.noHotApply=true;entry.sameBootDoesNotReplay=true;entry.oneRestorePerNewBoot=true;entry.storageAndStartupPass=true;entry.pass=entry.editorReturn?.returned!==false;report.assertions.push(entry);
    }catch(error){entry.error=error.stack||String(error);report.assertions.push(entry);console.error('FAIL',name,error.message);try{await page.screenshot({path:out+'/'+name+'-failure.png'});}catch{}}
-   finally{entry.elapsedMs=performance.now()-began;active?.a.boot.cancelBootModeDeferredMouse?.();next?.boot.cancelBootModeDeferredMouse?.();active?.flush();}
+   finally{entry.elapsedMs=performance.now()-began;entry.uiCalls=uiCalls.slice(firstUiCall);if(c.fault)entry.overviewWarnings=warnings.slice(firstWarning);active?.a.boot.cancelBootModeDeferredMouse?.();next?.boot.cancelBootModeDeferredMouse?.();do{await Promise.allSettled([...backendTasks]);}while(backendTasks.size);active?.flush();progress('ui-case-end',{name,pass:entry.pass,elapsedCaseMs:entry.elapsedMs,uiCalls:entry.uiCalls});}
+   if(!entry.pass&&!collectFailures)break uiResolutionLoop;
   }
   await page.close();
  }
+ }
  report.pass=report.assertions.every(x=>x.pass)&&report.policyFailures.length===0&&report.navigationFailures.length===0&&report.pageErrors.length===0&&report.networkRejected.length===0;
 }catch(error){report.assertions.push({name:'build and initialize four-mode file UI',pass:false,error:error.stack||String(error)});}
-finally{await browser?.close();await native?.close();if(server)await new Promise(resolve=>server.close(resolve));report.inputsUnchanged=[...pinned].every(([p,h])=>fs.existsSync(path.join(repo,p))&&hash(path.join(repo,p))===h);report.sourceHashes=Object.fromEntries(pinned);report.pass=report.pass&&report.inputsUnchanged;report.coverage={resolutions:[{width:1280,height:720},{width:1280,height:800}],modes:ids,configuredCasesPerResolution:cases.length,allSourceTargetTransitionsPerResolution:16,editorSaveRequired:false,physicalReboot:false,deviceEnumeration:false};report.counts={scenarios:report.assertions.length,passed:report.assertions.filter(x=>x.pass).length,failed:report.assertions.filter(x=>!x.pass).length,policyFailures:report.policyFailures.length,navigationFailures:report.navigationFailures.length,storageAndStartupPassed:report.assertions.filter(x=>x.storageAndStartupPass).length};report.timing.totalMs=performance.now()-started;fs.writeFileSync(out+'/boot-modes-file-ui.json',JSON.stringify(report,null,2));}
+finally{await browser?.close();await native?.close();if(server)await new Promise(resolve=>server.close(resolve));report.inputsUnchanged=[...pinned].every(([p,h])=>fs.existsSync(path.join(repo,p))&&hash(path.join(repo,p))===h);report.sourceHashes=Object.fromEntries(pinned);report.pass=report.pass&&report.inputsUnchanged;report.coverage={resolutions:[{width:1280,height:720},{width:1280,height:800}],modes:ids,configuredCasesPerResolution:cases.length,allSourceTargetTransitionsPerResolution:cases.filter(row=>row.kind==='transition').length,editorSaveRequired:false,physicalReboot:false,deviceEnumeration:false};report.expectedUiCases=[720,800].flatMap(height=>cases.map(c=>height+'-'+c.kind+'-'+c.source+'-to-'+c.target+(c.fault?'-'+c.fault:'')+(c.kind==='field-win5'&&c.custom?'-custom-'+c.custom:'')));report.notRunCases=report.expectedUiCases.filter(name=>!report.assertions.some(row=>row.name===name));report.counts={scenarios:report.assertions.length,passed:report.assertions.filter(x=>x.pass).length,failed:report.assertions.filter(x=>!x.pass).length,policyFailures:report.policyFailures.length,navigationFailures:report.navigationFailures.length,storageAndStartupPassed:report.assertions.filter(x=>x.storageAndStartupPass).length};report.timing.totalMs=performance.now()-started;fs.writeFileSync(out+'/boot-modes-file-ui.json',JSON.stringify(report,null,2));}
 console.log(JSON.stringify({pass:report.pass,counts:report.counts,totalMs:report.timing.totalMs,failures:report.assertions.filter(x=>!x.pass).map(x=>({name:x.name,error:x.error?.split('\n')[0]})),policyFailures:report.policyFailures,navigationFailures:report.navigationFailures},null,2));if(!report.pass)process.exitCode=1;
+}

@@ -95,4 +95,15 @@ static json testOwnProcessRead(){
  require(after.at("pid").get<DWORD>()==::GetCurrentProcessId(),"read wrong process");require(after.at("cpuMsPerSec").get<double>()>0,"busy process cpu zero");require(::GetLastError()==4321,"real late error");
  return {{"before",before},{"after",after},{"oneObservedReadUs",readUs},{"scope","Fixture's own process only; no YMCC, Host, Steam or controller execution"}};
 }
-int main(){try{testAdapter();testUnsignedLimits();auto real=testOwnProcessRead();std::cout<<json{{"pass",true},{"checks",checks},{"realOwnProcessRead",real},{"inputHostNativeMainOrHardwareExecuted",false}}.dump();return 0;}catch(const std::exception& e){std::cerr<<e.what();return 1;}}
+#ifdef YMCC_DECKY_COST_OWN_SESSION
+#include "fixtures/decky_cost_own_session_cases.h"
+#endif
+int main(int argc,char** argv){
+#ifdef YMCC_DECKY_COST_OWN_SESSION
+if(argc!=2||(std::string(argv[1])!="--decky-sampler-own-session"&&std::string(argv[1])!="--decky-sampler-target-order"&&std::string(argv[1])!="--decky-sampler-target-identity"&&std::string(argv[1])!="--decky-sampler-target-alias")){std::cerr<<"unknown explicit native cost case\n";return 2;}
+if(std::string(argv[1])=="--decky-sampler-target-order")return deckyCostTargetOrderCases();
+if(std::string(argv[1])=="--decky-sampler-target-identity")return deckyCostTargetOrderCases(true);
+if(std::string(argv[1])=="--decky-sampler-target-alias")return deckyCostTargetOrderCases(false,true);
+return deckyCostOwnSessionCases();
+#endif
+try{testAdapter();testUnsignedLimits();auto real=testOwnProcessRead();std::cout<<json{{"pass",true},{"checks",checks},{"realOwnProcessRead",real},{"inputHostNativeMainOrHardwareExecuted",false}}.dump();return 0;}catch(const std::exception& e){std::cerr<<e.what();return 1;}}

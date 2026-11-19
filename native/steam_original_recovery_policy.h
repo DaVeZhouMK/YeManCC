@@ -7,7 +7,7 @@
 
 namespace ymcc::steamOriginal {
 
-enum class Trigger { Startup, TargetChanged, SteamChanged, SuspendCapture, Wake };
+enum class Trigger { Startup, TargetChanged, SteamChanged, SuspendCapture, Wake, RunningLost };
 
 struct Identity {
   std::uint32_t pid = 0, session = 0;
@@ -35,7 +35,7 @@ struct Event {
 };
 
 // accepted reports event eligibility. Only admit consumes the dispatch/
-// observation budget; preview never reserves it. For Startup/Wake,
+// observation budget; preview never reserves it. For Startup/Wake/RunningLost,
 // recoveryAllowed permits the native engine to check recovery eligibility in
 // that same job. It does not assert unhealthy state, authorize a mutation, or
 // report a repair. The engine owns the exact Running/full-original-identity
@@ -60,7 +60,18 @@ class Admission {
     return evaluate(scope, event, enabled).decision;
   }
 
-  // No health preflight or native reads. A normal wake gets one engine job;
+  // Read only the original append-only consumption entries. Called under the
+  // same host lock; this neither reserves an event nor changes preview/admit.
+  bool observedPair(const Scope& scope, Trigger trigger) const {
+    for (std::size_t i = 0; i < consumed_; ++i) {
+      const auto& entry = ledger_[i];
+      if (entry.trigger == trigger && entry.steam == scope.steam && entry.game == scope.game)
+        return true;
+    }
+    return false;
+  }
+
+  // No health preflight or native reads. A wake or running-loss hint gets one engine job;
   // the engine checks health and mutation eligibility within that same job.
   Decision admit(const Scope& scope, Event event, bool enabled) {
     const auto checked = evaluate(scope, event, enabled);
@@ -126,6 +137,10 @@ class Admission {
         allowed = {true, "wake-bound-original-check", true};
         powerEvent = true;
         break;
+      case Trigger::RunningLost:
+        replayReason = "running-lost-already-admitted";
+        allowed = {true, "running-lost-bound-original-check", true};
+        break;
       default: return {{false, "unsupported-trigger", false}};
     }
 
@@ -143,8 +158,10 @@ class Admission {
           entry.powerGeneration != generation ||
           !(entry.steam == scope.steam) || !(entry.game == scope.game))
         continue;
-      // Startup belongs to the Steam+game pair even if its parent changes.
-      if (event.trigger == Trigger::Startup || entry.parent == scope.parent)
+      // Startup and RunningLost each belong to the Steam+game pair even if
+      // their parent changes. Neither event refunds the other's budget.
+      if (event.trigger == Trigger::Startup || event.trigger == Trigger::RunningLost ||
+          entry.parent == scope.parent)
         return {{false, replayReason, false}, generation};
     }
     if (consumed_ == ledgerCapacity)
@@ -164,6 +181,7 @@ inline const char* name(Trigger trigger) {
     case Trigger::SteamChanged: return "steam-changed";
     case Trigger::SuspendCapture: return "suspend-capture";
     case Trigger::Wake: return "wake";
+    case Trigger::RunningLost: return "running-lost";
   }
   return "unknown";
 }

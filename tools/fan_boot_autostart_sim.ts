@@ -40,6 +40,26 @@ assert(signature[0].startsWith('function ensureFanAutoStart('),
   'the auto-start entry signature must stay on one line for the simulation to strip its TypeScript types');
 signature[0] = 'function ensureFanAutoStart(reason, generation = 0) {';
 fnSource = signature.join('\n').replace(/readSettingsSection<[^<>]*>/g, 'readSettingsSection');
+// The public wake event keeps its original request before the automatic
+// preference is read. Include that actual App owner, not a direct ensure call.
+const wakeStart = appSource.indexOf('function onFanResumeReady(');
+const wakeEnd = appSource.indexOf('\nfunction onPowerResumed(', wakeStart);
+assert(wakeStart >= 0 && wakeEnd > wakeStart, 'APP_FAN_WAKE_ENTRY_UNIQUE');
+const wakeLines = appSource.slice(wakeStart, wakeEnd).trimEnd().split('\n');
+wakeLines[0] = 'function onFanResumeReady(resumeGeneration) {';
+const wakeSource = wakeLines.join('\n').replace(/false as const/g, 'false');
+const resumingStart = appSource.indexOf('function onPowerResuming(');
+const resumingEnd = appSource.indexOf('\nfunction onPowerResumeReady(', resumingStart);
+assert(resumingStart >= 0 && resumingEnd > resumingStart, 'APP_FAN_RESUMING_ENTRY_UNIQUE');
+const resumingLines = appSource.slice(resumingStart, resumingEnd).trimEnd().split('\n');
+resumingLines[0] = 'function onPowerResuming(e) {';
+const resumingSource = resumingLines.join('\n');
+const committedStart = appSource.indexOf('function requestFanCommittedResume(');
+const committedEnd = appSource.indexOf('\n// FAN-938 R4:', committedStart);
+assert(committedStart >= 0 && committedEnd > committedStart, 'APP_FAN_COMMITTED_ENTRY_UNIQUE');
+const committedLines = appSource.slice(committedStart, committedEnd).trimEnd().split('\n');
+committedLines[0] = 'function requestFanCommittedResume(generation) {';
+const committedSource = committedLines.join('\n');
 assert(fnSource.includes('fanHostLifecycle.start(') && fnSource.includes('fanHostLifecycle.apply(') &&
   fnSource.includes('gate.writeReady') && fnSource.includes('fanHostLifecycle.hasControlIntent'),
 'source extraction lost the production start/apply/gate/intent logic; actual recovery authority is checked at dispatch below');
@@ -246,12 +266,23 @@ function buildOrchestrator(lifecycle: FanHostLifecycle, logs: string[]) {
     'let latestResumeGeneration = 0;',
     'let aiFanMockActive = env.aiMockActive;',
     'let fanAutoStartChain = Promise.resolve();',
+    'let fanAutoStartTransitionGeneration = -1;',
     'let fanBootAutoStartDone = false;',
     'const fanAutoStartGenerations = new Set();',
+    'let fanWakeRequest = null;',
+    'let resumeVideoTimer = null;',
+    'const window = { clearTimeout() {} };',
+    'const tdpRuntimeStore = { invalidatePower() {} };',
+    'const suspendBackgroundVideo = () => {};',
+    'const notePowerTransitionGeneration = (e) => { const g = Number(e.detail.generation); env.lifecycle.setPowerGeneration(g); return g; };',
     // 依赖一律闭包读 env，保证测试中途改开关/换生命周期即时生效。
     'const fanHostLifecycle = {',
     '  get hasControlIntent() { return env.lifecycle.hasControlIntent; },',
     '  get controlCancellationRevision() { return env.lifecycle.controlCancellationRevision; },',
+    '  get coordinatorSnapshot() { return env.lifecycle.coordinatorSnapshot; },',
+    '  resumeAfterNativeReady: (g) => env.lifecycle.resumeAfterNativeReady(g),',
+    '  resumeAfterCommittedPowerWake: (g) => env.lifecycle.resumeAfterCommittedPowerWake(g),',
+    '  observePowerBoundary: (event, g) => env.lifecycle.observePowerBoundary(event, g),',
     '  start: (options) => { env.autoStartInputs.push(options ? {...options} : undefined); return env.lifecycle.start(options); },',
     '  apply: (nodes) => { env.autoApplyInputs.push(nodes.map(n => ({...n}))); return env.lifecycle.apply(nodes); },',
     '};',
@@ -262,10 +293,17 @@ function buildOrchestrator(lifecycle: FanHostLifecycle, logs: string[]) {
     'const getFanPresetCurve = () => env.curve.map((n) => ({ ...n }));',
     'const fanDiagnosticLog = (event, detail) => { env.logs.push(event + (detail ? " " + JSON.stringify(detail) : "")); };',
     fnSource,
-    'return { ensureFanAutoStart, setLatestResumeGeneration: (g) => { latestResumeGeneration = g; } };',
+    wakeSource,
+    resumingSource,
+    committedSource,
+    'return { ensureFanAutoStart, onFanResumeReady, requestFanCommittedResume, onPowerResuming: (g) => onPowerResuming({detail:{generation:g}}), autoStartSettled: () => fanAutoStartChain, setLatestResumeGeneration: (g) => { latestResumeGeneration = g; } };',
   ].join('\n'));
   const api = factory(env) as {
     ensureFanAutoStart: (reason: 'boot' | 'resume', generation?: number) => Promise<void>;
+    onFanResumeReady: (generation: number) => void;
+    onPowerResuming: (generation: number) => void;
+    requestFanCommittedResume: (generation: number) => void;
+    autoStartSettled: () => Promise<void>;
     setLatestResumeGeneration: (g: number) => void;
   };
   return { env, api };
@@ -738,6 +776,104 @@ async function main(): Promise<void> {
     observations.push({reason:'queued-resume',phase:'before-queue-entry',action,autoApplyCalls:env.autoApplyInputs.length,enables:adapter.enables,launches:launcher.calls.filter(c=>c==='start').length});
     assert.equal(env.autoApplyInputs.length,0,'queued automatic work rebound authority after user cancellation');assert.equal(adapter.enables,0);assert.equal(launcher.calls.filter(c=>c==='start').length,0,'canceled queued work launched a Host');
     const manualCurve=SAVED_CURVE.map(n=>({...n,dutyPercent:Math.min(100,n.dutyPercent+6)}));lifecycle.stagePendingControlCurve(manualCurve);await lifecycle.start({manualRecovery:true,reason:'fixture-manual-after-queued-cancel'});await lifecycle.apply(manualCurve);assert.equal(adapter.enables,1,'next manual ON blocked after retiring queued auto-start');
+  });
+  if (process.env.YMCC_FAN_AUTO_CASE === 'DELIVERED-WAKE') await test('DELIVERED-WAKE OFF rejects a late same-wake auto-start and preserves explicit ON and next wake', async () => {
+    let hold=false,entered=false,release:(()=>void)|null=null;
+    class HeldWakeHost extends AutoOwnerHost {
+      override async getState(){const state=await super.getState();if(hold){hold=false;entered=true;await new Promise<void>(r=>release=r);}return state;}
+    }
+    const adapter=new HeldWakeHost(),launcher=new SimLauncher(),lifecycle=newLifecycle(adapter,launcher,250,1);
+    const {env,api}=buildOrchestrator(lifecycle,[]);env.preference=true;
+    const flush=async()=>{for(let i=0;i<1000;i++)await Promise.resolve();await api.autoStartSettled();};
+    async function wake(generation:number){
+      lifecycle.setPowerGeneration(generation);lifecycle.observePowerBoundary('suspending',generation);await adapter.suspend();await lifecycle.suspend();
+      lifecycle.observePowerBoundary('resuming',generation);await adapter.resume({generation});lifecycle.observePowerBoundary('resume-ready',generation);api.setLatestResumeGeneration(generation);
+    }
+    try {
+      lifecycle.setPowerGeneration(1);lifecycle.observePowerBoundary('resume-ready',1);await lifecycle.start();await lifecycle.apply(SAVED_CURVE);await wake(2);
+      hold=true;api.onFanResumeReady(2);for(let i=0;i<1000&&!entered;i++)await Promise.resolve();assert(entered,'actual original Fan state read must be held');
+      const before=adapter.enables;const off=lifecycle.disable();(release as (()=>void)|null)?.();await off;
+      api.onFanResumeReady(2);await flush();assert.equal(adapter.enables,before,'late same-wake auto-start resurrected OFF');assert.equal(lifecycle.hasControlIntent,false);
+      await lifecycle.start({manualRecovery:true,reason:'explicit-after-old-wake'});await lifecycle.apply(SAVED_CURVE);assert.equal(adapter.enables,before+1,'same-wake explicit ON blocked');
+      await lifecycle.disable();await wake(3);api.onFanResumeReady(3);await flush();assert.equal(adapter.enables,before+2,'next actual wake lost configured automatic start');
+      observations.push({reason:'delivered-wake-cancellation',sameWakeOffPreserved:true,manualOn:true,nextWakeAutoOn:true,enables:adapter.enables,autoApplyCalls:env.autoApplyInputs.length,actualAppWakeEntry:true});
+    } finally {(release as (()=>void)|null)?.();}
+  });
+  if (process.env.YMCC_FAN_AUTO_CASE === 'WAKE-BOUNDARY') await test('WAKE-BOUNDARY OFF before first F5 keeps ownership until the next actual wake', async () => {
+    const adapter=new AutoOwnerHost(),launcher=new SimLauncher(),lifecycle=newLifecycle(adapter,launcher,250,1);
+    const {env,api}=buildOrchestrator(lifecycle,[]);env.preference=true;
+    const flush=async()=>{for(let i=0;i<1000;i++)await Promise.resolve();await api.autoStartSettled();};
+    async function begin(g:number){lifecycle.setPowerGeneration(g);lifecycle.observePowerBoundary('suspending',g);await adapter.suspend();await lifecycle.suspend();api.onPowerResuming(g);}
+    async function ready(g:number){await adapter.resume({generation:g});lifecycle.observePowerBoundary('resume-ready',g);api.setLatestResumeGeneration(g);api.onFanResumeReady(g);await flush();}
+    lifecycle.setPowerGeneration(1);lifecycle.observePowerBoundary('resume-ready',1);await lifecycle.start();await lifecycle.apply(SAVED_CURVE);
+    const before=adapter.enables;await begin(2);await lifecycle.disable();await ready(2);
+    assert.equal(adapter.enables,before,'known public wake followed by OFF was overwritten by first F5');assert.equal(lifecycle.hasControlIntent,false);
+    await lifecycle.start({manualRecovery:true,reason:'manual-after-public-wake-off'});await lifecycle.apply(SAVED_CURVE);assert.equal(adapter.enables,before+1,'same-wake manual ON blocked');
+    await lifecycle.disable();await begin(3);await ready(3);assert.equal(adapter.enables,before+2,'future actual wake automatic start blocked');
+    observations.push({reason:'public-wake-cancellation',knownResumingBeforeOff:true,firstFanReadyAfterOff:true,manualOn:true,nextWakeAutoOn:true,enables:adapter.enables});
+  });
+  if (process.env.YMCC_FAN_AUTO_CASE === 'PUBLIC-READY') await test('PUBLIC-READY automatic preference survives a missing Fan-only notification and preserves OFF', async () => {
+    class PublicReadyReceiptHost extends AutoOwnerHost {
+      private active: readonly FanNode[] | null = null;
+      override snapshot(): FanState { const result=super.snapshot();return {...result,activeCurve:this.active,hardwareWrites:!!this.active,hardwareWritesEnabled:!!this.active,hardwareWritesObserved:!!this.active,lastControlWriteEvidence:'transported'}; }
+      override async enable(nodes?:readonly FanNode[]) {this.active=nodes?.map(n=>({...n}))??null;return super.enable(nodes);}
+      override async disable(){this.active=null;return super.disable();}
+      override async suspend(){this.active=null;return super.suspend();}
+      override async close(){this.active=null;return super.close();}
+    }
+    for (const variant of ['enabled', 'disabled', 'off-in-flight'] as const) {
+      const adapter=new PublicReadyReceiptHost(),launcher=new SimLauncher(),lifecycle=newLifecycle(adapter,launcher,250,1);
+      const {env,api}=buildOrchestrator(lifecycle,[]);env.preference=variant!=='disabled';
+      const flush=async()=>{for(let i=0;i<1000;i++)await Promise.resolve();await api.autoStartSettled();};
+      lifecycle.setPowerGeneration(1);lifecycle.observePowerBoundary('resume-ready',1);await lifecycle.start();
+      lifecycle.setPowerGeneration(2);lifecycle.observePowerBoundary('suspending',2);await adapter.suspend();await lifecycle.suspend();
+      api.onPowerResuming(2);await adapter.resume({generation:2});lifecycle.observePowerBoundary('resumed',2);api.setLatestResumeGeneration(2);
+      api.requestFanCommittedResume(2);if(variant==='off-in-flight')await lifecycle.disable();await flush();
+      assert.equal(adapter.enables,variant==='enabled'?1:0,'public-only committed wake must consume the enabled preference without overwriting OFF');
+      api.requestFanCommittedResume(2);api.onFanResumeReady(2);await flush();assert.equal(adapter.enables,variant==='enabled'?1:0,'duplicate notification rewrote or revived the same request');
+      if(variant==='enabled'){await lifecycle.disable();api.requestFanCommittedResume(2);api.onFanResumeReady(2);await flush();assert.equal(adapter.enables,1,'explicit OFF after recovery was overwritten');}
+      await lifecycle.close();observations.push({reason:'public-ready-auto',variant,enables:adapter.enables,manualClicks:0,fanOnlyEventsBeforeFirstResult:0});
+    }
+  });
+  if (process.env.YMCC_FAN_AUTO_CASE === 'AUTO-GENERATION') await test('AUTO-GENERATION new wake does not inherit a retired preflight and old boot never adopts the new wake', async () => {
+    for (const reason of ['boot','resume'] as const) {
+      const adapter=new AutoOwnerHost(),launcher=new SimLauncher(),lifecycle=newLifecycle(adapter,launcher,250,1);
+      const {env,api}=buildOrchestrator(lifecycle,[]);env.preference=true;
+      lifecycle.setPowerGeneration(1);lifecycle.observePowerBoundary('resume-ready',1);api.setLatestResumeGeneration(1);
+      let release!:()=>void,enter!:()=>void;const held=new Promise<void>(r=>release=r),entered=new Promise<void>(r=>enter=r);let reads=0;
+      env.readPreference=async()=>{if(++reads===1){enter();await held;}return{fanControl:true};};
+      const old=api.ensureFanAutoStart(reason,reason==='resume'?1:0);await entered;let current:Promise<void>|null=null;
+      try {
+        lifecycle.setPowerGeneration(2);lifecycle.observePowerBoundary('suspending',2);lifecycle.observePowerBoundary('resuming',2);lifecycle.observePowerBoundary('resume-ready',2);api.setLatestResumeGeneration(2);
+        let completed=false;current=api.ensureFanAutoStart('resume',2).then(()=>{completed=true;});
+        for(let i=0;i<1000;i++)await Promise.resolve();
+        assert(completed,'current wake is chained behind a retired automatic preflight');assert.equal(adapter.enables,1);assert.equal(env.autoApplyInputs.length,1);
+        const after=adapter.enables;release();await old;await current;assert.equal(adapter.enables,after,'late old preflight adopted the new wake');
+        observations.push({reason:'auto-generation-handoff',oldReason:reason,newGeneration:2,currentCompletedWhileOldReadHeld:completed,enables:adapter.enables,reads});
+      } finally {release();await old;await current;await lifecycle.close();}
+    }
+    const adapter=new AutoOwnerHost(),launcher=new SimLauncher(),lifecycle=newLifecycle(adapter,launcher,250,1);const {env,api}=buildOrchestrator(lifecycle,[]);env.preference=true;
+    lifecycle.setPowerGeneration(1);lifecycle.observePowerBoundary('resume-ready',1);api.setLatestResumeGeneration(1);
+    let release!:()=>void,enter!:()=>void;const held=new Promise<void>(r=>release=r),entered=new Promise<void>(r=>enter=r);let reads=0;
+    env.readPreference=async()=>{if(++reads===1){enter();await held;}return{fanControl:true};};const oldBoot=api.ensureFanAutoStart('boot');await entered;
+    lifecycle.setPowerGeneration(2);lifecycle.observePowerBoundary('suspending',2);lifecycle.observePowerBoundary('resuming',2);lifecycle.observePowerBoundary('resume-ready',2);api.setLatestResumeGeneration(2);
+    release();await oldBoot;assert.equal(adapter.enables,0,'old boot preflight may not inherit a later Native wake');await lifecycle.close();
+    observations.push({reason:'auto-old-boot-retired',enables:adapter.enables,launches:launcher.calls.filter(c=>c==='start').length});
+    const sameHost=new AutoOwnerHost(),sameLauncher=new SimLauncher(),same=newLifecycle(sameHost,sameLauncher,250,1),s=buildOrchestrator(same,[]);s.env.preference=true;
+    same.setPowerGeneration(1);same.observePowerBoundary('resume-ready',1);s.api.setLatestResumeGeneration(1);
+    let sameRelease!:()=>void,sameEnter!:()=>void;const sameHeld=new Promise<void>(r=>sameRelease=r),sameEntered=new Promise<void>(r=>sameEnter=r);let sameReads=0;
+    s.env.readPreference=async()=>{if(++sameReads===1){sameEnter();await sameHeld;}return{fanControl:true};};
+    const sameBoot=s.api.ensureFanAutoStart('boot');await sameEntered;const sameWake=s.api.ensureFanAutoStart('resume',1);for(let i=0;i<100;i++)await Promise.resolve();
+    assert.equal(sameHost.enables,0,'same-generation work must retain serialization');sameRelease();await Promise.all([sameBoot,sameWake]);assert.equal(sameHost.enables,1,'same-generation boot and wake duplicated control');await same.close();
+    observations.push({reason:'same-generation-serialized',enables:sameHost.enables});
+
+  });
+  if (process.env.YMCC_FAN_AUTO_CASE === 'AUTO-COLD') await test('AUTO-COLD initial native synchronization preserves configured boot control', async () => {
+    const adapter=new AutoOwnerHost(),launcher=new SimLauncher(),lifecycle=newLifecycle(adapter,launcher,250,1),{env,api}=buildOrchestrator(lifecycle,[]);env.preference=true;
+    assert.equal(lifecycle.coordinatorSnapshot.powerGeneration,0,'begin at actual uninitialized frontend generation');
+    await api.ensureFanAutoStart('boot');assert.equal(lifecycle.coordinatorSnapshot.powerGeneration,1,'ordinary native synchronization must occur');
+    assert.equal(adapter.enables,1,'initial Native generation sync was mistaken for a later sleep transition');assert.deepEqual(adapter.enabledNodeSets,[SAVED_CURVE]);await lifecycle.close();
+    observations.push({reason:'initial-native-generation',before:0,after:1,enables:adapter.enables});
   });
   console.log(JSON.stringify({ok:cases.every(c=>c.ok),checks:cases.length,cases,observations,hardwareCalls:0,scope:'extracted production App fan auto-start function + real FanHostLifecycle/coordinator, inert settings/native/adapter/launcher; no App mount, Steam/device/OS sleep/CPU benchmark'}));
   if(cases.some(c=>!c.ok))process.exitCode=1;

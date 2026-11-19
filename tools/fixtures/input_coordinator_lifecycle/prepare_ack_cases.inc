@@ -1,10 +1,12 @@
 // Actual PREPARE creates an owned managed target. Only its native wire read is
 // lost; a bounded fake SDK output-stop gate keeps real cleanup/child pending.
+static constexpr const char* psNoPinCanonicalCaseName="PREPARE-ACK-LOSS/PC/unknown-owned-root-negative-proof";
 static void fullPipePrepareAckLostCase(const std::string& family,bool offWhileHeld=false,bool unknownReturn=false,bool exitSweep=false){
  seed();fixtureFullPipe=true;fullPipeFault="prepare-ack-loss-held-exit";g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
  g_machineIdentity.family=family=="ROG"?YmccFamily::AsusRogAllyX:YmccFamily::Unknown;g_machineIdentity.manufacturer=family=="ROG"?"ASUSTEK COMPUTER INC.":"FIXTURE-PC";g_machineIdentity.product=family=="ROG"?"ROG Ally X":"unregistered-desktop";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;g_xinputAdmittedMask=1;if(family=="PC")fixturePcPowerCapabilities=true;
  g_msiMainSourceRevision=1;g_msiFeedbackModeGeneration=1;g_msiSteamDeckReleaseDebt.clear();g_msiSdOwnedPnpSnapshotForTest={};g_inputShortcutRuntime.clear();g_externalPriorityVirtualSuspended=false;g_inputCaptureStop=false;reg_fs();
  cases.push_back({{"name","PREPARE-ACK-LOSS/"+family+(exitSweep?"/app-exit-sweep-while-owned-target-held":offWhileHeld?"/explicit-OFF-while-owned-target-held":unknownReturn?"/unknown-owned-root-negative-proof":"/actual-owned-target-held-cleanup")},{"controlledFamily",family}});
+ if(family=="PC"&&unknownReturn&&!offWhileHeld&&!exitSweep)cases.back()["name"]=psNoPinCanonicalCaseName;
  const auto restoreCalls=[](){return static_cast<unsigned>(std::count_if(g_startEntrySeam.trace.begin(),g_startEntrySeam.trace.end(),[](const std::string& entry){return entry.rfind("hidhide-restore:",0)==0;}));};
  const auto spawns=fullPipeSpawnCount,restores=restoreCalls();const auto on=targetDocument("dualsense-edge",0),off=targetDocument("disabled",1);
  check(sgWriteFileAtomic(YM_SETTINGS_FILE,on.dump()),"prepare ACK loss seeds a private real settings request");inputCaptureRefreshRealStickSettings(true);const auto initial=g_virtualStartProtection.view(startProtectionClock);
@@ -42,10 +44,23 @@ static void fullPipePrepareAckLostCase(const std::string& family,bool offWhileHe
   const auto beforeUnknownRestore=restoreCalls();
   for(unsigned phase=0;phase<4;++phase){
    fixturePsReadConfig(phase==1?std::vector<std::wstring>{}:phase==2?std::vector<std::wstring>{L"HID#VID_1234&PID_0001#PHYSICAL"}:std::vector<std::wstring>{L"HID#VID_054C&PID_0DF2#HIDMAESTRO-OTHER-PROCESS-B"},phase==1?ERROR_ACCESS_DENIED:ERROR_NO_MORE_ITEMS);if(phase==2)fixturePsParentFailure=0;
+   // Interface topology and the independent PS-root census are distinct inputs.
+   fixturePsProfileScenario=phase==1?"enum-error":phase==2?"generic":"root-present";
    {FixturePsReadScope scope;fullPipeQuarantineProbe();}
    check(g_inputHostReleaseQuarantined&&g_psEndpointOwnership.retirementRequired()&&restoreCalls()==beforeUnknownRestore,"unknown old PS root cannot be discharged by profile presence or incomplete family census");
   }
-  fixturePsReadConfig({L"HID#VID_1234&PID_0001#PHYSICAL"});{FixturePsReadScope scope;fullPipeQuarantineProbe();}
+  for(const char* scenario:{"root-present","generic","malformed","enum-error"}){
+   fixturePsReadConfig({});fixturePsProfileScenario=scenario;
+   ymcc::targetReturn::pnpAbsence::Result observed;
+   {FixturePsReadScope scope;observed=fixturePsProfileAbsence();}
+   check(!observed.absent(),"independent complete root reader proves PS presence or uncertainty without injecting ownership");
+   {FixturePsReadScope scope;fullPipeQuarantineProbe();}
+   check(g_inputHostReleaseQuarantined&&g_psEndpointOwnership.retirementRequired()&&restoreCalls()==beforeUnknownRestore,
+    "unknown old PS root cannot be discharged by profile presence or incomplete family census");
+  }
+  fixturePsReadConfig({L"HID#VID_1234&PID_0001#PHYSICAL"});fixturePsProfileScenario="other-families";
+  {FixturePsReadScope scope;check(fixturePsProfileAbsence().absent(),"PS root scope ignores unrelated SteamDeck and Xbox roots without changing default family policy");fullPipeQuarantineProbe();}
+  cases.back()["noPinRootObservations"]=fixturePsProfileObservations;
   check(!g_inputHostReleaseQuarantined&&!g_psEndpointOwnership.retirementRequired()&&restoreCalls()==beforeUnknownRestore+1,"complete profile-negative census retires unknown old PS root without claiming a peer as owned");
  }
  if(!offWhileHeld){fullPipeWaitForPlayerLock(on,off);check(writeTarget(on,off).value("ok",false),"unproven creation closes through a new actual admitted player OFF after original lock");inputCaptureRefreshRealStickSettings(true);closingTicket=g_virtualStartProtection.view(startProtectionClock).requestId;}

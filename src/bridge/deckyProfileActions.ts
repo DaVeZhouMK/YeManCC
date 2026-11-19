@@ -1,8 +1,8 @@
 // Dedicated-profile intents use the existing game command, mutex and store owners.
 import {gamePolicyKey} from './gamePolicyHysteresis';
 import {captureGameCustomProfileTarget} from './gameCustomProfileTarget';
-import {gameMirrorIdentity,makeGameMirrorEntry,rememberGameMirrorInput,type GameMirrorGyroDefaults} from './deckyGameActions';
-import {requireVirtualTargetAllowed,type VirtualTargetPolicy} from './virtualTargetPolicy';
+import {gameMirrorIdentity,makeGameMirrorEntry,type GameMirrorGyroDefaults} from './deckyGameActions';
+import type {VirtualTargetPolicy} from './virtualTargetPolicy';
 import type {DetectedGame} from './gamedetect';
 import type {ContinuousPerformanceSnapshot} from './performanceControls';
 import type {GameCustomConfig,GameCustomProfile,GameCustomProfileTarget,PerformanceScheduleConfig} from './performanceSchedule';
@@ -16,8 +16,8 @@ export interface ProfileMirrorDeps {
   power:()=>Promise<{phase:string;hardwareWritesAllowed:boolean;generation:number}>;
   acquire:(label:string)=>(()=>void)|null;load:()=>Promise<GameCustomConfig>;
   schedule:()=>Promise<PerformanceScheduleConfig>;currentSchedule:()=>PerformanceScheduleConfig|null;
-  snapshot:()=>Promise<ContinuousPerformanceSnapshot>;gyro:()=>Promise<GameMirrorGyroDefaults>;
-  targetPolicy:()=>VirtualTargetPolicy|null;
+  snapshot:()=>Promise<ContinuousPerformanceSnapshot>;gyro?:()=>Promise<GameMirrorGyroDefaults>;
+  targetPolicy?:()=>VirtualTargetPolicy|null;
   import:(target:GameCustomProfileTarget,revision:string,entry:GameCustomProfile,frames:FrameRatePair,checkpoint:()=>void)=>Promise<void>;
   remove:(target:GameCustomProfileTarget,revision:string)=>Promise<void>;
   restore:()=>Promise<string>;
@@ -42,14 +42,11 @@ export function createProfileMirrorActions(deps:ProfileMirrorDeps) {
     if(config.entries[key]?.enabled!==false&&config.entries[key])return {saved:false,applied:false,notice:'当前游戏已使用专属配置'};
     const schedule=await deps.schedule();checkpoint();if(JSON.stringify(schedule)!==admission.schedule)throw Error('GAME_PROFILE_SOURCE_CHANGED');
     const source=await deps.snapshot();checkpoint();if(gameProfileImportSource(source)!==admission.profileSource||source.identity.scope!=='global')throw Error('GAME_PROFILE_SOURCE_CHANGED');
-    const gyro=await deps.gyro();checkpoint();if(gyro.source!==admission.gyro)throw Error('GAME_PROFILE_SOURCE_CHANGED');
-    requireVirtualTargetAllowed(gyro.padPersona,deps.targetPolicy(),true);
     const entry=makeGameMirrorEntry(undefined,schedule,deps.label(game));
-    entry.enabled=true;entry.controls=structuredClone(source.controls);rememberGameMirrorInput(entry,gyro);
+    entry.enabled=true;entry.controls=structuredClone(source.controls);
     entry.hyperThreadPolicyEnabled=source.hyperThreadMode!=='default';entry.hyperThreadPolicy=source.hyperThreadMode;
     await gate();
     const fresh=await deps.snapshot();checkpoint();if(gameProfileImportSource(fresh)!==admission.profileSource)throw Error('GAME_PROFILE_SOURCE_CHANGED');
-    const freshGyro=await deps.gyro();checkpoint();if(freshGyro.source!==admission.gyro)throw Error('GAME_PROFILE_SOURCE_CHANGED');
     await gate();
     await deps.import(target,admission.profile,entry,structuredClone(source.frameRates),()=>{checkpoint();if(JSON.stringify(deps.currentSchedule())!==admission.schedule)throw Error('GAME_PROFILE_SOURCE_CHANGED');});
    }

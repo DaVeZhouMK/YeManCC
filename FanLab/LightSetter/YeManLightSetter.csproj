@@ -34,9 +34,17 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="DeviceCore\**\*.cs" />
+    <!-- Source reuse of the checked port session; no battery operation is called. -->
+    <Compile Include="../../native/BatteryHost/SuperXCheckedEcWriter.cs" Link="CheckedLpcTransport.cs" />
     <Compile Include="..\..\native\ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
     <Compile Include="..\DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
     <Compile Include="..\RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="LibreHardwareMonitorLib">
+      <HintPath>../../deps/ymcc-shared-runtime/bin/LibreHardwareMonitorLib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../capabilities/HcDeviceCapabilityCatalog.cs" Link="Capabilities/HcDeviceCapabilityCatalog.cs" />
@@ -47,4 +55,5 @@
   <ItemGroup>
     <Content Include="../../capabilities/upstream/huesync-7176803c/LICENSE" Link="LICENSE.HueSync.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup><Using Include="System.IO" /></ItemGroup>
 </Project>

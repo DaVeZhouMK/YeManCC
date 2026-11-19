@@ -1,0 +1,123 @@
+#define NOMINMAX
+#include <windows.h>
+#include <shellapi.h>
+#include <atomic>
+#include <algorithm>
+#include <cwctype>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include "json.hpp"
+#include "settings_baseline.h"
+using json=nlohmann::json;
+namespace fspath=std::filesystem;
+static json document,expected;
+static std::mutex settingsMx;
+static std::string stage,change;
+static bool changed=false,readFailure=false,running=false;
+static unsigned effects=0,effectsAtChange=0,settingsReads=0,observations=0,serviceCalls=0;
+static const std::wstring YM_SETTINGS_FILE=L"owned-memory/settings.json",POWER_CONTROL_DIR=L"owned-memory";
+struct SettingsFileGuard {std::lock_guard<std::mutex> lock{settingsMx};};
+static std::string ymSettingsReadRaw(const std::wstring&){++settingsReads;if(readFailure)throw std::runtime_error("owned read failure");return document.dump();}
+static void mutate(){if(changed)return;changed=true;effectsAtChange=effects;
+ if(change=="revision")document["input"]["revision"]=8;
+ if(change=="hash")document["input"]["diagnostics"]["inputLoggingEnabled"]=true;
+ if(change=="mode")document["extensions"]["bootModes"]["revision"]=99;
+ if(change=="result")document["extensions"]["bootModesStartupResult"]={{"schema",1},{"revision",99}};
+ if(change=="observed")document["input"]["startupObservedBoot"]="other-boot";
+ if(change=="ack")document["input"]["hostAcknowledgedRevision"]=7;
+ if(change=="unrelated")document["extensions"]["unrelated"]=true;
+ if(change=="read-failure")readFailure=true;
+}
+static std::wstring U2W(const std::string& value){return {value.begin(),value.end()};}
+static std::string W2U(const std::wstring& value){
+ if(value.empty())return {};
+ const auto bytes=WideCharToMultiByte(CP_UTF8,0,value.data(),static_cast<int>(value.size()),nullptr,0,nullptr,nullptr);
+ if(bytes<=0)throw std::runtime_error("owned UTF-8 conversion failed");
+ std::string text(bytes,'\0');WideCharToMultiByte(CP_UTF8,0,value.data(),static_cast<int>(value.size()),text.data(),bytes,nullptr,nullptr);return text;
+}
+static std::wstring quote_windows_arg(const std::wstring& value){if(stage=="shell-args")mutate();return value;}
+static std::atomic<bool> g_exitRequested{false};
+static bool hardwareWriteAllowed(){return true;}
+static unsigned long long currentPowerGeneration(){return 4;}
+static void appendNativeLifecycleLog(const char*,const json&){}
+static HRESULT ownedCoInit(void*,DWORD){return S_OK;}
+static void ownedCoEnd(){}
+static void ownedSleep(DWORD){if(stage=="fx-wait")mutate();}
+static BOOL ownedShellStart(SHELLEXECUTEINFOW* info){++effects;running=true;info->hProcess=nullptr;return TRUE;}
+namespace ymcc::processEfficiency {
+static HINSTANCE shellExecute(HWND,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR,INT){++effects;return reinterpret_cast<HINSTANCE>(33);}
+}
+namespace ymcc::fxsound {
+enum class ProcessState{stopped,running};
+struct Audio{bool valid=true;bool hasFxDefault()const{return false;}};
+struct ControlState{bool known=true,installed=true,running=false,enabled=false,selected=false;std::wstring preset,output,reason;Audio audio;};
+struct ControlResult{bool ok=false,copied=false,reused=false,repaired=false;std::wstring reason;ControlState state;};
+struct Identity{DWORD pid=0;};
+static const wchar_t* presetName=L"owned-test";
+static Identity identity(){++serviceCalls;if(stage=="fx-identity")mutate();return {};}
+static ControlState observe(){++observations;if(stage=="fx-observe")mutate();ControlState value;value.running=running;value.enabled=running;value.selected=running;return value;}
+static bool ensurePreset(const std::filesystem::path&,bool& copied,std::wstring&){++effects;copied=true;return true;}
+static std::wstring executable(){return L"owned-memory/FxSound.exe";}
+static ProcessState processState(){return running?ProcessState::running:ProcessState::stopped;}
+static bool gracefulExit(const Identity&,const std::function<bool()>& allowed){if(!allowed())return false;++effects;running=false;return true;}
+static bool prepareConfig(std::wstring&){++effects;return true;}
+static bool restoreStoppedOutput(ControlResult&,const std::function<bool()>& allowed){if(!allowed())return false;++effects;return true;}
+#define Sleep ownedSleep
+#define ShellExecuteExW ownedShellStart
+// ORIGINAL_FXSOUND_CONTROL
+#undef ShellExecuteExW
+#undef Sleep
+}
+// ORIGINAL_STEAM_CLASSIFICATION
+// The ordinary-program/FxSound group has no Steam creation capability.
+static json bootSelectedSteamLaunch(const json&,const std::wstring&,const std::function<bool()>&){throw std::runtime_error("Steam creation is outside this ordinary software fixture");}
+// ORIGINAL_OWNER_GUARD
+static std::map<std::string,std::function<json(const json&)>> handlers;
+template<class F>static void ipc_on(const std::string& name,F callback){handlers[name]=callback;}
+static void registerHandlers(){
+#define CoInitializeEx ownedCoInit
+#define CoUninitialize ownedCoEnd
+// ORIGINAL_STATE_JSON
+// ORIGINAL_HANDLERS
+#undef CoUninitialize
+#undef CoInitializeEx
+}
+static void need(bool value,const std::string& why){if(!value)throw std::runtime_error(why);}
+int main(int argc,char** argv){
+ if(argc!=3)return 2;json rows=json::array();std::string error;const std::string selection=argv[2];
+ try{
+  json baseline;std::ifstream(argv[1])>>baseline;registerHandlers();
+  for(const auto* mode:{"global","xbox","steam","xbox-steam"})
+   for(const auto* action:{"shell-before","shell-args","fx-before","fx-identity","fx-observe","fx-wait"})
+    for(const auto* kind:{"revision","hash","mode","result","observed","ack","unrelated","read-failure","none"}){
+     if(selection=="inverse-shell"&&(std::string(mode)!="global"||std::string(action)!="shell-before"||std::string(kind)!="revision"))continue;
+     if(selection=="inverse-fx"&&(std::string(mode)!="global"||std::string(action)!="fx-identity"||std::string(kind)!="hash"))continue;
+     document=baseline;document["input"]["revision"]=7;document["input"]["startupObservedBoot"]="owned-boot";
+     document["input"]["diagnostics"]["inputLoggingEnabled"]=false;
+     document["extensions"]={{"bootModes",{{"schema",1},{"revision",3},{"current",mode},{"boot",mode}}},{"bootModesAppliedBoot","owned-boot"}};
+     expected={{"input",document["input"]},{"extensions",document["extensions"]}};
+     stage=action;change=kind;changed=false;readFailure=false;running=false;effects=0;effectsAtChange=0;observations=0;serviceCalls=0;
+     if(stage.ends_with("before"))mutate();json reply;std::string failure;
+     try{reply=stage.starts_with("shell")?handlers.at("shell.execute")({{"program","owned.exe"},{"args",{"owned"}},{"bootContext",expected}}):handlers.at("fxsound.setEnabled")({{"enabled",true},{"bootContext",expected}});}catch(const std::exception& e){failure=e.what();}
+     const bool allowed=change=="ack"||change=="unrelated"||change=="none";
+     json row={{"mode",mode},{"stage",stage},{"change",change},{"allowed",allowed},{"effects",effects},{"effectsAfterChange",effects-effectsAtChange},{"settingsReads",settingsReads},{"reply",reply},{"error",failure}};rows.push_back(row);
+     need(changed,"original selected boundary not reached");
+     if(allowed)need(failure.empty()&&(stage.starts_with("shell")?reply==true:reply.value("ok",false)),"current original startup action incorrectly rejected");
+     else {need(effects==effectsAtChange,"expired native startup action reached an effect");need(!failure.empty()||!reply.value("ok",true),"expired native action reported success");}
+    }
+  if(selection=="current"){
+   for(const auto* action:{"shell.execute","fxsound.setEnabled"}){
+    stage="ordinary";change="none";readFailure=false;running=false;effects=0;const auto reads=settingsReads;
+    const auto reply=handlers.at(action)(std::string(action)=="shell.execute"?json{{"program","owned.exe"},{"args",json::array()}}:json{{"enabled",true}});
+    need(std::string(action)=="shell.execute"?reply==true:reply.value("ok",false),"ordinary action changed");need(reads==settingsReads,"ordinary action acquired a boot settings dependency");
+   }
+  }
+ }catch(const std::exception& e){error=e.what();}
+ std::cout<<json{{"status",error.empty()?"PASS":"FAIL"},{"rows",rows},{"error",error},{"selection",selection},{"realProcessOrDeviceActions",0}}.dump();return error.empty()?0:1;
+}

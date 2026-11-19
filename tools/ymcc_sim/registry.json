@@ -50,6 +50,12 @@
       "status": "implemented (v2: SIM-1..4)",
       "modes": [
         {
+          "mode": "command-pending",
+          "modeKind": "offline-injection",
+          "status": "implemented",
+          "desc": "Explicit CommandPendingCase forwards one existing original Steam startup-pair parameter to tools/steam_original_recovery_dual_route_selftest.py before legacy Host setup; PrepareOnly retains preparation and CommandPendingReuse strictly reuses a qualified compilation. No default cases, global ID or release gate."
+        },
+        {
           "mode": "selfcheck",
           "modeKind": "none",
           "status": "implemented",

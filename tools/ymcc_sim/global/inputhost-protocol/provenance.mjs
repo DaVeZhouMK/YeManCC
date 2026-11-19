@@ -29,6 +29,39 @@ export function inputsFor(id){need(CASES[id],'INPUTHOST_CASE_UNKNOWN');return{so
 export function captureInputs(id,root){const inputs=inputsFor(id);const sourceRows=inputs.sources.map(relative=>{const p=path.join(REPO,relative),bytes=fs.readFileSync(p),saved=path.join(root,'input-sources',relative);fs.mkdirSync(path.dirname(saved),{recursive:true});fs.writeFileSync(saved,bytes,{flag:'wx'});return{path:relative,sha256:bytesHash(bytes),saved};});const artifactDir=path.join(root,'input-artifacts');fs.mkdirSync(artifactDir);const artifactRows=inputs.artifacts.map(p=>{need(fs.lstatSync(p).isFile(),'INPUTHOST_ARTIFACT_NOT_FILE');const sha256=hash(p),saved=path.join(artifactDir,sha256+'-'+path.basename(p));if(!fs.existsSync(saved))fs.copyFileSync(p,saved,fs.constants.COPYFILE_EXCL);need(hash(saved)===sha256,'INPUTHOST_ARTIFACT_COPY_CHANGED');return{path:p,sha256,saved};});const result={schemaVersion:1,caseId:id,createdAt:new Date().toISOString(),sources:sourceRows,artifacts:artifactRows,artifactMeaning:'Declared compiler/framework allowlist; evaluated-input ledgers identify actually consumed Compile/Reference/Analyzer rows.'};writeJson(path.join(root,'input-snapshot.json'),result);return result;}
 export function verifyInputs(id,root,before){const current=inputsFor(id);need(JSON.stringify(current.sources)===JSON.stringify(before.sources.map(r=>r.path))&&JSON.stringify(current.artifacts)===JSON.stringify(before.artifacts.map(r=>r.path)),'INPUTHOST_INPUT_MEMBERSHIP_CHANGED');for(const row of before.sources){need(hash(path.join(REPO,row.path))===row.sha256,'INPUTHOST_SOURCE_CHANGED:'+row.path);need(hash(row.saved)===row.sha256,'INPUTHOST_SOURCE_SNAPSHOT_CHANGED:'+row.path);}for(const row of before.artifacts){need(hash(row.path)===row.sha256,'INPUTHOST_TOOL_CHANGED:'+row.path);need(hash(row.saved)===row.sha256,'INPUTHOST_TOOL_SNAPSHOT_CHANGED:'+row.path);}return true;}
 export function walkFiles(root){const files=[];function visit(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);need(!fs.lstatSync(p).isSymbolicLink(),'INPUTHOST_REPARSE_OUTPUT');if(e.isDirectory())visit(p);else{need(e.isFile(),'INPUTHOST_OUTPUT_NOT_FILE');files.push(p);need(files.length<=20000,'INPUTHOST_OUTPUT_LIMIT');}}}visit(root);return files.sort();}
-export function recordEvaluatedInputs(root,before){const external=new Map(before.artifacts.map(r=>[path.resolve(r.path).toLowerCase(),r]));const ledgers=walkFiles(root).filter(p=>/evaluated-inputs-(Release|Debug)\.txt$/.test(p));need(ledgers.length>=2,'INPUTHOST_EVALUATED_INPUT_LEDGER_MISSING');const rows=[];for(const ledger of ledgers){for(const line of fs.readFileSync(ledger,'utf8').replace(/^\uFEFF/,'').split(/\r?\n/)){if(!line)continue;const [kind,...parts]=line.split('\t');const p=parts.join('\t');if(!p||!fs.existsSync(p))continue;const absolute=path.resolve(p);if(!inside(root,absolute)){const declared=external.get(absolute.toLowerCase());need(declared,'INPUTHOST_UNDECLARED_COMPILER_INPUT:'+absolute);need(hash(absolute)===declared.sha256,'INPUTHOST_COMPILER_INPUT_CHANGED:'+absolute);}rows.push({ledger:path.relative(root,ledger).replaceAll('\\','/'),kind,path:absolute,sha256:hash(absolute)});}}need(rows.some(r=>r.kind==='Compile')&&rows.some(r=>r.kind==='Reference'),'INPUTHOST_ACTUAL_COMPILE_REFERENCE_SET_MISSING');writeJson(path.join(root,'evaluated-compiler-inputs.json'),{schemaVersion:1,ledgers:ledgers.length,rows});return{ledgers:ledgers.length,compileRows:rows.filter(r=>r.kind==='Compile').length,referenceRows:rows.filter(r=>r.kind==='Reference').length};}
+export function recordEvaluatedInputs(root,before,{minimumLedgers=2}={}){
+ need(Number.isInteger(minimumLedgers)&&(minimumLedgers===1||minimumLedgers===2),'INPUTHOST_EVALUATED_MINIMUM_LEDGERS_INVALID');
+ const external=new Map(before.artifacts.map(r=>[path.resolve(r.path).toLowerCase(),r]));
+ const ledgers=walkFiles(root).filter(p=>/evaluated-inputs-(Release|Debug)\.txt$/.test(p));
+ need(ledgers.length>=minimumLedgers,'INPUTHOST_EVALUATED_INPUT_LEDGER_MISSING');
+ const rows=[];
+ for(const ledger of ledgers){
+  for(const line of fs.readFileSync(ledger,'utf8').replace(/^\uFEFF/,'').split(/\r?\n/)){
+   if(!line.trim())continue;
+   const [kind,...parts]=line.split('\t');
+   need(['Compile','Reference','Analyzer','Project','Import'].includes(kind),'INPUTHOST_EVALUATED_INPUT_KIND_INVALID:'+kind);
+   const p=parts.join('\t');
+   if(kind==='Import'&&p===''&&parts.length<=1)continue;
+   need(p.trim().length>0,'INPUTHOST_COMPILER_INPUT_PATH_REQUIRED:'+kind);
+   need(path.isAbsolute(p),'INPUTHOST_COMPILER_INPUT_ABSOLUTE_REQUIRED:'+p);
+   const absolute=path.resolve(p);
+   let info;
+   try{info=fs.lstatSync(absolute);}catch(error){
+    if(error.code==='ENOENT'||error.code==='ENOTDIR')throw Error('INPUTHOST_COMPILER_INPUT_MISSING:'+absolute);
+    throw error;
+   }
+   need(info.isFile(),'INPUTHOST_COMPILER_INPUT_NOT_FILE:'+absolute);
+   if(!inside(root,absolute)){
+    const declared=external.get(absolute.toLowerCase());
+    need(declared,'INPUTHOST_UNDECLARED_COMPILER_INPUT:'+absolute);
+    need(hash(absolute)===declared.sha256,'INPUTHOST_COMPILER_INPUT_CHANGED:'+absolute);
+   }
+   rows.push({ledger:path.relative(root,ledger).replaceAll('\\','/'),kind,path:absolute,sha256:hash(absolute)});
+  }
+ }
+ need(rows.some(r=>r.kind==='Compile')&&rows.some(r=>r.kind==='Reference'),'INPUTHOST_ACTUAL_COMPILE_REFERENCE_SET_MISSING');
+ fs.writeFileSync(path.join(root,'evaluated-compiler-inputs.json'),JSON.stringify({schemaVersion:1,ledgers:ledgers.length,rows},null,2)+'\n',{flag:'wx'});
+ return{ledgers:ledgers.length,compileRows:rows.filter(r=>r.kind==='Compile').length,referenceRows:rows.filter(r=>r.kind==='Reference').length};
+}
 export function seal(root,id,before,result){verifyInputs(id,root,before);const own=walkFiles(root);const sourceRows=before.sources.map(r=>({path:r.path,sha256:r.sha256}));const rows=[...sourceRows,...own.map(p=>({path:p,sha256:hash(p)}))];const sealed={...result,schemaVersion:1,caseId:id,sourceHashes:rows,sourceMembershipStable:true,toolMembershipStable:true,hardwareIo:false,productEntryExecuted:false,sdkInputAssembliesLoaded:false,performanceMeasurementExecuted:false};writeJson(path.join(root,'result.json'),sealed);return sealed;}
 export const buildTargets=`<Project><Target Name="RecordInputHostFixtureInputs" AfterTargets="CoreCompile"><WriteLinesToFile File="$(MSBuildProjectDirectory)/evaluated-inputs-$(Configuration).txt" Lines="@(Compile-&gt;'Compile&#x9;%(FullPath)');@(ReferencePath-&gt;'Reference&#x9;%(FullPath)');@(Analyzer-&gt;'Analyzer&#x9;%(FullPath)');Project&#x9;$(MSBuildProjectFullPath);Import&#x9;$(DirectoryBuildPropsPath);Import&#x9;$(DirectoryBuildTargetsPath)" Overwrite="true" Encoding="UTF-8" /></Target></Project>`;

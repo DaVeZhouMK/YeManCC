@@ -12,12 +12,25 @@
 #include "battery_host_contract.h"
 #include "battery_managed_runtime.h"
 #include <atomic>
+#include <functional>
+#include "sleep_power_state.h" // Parent-owned ABI: coherent=1, unknown=0.
 namespace ymcc::batterycharge {
 using Json=nlohmann::json;
 inline std::timed_mutex& lock(){static auto* m=new std::timed_mutex;return *m;}
 inline std::atomic<bool>& stopping(){static auto* value=new std::atomic<bool>{false};return *value;}
 inline managed::Component& component(){static auto* value=new managed::Component;return *value;}
-inline void seal() noexcept {stopping().store(true,std::memory_order_release);}
+using SystemPowerReader=int(__cdecl*)(ymcc::sleeppower::SharedPowerV1*,std::uint32_t);
+inline std::atomic<SystemPowerReader> systemPowerReader{nullptr};
+inline bool bindSystemPowerReader(SystemPowerReader reader) noexcept {
+    if(!reader||stopping().load(std::memory_order_acquire))return false;
+    SystemPowerReader expected=nullptr;
+    return systemPowerReader.compare_exchange_strong(expected,reader,std::memory_order_acq_rel)||expected==reader;
+}
+inline void notifySystemPower() noexcept {
+    // No Component lookup/load, battery mutex, JSON, OS query or device work.
+    if(!stopping().load(std::memory_order_acquire))managed::notifySystemPower();
+}
+inline void seal() noexcept {stopping().store(true,std::memory_order_release);managed::sealSystemPowerNotifications();}
 inline bool hasBattery(){const auto state=ymcc::powerSource::snapshot();return state.batteryKnown&&state.hasBattery;}
 // Same-process ABI: passive receipt only. No OS sampling or managed callback under
 // the owner lock; the component stops using this function before process teardown.
@@ -68,20 +81,33 @@ inline Json componentIdentity(const std::wstring& powerRoot){
     component().load(powerRoot);
     return component().call({{"request",{{"op","hello"}}}});
 }
-inline Json requestCore(const std::wstring& powerRoot,const std::wstring& stateRoot,const Json& input,Json& detail){
+inline bool currentRequest(const std::function<bool()>& isCurrent) noexcept {
+    try{return !isCurrent || isCurrent();}catch(...){return false;}
+}
+inline int __cdecl nativeRequestOwnerReader(std::uintptr_t context) noexcept {
+    try{const auto* owner=reinterpret_cast<const std::function<bool()>*>(context);return !stopping().load(std::memory_order_acquire)&&owner&&currentRequest(*owner)?1:0;}catch(...){return 0;}
+}
+inline Json requestCore(const std::wstring& powerRoot,const std::wstring& stateRoot,const Json& input,Json& detail,const std::function<bool()>& isCurrent={}){
     try{
         if(stopping().load(std::memory_order_acquire))return failure("充电组件正在退出");
+        if(!currentRequest(isCurrent))return failure("BOOT_CHARGE_REQUEST_EXPIRED");
         detail["runtime"]=runtimeIdentity(powerRoot);detail["stage"]="load-in-process";
         component().load(powerRoot);
         if(stopping().load(std::memory_order_acquire))return failure("充电组件正在退出");
-        const auto envelope=[&](Json request){return Json{{"powerRoot",utf8Path(powerRoot)},{"stateRoot",utf8Path(stateRoot)},{"nativePowerReader",std::to_string(reinterpret_cast<std::uintptr_t>(&nativePowerReader))},{"request",std::move(request)}};};
+        if(!currentRequest(isCurrent))return failure("BOOT_CHARGE_REQUEST_EXPIRED");
+        const auto publicReader=systemPowerReader.load(std::memory_order_acquire);
+        if(!publicReader)return failure("公共睡眠状态读取接口尚未绑定");
+        const auto envelope=[&](Json request){Json value{{"powerRoot",utf8Path(powerRoot)},{"stateRoot",utf8Path(stateRoot)},{"nativePowerReader",std::to_string(reinterpret_cast<std::uintptr_t>(&nativePowerReader))},{"nativeSystemPowerReader",std::to_string(reinterpret_cast<std::uintptr_t>(publicReader))},{"request",std::move(request)}};
+            if(isCurrent)value["nativeRequestOwner"]={{"reader",std::to_string(reinterpret_cast<std::uintptr_t>(&nativeRequestOwnerReader))},{"context",std::to_string(reinterpret_cast<std::uintptr_t>(&isCurrent))}};return value;};
         detail["phase"]="handshake";
         const auto hello=component().call(envelope({{"op","hello"}}));detail["hostIdentity"]=hello;
+        if(!currentRequest(isCurrent))return failure("BOOT_CHARGE_REQUEST_EXPIRED");
         if(!matchingHost(hello))return failure("充电组件与主程序版本不一致，请退出 YMCC 后更新完整程序包");
         if(hello.value("execution",std::string{})!="in-process"||hello.value("processId",0u)!=GetCurrentProcessId())return failure("充电组件未绑定当前 YMCC 进程");
         detail["phase"]="operation";detail["stage"]="in-process-dispatch";
         auto bound=input;bound["protocol"]=kHostProtocol;bound["sourceId"]=kHostSourceId;
         auto result=component().call(envelope(std::move(bound)));
+        if(stopping().load(std::memory_order_acquire)||!currentRequest(isCurrent))return failure("BOOT_CHARGE_REQUEST_EXPIRED");
         if(result.contains("error"))return failure(result.at("error").get<std::string>().c_str());return result;
     }catch(const std::exception& e){return failure(e.what());}
     catch(...){return failure("充电控制暂不可用，请重新读取");}
@@ -98,16 +124,18 @@ inline Json shutdown(const std::wstring& stateRoot){
         trace(stateRoot,"in-process-stop",result);return result;
     }catch(const std::exception& e){Json result{{"ok",false},{"reason",e.what()},{"recoveryJournalPreserved",true}};trace(stateRoot,"in-process-stop-failed",result);return result;}
 }
-inline Json request(const std::wstring& powerRoot,const std::wstring& stateRoot,const Json& input){
+inline Json request(const std::wstring& powerRoot,const std::wstring& stateRoot,const Json& input,const std::function<bool()>& isCurrent={}){
     if(stopping().load(std::memory_order_acquire))return failure("充电组件正在退出");
+    if(!currentRequest(isCurrent))return failure("BOOT_CHARGE_REQUEST_EXPIRED");
     std::unique_lock<std::timed_mutex> serial(lock(),std::defer_lock);
     if(!serial.try_lock_for(std::chrono::seconds(30)))return failure("充电控制正在处理其他请求，请稍后重试");
+    if(!currentRequest(isCurrent))return failure("BOOT_CHARGE_REQUEST_EXPIRED");
     const auto start=GetTickCount64();
     Json detail{{"operation",input.value("op","")}};if(input.contains("target"))detail["target"]=input["target"];
     trace(stateRoot,"request-start",detail);
-    auto result=requestCore(powerRoot,stateRoot,input,detail);detail["elapsedMs"]=GetTickCount64()-start;
+    auto result=requestCore(powerRoot,stateRoot,input,detail,isCurrent);detail["elapsedMs"]=GetTickCount64()-start;
     for(const auto* key:{"ok","supported","batteryPresent","model","family","currentLimit","requestedLimit","managed","verification","reason"})if(result.contains(key))detail[key]=result[key];
-    trace(stateRoot,"request-result",detail);return result;
+    trace(stateRoot,"request-result",detail);return currentRequest(isCurrent)?result:failure("BOOT_CHARGE_REQUEST_EXPIRED");
 }
 inline void restoreAtStartup(const std::wstring& powerRoot,const std::wstring& stateRoot){
     // No preference/recovery file means zero component loading or hardware work.

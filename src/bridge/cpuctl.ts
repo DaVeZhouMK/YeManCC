@@ -50,6 +50,9 @@ export interface CcdLease {
   active: boolean;
 }
 export interface CcdProbe {
+  performanceReason?: string;
+  readerRevision?: string;
+  multiCcdSource?: string;
   performanceSupported: boolean;
   supported: boolean;
   available: boolean;
@@ -67,10 +70,22 @@ export interface CcdProbe {
   reason?: string;
 }
 
-function ccdUnavailable(reason: string): CcdProbe {
+function ccdUnavailable(reason: string, observed?: unknown): CcdProbe {
+  const raw = isRecord(observed) ? observed : {};
+  const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) &&
+    value >= 0 && value <= 4096 ? value : 0;
+  const diagnostic = (value: unknown) => typeof value === 'string' ? value.slice(0, 160) : '';
+  // Keep the rejected observation for diagnosis, while all control admission
+  // remains false. A hidden native result must not become an all-zero success
+  // lookalike or lose its reader revision and exact reason in renderer logs.
+  const masks = Array.isArray(raw.ccdMasks) ? raw.ccdMasks.slice(0, 64).filter(
+    (mask): mask is string => typeof mask === 'string' && /^(?:0x)?[0-9a-f]{1,16}$/i.test(mask)) : [];
   return {
-    performanceSupported: false, supported: false, available: false, l3Domains: 0, ccdMasks: [], domains: [],
-    physicalCores: 0, logical: 0, operation: '', effectScope: '', mechanism: '',
+    readerRevision: diagnostic(raw.readerRevision), performanceReason: diagnostic(raw.performanceReason) || reason,
+    multiCcdSource: diagnostic(raw.multiCcdSource),
+    performanceSupported: false, supported: false, available: false,
+    l3Domains: count(raw.l3Domains), ccdMasks: masks, domains: [],
+    physicalCores: count(raw.physicalCores), logical: count(raw.logical), operation: '', effectScope: '', mechanism: '',
     physicalCcdPowerOff: false, topologySource: '', lease: null, reason,
   };
 }
@@ -121,7 +136,7 @@ export async function probeCcd(): Promise<CcdProbe> {
     // Native owns runtime representability and availability. Valid-looking
     // masks must never override an explicit native refusal.
     if (r?.supported !== true || r?.available !== true || r?.singleGroupRepresentable === false)
-      return ccdUnavailable(text(r?.reason) ? r.reason : 'native_topology_unavailable');
+      return ccdUnavailable(text(r?.reason) ? r.reason : 'native_topology_unavailable', r);
     const count = (value: unknown) =>
       typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
     const l3 = count(r?.l3Domains), logical = count(r?.logical);
@@ -136,9 +151,9 @@ export async function probeCcd(): Promise<CcdProbe> {
     });
     const threads = union.toString(2).replace(/0/g, '').length;
     if (!validMasks || logical === 0 || logical > 64 || threads !== logical)
-      return ccdUnavailable('invalid_topology');
+      return ccdUnavailable('invalid_topology', r);
     if (r?.physicalCcdPowerOff === true)
-      return ccdUnavailable('physical_power_off_claim_rejected');
+      return ccdUnavailable('physical_power_off_claim_rejected', r);
     const operation = r?.operation === 'process_affinity' ? 'process_affinity' as const : '';
     const effectScope = text(r?.effectScope) ? r.effectScope : '';
     const mechanism = text(r?.mechanism) ? r.mechanism : '';
@@ -162,9 +177,12 @@ export async function probeCcd(): Promise<CcdProbe> {
         : (!operation || !effectScope || !mechanism || !topologySource || !domainsValid)
           ? 'invalid_operation_contract'
           : 'invalid_lease';
-      return ccdUnavailable(reason);
+      return ccdUnavailable(reason, r);
     }
     return {
+      performanceReason: text(r?.performanceReason) ? r.performanceReason : undefined,
+      readerRevision: text(r?.readerRevision) ? r.readerRevision : undefined,
+      multiCcdSource: text(r?.multiCcdSource) ? r.multiCcdSource : undefined,
       performanceSupported: r?.performanceSupported === true && r?.multiCcdConfirmed === true &&
         r?.coreArchitectureDetected === true && r?.heterogeneous === false,
       supported: true, available: true, l3Domains: l3, ccdMasks: masks, domains,

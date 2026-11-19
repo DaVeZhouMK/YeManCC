@@ -30,5 +30,22 @@ int main() {
   std::this_thread::yield();--active;racing.finish(200);}});
  for(auto& t:writers)t.join();
  check(maxActive==1&&active==0,"racing-entry-and-completion-never-overlap-writers");
+ const ymcc::fan_resume::PowerStamp s4{75,5,11,21,0,3}, s0{75,5,13,24,0,3};
+ ymcc::fan_resume::RequestOwner mixed;
+ const auto first=mixed.offer(75,s4,100,0,9,4);
+ const auto post=mixed.reservePost(first,101);
+ check(bool(post)&&mixed.completePost(post,false),"s4-host-accepts-original-resume-once");
+ check(!mixed.offer(75,s0,110,0,9,5)&&mixed.pending()==75,"late-s0-retains-successor-without-overlapping-owner");
+ const auto next=mixed.finishRequest(first,111,false);
+ auto transferred=mixed.snapshot(next);
+ check(transferred&&next.request==first.request&&next.run!=first.run&&transferred->power.same(s0)&&transferred->writeRevision==5,"later-wake-transfers-the-fresh-permit-with-the-original-request");
+ check(transferred&&transferred->deadlineTick==15100&&transferred->attempts==1&&transferred->posts==1&&!mixed.reservePost(next,112),"handoff-keeps-first-deadline-and-never-reposts-accepted-command");
+ check(!mixed.finishRequest(first,113,true)&&mixed.snapshot(next).has_value(),"late-original-cannot-settle-the-successor");
+ mixed.finishRequest(next,114,false);
+ check(!mixed.offer(75,s0,115,0,9,6),"write-revision-alone-is-not-a-new-wake");
+ const ymcc::fan_resume::PowerStamp ready{75,5,14,25,0,3};
+ const auto idle=mixed.offer(75,ready,116,0,9,7);
+ const auto idleState=mixed.snapshot(idle);
+ check(idleState&&idleState->writeRevision==7&&idle.request==first.request&&idleState->attempts==1,"idle-handoff-uses-the-same-fresh-permit-rule");
  std::cout<<"checks="<<checks<<" failed="<<failed<<"\n";return failed?1:0;
 }

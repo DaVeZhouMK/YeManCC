@@ -13,6 +13,8 @@ export const virtualControllerRuntimeHeaders = Object.freeze([
   'virtual_target_return_runtime.h',
   'hidhide_cli_writer_runtime.h',
   'virtual_target_return_cold_runtime.h',
+  'virtual_runtime_recovery_runtime.h',
+  'virtual_recovery_fallback_runtime.h',
 ]);
 const allowed = new Set(virtualControllerRuntimeHeaders);
 const sha = data => createHash('sha256').update(data).digest('hex');

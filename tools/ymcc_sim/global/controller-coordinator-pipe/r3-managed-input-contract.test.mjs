@@ -80,6 +80,9 @@ function decoder23Receipt(){
 }
 test('decoder23 entry: explicit preparation selection preserves default22 and rejects ambiguous versions',()=>{
  assert.equal(parseTerminalManagedPreparationArguments([])['--managed-input-contract'],TERMINAL_MANAGED_CONTRACT);
+ assert.equal(parseTerminalManagedPreparationArguments([])['--stage'],'managed');
+ assert.equal(parseTerminalManagedPreparationArguments(['--stage','capture'])['--stage'],'capture');
+ for(const args of [['--stage','runtime'],['--stage','capture','--stage','managed'],['--stage']])assert.throws(()=>parseTerminalManagedPreparationArguments(args));
  const options=parseTerminalManagedPreparationArguments(['--repo','G:/source','--workspace','G:/owner','--managed-input-contract',decoder23Id]);assert.equal(options['--managed-input-contract'],decoder23Id);
  for(const args of [['--managed-input-contract',LEGACY_MANAGED_CONTRACT],['--managed-input-contract','23'],['--managed-input-contract','current105-terminal24-v1'],['--managed-input-contract',decoder23Id,'--managed-input-contract',decoder23Id],['--managed-input-contract'],['--workspace','--repo']])assert.throws(()=>parseTerminalManagedPreparationArguments(args));
 });
@@ -104,4 +107,78 @@ test('decoder23 entry: flags cannot replace actual decoder membership generated 
 });
 test('decoder23 entry: duplicate and unrelated decoder paths cannot satisfy the real project member',()=>{
  for(const mutate of [v=>v.evaluatedCompilerInputs.push({...v.evaluatedCompilerInputs[0]}),v=>v.inputBindings.generatedInputs.push({...v.inputBindings.generatedInputs[0]}),v=>{v.evaluatedCompilerInputs[0].path=path.resolve('G:/different-owner/SteamDeckPadReportObservation.cs');v.inputBindings.generatedInputs[0].path=v.evaluatedCompilerInputs[0].path;},v=>v.inputBindings.sources.find(row=>row.relative==='InputHost/SteamDeckPadReportObservation.cs').snapshot='relative.cs']){const value=decoder23Receipt();mutate(value);assert.throws(()=>verifyManagedDecoderCompileEvidence(value,decoder23Id,decoder23UnitBuildRoot));}
+});
+
+
+import {TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT,validateManagedSourceRequirements} from './r3-managed-input-contract.mjs';
+import contractFs from 'node:fs';
+const signal26Id=TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT;
+const signal26Helpers=['InputHost/HostSdkFirstWitness.cs','InputHost/TargetCreationLifetimeEvidence.cs','InputHost/CompactFrameReplyBinding.cs'];
+function signal26Receipt(){
+ const value=decoder23Receipt(),root=path.dirname(value.fixtureProject),sha256='a'.repeat(64);
+ value.managedInputContract=signal26Id;value.managedInputCount=26;value.signalEvidenceCompiled=true;
+ value.inputBindings.sources=rows(signal26Id).map(row=>({...row,path:path.join(path.resolve('G:/unit-decoder-contract-source'),row.relative),snapshot:path.join(root,'input-sources',row.relative)}));
+ for(const relative of signal26Helpers){const file=path.join(root,path.basename(relative));value.inputBindings.generatedInputs.push({path:file,sha256});value.evaluatedCompilerInputs.push({kind:'Compile',path:file,sha256});}
+ return value;
+}
+test('signal26 entry: exact actual helpers extend unchanged23 without granting live authority',()=>{
+ const contract=managedCompileContract(signal26Id);
+ assert.equal(contract.count,26);assert.equal(contract.signalEvidence,true);
+ assert.deepEqual(contract.names,[...managedCompileContract(decoder23Id).names,...signal26Helpers]);
+ assert.equal(new Set(contract.names).size,26);assert(Object.isFrozen(contract.names));
+ assert.equal(validateManagedCompileRows(rows(signal26Id),signal26Id),contract);
+ assert.throws(()=>requireCurrentCompileBatch(contract),/LIVE_BRANDED_BATCH_REQUIRED/);
+});
+test('signal26 entry: missing duplicate foreign extra and mislabeled memberships remain refused',()=>{
+ const good=rows(signal26Id);
+ for(const bad of [good.slice(1),[...good,good[0]],good.map((r,i)=>i===25?good[0]:r),good.map((r,i)=>i===25?{...r,relative:'InputHost/Foreign.cs'}:r),good.map((r,i)=>i===25?{...r,sha256:'bad'}:r)])
+  assert.throws(()=>validateManagedCompileRows(bad,signal26Id));
+ for(const old of [LEGACY_MANAGED_CONTRACT,TERMINAL_MANAGED_CONTRACT,decoder23Id]){
+  assert.throws(()=>validateManagedCompileRows(good,old));
+  assert.throws(()=>validateManagedCompileRows(rows(old),signal26Id));
+ }
+});
+test('signal26 entry: original preparation and declaration route only the explicit new version',()=>{
+ assert.equal(parseTerminalManagedPreparationArguments(['--managed-input-contract',signal26Id])['--managed-input-contract'],signal26Id);
+ assert.equal(parseTerminalManagedPreparationArguments([])['--managed-input-contract'],TERMINAL_MANAGED_CONTRACT);
+ assert.equal(terminalManagedStageStatus('managed',signal26Id),'MANAGED26_COMPILED_NOT_RUNTIME_ACCEPTED');
+ assert.equal(terminalManagedStageStatus('native',signal26Id),'NATIVE26_COMPILED_NOT_RUNTIME_ACCEPTED');
+ assert.equal(terminalManagedContractFromDeclaration(terminalLifecycleDeclarationKind(signal26Id)).id,signal26Id);
+ for(const id of ['current105-terminal25-v1','current105-terminal27-v1','26'])assert.throws(()=>requireTerminalManagedContract(id));
+});
+test('signal26 compile identity: actual source generated and Compile membership required for all three helpers',()=>{
+ const proof=verifyManagedDecoderCompileEvidence(signal26Receipt(),signal26Id,decoder23UnitBuildRoot);
+ assert.equal(proof.signalEvidence.length,3);assert.equal(proof.runtimeAuthorityGranted,false);
+ for(const relative of signal26Helpers){
+  const file=path.join(decoder23UnitBuildRoot,path.basename(relative));
+  for(const mutate of [
+   v=>v.signalEvidenceCompiled=false,
+   v=>v.inputBindings.generatedInputs=v.inputBindings.generatedInputs.filter(r=>r.path!==file),
+   v=>v.evaluatedCompilerInputs=v.evaluatedCompilerInputs.filter(r=>r.path!==file),
+   v=>v.evaluatedCompilerInputs.push({...v.evaluatedCompilerInputs.find(r=>r.path===file)}),
+   v=>v.evaluatedCompilerInputs.find(r=>r.path===file).sha256='b'.repeat(64),
+   v=>v.inputBindings.generatedInputs.find(r=>r.path===file).sha256='b'.repeat(64),
+   v=>v.inputBindings.sources.find(r=>r.relative===relative).snapshot=path.resolve('G:/foreign-owner/'+path.basename(relative)),
+  ]){const value=signal26Receipt();mutate(value);assert.throws(()=>verifyManagedDecoderCompileEvidence(value,signal26Id,decoder23UnitBuildRoot));}
+ }
+});
+test('signal26 preflight: current consumed type requirements reject legacy before expensive capture',()=>{
+ const source=contractFs.readFileSync(new URL('../../../../InputHost/Program.cs',import.meta.url),'utf8');
+ const proof=validateManagedSourceRequirements(source,signal26Id);
+ assert.deepEqual(new Set(proof.required),new Set(signal26Helpers));
+ assert.equal(proof.compileReadyProven,false);assert.equal(proof.runtimeAuthorityGranted,false);
+ for(const id of [LEGACY_MANAGED_CONTRACT,TERMINAL_MANAGED_CONTRACT,decoder23Id])
+  assert.throws(()=>validateManagedSourceRequirements(source,id),/SOURCE_DEPENDENCIES_MISSING/);
+ assert.equal(validateManagedSourceRequirements('class OldBaseline {}',decoder23Id).compileReadyProven,false);
+});
+
+test('signal26 preparation: known missing dependencies reject before any workspace or capture creation',async()=>{
+ const {fileURLToPath}=await import('node:url');
+ const {randomUUID}=await import('node:crypto');
+ const {prepareTerminal22}=await import('./r3-terminal22-prepare.mjs');
+ const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
+ const workspace=path.resolve(repo,'../../../Testing/YMCC/Workspace','Runtime105-preflight-'+randomUUID());
+ assert.equal(contractFs.existsSync(workspace),false);
+ await assert.rejects(prepareTerminal22(['--repo',repo,'--workspace',workspace,'--managed-input-contract',decoder23Id]),/SOURCE_DEPENDENCIES_MISSING/);
+ assert.equal(contractFs.existsSync(workspace),false);
 });

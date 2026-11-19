@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include "steam_ui_epoch.h"
+#include "steam_ui_mode_cache_miss.h"
 #include <algorithm>
 #include <string>
 #include <utility>
@@ -36,8 +37,12 @@ public:
     bool take(ULONGLONG now) { if (timeout(now) != 0) return false; cancel(); return true; }
 };
 enum class UiMode { Unknown, Desktop, BigPicture };
+enum class ModeHandoffPath { None, StableNotice, ChangedNotice, CacheFallback };
 struct ModeSample {
     UiMode mode; std::string epoch;
+    ymcc::steamui::ModeCacheTiming timing;
+    std::uint64_t enqueuedTick = 0;
+    ModeHandoffPath path = ModeHandoffPath::None;
     ModeSample(UiMode value = UiMode::Unknown, std::string entry = {}) : mode(value), epoch(std::move(entry)) {}
 };
 // Window events request a finite read window. No event means no mode query.
@@ -84,8 +89,13 @@ public:
         const auto currentDocument = ymcc::steamui::parseModeEpoch(sample.epoch);
         // A replaced CEF document loses its styles while Steam PID/mode stay
         // unchanged. Reapply CSS once; this never grants Decky or Steam startup.
-        const bool documentChanged = previousDocument.valid && currentDocument.valid && previousDocument.document != currentDocument.document;
-        const bool entered = mode == UiMode::BigPicture && (last_ != mode || documentChanged || ymcc::steamui::laterModeEntry(epoch_, sample.epoch)) && !(requested_ && now < requestedUntil_);
+        const bool replacedBigPicture = last_ == UiMode::BigPicture && previousDocument.valid &&
+            currentDocument.valid && previousDocument.document != currentDocument.document;
+        // A manual/resume use can cover the first entry, but its receipt can
+        // still belong to a previous Big Picture document.
+        const bool coalescingEntry = requested_ && now < requestedUntil_;
+        const bool entered = mode == UiMode::BigPicture && (replacedBigPicture ||
+            (!coalescingEntry && (last_ != mode || ymcc::steamui::laterModeEntry(epoch_, sample.epoch))));
         last_ = mode; if (ymcc::steamui::updateModeEpoch(epoch_, sample.epoch)) epoch_ = sample.epoch; requested_ = false; return entered;
     }
 };

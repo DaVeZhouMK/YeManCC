@@ -9,7 +9,7 @@ try {
  const active=()=>button().evaluate(n=>n.classList.contains('fan-toggle-active'));
  const top=async()=> (await page.locator('.chart-card').boundingBox()).y;
  await page.goto(url());await button().waitFor();await enabled();const initialTop=await top();
- assert.equal(await text(),'风扇未操控');assert.equal(await active(),false);assert.deepEqual(await page.evaluate(()=>window.__fixture.calls),[]);
+ assert.equal(await text(),'点击启用');assert.equal(await active(),false);assert.deepEqual(await page.evaluate(()=>window.__fixture.calls),[]);
  assert.equal(await page.locator('.fan-close').count(),0);assert.equal(await page.locator('.fan-status-banner span').count(),0);
  assert.equal(await button().getAttribute('data-gp-col'),'0');assert.equal(await button().getAttribute('aria-pressed'),'false');
  cases.push('Single idle switch: requested label, controller coordinate, no second control or helper line; mount sends no Host request');
@@ -27,13 +27,13 @@ try {
  cases.push('Pending initial ON stays visibly opening and becomes clickable after the fixed guard; no false control or layout jump');
  await page.evaluate(async()=>{window.__fixture.recoveryActive=true;document.querySelector('.fan-toggle').dispatchEvent(new MouseEvent('click',{bubbles:true}));});assert.equal(await page.evaluate(()=>window.__fixture.calls.filter(c=>c==='disable').length),0);
  await page.evaluate(async()=>{await window.__fanHost.disable();window.dispatchEvent(new CustomEvent('fan:guard-state',{detail:{active:false,state:'ready'}}));});await enabled();
- assert.equal(await text(),'风扇未操控');assert.equal(await active(),false);assert.equal(await page.evaluate(()=>window.__fixture.calls.filter(c=>c==='disable').length),1);
+ assert.equal(await text(),'点击启用');assert.equal(await active(),false);assert.equal(await page.evaluate(()=>window.__fixture.calls.filter(c=>c==='disable').length),1);
  assert.equal(await top(),initialTop);cases.push('Duplicate initial click cannot cancel; an external explicit OFF still retires the intent without a second control button');
  await page.evaluate(()=>window.__fixture.releaseApply&&window.__fixture.releaseApply());await page.waitForTimeout(250);
- assert.equal(await text(),'风扇未操控');assert.equal(await active(),false);assert.equal(await page.evaluate(()=>window.__fixture.appliedNodes.length),1);
+ assert.equal(await text(),'点击启用');assert.equal(await active(),false);assert.equal(await page.evaluate(()=>window.__fixture.appliedNodes.length),1);
  cases.push('Late apply reply cannot turn the canceled switch back on');
  await page.evaluate(()=>{window.__fixture.holdApply=false;window.__fixture.throwGetState=false;});await button().click();await enabled();
- assert.equal(await text(),'风扇已开启');assert.equal(await active(),true);assert.equal(await page.evaluate(()=>window.__fixture.appliedNodes.length),2);
+ assert.equal(await text(),'点击关闭');assert.equal(await active(),true);assert.equal(await page.evaluate(()=>window.__fixture.appliedNodes.length),2);
  const activeShot=path.join(out,'fan-single-switch-active.png');await page.screenshot({path:activeShot,fullPage:true});screenshots.push(activeShot);
  cases.push('Switch can re-enable after cancellation and sends a new curve apply');
  await page.evaluate(()=>{window.__fixture.throwGetState=true;window.__fixture.autoRecoveryExpected=true;});
@@ -45,24 +45,24 @@ try {
  cases.push('Host state timeout shows a visible recovering switch; optional retry attempts ON and never disables retained recovery');
  await page.reload();await button().waitFor();await enabled();await button().click();assert.equal(await button().isDisabled(),true);
  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('ipc:power.suspending',{detail:{generation:1}})));
- await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent.trim()==='风扇未操控');
+ await page.waitForFunction(()=>document.querySelector('.fan-toggle').textContent.trim()==='点击启用');
  assert((await page.locator('.fan-status-banner').textContent()).includes('睡眠中'));await page.evaluate(()=>window.__fixture.releaseApply&&window.__fixture.releaseApply());await page.waitForTimeout(250);
- assert.equal(await text(),'风扇未操控');assert.equal(await active(),false);
+ assert.equal(await text(),'点击启用');assert.equal(await active(),false);
  cases.push('New sleep invalidates the in-flight page commit; its late reply cannot resurrect the switch');
  // Reported FAN955 state: retained intent + terminal fault is NOT an active recovery.
  await page.reload();await button().waitFor();await enabled();
  await page.evaluate(()=>{const fx=window.__fixture;fx.holdApply=false;fx.hasControlIntent=true;fx.recoveryActive=false;fx.needsManualRecovery=true;window.__fanHost.state='fault-locked';window.dispatchEvent(new CustomEvent('fan:guard-state',{detail:{active:false,state:'fault-locked'}}));});
- assert.equal(await text(),'风扇未操控');assert.equal(await active(),false);assert.equal(await button().isDisabled(),false);
+ assert.equal(await text(),'点击启用');assert.equal(await active(),false);assert.equal(await button().isDisabled(),false);
  await button().click();await enabled();
  assert.equal(await page.evaluate(()=>window.__fixture.calls.filter(c=>c==='disable').length),0);
  assert.equal(await page.evaluate(()=>window.__fixture.calls.filter(c=>c==='apply').length),1);
- assert.equal(await text(),'风扇已开启');assert.equal(await active(),true);
+ assert.equal(await text(),'点击关闭');assert.equal(await active(),true);
  cases.push('FAN955 FaultLocked with saved intent: one click restarts; no disable; only live Host confirmation promotes button');
  // A successful apply callback without live Host writes is insufficient.
  await page.reload();await button().waitFor();await enabled();
  await page.evaluate(()=>{const fx=window.__fixture;fx.holdApply=false;fx.on.apply=async()=>{fx.calls.push('apply');fx.hasControlIntent=true;fx.liveWrites=false;window.__fanHost.state='fault-locked';};});
  await button().click();await enabled();
- assert.equal(await text(),'风扇未操控');assert.equal(await active(),false);assert.equal(await button().isDisabled(),false);assert.equal(await page.evaluate(()=>window.__fixture.lastControlActive),false);
+ assert.equal(await text(),'点击启用');assert.equal(await active(),false);assert.equal(await button().isDisabled(),false);assert.equal(await page.evaluate(()=>window.__fixture.lastControlActive),false);
  cases.push('FAN955 resolved apply plus FaultLocked state cannot display enabled or lock out manual retry');
  // FAN-941: the real DOM close handler must release its busy latch even
  // when the serialized/native boundary is still pending. A late success or
@@ -73,13 +73,13 @@ try {
   await page.evaluate(()=>{window.__fixture.holdDisable=true;});
   const before=Date.now();await button().click();await enabled();
   assert(Date.now()-before<5500,'FAN-947 close UI exceeded the bounded four-second switch lock plus scheduling tolerance');
-  assert.equal(await text(),'风扇未操控');assert.equal(await active(),false);
+  assert.equal(await text(),'点击启用');assert.equal(await active(),false);
   assert((await page.locator('.fan-status-banner').textContent()).includes('交还仍在进行'));
   assert.equal(await page.evaluate(()=>window.__fixture.calls.filter(c=>c==='disable').length),1);
-  await button().click();await enabled();assert.equal(await text(),'风扇已开启');
+  await button().click();await enabled();assert.equal(await text(),'点击关闭');
   await page.evaluate(terminal=>{const fx=window.__fixture;if(terminal==='success')fx.releaseDisable();else fx.rejectDisable(new Error('FAN941_LATE_CLOSE_FAILURE'));},terminal);
   await page.waitForTimeout(250);
-  assert.equal(await text(),'风扇已开启');assert.equal(await active(),true);
+  assert.equal(await text(),'点击关闭');assert.equal(await active(),true);
   assert.equal(await page.evaluate(()=>window.__fixture.appliedNodes.length),2);
   cases.push('FAN-941 pending disable: switch clickable within budget; one disable; late '+terminal+' cannot clear a newer enable');
  }

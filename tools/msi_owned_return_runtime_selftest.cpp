@@ -17,7 +17,9 @@
 #include <utility>
 #include <vector>
 #include "json.hpp"
+#include "../native/sleep_power_state.h"
 #include "../native/msi_owned_return_recovery.h"
+#include "../native/msi_owned_return_off_endpoint.h"
 #include "../native/msi_crash_recovery_journal.h"
 #include "../native/xinput_identity_refresh_policy.h"
 using json = nlohmann::json;
@@ -88,7 +90,7 @@ static std::atomic<bool> g_msiDinputRouteDinputArmed{false}, g_msiDinputReturnOw
 static std::atomic<unsigned long long> g_msiDinputReturnDebtEpisode{41};
 static std::atomic<unsigned long long> g_msiFeedbackModeGeneration{4};
 static std::atomic<unsigned> g_xinputTopologyEpoch{8};
-static std::atomic<unsigned long long> g_xinputSlotIdentityEpoch{3};
+static std::atomic<unsigned> g_xinputSlotIdentityEpoch{3};
 static bool msiClawKnownBoardAuthority() { return g_board == "msi"; }
 static bool hardwareWriteAllowed() { return g_hardwareGate && g_powerReady; }
 static bool inputHostExitFenceRaised() { return g_exitFence; }
@@ -120,6 +122,7 @@ static std::atomic<bool> g_msiOwnedReturnPending{false}, g_msiOwnedReturnWorking
 static std::atomic<unsigned long long> g_msiOwnedReturnMatchedEpisode{0}, g_msiOwnedReturnMatchedPower{0};
 static std::atomic<unsigned> g_msiOwnedReturnMatchedTopology{0};
 static std::atomic<unsigned long long> g_msiOwnedReturnSourceEvent{0};
+static ymcc::msi::ownedReturnOff::Publication g_msiOwnedReturnOffEndpoint;
 static std::atomic<ULONGLONG> g_msiDinputReturnDebtPendingLogTick{0};
 static std::atomic<bool> g_externalPriorityVirtualSuspended{false};
 static std::atomic<unsigned> g_externalPrioritySourceMask{0};
@@ -128,7 +131,8 @@ static std::string msiCrashBoardKey() { return "MSI|Claw-A1M|Claw-A1M|handheld";
 static std::string msiCrashProcessCreation(HANDLE) { return "133900000000000001"; }
 static std::function<void(const json&)> g_logHook;
 static void appendNativeLifecycleLog(const char* domain, const json& row) { g_logs.emplace_back(domain, row);if(g_logHook)g_logHook(row); }
-static bool msiCrashRecoveryAfterModeDischarge() {
+static bool msiCrashRecoveryAfterModeDischarge(const std::function<bool()>& proofCurrent = {}) {
+    if (proofCurrent && !proofCurrent()) return false;
     ++g_count.durableDischarges;
     g_msiCrashRecord.modeReturnPending = false;
     return true;
@@ -242,14 +246,40 @@ static MsiClawCommandOutcome msiClawSwitchMode(BYTE mode) {
     if(mode!=1)throw std::runtime_error("fixture terminal command must be mode1");
     ++g_terminalCalls;return g_terminalOutcome;
 }
-static void msiTerminalReturnSchedule(const char*,const MsiClawCommandOutcome&) {}
+template<class... T> static void msiTerminalReturnSchedule(const char*,const MsiClawCommandOutcome&,const T&...) {}
 // Cached Stop facts are fake boundaries; the OFF cleanup predicate below is real.
 static bool g_inputHostHello=false,g_inputHostPrepareMayHaveReachedHost=false,g_inputHostNeutralized=false;
 static struct {bool active=false;} g_hidHideVisibilityJournal;
 static struct {bool required()const{return false;}} g_msiSteamDeckReleaseDebt;
 static struct {bool retirementRequired()const{return false;}} g_psEndpointOwnership;
 static bool inputHostTargetReturnHistorySettledLocked(){return true;}
+static HANDLE g_inputHostPrimaryThread=0,g_inputHostServerPipe=0;
+static bool inputHostPipeRetirementProvenLocked(){return true;}
+static bool inputHostTargetReturnCurrentProofPendingLocked(){return false;}
 // STUB-END
+// Read-only public transport ports for this legacy inert business fixture.
+// SharedPowerV1 is the real Native48 declaration; this transport is controlled,
+// and cannot prove real notification, cancellation or device-return behavior.
+#ifndef YMCC_LEGACY_MSI_INERT_PUBLIC_POWER
+#define YMCC_LEGACY_MSI_INERT_PUBLIC_POWER
+#include <memory>
+namespace ymcc::sleeppower {inline bool powerAdmitted(bool value)noexcept{return value;}}
+namespace ymcc::inputHost::sharedPower {
+class Scope final {public:bool current()const noexcept{return true;}bool power()const noexcept{return true;}};
+}
+[[maybe_unused]] static std::shared_ptr<ymcc::inputHost::sharedPower::Scope> t_inputHostRequestPower;
+#endif
+#ifndef YMCC_LEGACY_RETURN_OBSERVATION_CAPTURE
+#define YMCC_LEGACY_RETURN_OBSERVATION_CAPTURE
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& output)noexcept{
+    output={};output.generation=currentPowerGeneration();output.flags=ymcc::sleeppower::kKnown;
+    if(hardwareWriteAllowed())output.flags|=ymcc::sleeppower::kHardwareAllowed;
+    return ymcc::sleeppower::powerAdmitted(output);
+}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& value)noexcept{
+    return ymcc::sleeppower::powerAdmitted(value)&&value.generation==currentPowerGeneration()&&hardwareWriteAllowed();
+}
+#endif
 #include "../native/msi_owned_return_runtime.h"
 // Byte-for-byte actual gate, readback contract, restore and finish consumers.
 #include "production_restore_helpers.h"
@@ -280,6 +310,9 @@ static MsiClawCommandOutcome disconnected(DWORD error = ERROR_NO_SUCH_DEVICE) {
 }
 static void reset() {
     resetMsiReboundBoundary();
+    g_msiOwnedReturnOffEndpoint.publish({});
+    g_msiOwnedReturnOffHandoffPending=false;g_msiOwnedReturnOffRequalification={};
+    g_inputHostPrimaryThread=g_inputHostServerPipe=0;
     g_msiMode1TerminalAttempted=false;g_terminalCalls=0;g_terminalOutcome={};
     g_inputHostHello=g_inputHostPrepareMayHaveReachedHost=g_inputHostNeutralized=false;g_hidHideVisibilityJournal.active=false;
     g_count = {}; g_clockReads = 0; g_tick = 10000;g_msiTerminalReturnPending=false;
@@ -464,6 +497,11 @@ static void trackingAndReturn(Checks& c) {
             c.require(signal.matched && signal.mask == 4 && signal.sequence == 101, "ReadSignal consumes actual cached path and connected slot mask");
             maintain(15000); c.owed("first fresh exact physical window cannot discharge");
             sample(102, 16000, "xinput-any-connected"); maintain(16000); c.settled();
+            c.require(msiOwnedReturnOffEndpointAbsent(), "two qualified owned-source windows authorize the actual OFF endpoint handoff");
+            const auto connectedBeforeForeign=g_xinputConnectedMask;
+            g_xinputConnectedMask|=1u;
+            c.require(!msiOwnedReturnOffEndpointAbsent(), "another connected slot vetoes physical-only OFF handoff despite settled mode debt");
+            g_xinputConnectedMask=connectedBeforeForeign;
             maintain(17000); initial(row.second); maintain(18000);
             c.require(g_count.writes == 1 && g_count.durableDischarges == 1 && !g_msiOwnedReturnPending,
                 "completed same-episode OFF reentry cannot renew budget or discharge twice");

@@ -12,20 +12,33 @@
 #include <string>
 #include <vector>
 #include "json.hpp"
+#include "log_snapshot_state.h"
+#include "input_host_shared_power.h"
 #include "sensor_thread_mailbox.h"
 #include "sensor_device_change.h"
 #include "sleep_notification_evidence.h"
+#include "sleep_power_dispatch.h"
+static ymcc::sleeppower::Dispatch g_sleepPowerDispatch;
 #include "sensor_virtual_link_wake.h"
 #include "input_frame_submission.h"
 #include "input_host_recovery_health.h"
 using json=nlohmann::json;
 using SensorThreadRequest=ymcc::sensors::ThreadRequest;
+static constexpr UINT kSharedPowerStateMessage=WM_APP+0x53;
 enum class PowerLifecycle:uint8_t{Ready,Suspending,Suspended,Resuming};
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static std::atomic<int> g_idleSessionDisplayState{1},g_idleLegacyMonitorState{1};
 static std::atomic<bool> g_inputCaptureSensorsSuspended{false},g_sensorPowerPausePending{false},g_sensorSuspendCallbackActive{false};
 static std::atomic<bool> g_sensorWakePollActive{true},g_gyroJudgeTaskEnabled{true};
-static bool g_inputCaptureReady=true;
+static std::atomic<bool> g_inputCaptureReady{true};
+static std::atomic<bool> g_inputCaptureStop{false};
+static std::atomic<std::shared_ptr<ymcc::inputHost::sharedPower::Scope>> g_sensorActivePower;
+static ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
+static std::atomic<std::uint64_t> g_captureGeneration{7};
+struct SensorThreadOwnerStart {unsigned long long serial=0,capture=0;};
+struct SensorThreadRecoveryRequest {unsigned long long serial=0,capture=0,power=0,sequence=0;ULONGLONG deadline=0;ymcc::sensors::ThreadMailbox::Handle ticket;std::shared_ptr<ymcc::inputHost::sharedPower::Scope> publicPower;};
+static std::atomic<unsigned long long> g_sensorThreadOwnerSerial{0},g_sensorThreadRecoveryPendingSerial{0};
+static std::atomic<std::shared_ptr<const SensorThreadRecoveryRequest>> g_sensorThreadRecoveryRequest;
 static std::atomic<bool> g_inputReady{true},g_exitRequested{false},g_externalPriorityVirtualSuspended{false},g_sleepRecoveryOutputWanted{true};
 static std::atomic<UINT64> fixtureHostEpoch{41},fixturePowerGeneration{7},fixtureClock{0};
 static std::atomic<bool> fixtureGameOverrideActive{false},fixtureSelectionWork{false};
@@ -62,6 +75,8 @@ static ymcc::sleepnotifications::Evidence g_sleepNotificationEvidence;
 static std::atomic<bool> g_sensorUnsubscribeRetained{false},g_windowsSourceProbeBusy{false};
 static HANDLE g_sensorThread=nullptr,g_sensorThreadWake=nullptr,fixtureOwnerGate=nullptr;
 static HWND g_hwnd=nullptr;
+static ymcc::sensors::ThreadMailbox::Handle g_sensorThreadPowerWakePending;
+static void sleepPowerArmRedelivery(HWND){} // Inert window transport; power-wake exercises actual retry timer.
 static UINT64 g_inputCaptureSensorGeneration=10;
 static constexpr UINT32 kInputCaptureWakeSensorPollIntervalMs=10,kInputCaptureSensorPumpCheckMs=10,kInputCaptureRequestedSensorIntervalMs=100;
 static std::atomic<unsigned> fixturePolls{0},fixtureKeepalive{0},fixtureSelections{0},fixtureColdStarts{0},fixtureRevokes{0};
@@ -69,9 +84,19 @@ static std::string fixtureScenario="power";
 static std::vector<json> fixtureLogs,fixtureAllLogs;
 static void appendDomainLog(const char*,const char* event,const json& d){std::lock_guard<std::mutex> l(fixtureLogMx);auto o=d;o["event"]=event;o["fixtureThreadId"]=GetCurrentThreadId();o["fixtureScenario"]=fixtureScenario;fixtureLogs.push_back(o);fixtureAllLogs.push_back(o);}
 static void appendNativeLifecycleLog(const char* e,const json& d){appendDomainLog("native",e,d);}
+static bool domainLogEnabled(const char*){return false;} // Inactive Native logging gates;logging consumers cover real lane selection.
 static void writeLog(const char*,const std::string& text){appendDomainLog("test","writeLog",{{"text",text}});}
 static void inputCaptureAppend(const json&){}
 static UINT64 currentPowerGeneration(){return fixturePowerGeneration.load();}
+static auto& g_powerGeneration=fixturePowerGeneration;
+namespace winrt {struct hresult_error:std::exception{struct Code{HRESULT value;};Code code()const{return {E_FAIL};}};}
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* output,uint32_t bytes){
+ if(!output||bytes<sizeof(*output)||g_exitRequested.load())return 0;
+ ymcc::sleeppower::SharedPowerV1 power;power.generation=currentPowerGeneration();power.publicationRevision=1;
+ power.observedNotificationSequence=g_sleepPowerDispatch.observedSequence();power.phase=static_cast<uint32_t>(g_powerLifecycle.load());
+ power.flags=ymcc::sleeppower::kKnown|(power.phase==0?ymcc::sleeppower::kHardwareAllowed:0u)|
+  (g_sleepPowerDispatch.pendingSuspend()?ymcc::sleeppower::kNotificationPending:0u);*output=power;return 1;
+}
 static const char* powerLifecycleName(PowerLifecycle p){return p==PowerLifecycle::Ready?"ready":p==PowerLifecycle::Resuming?"resuming":"suspended";}
 enum class YmccFamily{Other,LenovoLegionGo,OneXPlayer,Rog};
 static struct{YmccFamily family=YmccFamily::Other;bool resolved=true;}g_machineIdentity;
@@ -140,6 +165,10 @@ static void inputCaptureSensorWakePollStep(){++fixturePolls;}
 static void inputCaptureSensorHighMagKeepaliveStep(){++fixtureKeepalive;}
 static void inputCaptureStartWinRtSensorsImpl(){++fixtureColdStarts;}
 #define GetTickCount64 fixtureSensorTick
+static bool inputCaptureSensorPowerWorkWanted();
+static bool inputCaptureSensorPowerAdmitted(const ymcc::sleeppower::SharedPowerV1&);
+static bool inputCaptureSensorPowerMayRun();
+// PRODUCTION_POWER_DECLARATIONS
 // PRODUCTION_FUNCTIONS
 #undef GetTickCount64
 static json checks=json::array();
@@ -229,6 +258,7 @@ static void prepareVirtual(bool enabled=true){
  g_inputReady=true;g_exitRequested=false;g_externalPriorityVirtualSuspended=false;g_sleepRecoveryOutputWanted=true;g_inputCaptureReady=true;
  g_machineIdentity.family=YmccFamily::Rog;g_machineIdentity.resolved=true;resetBusy();g_gyroJudgeTaskEnabled=false;
  g_sensorThreadMailbox.close();g_sensorThreadMailbox.open();g_windowsSensorDeviceChange.reset();g_sensorUnsubscribeRetained=false;
+  g_sensorActivePower.store(ymcc::inputHost::sharedPower::Scope::create(&readSharedSystemPower,g_sharedPowerRevocations,true,ymcc::inputHost::sharedPower::Use::Lifecycle));
  g_inputCaptureSensorGeneration+=10;g_inputCaptureSink=std::make_shared<FixtureSink>();g_inputCaptureSink->SetBindingGeneration(g_inputCaptureSensorGeneration);
  g_gyroSensor.reset();g_accelSensor.reset();g_gyroReadingChangedSubscribed=g_accelReadingChangedSubscribed=true;
  g_gyroReadingChangedToken=g_accelReadingChangedToken=1;

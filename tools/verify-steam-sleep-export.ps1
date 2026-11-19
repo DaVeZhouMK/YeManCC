@@ -4,12 +4,18 @@ param(
   [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,
   [Parameter(Mandatory=$true)][string]$NativeExe,
   [string]$Zip = '',
-  [string]$ReceiptPath = ''
+  [string]$ReceiptPath = '',
+  [string]$SteamGuardSuccessorReceipt = ''
 )
 $ErrorActionPreference = 'Stop'
+if($SteamGuardSuccessorReceipt -and -not $ProjectRoot){throw 'EXPORT_GUARD_SUCCESSOR_EXPLICIT_PRODUCT_REQUIRED'}
 if (-not $ProjectRoot) { $ProjectRoot = Split-Path -Parent $PSScriptRoot }
 if (-not $WorkspaceRoot) { $WorkspaceRoot = [IO.Path]::GetFullPath((Join-Path $ProjectRoot '..\..')) }
-. (Join-Path $PSScriptRoot 'release-export-identity.ps1')
+if($SteamGuardSuccessorReceipt){
+  . (Join-Path $PSScriptRoot 'release-export-identity.ps1') -SteamGuardSuccessorReceipt $SteamGuardSuccessorReceipt -GuardProductRoot $ProjectRoot -GuardWorkspaceRoot $WorkspaceRoot
+}else{
+  . (Join-Path $PSScriptRoot 'release-export-identity.ps1')
+}
 $build = Assert-ExportBuildIdentity $ProjectRoot $WorkspaceRoot
 $receipt = if ($Zip) { Assert-SteamSleepArchiveExport $ProjectRoot $Zip $NativeExe }
            else { Assert-SteamSleepNativeExport $ProjectRoot $NativeExe }
@@ -20,6 +26,10 @@ Assert-SteamSleepExportReceipt $build.steamSleepRecovery $receipt
 $receipt['buildId'] = $build.buildId
 $receipt['sourceTreeSha256'] = $build.sourceTreeSha256
 $receipt['verification'] = 'source-build-and-artifact-identity'
+if($exportGuardSuccessorContext){
+  Assert-ExportVerifierSuccessor $ProjectRoot $WorkspaceRoot $build.verifierSuccessor -CheckBinding
+  $receipt['verifierSuccessor']=$exportGuardSuccessorContext.binding
+}
 $json = $receipt | ConvertTo-Json -Depth 6
 if ($ReceiptPath) {
   $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ReceiptPath))

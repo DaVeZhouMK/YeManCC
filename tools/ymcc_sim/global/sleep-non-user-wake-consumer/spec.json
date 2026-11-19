@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "originalScript": {
     "path": "tools/sleep_non_user_wake_selftest.py",
-    "sha256": "8b62cd63b17dea9298cd98f0907c0a91a6617b53d89063347f804a075d427c8f",
+    "sha256": "da894448c12f524c942b4c2ea5cca4d63826b7aa979360e375feb5400e28dbb8",
     "originalBeforeCompatibilitySha256": "0b81a0e5cdb4106e53e3a076e603e9a9104c1d4dee651e899fdd5b95ef632ddc",
     "reviewedMaintenance": true,
-    "priorReviewedSha256": "c2bcd193a515586874930b48a9b5d9d829d0df8019ab585369e48dc893e88396"
+    "priorReviewedSha256": "1c76ff1aa7db9b5fbc39fc95683473e949989b0dab7afbf704e40002927c236e"
   },
   "originalFixtures": [
     {
@@ -25,6 +25,12 @@
     }
   ],
   "productSources": [
+    "tools/fixtures/sleep_non_user_wake/resume_sender_join.py",
+    "tools/fixtures/sleep_non_user_wake/resume_sender_join.inc",
+    "native/sleep_power_state.h",
+    "native/sleep_power_observation.h",
+    "tools/fixtures/sleep_non_user_wake/sleep_request_notifications.py",
+    "tools/fixtures/sleep_non_user_wake/sleep_request_notifications.cpp.in",
     "tools/sleep_non_user_wake_selftest.py",
     "tools/fixtures/sleep_non_user_wake/amd_usb4_failure.json",
     "tools/fixtures/sleep_non_user_wake/intel_usb4_failure.json",
@@ -36,7 +42,52 @@
     "native/sleep_request_fallback.h",
     "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
     "tools/fixtures/sleep_non_user_wake/g3e_usb4_delayed_entry.json",
-    "native/sleep_notification_evidence.h"
+    "native/sleep_notification_evidence.h",
+    "native/sleep_power_dispatch.h",
+    "native/sleep_power_diagnostics.h",
+    "tools/fixtures/sleep_non_user_wake/shared_power_diagnostics.cpp",
+    "tools/fixtures/sleep_non_user_wake/SHARED-POWER-DIAGNOSTICS.md",
+    "native/msi_native_foreground_isolation_runtime.h",
+    "tools/fixtures/sleep_non_user_wake/win5_mouse_entry_failure.json",
+    "native/sleep_timeout_native.inc",
+    "native/sleep_kernel_cycle.h",
+    "native/sleep_kernel_cycle_native.inc",
+    "native/sleep_timeout_policy.h",
+    "native/sleep_resume_classification_native.inc",
+    "tools/fixtures/sleep_non_user_wake/resume_classification.py",
+    "tools/fixtures/sleep_non_user_wake/resume_classification_cases.inc",
+    "tools/fixtures/sleep_non_user_wake/resume_legacy_binding.py",
+    "tools/fixtures/sleep_non_user_wake/resume_sender_join.cmd.in",
+    "tools/fixtures/sleep_non_user_wake/timeout_observation_ports.inc",
+    "tools/fixtures/sleep_non_user_wake/timeout_observation_cases.inc",
+    "tools/sleep_residency_evidence_selftest.cpp",
+    "tools/fixtures/sleep_residency/sleep_timeout_native_harness.inc",
+    "tools/sleep_residency_evidence_selftest.py",
+    "native/sleep_residency_evidence.h",
+    "native/wake_game_recovery.h",
+    "native/sleep_cancel_ready.h",
+    "tools/fixtures/sleep_non_user_wake/broadcast_consumers.py",
+    "native/log_frequency_policy.h",
+    "native/sleep_fact_log_record.h",
+    "native/sensor_thread_mailbox.h",
+    "native/touch_feedback_lease.h",
+    "native/touch_haptic_dispatch.h",
+    "native/sleep_static_wake_schedule_native.inc",
+    "native/battery_charge_client.h",
+    "native/battery_managed_runtime.h",
+    "native/sleep_static_wake_schedule.h",
+    "tools/fixtures/sleep_residency/static_wake_schedule_admission.py",
+    "tools/fixtures/sleep_residency/static_wake_schedule_harness.inc",
+    "tools/ymcc_sim/global/sleep-fixtures/residency-entry.mjs",
+    "tools/fixtures/sleep_residency/static_wake_pool_harness.inc",
+    "tools/fixtures/sleep_residency/static_wake_pool_exit_harness.inc",
+    "tools/fixtures/sleep_residency/static_wake_pool_crt_harness.inc",
+    "native/input_host_diagnostic_dispatch.h",
+    "native/input_host_diagnostic_runtime.h",
+    "native/sleep_wake_admission.h",
+    "native/input_host_shared_power.h",
+    "native/sleep_power_revocation.h",
+    "native/sleep_abnormal_resleep.h"
   ],
   "sharedLeaves": [
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
@@ -49,13 +100,19 @@
     "tools/ymcc_sim/global/host-process.ps1",
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
-    "tools/sleep_game_pause_selftest.py",
     "native/sleep_request_fallback.h",
     "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
     "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
     "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
     "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
-    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.test.mjs"
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.test.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-review.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/shared-launch-review.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/shared-launch-review.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-successor.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-successor.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/public-wake-source-review.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/public-wake-source-review.mjs"
   ],
   "privateFault": {
     "path": "native/sleep_retry_budget.h",
@@ -65,7 +122,7 @@
     "scope": "Private production budget wrongly never exhausts; original S3 refusal/budget assertions must fail only after successful compile and program start."
   },
   "ioReview": {
-    "actualFunctions": 31,
+    "actualFunctions": 37,
     "sourceOnlySystemSleepFunction": "sgRequestSystemSleep",
     "realSystemSleepFunctionActuallyExecuted": false,
     "systemSleepPort": "original counter requestCount with requestAccepted, never SetSuspendState",
@@ -102,7 +159,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
-      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+      "sha256": "f11ebfeb4529e76485377a364cf811fb2107217426fee6978636dbe1c14b7f5d"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
@@ -114,26 +171,30 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
-      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+      "sha256": "2a168ba4b9861e25deb0fb60505f2712368dd6d82ed2229bad0fe281cf0adc8c"
     },
     {
       "path": "tools/ymcc_sim/global/host-process.ps1",
-      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+      "sha256": "7e714655f8a8ab2b7537165daff816a22238ddea250abe04a516718520cb0102"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
-      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+      "sha256": "c77d3f0e999646bd5552950a4a48a754875d80f2e2f0d480b2bce6bb0f5b4630"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
-      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+      "sha256": "539671496ff2d859bcb02a90bbdff6abbed15355c6cbc883a26d606bf14b7313"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-review.mjs",
+      "sha256": "773c375eb93aeb56f9719d14e3259bd8ad6ffdd3449ed09a82811ef528470569"
     }
   ],
   "reviewedSharedLeafMaintenance": {
     "schemaVersion": 2,
     "kind": "exact-current-source-reverse-deltas",
     "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
-    "sha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267",
+    "sha256": "8d0f13acbf2068205b7b1f93b9abd088166cc799dedd97c1edf39ffa2fe9f417",
     "consumedExport": "evidencePath",
     "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
     "compilerAndEnvironmentTextUnchanged": true,
@@ -142,10 +203,11 @@
   },
   "sourceCompatibilityReview": {
     "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
-    "sha256": "2a66abc9acd7c555ffc2aaad9d8fcd69169fc73d4406bdb3305d07a41d28a267",
+    "sha256": "7ba80af5d2072151899aa59eb1edcc8cc79218df87d0963978a63494c8a81780",
     "oldIdentitiesRetained": true,
     "fullReverseDeltaRequired": true,
-    "sourceApproval": false
+    "sourceApproval": false,
+    "priorManifestSha256": "2b46d8589e827371d02f2c0ebf102c6741de3356f8d6323f18c21e124bd66ef5"
   },
   "priorReviewedSharedLeafIdentities": [
     {
@@ -225,12 +287,17 @@
       "path": "tools/fixtures/sleep_non_user_wake/g3e_usb4_delayed_entry.json",
       "sha256": "fd3a8d53f67fec4457ec9738dfd48ec539087e5e55eddfc2882d03e04654e194",
       "events": 7
+    },
+    {
+      "path": "tools/fixtures/sleep_non_user_wake/win5_mouse_entry_failure.json",
+      "sha256": "c2c01bb69b3b661128ee3c506ec4424b9fe95e7c508125ec4852072fa8df4a00",
+      "events": 4
     }
   ],
   "expectedProfiles": {
     "s3": 4,
     "capsUnknown": 4,
-    "main": 76
+    "main": 98
   },
   "priorNotificationDiagnosticReviews": [
     {
@@ -289,5 +356,533 @@
       }
     ],
     "originalGroupsAndNegativesPreserved": true
+  },
+  "suspendAdmissionFault": {
+    "path": "native/main.cpp",
+    "before": "if(admission.privateIsolationRequired())msiNativeForegroundPowerEvent(PBT_APMSUSPEND);",
+    "after": "if(admission.privateIsolationRequired() || admission.kind==SgSuspendAdmissionKind::Duplicate)msiNativeForegroundPowerEvent(PBT_APMSUSPEND);",
+    "expectedAssertion": "isolationSuspendCalls == beforeDuplicate",
+    "scope": "Restore private relatch on the actual shared duplicate decision; execute only the original consumer added admission group after compile."
+  },
+  "suspendAdmissionCoverage": {
+    "originalId": "sleep.non-user-wake-consumer",
+    "productionConsumer": "actual sgAdmitSuspendNotification and complete PBT_APMSUSPEND body; early hook ordering statically bound",
+    "realSleep": false,
+    "realPrivateDeviceIo": false,
+    "negative": "private duplicate-side-effect restored",
+    "newPermanentId": false,
+    "originalProfilesAndReplayBytesPreserved": true,
+    "newSharedDispatchGroups": 5,
+    "newSharedReadyGroups": 1,
+    "realWindowQueueOrderProven": false
+  },
+  "interruptedEntryCoverage": {
+    "actualNewFunctions": 6,
+    "groups": 21,
+    "fixtureRecords": 4,
+    "noNewId": true,
+    "realSleep": false
+  },
+  "resumeClassificationCoverage": {
+    "originalId": "sleep.non-user-wake-consumer",
+    "selector": "--resume-classification-only",
+    "s0Cases": 33,
+    "s3Cases": 1,
+    "unknownCases": 1,
+    "actualCommon": true,
+    "actualWorkerArms": 3,
+    "originalLegacyParentExecuted": false,
+    "newPermanentId": false,
+    "realSleep": false,
+    "continuationSelector": "--resume-classification-edge-only",
+    "continuationCases": 2,
+    "lifetimeSelector": "--resume-classification-lifetime-only",
+    "lifetimeCases": 4
+  },
+  "sharedPowerPublicationCoverage": {
+    "source": "native/main.cpp/publishSharedPowerLifecycle",
+    "actualBodyCompiled": true,
+    "externalEnds": [
+      "battery notification",
+      "window post/redelivery"
+    ],
+    "projectedConsumersExecuted": false,
+    "scope": "legacy and original classification selectors; joined sender remains separately scoped",
+    "fullParentAcceptedByMaintenance": false
+  },
+  "resumeSenderJoinCoverage": {
+    "selector": "--resume-classification-sender-only",
+    "originalCases": 8,
+    "choicesAuthority": "tools/fixtures/sleep_non_user_wake/resume_sender_join.inc/run declarations",
+    "originalCaseAssertionsPreserved": true,
+    "actualSenderAndReaderBodies": true,
+    "compileRecipeTemplate": "tools/fixtures/sleep_non_user_wake/resume_sender_join.cmd.in",
+    "compileTimeoutMs": 60000,
+    "originalCompileTimeoutMs": 45000,
+    "nativeTimeoutMs": 5000,
+    "workerStageTimeoutMs": 120000,
+    "projectedConsumersExecuted": false,
+    "ordinaryDefaultOrMinimumExpanded": false
+  },
+  "timeoutObservationMetadataMaintenance": {
+    "date": "2026-11-14",
+    "predecessorSpec": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/sleep-non-user-wake-consumer/spec.json",
+      "bytes": 17833,
+      "sha256": "d3d6b88759ec71eca0a0e292d4b4703f5705b5ebf87b0f4e2d832a05dfb72f5d"
+    },
+    "predecessorReview": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+      "bytes": 988235,
+      "sha256": "b20fc70b6c4f63023c6ff1db5381c94fe1c34e793ba13fdaea393c1ce0b455e4"
+    },
+    "currentOriginalScriptSha256": "7e9a37ea757c5653f7a67e187a8900518203df3619f17c331e0bb1bccd4d176a",
+    "retainedJoinedCases": 8,
+    "addedJoinedCases": 31,
+    "totalJoinedCases": 39,
+    "addedProductSources": [
+      "tools/fixtures/sleep_non_user_wake/timeout_observation_ports.inc",
+      "tools/fixtures/sleep_non_user_wake/timeout_observation_cases.inc",
+      "tools/sleep_residency_evidence_selftest.cpp",
+      "tools/fixtures/sleep_residency/sleep_timeout_native_harness.inc",
+      "tools/sleep_residency_evidence_selftest.py",
+      "native/sleep_residency_evidence.h"
+    ],
+    "companionInputs": [
+      {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/Win5Sleep1946-20261111/FastRetryRepair/TimeoutRepair-20261114/candidate/tools/sleep_residency_evidence_selftest.cpp",
+        "bytes": 13126,
+        "sha256": "3d665f08adae08b57c7203fdeaec893b19f52b2dde24316971b58e704e8178f9",
+        "repositoryPath": "tools/sleep_residency_evidence_selftest.cpp"
+      },
+      {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/Win5Sleep1946-20261111/FastRetryRepair/TimeoutRepair-20261114/candidate/tools/fixtures/sleep_residency/sleep_timeout_native_harness.inc",
+        "bytes": 35298,
+        "sha256": "1c79b273004d8885652ef240da1c887ab59ead8f0a89afaf6011c8d89582820d",
+        "repositoryPath": "tools/fixtures/sleep_residency/sleep_timeout_native_harness.inc"
+      },
+      {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/Win5Sleep1946-20261111/FastRetryRepair/TimeoutRepair-20261114/candidate/tools/sleep_residency_evidence_selftest.py",
+        "bytes": 40336,
+        "sha256": "8641fab3dca8c625271bb37d9cce67bb6b6567d8ec5340492c808277ad4a1691",
+        "repositoryPath": "tools/sleep_residency_evidence_selftest.py"
+      }
+    ],
+    "newCanonicalId": false,
+    "minimumExpanded": false,
+    "businessTestsExecuted": 0
+  },
+  "original107MessageMaintenance": {
+    "date": "2026-11-14",
+    "scope": "Native original107 late callback/GUI fences; default fixture supplies real Native timestamped ingress and unchanged original assertions",
+    "newDefaultScenarios": 0,
+    "newIdOrMinimum": false,
+    "privateDirectedActualScenarios": 18,
+    "privateDirectedActualAssertions": 65,
+    "defaultParentExecutedThisSuccessor": false
+  },
+  "publicReceiptOriginMaintenance": {
+    "sameCanonicalId": true,
+    "noMinimumChange": true,
+    "actualReceiptPassedToBothQueryAndSuspend": true,
+    "originalClaimedReceiptReused": true,
+    "predecessorCasesNotReplayedForMetadata": true,
+    "settledRetirementPreservesClosedFence": true
+  },
+  "consumerClassificationMetadataMaintenance": {
+    "localDate": "2026-11-14",
+    "predecessorSpec": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/sleep-non-user-wake-consumer/spec.json",
+      "bytes": 21486,
+      "sha256": "91d941ea5a8cc0f23c70dc7d753bc7a25644f9129ab661fe4043f54a8f3d5dde"
+    },
+    "predecessorReview": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+      "bytes": 1043360,
+      "sha256": "74e7d9080307fe43f763bb34ec2e22f83cb8a4ff11a3c5e69d5c75410e737999"
+    },
+    "retainedJoinedCases": 58,
+    "addedJoinedCases": 10,
+    "totalJoinedCases": 68,
+    "currentOriginalScriptSha256": "da894448c12f524c942b4c2ea5cca4d63826b7aa979360e375feb5400e28dbb8",
+    "addedProductSources": [],
+    "sourceApproval": false,
+    "newCanonicalId": false,
+    "minimumExpanded": false,
+    "businessTestsExecuted": 0
+  },
+  "lateEntryObservationMetadataMaintenance": {
+    "localDate": "2026-11-14",
+    "canonicalId": "sleep.non-user-wake-consumer",
+    "predecessorReviewSha256": "47bf58a056ddca399b1f5cd8a0176e7ae70d308ef3650be9153e446499deecfb",
+    "retainedJoinedCases": 68,
+    "totalJoinedCases": 93,
+    "addedJoinedCases": 25,
+    "historicalBeforeSha256Preserved": true,
+    "sourceApproval": false,
+    "newCanonicalId": false,
+    "minimumExpanded": false,
+    "fullDefaultParentPassed": false,
+    "scope": "late original/display/507 observation and actual worker/window ownership handoff",
+    "evidence": "Testing/YMCC/Evidence/Win5Sleep1946-20261111/FastRetryRepair/ROG-193736-20261114/Repair"
+  },
+  "nonEntryAdmissionMetadataMaintenance": {
+    "localDate": "2026-11-14",
+    "canonicalId": "sleep.non-user-wake-consumer",
+    "predecessorReviewSha256": "fb9eb31939d0a43e39a2901be893de5c3714e3d7024a74afca794047b26981b2",
+    "retainedJoinedCases": 93,
+    "totalJoinedCases": 99,
+    "addedJoinedCases": 6,
+    "historicalBeforeSha256Preserved": true,
+    "sourceApproval": false,
+    "newCanonicalId": false,
+    "minimumExpanded": false,
+    "fullDefaultParentPassed": false,
+    "scope": "timeout and unexpected-wake retry admission serialized with final worker cleanup; current original Native observation and shared existing event delivery",
+    "evidence": "Testing/YMCC/Evidence/Win5Sleep1946-20261111/FastRetryRepair/ROG-193736-20261114/Repair/RetryAdmission"
+  },
+  "unexpectedFinalSuccessMetadataMaintenance": {
+    "localDate": "2026-11-14",
+    "canonicalId": "sleep.non-user-wake-consumer",
+    "predecessorReviewSha256": "7ce59cabab6b9084868d4e654509c25428e685db32d34ffc33af056f34db645b",
+    "retainedJoinedCases": 99,
+    "totalJoinedCases": 103,
+    "addedJoinedCases": 4,
+    "historicalBeforeSha256Preserved": true,
+    "sourceApproval": false,
+    "newCanonicalId": false,
+    "minimumExpanded": false,
+    "fullDefaultParentPassed": false,
+    "scope": "Unexpected-wake new Windows success cancels queued/final sender and retains the first cancellation witness through deferred Native observation",
+    "evidence": "Testing/YMCC/Evidence/Win5Sleep1946-20261111/FastRetryRepair/ROG-193736-20261114/Repair/RetryAdmission/FinalDispatch"
+  },
+  "retryPreparationPublicObservation": {
+    "sourceApproval": false,
+    "existingIdOnly": true,
+    "selectedArgument": "--resume-sender-case preparation-public-observation",
+    "matrixBoundaries": 36,
+    "normalOriginalSelectorsReused": [
+      "duplicate-resume-before-retry",
+      "new-pbt-inside-sender",
+      "new-suspend-before-old-timer",
+      "consumed-suspend-before-old-timer",
+      "long-reason1-control",
+      "field-first-pid",
+      "field-second-no-pid"
+    ],
+    "actualSenderAndReader": true,
+    "noExtraPublicReads": true,
+    "suppliedObservationStackLifetimeOnly": true,
+    "publicProductHeadersWritten": false,
+    "positive": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r51.json",
+      "bytes": 2193,
+      "sha256": "c2f8bbf559636c7a42f08cf467f3d665c5a9aab8bac15bb7ec764e591cd39d1d"
+    },
+    "fullDefaultParentPassed": false
+  },
+  "failedReturnPublicObservation": {
+    "sourceApproval": false,
+    "existingIdOnly": true,
+    "selectedArgument": "--resume-sender-case return-public-observation",
+    "matrixBoundaries": 108,
+    "assertions": 1261,
+    "actualRetryAndExhaustionFunctions": true,
+    "actualReaderAndSender": true,
+    "controlledPublicSerialAndPhaseBoundaryNotFieldReproduction": true,
+    "unchangedAndMonotonicPublicationControls": true,
+    "publicProductHeadersWritten": false,
+    "positive": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r64.json",
+      "bytes": 2163,
+      "sha256": "3e113defda3505cc19a567616c7713c0567bb6e70ede42a22ad05012eec85ce2"
+    },
+    "necessaryControls": [
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r65.json",
+        "bytes": 1641,
+        "sha256": "13865ad9a2ed8127a8ad7d1f988b1921b8e87686ec4679d3842fb22f8ec3d7de"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r66.json",
+        "bytes": 1642,
+        "sha256": "4564e4c6235245e4ee8a05be166f2334c8d951b320fd158e77c96d350f854d78"
+      }
+    ],
+    "fullDefaultParentPassed": false
+  },
+  "queryFailureAdvanceObservation": {
+    "sourceApproval": false,
+    "sameOriginalId": true,
+    "selectedArguments": [
+      "--resume-sender-case retry-advance-observation",
+      "--resume-sender-case retry-advance-exhaustion-observation"
+    ],
+    "remainingRetryBoundaries": 54,
+    "remainingRetryAssertions": 685,
+    "exhaustedBoundaries": 27,
+    "exhaustedAssertions": 397,
+    "separateEpochsSameProductFunction": true,
+    "actualQueryFailureActiveBranch": true,
+    "outerFullWindowPipelineExecuted": false,
+    "actualReaderDispatchAndSender": true,
+    "existingPublicOnly": true,
+    "sharedHeaderWrites": 0,
+    "newResidentTasks": 0,
+    "positives": [
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r75.json",
+        "bytes": 2165,
+        "sha256": "92aaf0c841269d6370aae43e8ec505781f7c1fcb5e7091c308661c3f28fdaa0b"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r76.json",
+        "bytes": 2209,
+        "sha256": "020def00ca38cb6688e121c8c417257f8902e5c9db7860134d7346e61fab7af0"
+      }
+    ],
+    "necessaryControls": [
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r77.json",
+        "bytes": 1640,
+        "sha256": "e75223ff0058225241c446cd1ceed136f43245fd01d618e3cbeaf53ea462916f"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r78.json",
+        "bytes": 1639,
+        "sha256": "009e271089bfb069a19d1cbae63c220626a300bd203e272c4c7d4bb118cfffe6"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r79.json",
+        "bytes": 1642,
+        "sha256": "01634dbb1978726119a6b0260639a2e108028127857ce223335ae44575884cfe"
+      }
+    ],
+    "wholeEarlierQueuedAttemptLifetimeProven": false,
+    "defaultWholeParentPassed": false
+  },
+  "duplicateQueryOriginalDeadline": {
+    "sourceApproval": false,
+    "sameOriginalId": true,
+    "selectedArgument": "--resume-sender-case duplicate-query-deadline",
+    "deadlineBoundaries": 30,
+    "publicManualCancellationControls": 6,
+    "assertions": 568,
+    "actualQueryFailureActiveBranch": true,
+    "outerFullWindowPipelineExecuted": false,
+    "firstAndSecondRealFailurePreserved": true,
+    "originalQuickExpiryPreserved": true,
+    "revocationBeforeDuplicateGate": true,
+    "originalAdvance81ReusedSameExe": true,
+    "sharedHeaderWrites": 0,
+    "newResidentTasks": 0,
+    "positive": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r84.json",
+      "bytes": 2157,
+      "sha256": "d069ca47000195b5e21e91efc25da916c889e611378d626341b3075c9d35843c"
+    },
+    "necessaryControl": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r85.json",
+      "bytes": 1638,
+      "sha256": "8316769da728705fc0051be1ab602048914223d106d815ca301ce62ab2c8c235"
+    },
+    "defaultWholeParentPassed": false
+  },
+  "retryTimerFailureOwnership": {
+    "sourceApproval": false,
+    "sameOriginalId": true,
+    "selectedArgument": "--resume-sender-case retry-timer-failure",
+    "boundaries": 108,
+    "assertions": 1383,
+    "threeExistingTimerSites": true,
+    "existingRecoveryAndOriginalScope": true,
+    "actualSetTimerFailurePortOnly": true,
+    "realWindowsTimerResourceExhaustionProven": false,
+    "callerYieldForwardsActualFinishScope": true,
+    "sharedHeaderWrites": 0,
+    "newResidentTasks": 0,
+    "positive": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r90.json",
+      "bytes": 2146,
+      "sha256": "e25f64ec28699c9fd8008e79bb4e7329635df24fd8ee718ff2a05b103d4da1ff"
+    },
+    "necessaryControls": [
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r91.json",
+        "bytes": 1629,
+        "sha256": "4ebcde9824e5bba7b4da6ea9e80fd540227105e7918da0b40e498ecfc3536f2c"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Win5Sleep1946-20261111\\FastRetryRepair\\ROG-193736-20261114\\Repair\\RetryAdmission\\FinalDispatch\\NewEntryPreDispatch-20261115\\NonButtonEntry\\CleanupEntry\\OrdinaryAbort\\JOINED-CLOSING-r92.json",
+        "bytes": 1629,
+        "sha256": "b541770d6e34a3f25f6028ee73980c9894a5b0ea2effeac3142f417a34e86285"
+      }
+    ],
+    "defaultWholeParentPassed": false
+  },
+  "sharedLaunchCompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/shared-launch-review.json",
+    "sha256": "d5fc8f4cfc42ca1cabfdbecbb28ad381d3ac88635ec879303a3efc9e7a530d90"
+  },
+  "currentSourceSuccessorReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-successor.json",
+    "sha256": "2025ede45d64b472948fe95c673519f1edcd92e8b90555a449cb981c5bc5e0f1"
+  },
+  "publicWakeSourceReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/public-wake-source-review.json",
+    "sha256": "ed93828542acf6e2bd215ecfe27b67f139148898cbbf23981042798cfabdaca9",
+    "inputSuccessor": {
+      "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/public-wake-input-successor.json",
+      "sha256": "a369cd94329fcad118a82460c8fba480d15bde451f1f54a37b552bb86958f27a"
+    },
+    "inputContinuation": {
+      "schemaVersion": 1,
+      "previousInputSha256": "a369cd94329fcad118a82460c8fba480d15bde451f1f54a37b552bb86958f27a",
+      "sourceApproval": false,
+      "defaultParentApprovalRenewed": false,
+      "deltas": [
+        {
+          "path": "native/wake_game_recovery.h",
+          "beforeSha256": "9a67ae4a967de9bb5b8afc5103332fc2b8991ba20e40a1d6d852996d19a9de9d",
+          "afterSha256": "85230fdb8b71bc885204621bc78bfa044ee84611d80e4b3bcb74ef8bd404e891",
+          "edits": [
+            {
+              "beforeOffset": 1036,
+              "afterOffset": 1036,
+              "beforeBase64": "",
+              "afterBase64": "ICAgIHltY2M6OnNsZWVwcG93ZXI6OlNoYXJlZFBvd2VyVjEgZm9jdXNQb3dlcjsK"
+            },
+            {
+              "beforeOffset": 20822,
+              "afterOffset": 20870,
+              "beforeBase64": "",
+              "afterBase64": "ICAgIGNvbnN0IGF1dG8gY2FwdHVyZUZvY3VzUG93ZXIgPSBbZ2VuZXJhdGlvbl0gewogICAgICAgIHltY2M6OnNsZWVwcG93ZXI6OlNoYXJlZFBvd2VyVjEgcG93ZXI7CiAgICAgICAgaWYgKCF5bWNjOjpzbGVlcHBvd2VyOjpjYXB0dXJlUG93ZXJPYnNlcnZhdGlvbigmcmVhZFNoYXJlZFN5c3RlbVBvd2VyLCBwb3dlcikgfHwKICAgICAgICAgICAgcG93ZXIuZ2VuZXJhdGlvbiAhPSBnZW5lcmF0aW9uKSByZXR1cm4geW1jYzo6c2xlZXBwb3dlcjo6U2hhcmVkUG93ZXJWMXt9OwogICAgICAgIHJldHVybiBwb3dlcjsKICAgIH07Cg=="
+            },
+            {
+              "beforeOffset": 21461,
+              "afterOffset": 21810,
+              "beforeBase64": "",
+              "afterBase64": "ICAgICAgICBiYXRjaC5mb2N1c1Bvd2VyID0gY2FwdHVyZUZvY3VzUG93ZXIoKTsK"
+            },
+            {
+              "beforeOffset": 21980,
+              "afterOffset": 22377,
+              "beforeBase64": "",
+              "afterBase64": "ICAgIGdfc2dXYWtlUmVjb3ZlcnkuZm9jdXNQb3dlciA9IGNhcHR1cmVGb2N1c1Bvd2VyKCk7Cg=="
+            },
+            {
+              "beforeOffset": 43112,
+              "afterOffset": 43564,
+              "beforeBase64": "ICAgICAgICAgICAgICAgICAgICBpZihnX3NnV2FrZVJlY292ZXJ5LmZvY3VzT25Db21wbGV0ZSYmIWUuY2FuY2VsZWRMZWFzZSkgZm9jdXNTaW5nbGVSZXN1bWVkR2FtZSh7ZS5waWR9LCBlLmNyZWF0ZWQsIGdlbmVyYXRpb24pOwo=",
+              "afterBase64": "ICAgICAgICAgICAgICAgICAgICBpZihnX3NnV2FrZVJlY292ZXJ5LmZvY3VzT25Db21wbGV0ZSYmIWUuY2FuY2VsZWRMZWFzZSYmCiAgICAgICAgICAgICAgICAgICAgICAgeW1jYzo6c2xlZXBwb3dlcjo6cG93ZXJPYnNlcnZhdGlvbktub3duKGdfc2dXYWtlUmVjb3ZlcnkuZm9jdXNQb3dlcikpCiAgICAgICAgICAgICAgICAgICAgICAgIGZvY3VzU2luZ2xlUmVzdW1lZEdhbWUoe2UucGlkfSwgZS5jcmVhdGVkLCBnX3NnV2FrZVJlY292ZXJ5LmZvY3VzUG93ZXIpOwo="
+            }
+          ]
+        },
+        {
+          "path": "native/sleep_static_wake_schedule_native.inc",
+          "beforeSha256": "54fc8f8857b150dbead4bbcd19a50853e29ee1c2ede12f82bdc05e997a9d7d56",
+          "afterSha256": "fff2d683f25cf7551ccf42d4bd106da3ea8fcc45462ecc2f6ba4bc3f28dc1d8b",
+          "edits": [
+            {
+              "beforeOffset": 41,
+              "afterOffset": 41,
+              "beforeBase64": "",
+              "afterBase64": "I2luY2x1ZGUgPG11dGV4Pg0K"
+            },
+            {
+              "beforeOffset": 605,
+              "afterOffset": 623,
+              "beforeBase64": "",
+              "afterBase64": "c3RydWN0IFNnU3RhdGljU2NhbkFybU1lc3NhZ2Ugew0KICAgIExQQVJBTSB0b2tlbj0wOw0KICAgIFdQQVJBTSBjYXVzZT0wOw0KICAgIFVMT05HTE9ORyByZXZpc2lvbj0wOw0KICAgIHltY2M6OnNsZWVwcG93ZXI6OlNoYXJlZFBvd2VyVjEgcG93ZXI7DQp9Ow0Kc3RhdGljIHN0ZDo6bXV0ZXggZ19zZ1N0YXRpY1NjYW5Bcm1NdXRleDsNCnN0YXRpYyBTZ1N0YXRpY1NjYW5Bcm1NZXNzYWdlIGdfc2dTdGF0aWNTY2FuUXVldWVkQXJtOw0Kc3RhdGljIExQQVJBTSBnX3NnU3RhdGljU2NhbkFybVRva2VuPTA7DQo="
+            },
+            {
+              "beforeOffset": 1498,
+              "afterOffset": 1806,
+              "beforeBase64": "",
+              "afterBase64": "c3RhdGljIHZvaWQgc2dQb3N0U3RhdGljU2NhbkFybShXUEFSQU0gY2F1c2UpIHsNCiAgICBjb25zdCBIV05EIHdpbmRvdz1nX2h3bmQ7DQogICAgY29uc3QgYXV0byByZXZpc2lvbj1nX3NnU3RhdGljU2NhblJldmlzaW9uLmxvYWQoc3RkOjptZW1vcnlfb3JkZXJfYWNxdWlyZSk7DQogICAgeW1jYzo6c2xlZXBwb3dlcjo6U2hhcmVkUG93ZXJWMSBwb3dlcjsNCiAgICBpZighd2luZG93fHxnX3NnU3RhdGljU2NhblByZWZlcmVuY2UubG9hZChzdGQ6Om1lbW9yeV9vcmRlcl9hY3F1aXJlKSE9MXx8IWNhcHR1cmVTaGFyZWRQb3dlckxpZmVjeWNsZShwb3dlcikpcmV0dXJuOw0KICAgIHN0ZDo6bG9ja19ndWFyZCBsb2NrKGdfc2dTdGF0aWNTY2FuQXJtTXV0ZXgpOw0KICAgIGlmKGdfc2dTdGF0aWNTY2FuUmV2aXNpb24ubG9hZChzdGQ6Om1lbW9yeV9vcmRlcl9hY3F1aXJlKSE9cmV2aXNpb258fA0KICAgICAgIGdfc2dTdGF0aWNTY2FuUHJlZmVyZW5jZS5sb2FkKHN0ZDo6bWVtb3J5X29yZGVyX2FjcXVpcmUpIT0xfHwhc2hhcmVkUG93ZXJMaWZlY3ljbGVDdXJyZW50KHBvd2VyKXx8DQogICAgICAgZ19zZ1N0YXRpY1NjYW5Bcm1Ub2tlbj09KHN0ZDo6bnVtZXJpY19saW1pdHM8TFBBUkFNPjo6bWF4KSgpKXJldHVybjsNCiAgICBjb25zdCBhdXRvJiBxdWV1ZWQ9Z19zZ1N0YXRpY1NjYW5RdWV1ZWRBcm07DQogICAgLy8gS2VlcCB0aGUgZmlyc3QgdmFsaWQgc3RhcnQgZm9yIHRoaXMgcmV2aXNpb24uIEEgbmV3IHB1YmxpYyBzY29wZSBjYW4NCiAgICAvLyByZXBsYWNlIGEgcmV0aXJlZCBzdGFydCB3aXRob3V0IGxldHRpbmcgaXRzIG9sZCBtZXNzYWdlIHRha2UgdGhlIHNsb3QuDQogICAgaWYocXVldWVkLnRva2VuJiZxdWV1ZWQucmV2aXNpb249PXJldmlzaW9uJiZ5bWNjOjpzbGVlcHBvd2VyOjpzYW1lUG93ZXJSZXZvY2F0aW9uKHF1ZXVlZC5wb3dlcixwb3dlcikpcmV0dXJuOw0KICAgIGNvbnN0IGF1dG8gdG9rZW49KytnX3NnU3RhdGljU2NhbkFybVRva2VuOw0KICAgIGlmKFBvc3RNZXNzYWdlVyh3aW5kb3csV01fU0dfU1RBVElDX1NDQU4sY2F1c2UsdG9rZW4pKWdfc2dTdGF0aWNTY2FuUXVldWVkQXJtPXt0b2tlbixjYXVzZSxyZXZpc2lvbixwb3dlcn07DQp9DQo="
+            },
+            {
+              "beforeOffset": 1548,
+              "afterOffset": 2977,
+              "beforeBase64": "ICAgIGlmKGdfaHduZCYmIWdfZXhpdFJlcXVlc3RlZC5sb2FkKHN0ZDo6bWVtb3J5X29yZGVyX2FjcXVpcmUpKQ0KICAgICAgICBQb3N0TWVzc2FnZVcoZ19od25kLFdNX1NHX1NUQVRJQ19TQ0FOLHN0YXJ0dXA/MToyLHN0YXRpY19jYXN0PExQQVJBTT4oZ19zZ1N0YXRpY1NjYW5SZXZpc2lvbi5sb2FkKHN0ZDo6bWVtb3J5X29yZGVyX2FjcXVpcmUpKSk7DQo=",
+              "afterBase64": "ICAgIHNnUG9zdFN0YXRpY1NjYW5Bcm0oc3RhcnR1cD8xOjIpOw0K"
+            },
+            {
+              "beforeOffset": 2285,
+              "afterOffset": 3550,
+              "beforeBase64": "ICAgIGVsc2UgaWYocHJldmlvdXMhPTEmJmdfaHduZClQb3N0TWVzc2FnZVcoZ19od25kLFdNX1NHX1NUQVRJQ19TQ0FOLDMsc3RhdGljX2Nhc3Q8TFBBUkFNPihnX3NnU3RhdGljU2NhblJldmlzaW9uLmxvYWQoc3RkOjptZW1vcnlfb3JkZXJfYWNxdWlyZSkpKTsNCg==",
+              "afterBase64": "ICAgIGVsc2UgaWYocHJldmlvdXMhPTEpc2dQb3N0U3RhdGljU2NhbkFybSgzKTsNCg=="
+            },
+            {
+              "beforeOffset": 7038,
+              "afterOffset": 8201,
+              "beforeBase64": "c3RhdGljIHZvaWQgc2dTdGF0aWNTY2FuTWVzc2FnZShXUEFSQU0gY2F1c2UsTFBBUkFNIHJldmlzaW9uKSB7DQo=",
+              "afterBase64": "c3RhdGljIHZvaWQgc2dTdGF0aWNTY2FuTWVzc2FnZShXUEFSQU0gY2F1c2UsTFBBUkFNIHRpY2tldCkgew0K"
+            },
+            {
+              "beforeOffset": 7351,
+              "afterOffset": 8512,
+              "beforeBase64": "ICAgICAgICBpZihzdGF0aWNfY2FzdDxVTE9OR0xPTkc+KHJldmlzaW9uKSE9Z19zZ1N0YXRpY1NjYW5SZXZpc2lvbi5sb2FkKHN0ZDo6bWVtb3J5X29yZGVyX2FjcXVpcmUpKXJldHVybjsNCg==",
+              "afterBase64": "ICAgICAgICBpZihzdGF0aWNfY2FzdDxVTE9OR0xPTkc+KHRpY2tldCkhPWdfc2dTdGF0aWNTY2FuUmV2aXNpb24ubG9hZChzdGQ6Om1lbW9yeV9vcmRlcl9hY3F1aXJlKSlyZXR1cm47DQo="
+            },
+            {
+              "beforeOffset": 7764,
+              "afterOffset": 8923,
+              "beforeBase64": "",
+              "afterBase64": "ICAgIFNnU3RhdGljU2NhbkFybU1lc3NhZ2UgcXVldWVkOw0KICAgIHsNCiAgICAgICAgc3RkOjpsb2NrX2d1YXJkIGxvY2soZ19zZ1N0YXRpY1NjYW5Bcm1NdXRleCk7DQogICAgICAgIGlmKCF0aWNrZXR8fGdfc2dTdGF0aWNTY2FuUXVldWVkQXJtLnRva2VuIT10aWNrZXR8fGdfc2dTdGF0aWNTY2FuUXVldWVkQXJtLmNhdXNlIT1jYXVzZSlyZXR1cm47DQogICAgICAgIHF1ZXVlZD1nX3NnU3RhdGljU2NhblF1ZXVlZEFybTsNCiAgICAgICAgZ19zZ1N0YXRpY1NjYW5RdWV1ZWRBcm09e307DQogICAgfQ0KICAgIGNvbnN0IGF1dG8gcmV2aXNpb249cXVldWVkLnJldmlzaW9uOw0K"
+            },
+            {
+              "beforeOffset": 7950,
+              "afterOffset": 9439,
+              "beforeBase64": "ICAgIHltY2M6OnNsZWVwcG93ZXI6OlNoYXJlZFBvd2VyVjEgcG93ZXI7DQogICAgaWYoZ19zZ1N0YXRpY1NjYW5QcmVmZXJlbmNlLmxvYWQoKSE9MXx8IWNhcHR1cmVTaGFyZWRQb3dlckxpZmVjeWNsZShwb3dlcikpcmV0dXJuOw0K",
+              "afterBase64": "ICAgIGNvbnN0IGF1dG8mIHBvd2VyPXF1ZXVlZC5wb3dlcjsNCiAgICBpZihnX3NnU3RhdGljU2NhblByZWZlcmVuY2UubG9hZCgpIT0xfHwhc2hhcmVkUG93ZXJMaWZlY3ljbGVDdXJyZW50KHBvd2VyKSlyZXR1cm47DQo="
+            }
+          ]
+        },
+        {
+          "path": "tools/fixtures/sleep_residency/static_wake_schedule_harness.inc",
+          "beforeSha256": "de01ca8cb2302f9132aa9a5e1d7e594554607d43d55100a9cc1a6e90295beb10",
+          "afterSha256": "13ed8af78aae56b5f681512d810cbd26d0c01c3586a393d6c8fc6404d38559b6",
+          "edits": [
+            {
+              "beforeOffset": 10030,
+              "afterOffset": 10030,
+              "beforeBase64": "",
+              "afterBase64": "IGdfc2dTdGF0aWNTY2FuUXVldWVkQXJtPXt9Owo="
+            },
+            {
+              "beforeOffset": 15396,
+              "afterOffset": 15425,
+              "beforeBase64": "ICsrdGVzdFNjaGVkdWxlR2VuZXJhdGlvbjtzZ1N0YXRpY1NjYW5TY2hlZHVsZShmYWxzZSk7c2dTdGF0aWNTY2FuTWVzc2FnZSgyLHN0YXRpY19jYXN0PExQQVJBTT4oZ19zZ1N0YXRpY1NjYW5SZXZpc2lvbi5sb2FkKCkpKTtjb25zdCBhdXRvIG5ld2VyRHVlPXRpbWVyRHVlOwo=",
+              "afterBase64": "ICsrdGVzdFNjaGVkdWxlR2VuZXJhdGlvbjtzZ1N0YXRpY1NjYW5TY2hlZHVsZShmYWxzZSk7Y29uc3QgYXV0byBuZXdXYWtlPW1lc3NhZ2VzLmJhY2soKTtzZ1N0YXRpY1NjYW5NZXNzYWdlKG5ld1dha2UuY2F1c2UsbmV3V2FrZS5yZXZpc2lvbik7Y29uc3QgYXV0byBuZXdlckR1ZT10aW1lckR1ZTsK"
+            },
+            {
+              "beforeOffset": 16716,
+              "afterOffset": 16758,
+              "beforeBase64": "",
+              "afterBase64": "IHJlc2V0KCk7c2dTdGF0aWNTY2FuUHJlZmVyZW5jZSh0cnVlLHRydWUpOysrbm90aWZpY2F0aW9uU2VxdWVuY2U7cHVtcCgpOwogY29uc3QgYXV0byBvbGRTdGFydEFybWVkPWdfc2dTdGF0aWNTY2FuRGVsYXkucGVuZGluZzsKIHRpY2s9NjEwMDA7c2dTdGF0aWNTY2FuVGltZXIoKTt3b3JrKCk7CiBleHBlY3QoIW9sZFN0YXJ0QXJtZWQmJnNjYW5zPT0wJiZzY2FuV3JpdGVzPT0wLCJxdWV1ZWQgc3RhcnR1cCBjYW5ub3QgYWNxdWlyZSBhIG5ld2VyIHB1YmxpYyBub3RpZmljYXRpb24iKTsKIHJlc2V0KCk7c2dTdGF0aWNTY2FuUHJlZmVyZW5jZSh0cnVlLHRydWUpOysrcHVibGljYXRpb25SZXZpc2lvbjtwdW1wKCk7CiBleHBlY3QodGltZXJEdWU9PTYxMDAwLCJwdWJsaWNhdGlvbi1vbmx5IGNoYW5nZSBwcmVzZXJ2ZXMgdGhlIG9yaWdpbmFsIHF1ZXVlZCBhZG1pc3Npb24iKTsKIHJlc2V0KCk7c2dTdGF0aWNTY2FuUHJlZmVyZW5jZSh0cnVlLHRydWUpO3B1bXAoKTsrK3Rlc3RTY2hlZHVsZUdlbmVyYXRpb247c2dTdGF0aWNTY2FuU2NoZWR1bGUoZmFsc2UpOwogY29uc3QgYXV0byByZXRpcmVkV2FrZT1tZXNzYWdlcy5mcm9udCgpO21lc3NhZ2VzLnBvcF9mcm9udCgpOysrdGVzdFNjaGVkdWxlR2VuZXJhdGlvbjtzZ1N0YXRpY1NjYW5TY2hlZHVsZShmYWxzZSk7CiBjb25zdCBhdXRvIHN1Y2Nlc3Nvcldha2U9bWVzc2FnZXMuZnJvbnQoKTsKIGV4cGVjdChyZXRpcmVkV2FrZS5yZXZpc2lvbiE9c3VjY2Vzc29yV2FrZS5yZXZpc2lvbiwic3VjY2Vzc29yIHF1ZXVlZCB3YWtlIGhhcyBpdHMgb3duIG1lc3NhZ2UgaWRlbnRpdHkiKTsKIHNnU3RhdGljU2Nhbk1lc3NhZ2UocmV0aXJlZFdha2UuY2F1c2UscmV0aXJlZFdha2UucmV2aXNpb24pOwogZXhwZWN0KGdfc2dTdGF0aWNTY2FuQXJtZWRQb3dlci5nZW5lcmF0aW9uIT10ZXN0U2NoZWR1bGVHZW5lcmF0aW9uLCJyZXRpcmVkIG1lc3NhZ2UgY2Fubm90IGNsYWltIHRoZSBzdWNjZXNzb3Igd2FrZSIpOwogcHVtcCgpO2V4cGVjdChnX3NnU3RhdGljU2NhbkFybWVkUG93ZXIuZ2VuZXJhdGlvbj09dGVzdFNjaGVkdWxlR2VuZXJhdGlvbiYmZ19zZ1N0YXRpY1NjYW5EZWxheS5wZW5kaW5nLCJmcmVzaCB3YWtlIGNhcnJpZXMgaXRzIG93biBwdWJsaWMgYWRtaXNzaW9uIik7CiByZXNldCgpO3NnU3RhdGljU2NhblByZWZlcmVuY2UodHJ1ZSk7Kyt0ZXN0U2NoZWR1bGVHZW5lcmF0aW9uO3B1bXAoKTsKIGV4cGVjdCghZ19zZ1N0YXRpY1NjYW5EZWxheS5wZW5kaW5nJiZ0aW1lckR1ZT09MCwicXVldWVkIE9OIGNhbm5vdCBhY3F1aXJlIGFub3RoZXIgZ2VuZXJhdGlvbiIpOwo="
+            }
+          ]
+        }
+      ]
+    },
+    "s4CompletionTime": {
+      "previousInputSha256": "a369cd94329fcad118a82460c8fba480d15bde451f1f54a37b552bb86958f27a",
+      "sourceApproval": false,
+      "defaultParentApprovalRenewed": false,
+      "delta": {
+        "path": "native/sleep_timeout_native.inc",
+        "beforeSha256": "77554d1ba605cebc495088876f9a512d7efcbdc133def4d00bfd7e8bcf0a0f59",
+        "afterSha256": "706826a965ec18687d97c3af06316d51aebb365e95d79909aef77840f943c242",
+        "edits": [
+          {
+            "beforeOffset": 27932,
+            "afterOffset": 27932,
+            "beforeBase64": "ICAgIGlmKCFhdClyZXR1cm47",
+            "afterBase64": "ICAgIGlmKCFhdHx8YXQ+c2dOb3dGaWxlVGltZSgpKXJldHVybjs="
+          }
+        ]
+      }
+    }
   }
 }

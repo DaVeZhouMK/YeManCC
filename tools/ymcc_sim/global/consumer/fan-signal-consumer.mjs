@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createFanSignalFixture, SIMULATED_HANDSHAKE } from './fan-signal-fixture.mjs';
+import { createFanFixtureTranspilation } from '../fan-log-regression.mjs';
 
 const DEFAULT_REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const FIXTURE = 'source-derived-fixture';
@@ -64,7 +65,11 @@ function handshakeOf(event) {
  * fan.power and fan.clock fixtures. simulation is test-only fault injection and
  * requires provenance='source-derived-fixture'. Real logs cannot enable it.
  */
-export async function replayFanSignals({ repoRoot = DEFAULT_REPO, events = [], sourceArchive = null, simulation = null, runtimeContract = {} } = {}) {
+export async function replayFanSignals(options = {}) {
+  return replayFanSignalsWithTranspilation(options, createFanFixtureTranspilation());
+}
+
+async function replayFanSignalsWithTranspilation({ repoRoot = DEFAULT_REPO, events = [], sourceArchive = null, simulation = null, runtimeContract = {} }, transpilation) {
   const diagnostics = [], evidence = [], root = fs.realpathSync(repoRoot);
   const add = (code, stage, eventId, status = 'INCOMPLETE') => diagnostics.push({ code, stage, eventId, status });
   const result = { schemaVersion: 1, kind: 'fan-signal-consumption', status: 'PASS', scope: 'software-signal-consumption',
@@ -81,7 +86,7 @@ export async function replayFanSignals({ repoRoot = DEFAULT_REPO, events = [], s
       || (runtimeContract.protocolVersion !== undefined && (!Number.isSafeInteger(runtimeContract.protocolVersion) || runtimeContract.protocolVersion < 1))) {
     add('PROTOCOL_CONTRACT_INVALID', 'input', null, 'FAIL'); result.status = 'FAIL'; return result;
   }
-  let f = createFanSignalFixture({ repoRoot: root, handshake: {}, simulation: simulation ?? {}, runtimeContract });
+  let f = createFanSignalFixture({ repoRoot: root, handshake: {}, simulation: simulation ?? {}, runtimeContract }, transpilation);
   const retiredContexts = [];
   result.sourceChanges = [
     { path: 'src/bridge/fanApi.ts', change: 'Validate optional handshake capability booleans and reject contradictory receipts.' },
@@ -224,7 +229,7 @@ export async function replayFanSignals({ repoRoot = DEFAULT_REPO, events = [], s
             if (!f.sourcesUnchanged()) add('PRODUCT_SOURCE_CHANGED_DURING_REPLAY', 'consumer', eventId, 'FAIL');
             retiredContexts.push({ ...f.snapshot(), requestCount: f.requests.length, receiptCount: f.receipts.length, syntheticRetirement: 'sandbox-disposal;not-oem-release-proof' });
             f.dispose();
-            f = createFanSignalFixture({ repoRoot: root, handshake: {}, simulation: simulation ?? {}, runtimeContract });
+            f = createFanSignalFixture({ repoRoot: root, handshake: {}, simulation: simulation ?? {}, runtimeContract }, transpilation);
             row.state.before = f.snapshot();
             row.consumer.startedAtMs = f.clock.now;
           }
@@ -318,12 +323,12 @@ export async function replayFanSignals({ repoRoot = DEFAULT_REPO, events = [], s
 }
 
 export async function runFanSignalRegressions({ repoRoot = DEFAULT_REPO } = {}) {
-  const cases = [], sourceHashes = new Map();
+  const cases = [], sourceHashes = new Map(), transpilation = createFanFixtureTranspilation();
   const event = (id, fields) => ({ id, domain: 'fan', provenance: FIXTURE, ...fields });
   const good = event('handshake', { event: 'startup.handshake', ...SIMULATED_HANDSHAKE });
   const intent = (id, action, extra = {}) => event(id, { event: 'fan.intent', action, ...extra });
   async function check(id, events, verify, simulation = null) {
-    const replay = await replayFanSignals({ repoRoot, events, simulation });
+    const replay = await replayFanSignalsWithTranspilation({ repoRoot, events, simulation }, transpilation);
     for (const source of replay.sourceHashes) sourceHashes.set(source.path, source);
     try { verify(replay); cases.push({ id, status: 'PASS', provenance: FIXTURE, replay }); }
     catch (error) { cases.push({ id, status: 'FAIL', provenance: FIXTURE,
@@ -408,6 +413,7 @@ export async function runFanSignalRegressions({ repoRoot = DEFAULT_REPO } = {}) 
     assert.equal(r.summary.curveWrites, 0);
   });
   return { schemaVersion: 1, kind: 'fan-signal-regressions', status: cases.every(row => row.status === 'PASS') ? 'PASS' : 'FAIL',
+    fixtureTranspilation: transpilation.snapshot(),
     scope: 'software-signal-consumption', sourceChanges: cases[0]?.replay.sourceChanges ?? [],
     executedProductModules: cases[0]?.replay.executedProductModules ?? [], inputConsumerStateFeedback: cases.map(row => ({ id: row.id, evidence: row.replay.evidence })),
     compatibility: { status: 'SCENARIO_EXPECTATIONS_VERIFIED', hardwareRuntimeGate: 'not-executed', versionsPinnedByConsumer: false }, remainingGaps: cases[0]?.replay.remainingGaps ?? [], cases, summary: { total: cases.length, passed: cases.filter(row => row.status === 'PASS').length,

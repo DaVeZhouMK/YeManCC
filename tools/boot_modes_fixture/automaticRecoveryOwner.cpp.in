@@ -1,0 +1,151 @@
+#define NOMINMAX
+#include <windows.h>
+#include <atomic>
+#include <chrono>
+#include <fstream>
+#include <functional>
+#include <future>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+#include "settings_baseline.h"
+#include "boot_mode_preferences.h"
+#include "sleep_steam_settle.h"
+#include "sleep_recovery_diagnostics.h"
+#include "sleep_wake_admission.h"
+using json=nlohmann::json;
+static json document;
+static std::mutex settingsMx;
+static const std::wstring YM_SETTINGS_FILE=L"owned-memory/automatic-recovery.json",SG_DIR=L"owned-memory/sleep";
+static thread_local bool notificationBoundaryOnUnlock=false;
+struct SettingsFileGuard {std::unique_lock<std::mutex> lock{settingsMx};~SettingsFileGuard();};
+static unsigned ownerReads=0,writes=0,readbacks=0;
+static bool failSave=false,changed=false;
+static std::string stage,change;
+static std::vector<std::string> effects;
+static std::size_t atChange=0;
+static json runtimeAtChange;
+static void boundary(const std::string&);
+template<class T> struct ObservedAtomic {
+ std::atomic<T> value;const char* name;
+ ObservedAtomic(T initial,const char* key):value(initial),name(key){}
+ T load()const{return value.load();}
+ void store(T next,std::memory_order order){value.store(next,order);effects.push_back(name);}
+ T fetch_add(T increment,std::memory_order order){const auto prior=value.fetch_add(increment,order);effects.push_back(name);return prior;}
+};
+static ObservedAtomic<bool> g_sleepRecoveryAutoEnabled(false,"enabled"),g_sleepRecoveryAutoPending(true,"pending");
+static ObservedAtomic<unsigned long long> g_sleepRecoveryAutoConfigEpoch(5,"epoch");
+static std::function<void()> onContention;
+static unsigned serialContentions=0,stateContentions=0;
+struct ObservedSerialLock {
+ std::unique_lock<std::timed_mutex> lock;
+ ObservedSerialLock(std::timed_mutex& mutex,std::defer_lock_t):lock(mutex,std::defer_lock){}
+ template<class Rep,class Period> bool try_lock_for(const std::chrono::duration<Rep,Period>& duration){if(lock.try_lock())return true;++serialContentions;if(onContention)onContention();return lock.try_lock_for(duration);}
+};
+struct ObservedStateLock {
+ std::unique_lock<std::mutex> lock;
+ explicit ObservedStateLock(std::mutex& mutex):lock(mutex,std::defer_lock){if(!lock.try_lock()){++stateContentions;if(onContention)onContention();lock.lock();}}
+};
+static std::string W2U(const std::wstring& text){return std::string(text.begin(),text.end());}
+static void effect(const std::string& name){effects.push_back(name);boundary(name);}
+static void sgRecordFact(const char*,const json&){effect("fact");}
+static void sgNotifyWork(){effect("worker-wake");}
+static void ipc_emit(const char*,const json&){effect("notification");}
+static void postSleepRecoveryAutoStatus(){
+ effects.push_back("notification");
+ // Posting under the owner lock cannot synchronously run a settings writer.
+ if(stage=="notification")notificationBoundaryOnUnlock=true;
+}
+// This fixture owns settings publication; Steam command retirement has its own tests.
+static void steamOriginalRecoveryBusinessCommit(bool,const std::function<void()>& publication){publication();}
+static bool ymSettingsPatchSection(const char*,const json& patch){if(failSave)return false;document["sleep"].update(patch);++writes;effects.push_back("settings-write");return true;}
+namespace SleepRecoveryAuto {
+static std::mutex mx;
+// SERIAL_MUTEX
+// ORIGINAL_STATE
+static State state;
+// ORIGINAL_REPORT_PATH
+// ORIGINAL_GET
+static json get(){const auto snapshot=actualGet();++readbacks;boundary("final-readback");return snapshot;}
+// ORIGINAL_NOTIFY
+// ORIGINAL_SET
+}
+static json runtime(){return {{"enabled",g_sleepRecoveryAutoEnabled.load()},{"epoch",g_sleepRecoveryAutoConfigEpoch.load()},{"pending",g_sleepRecoveryAutoPending.load()},
+ {"phase",SleepRecoveryAuto::state.phase},{"reason",SleepRecoveryAuto::state.reason},{"steam",SleepRecoveryAuto::state.steamStatus},{"input",SleepRecoveryAuto::state.inputStatus}};}
+static void mutateUnlocked(){
+ if(changed)return;changed=true;atChange=effects.size();runtimeAtChange=runtime();
+ if(change=="revision")document["input"]["revision"]=8;
+ if(change=="hash")document["input"]["diagnostics"]["inputLoggingEnabled"]=!document["input"]["diagnostics"]["inputLoggingEnabled"].get<bool>();
+ if(change=="mode")document["extensions"]["bootModes"]["revision"]=4;
+ if(change=="result")document["extensions"]["bootModesStartupResult"]={{"schema",1},{"revision",99}};
+ if(change=="observed")document["input"]["startupObservedBoot"]="replacement-boot";
+ if(change=="ack")document["input"]["hostAcknowledgedRevision"]=17;
+ if(change=="unrelated")document["extensions"]["peer"]=true;
+}
+static void mutate(){SettingsFileGuard held;mutateUnlocked();}
+static void boundary(const std::string& name){if(stage==name)mutate();}
+SettingsFileGuard::~SettingsFileGuard(){
+ if(!notificationBoundaryOnUnlock)return;
+ notificationBoundaryOnUnlock=false;
+ lock.unlock();
+ boundary("notification");
+}
+static std::string ymSettingsReadRaw(const std::wstring& path){if(path!=YM_SETTINGS_FILE)throw std::runtime_error("Unexpected settings path");++ownerReads;return document.dump();}
+static json ymSettingsReadUnlocked(){++ownerReads;return document;}
+// ORIGINAL_OWNER
+static bool ymSettingsWriteSection(const char* name,const json&,const std::function<bool(json&,json&)>& prepare){
+ if(std::string(name)!="sleep")throw std::runtime_error("Unexpected settings section");boundary("save-prepare");bool saved=false;
+ {SettingsFileGuard held;auto all=document;auto section=all.value("sleep",json::object());if(prepare(section,all)&&!failSave){all["sleep"]=section;document=all;++writes;effects.push_back("settings-write");saved=true;}}
+ boundary("save-return");return saved;
+}
+static void steamGameLinkNotify(){effect("game-link-poke");}
+static std::map<std::string,std::function<json(const json&)>> handlers;
+static void ipc_on(const std::string& name,std::function<json(const json&)> callback){handlers[name]=std::move(callback);}
+// ORIGINAL_REGISTRATION
+static void need(bool value,const std::string& message){if(!value)throw std::runtime_error(message);}
+static void reset(const json& defaults,const json& wire,bool enable){
+ document=defaults;document["input"]=wire.at("expectedBootContext").at("input");document["extensions"]=wire.at("expectedBootContext").at("extensions");document["sleep"]["autoWakeRecovery"]=!enable;
+ g_sleepRecoveryAutoEnabled.value.store(!enable);g_sleepRecoveryAutoConfigEpoch.value.store(5);g_sleepRecoveryAutoPending.value.store(true);
+ SleepRecoveryAuto::state=SleepRecoveryAuto::State{};SleepRecoveryAuto::state.phase="waiting";SleepRecoveryAuto::state.reason="existing-wake";SleepRecoveryAuto::state.steamStatus={{"marker","steam"}};SleepRecoveryAuto::state.inputStatus={{"marker","input"}};
+ ownerReads=writes=readbacks=serialContentions=stateContentions=0;failSave=changed=false;stage.clear();change="current";effects.clear();atChange=0;runtimeAtChange=nullptr;onContention=nullptr;
+}
+static json invoke(const json& args){return handlers.at("sleepRecovery.autoSet")(args);}
+int main(int argc,char** argv){
+ json rows=json::array(),controls=json::array();
+ try{
+  need(argc==5,"defaults, wire, selection, raw required");json defaults,wire;std::ifstream(argv[1])>>defaults;std::ifstream(argv[2])>>wire;const bool before=std::string(argv[3])=="before";registerAutomaticRecovery();std::ofstream raw(argv[4],std::ios::app);
+  const std::vector<std::string> stages={"dispatch","serial-wait","state-wait","save-prepare","save-return","fact","worker-wake","notification","final-readback","game-link-poke"};
+  for(const auto& entry:wire["modes"])for(bool enable:{true,false})for(const auto& nextStage:stages)for(const std::string kind:{"revision","hash","mode","result","observed","ack","unrelated","current"}){
+   if(before&&(entry["mode"]!="global"||!enable||nextStage!="save-return"||kind!="hash"))continue;
+   reset(defaults,entry,enable);stage=nextStage;change=kind;const bool allowed=kind=="ack"||kind=="unrelated"||kind=="current";auto request=entry["request"];request["enabled"]=enable;if(before)request["bootContext"]=entry["expectedBootContext"];
+   json reply;std::string error;auto run=[&]{try{if(stage=="dispatch")mutate();reply=invoke(request);}catch(const std::exception& e){error=e.what();}};
+   bool joined=false;
+   if(stage=="serial-wait"||stage=="state-wait"){
+    std::unique_lock<std::timed_mutex> serial(SleepRecoveryAuto::setMx,std::defer_lock);std::unique_lock<std::mutex> state(SleepRecoveryAuto::mx,std::defer_lock);if(stage=="serial-wait")serial.lock();else state.lock();
+    std::promise<void> entered;auto ready=entered.get_future();onContention=[&]{entered.set_value();};std::thread worker(run);const bool reached=ready.wait_for(std::chrono::seconds(1))==std::future_status::ready;
+    const bool fastRevoked=stage!="state-wait"||(g_sleepRecoveryAutoConfigEpoch.load()==6&&g_sleepRecoveryAutoEnabled.load()==enable);
+    if(reached)mutate();
+    if(serial.owns_lock())serial.unlock();if(state.owns_lock())state.unlock();worker.join();joined=true;onContention=nullptr;need(reached,"Direct native mutex contention not observed");need(fastRevoked,"Worker authority was not revoked before state wait");
+   }else run();
+   const std::vector<std::string> late(effects.begin()+static_cast<std::ptrdiff_t>(atChange),effects.end());json row={{"mode",entry["mode"]},{"enabled",enable},{"stage",stage},{"kind",kind},{"allowed",allowed},{"changed",changed},{"error",error},{"reply",reply},{"lateEffects",late},{"runtime",runtime()},{"runtimeAtChange",runtimeAtChange},{"writes",writes},{"ownerReads",ownerReads},{"serialContentions",serialContentions},{"stateContentions",stateContentions},{"workerJoined",joined}};raw<<row.dump()<<'\n';raw.flush();rows.push_back(row);
+   need(changed,"Selected auto-recovery boundary not reached");
+   if(allowed){need(error.empty()&&reply.value("ok",false)&&g_sleepRecoveryAutoEnabled.load()==enable,"Current auto-recovery request failed");need(writes==1&&g_sleepRecoveryAutoConfigEpoch.load()==6&&!g_sleepRecoveryAutoPending.load(),"Current auto-recovery state was not applied exactly once");}
+   else{need(late.empty()&&runtime()==runtimeAtChange,"expired automatic recovery reached later publication");need(error=="BOOT_AUTOMATIC_RECOVERY_REQUEST_EXPIRED","Expired automatic recovery request returned success");}
+  }
+  if(!before){
+   for(bool enable:{true,false}){reset(defaults,wire["modes"][0],enable);auto result=invoke({{"enabled",enable}});need(result.value("ok",false)&&ownerReads==0&&writes==1,"Ordinary setter changed provenance reads");controls.push_back({{"name",enable?"ordinary-on":"ordinary-off"},{"ownerReads",ownerReads}});}
+   reset(defaults,wire["modes"][0],true);g_sleepRecoveryAutoEnabled.value.store(true);const auto initial=runtime();auto result=invoke({{"enabled",true}});need(result.value("ok",false)&&runtime()==initial&&writes==1&&effects==std::vector<std::string>{"settings-write","game-link-poke"},"Same-state explicit save rearmed pending work");controls.push_back({{"name","explicit-same-state-saves-intent-without-rearm"}});
+   reset(defaults,wire["modes"][0],true);g_sleepRecoveryAutoEnabled.value.store(true);const auto same=runtime();result=SleepRecoveryAuto::set({{"enabled",true}});need(result.value("ok",false)&&runtime()==same&&effects.empty()&&writes==0,"Default same-state setter changed work");controls.push_back({{"name","default-same-state-no-save-or-rearm"}});
+   reset(defaults,wire["modes"][0],true);const auto old=runtime();failSave=true;result=invoke(wire["modes"][0]["request"]);need(!result.value("ok",true)&&runtime()==old&&effects.empty(),"Failed save changed runtime or poked worker");controls.push_back({{"name","save-failure-no-state-or-notification"}});
+   for(const json value:{json(),json("yes"),json(1)}){reset(defaults,wire["modes"][0],true);auto invalid=wire["modes"][0]["request"];invalid["enabled"]=value;bool refused=false;try{invoke(invalid);}catch(...){refused=true;}need(refused&&effects.empty(),"Invalid enabled value reached save");}controls.push_back({{"name","invalid-enabled-no-effects"}});
+   reset(defaults,wire["modes"][0],true);auto invalid=wire["modes"][0]["request"];invalid["origin"]="ordinary";bool refused=false;try{invoke(invalid);}catch(...){refused=true;}need(refused&&effects.empty(),"Invalid origin reached save");controls.push_back({{"name","invalid-origin-no-effects"}});
+   reset(defaults,wire["modes"][0],true);invalid=wire["modes"][0]["request"];invalid["bootContext"]={{"input",json::object()}};refused=false;try{invoke(invalid);}catch(...){refused=true;}need(refused&&effects.empty(),"Invalid context reached save");controls.push_back({{"name","invalid-context-no-effects"}});
+   reset(defaults,wire["modes"][0],true);std::string busy;{std::unique_lock<std::timed_mutex> lock(SleepRecoveryAuto::setMx);std::thread worker([&]{try{invoke(wire["modes"][0]["request"]);}catch(const std::exception& e){busy=e.what();}});worker.join();}need(busy=="Automatic recovery configuration is busy"&&effects.empty(),"Bounded busy gate did not reject safely");need(invoke(wire["modes"][0]["request"]).value("ok",false),"New explicit request did not recover released gate");controls.push_back({{"name","bounded-serial-busy-and-explicit-recovery"}});
+  }
+  std::cout<<json{{"status","PASS"},{"rows",rows},{"controls",controls}}.dump()<<'\n';return 0;
+ }catch(const std::exception& e){std::cout<<json{{"status","FAIL"},{"error",e.what()},{"rows",rows},{"controls",controls}}.dump()<<'\n';return 1;}
+}

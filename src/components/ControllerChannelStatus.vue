@@ -10,7 +10,12 @@ const props = defineProps<{
   usage?: OemInputUsage | null; virtualEnabled?: boolean; persona?: string;
   observedKeys?: readonly string[];
 }>();
+const emit = defineEmits<{ 'inspect-keys': [] }>();
 const selected = ref<string | null>(null);
+function selectFeature(id: string): void {
+  selected.value = selected.value === id ? null : id;
+  if (selected.value && (id === 'back' || id === 'dedicated')) emit('inspect-keys');
+}
 const virtualLabel = computed(() => props.status.text.replace(/^虚拟手柄[-－·\s]*/, '').replace('状态待确认', '待确认').replace('成功开启', '已开启').replace('Steam未开启实际无效', 'Steam未运行'));
 const lights = computed(() => controllerFeatureStatuses({usage: props.usage, virtualEnabled: props.virtualEnabled === true,
   persona: props.persona || 'disabled', gyroSupported: props.gyroSupported, gyroEnabled: props.gyroEnabled,
@@ -23,12 +28,12 @@ const detail = computed(() => lights.value.find(light => light.id === selected.v
     <div class="controller-channel-list">
       <button v-for="light in lights" :key="light.id" type="button" class="controller-channel" :data-feature="light.id" :data-tone="light.tone"
         :title="light.detail" :aria-label="light.name + '：' + light.value + '，' + light.hint" :aria-expanded="selected === light.id"
-        @click="selected = selected === light.id ? null : light.id">
+        @click="selectFeature(light.id)">
         <span class="channel-name"><i class="channel-led"/>{{ light.name }}</span>
         <strong>{{ light.value }}</strong><small>{{ light.hint }}</small>
       </button>
     </div>
-    <p v-if="detail" class="controller-channel-detail" role="status">{{ detail.detail }}</p>
+    <p v-if="detail" class="controller-channel-detail" role="status"><template v-if="detail.id !== 'gyro'">来源状态为最近一次查询结果。</template>{{ detail.detail }}</p>
   </aside>
 </template>
 <style scoped>

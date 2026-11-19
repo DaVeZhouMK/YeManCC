@@ -41,24 +41,42 @@ inline Snapshot read() noexcept {
     SetLastError(savedError);
     return s;
 }
-inline nlohmann::json toJson(const Snapshot& s) {
-    auto modifiers=nlohmann::json::object();
-    for(std::size_t i=0;i<modifierKeys.size();++i){
-        modifiers[modifierNames[i]]={
-            {"virtualKey",modifierKeys[i]},
-            {"asyncDownBit",(s.asyncDownMask&(1u<<i))!=0},
-            {"callingThreadQueueDown",s.queueReadOk?nlohmann::json((s.callingThreadQueueDownMask&(1u<<i))!=0):nlohmann::json(nullptr)}};
-    }
-    return {{"schemaVersion",1},{"captureBeginTick",s.beginTick},{"captureEndTick",s.endTick},
+inline nlohmann::json toPeriodicJson(const Snapshot& s) {
+    return {{"schemaVersion",2},{"captureBeginTick",s.beginTick},{"captureEndTick",s.endTick},
         {"callingThreadId",s.threadId},{"foregroundPidBefore",s.foregroundPidBefore},{"foregroundPidAfter",s.foregroundPidAfter},
         {"foregroundStableDuringCapture",s.foregroundBefore==s.foregroundAfter&&s.foregroundPidBefore==s.foregroundPidAfter},
         {"asyncDownMask",s.asyncDownMask},{"callingThreadQueueReadOk",s.queueReadOk},
         {"callingThreadQueueError",s.queueReadOk?nlohmann::json(nullptr):nlohmann::json(s.queueError)},
-        {"callingThreadQueueDownMask",s.queueReadOk?nlohmann::json(s.callingThreadQueueDownMask):nlohmann::json(nullptr)},
-        {"modifiers",std::move(modifiers)},
+        {"callingThreadQueueDownMask",s.queueReadOk?nlohmann::json(s.callingThreadQueueDownMask):nlohmann::json(nullptr)}};
+}
+inline void addStandaloneFields(nlohmann::json& row,std::uint16_t asyncMask,bool queueReadOk,std::uint16_t queueMask) {
+    auto modifiers=nlohmann::json::object();
+    for(std::size_t i=0;i<modifierKeys.size();++i){
+        modifiers[modifierNames[i]]={
+            {"virtualKey",modifierKeys[i]},
+            {"asyncDownBit",(asyncMask&(1u<<i))!=0},
+            {"callingThreadQueueDown",queueReadOk?nlohmann::json((queueMask&(1u<<i))!=0):nlohmann::json(nullptr)}};
+    }
+    row.update({{"schemaVersion",1},{"modifiers",std::move(modifiers)},
         {"asyncApi","GetAsyncKeyState-high-bit-only"},{"queueApi","GetKeyboardState-calling-thread-message-queue"},
         {"asyncZeroIsAbsenceProof",false},{"crossKeyAtomicSnapshot",false},{"eventEdgesCaptured",false},
         {"sourceAttribution","unobserved"},{"gameOrSteamKeyboardReceipt","unobserved"},
-        {"scope","Sampled modifier state only; async zero may reflect desktop/access restrictions. Queue state belongs to the calling thread, not Steam/game. No physical/injected/device-origin or key-release proof; short edges may be missed."}};
+        {"scope","Sampled modifier state only; async zero may reflect desktop/access restrictions. Queue state belongs to the calling thread, not Steam/game. No physical/injected/device-origin or key-release proof; short edges may be missed."}});
+}
+inline nlohmann::json toJson(const Snapshot& s) {
+    auto row=toPeriodicJson(s);
+    addStandaloneFields(row,s.asyncDownMask,s.queueReadOk,s.callingThreadQueueDownMask);
+    return row;
+}
+// Expand only when an idle snapshot is copied into a selected event receipt.
+inline nlohmann::json standaloneFromIdleSnapshot(const nlohmann::json& snapshot) {
+    auto row=snapshot;
+    const auto version=snapshot.find("schemaVersion");
+    if(version!=snapshot.end()&&*version==2){
+        const bool queueReadOk=snapshot.at("callingThreadQueueReadOk").get<bool>();
+        addStandaloneFields(row,snapshot.at("asyncDownMask").get<std::uint16_t>(),queueReadOk,
+            queueReadOk?snapshot.at("callingThreadQueueDownMask").get<std::uint16_t>():std::uint16_t{0});
+    }
+    return row;
 }
 } // namespace ymcc::keyboardEvidence

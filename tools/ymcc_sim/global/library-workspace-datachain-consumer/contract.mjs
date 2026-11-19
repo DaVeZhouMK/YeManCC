@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {isDeepStrictEqual} from 'node:util';
 export const MODULE = 'tools/ymcc_sim/global/library-workspace-datachain-consumer';
 export const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const FILES = ['adapter.mjs','run.mjs','contract.mjs','observe.cjs','spec.json','toolchain-inputs.json','README.md','contract.test.mjs'];
@@ -42,16 +43,67 @@ export function mutate(source, faultId) {
 }
 export function semanticVerdict({report,trace,exitCode,faultId,controlsOk}) {
   const fault = spec.faults.find(f => f.id === faultId);
-  if (!controlsOk || !report || !trace || trace.forbidden?.length || !trace.finished || trace.vm.length !== 6 || trace.vm.some(v => !v.completed)) return false;
-  if (JSON.stringify(report.cases?.map(c => c.name)) !== JSON.stringify(spec.caseNames) || report.caseCount !== spec.caseNames.length || report.fuzzCombinationCount !== 1000 || report.artworkPriorityCombinationCount !== 1000 || report.realSteamFilesModified !== false) return false;
-  if (!(trace.calls.normalizeWorkspaceSnapshot?.calls >= 1000 && trace.calls.artworkEntry?.calls >= 3000)) return false;
-  const failed = report.cases.filter(c => !c.passed);
+  if (controlsOk !== true || !report || trace?.finished !== true || !Array.isArray(trace.forbidden) || trace.forbidden.length !== 0 || !Array.isArray(trace.assertions)) return false;
+  if (!Array.isArray(trace.vm) || trace.vm.length !== 6 || trace.vm.some(v => v?.completed !== true)) return false;
+  if (!Array.isArray(report.cases) || report.cases.some(c => typeof c?.passed !== 'boolean')) return false;
+  if (JSON.stringify(report.cases.map(c => c.name)) !== JSON.stringify(spec.caseNames) || report.caseCount !== spec.caseNames.length || report.fuzzCombinationCount !== 1000 || report.artworkPriorityCombinationCount !== 1000 || report.realSteamFilesModified !== false) return false;
+  const normalizeCalls = trace.calls?.normalizeWorkspaceSnapshot?.calls, artworkCalls = trace.calls?.artworkEntry?.calls;
+  if (!Number.isInteger(normalizeCalls) || normalizeCalls < 1000 || !Number.isInteger(artworkCalls) || artworkCalls < 3000) return false;
+  const failed = report.cases.filter(c => c.passed === false);
   if (!faultId) return exitCode === 0 && report.allPassed === true && failed.length === 0 && trace.assertions.length === 0;
   if (!fault || exitCode !== 1 || report.allPassed !== false || JSON.stringify(failed.map(c=>c.name)) !== JSON.stringify(fault.expectedFailedNames)) return false;
-  return failed.length > 0 && failed.every(c => trace.assertions.some(a => a.code === 'ERR_ASSERTION' && a.message === c.error && a.stack.includes('custom_steam_library_ui_datachain_selftest.mjs:')));
+  return failed.length > 0 && failed.every(c => typeof c.error === 'string' && trace.assertions.some(a => a?.code === 'ERR_ASSERTION' && a.message === c.error && typeof a.stack === 'string' && a.stack.includes('custom_steam_library_ui_datachain_selftest.mjs:')));
+}
+const samePin = (a,b) => b?.path===a.path && b.size===a.size && b.sha256===a.sha256;
+function receiptPins(rows, requiredPaths) {
+  need(Array.isArray(rows) && rows.length===requiredPaths.length, 'RECEIPT_PIN_COUNT');
+  const pins=new Map(rows.map(row=>{
+    need(typeof row?.path==='string' && path.isAbsolute(row.path) && path.resolve(row.path)===row.path &&
+      Number.isSafeInteger(row.size) && row.size>=0 && typeof row.sha256==='string' && /^[\da-f]{64}$/.test(row.sha256), 'RECEIPT_PIN_INVALID');
+    return [row.path,row];
+  }));
+  need(pins.size===rows.length && new Set(requiredPaths).size===rows.length && requiredPaths.every(file=>pins.has(file)), 'RECEIPT_PIN_MEMBERS');
+  return pins;
 }
 export function verifyReceipt(receipt) {
-  return receipt.accepted===true && unchanged([...receipt.sourceBefore,...receipt.vmInputBefore,...receipt.toolBefore,...receipt.outputAfter]);
+  try {
+    if (receipt?.schemaVersion!==1 || receipt.accepted!==true || receipt.controlStatus!=='PASS' ||
+        !Array.isArray(receipt.controlFailures) || receipt.controlFailures.length!==0) return false;
+    const {caseDir,child,faultId,outputBefore}=receipt, negative=faultId!==null;
+    const fresh=value=>value?.reportExists===false && value?.traceExists===false;
+    if (typeof caseDir!=='string' || !path.isAbsolute(caseDir) || path.resolve(caseDir)!==caseDir ||
+        receipt.kind!==(negative?'semantic-negative':'original-positive') || receipt.semanticDetected!==negative ||
+        (negative && !spec.faults.some(f=>f.id===faultId)) || !fresh(outputBefore) ||
+        child?.exitCode!==(negative?1:0) || child.error!==null || child.signal!==null) return false;
+    const reportName='Build/CustomSteamLibrary/ui-datachain-summary.json';
+    const files=['stdout.txt','stderr.txt','child.json','plan.json','observer-config.json','vm-inputs.json',reportName,'trace.json'];
+    const file=name=>path.join(caseDir,name);
+    const outputs=receiptPins(receipt.outputAfter,files.map(file));
+    const read=name=>{
+      const target=file(name), pin=outputs.get(target);
+      assertPlainDestination(target);
+      const bytes=fs.readFileSync(target);
+      need(bytes.length===pin.size && sha(bytes)===pin.sha256,'RECEIPT_OUTPUT_CHANGED');
+      return bytes;
+    };
+    const plan=JSON.parse(read('plan.json'));
+    if (plan.schemaVersion!==1 || plan.caseDir!==caseDir || plan.faultId!==faultId || !fresh(plan.outputBefore) ||
+        !isDeepStrictEqual(receipt.fault,plan.fault) || !isDeepStrictEqual(child,JSON.parse(read('child.json')))) return false;
+    const verifyInputs=(before,after,planned,paths)=>{
+      const pins=receiptPins(before,paths), closing=receiptPins(after,paths), opening=receiptPins(planned,paths);
+      return [...pins.values()].every(pin=>samePin(pin,opening.get(pin.path)) && samePin(pin,closing.get(pin.path))) && unchanged([...pins.values()]);
+    };
+    const toolRoot=path.dirname(plan.tools[1].path);
+    if (!samePin(child.node,plan.tools[0]) ||
+        !verifyInputs(receipt.sourceBefore,receipt.sourceAfter,plan.sourceInputs,spec.sourceInputs.map(rel=>checkedFile(plan.repoRoot,rel))) ||
+        !verifyInputs(receipt.vmInputBefore,receipt.vmInputAfter,plan.viewInputs,spec.sourceInputs.map(rel=>file(path.join('sourceview','repo',rel)))) ||
+        !verifyInputs(receipt.toolBefore,receipt.toolAfter,plan.tools,[child.node.path,...FILES.map(name=>path.join(toolRoot,name))])) return false;
+    const reportBytes=read(reportName), report=JSON.parse(reportBytes), trace=JSON.parse(read('trace.json'));
+    if (!semanticVerdict({report,trace,exitCode:child.exitCode,faultId,controlsOk:true})) return false;
+    if (read('stdout.txt').toString('utf8')!==reportBytes.toString('utf8')+'\n') return false;
+    for (const name of ['stderr.txt','observer-config.json','vm-inputs.json']) read(name);
+    return isDeepStrictEqual(receipt.originalResult,{allPassed:report.allPassed,caseCount:report.caseCount,failed:report.cases.filter(c=>c.passed===false)});
+  } catch {return false;}
 }
 export function assertPlainDestination(destination) {
   let ancestor=path.resolve(destination);

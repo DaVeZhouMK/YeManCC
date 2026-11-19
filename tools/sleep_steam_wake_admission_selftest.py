@@ -2,9 +2,180 @@
 
 from pathlib import Path
 
-import re
+import re,argparse
 
-root=Path(__file__).resolve().parents[1]
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--wake-admission-only',action='store_true')
+parser.add_argument('--case',choices=['consumer-rejection-lineage','public-final-wake','public-entry-continuation'])
+parser.add_argument('--source-root',type=Path)
+parser.add_argument('--before-root',type=Path)
+parser.add_argument('--emit-cpp',type=Path)
+args=parser.parse_args()
+if not args.case and (args.before_root or args.emit_cpp):
+    parser.error('--before-root/--emit-cpp require --case consumer-rejection-lineage')
+
+root=args.source_root or Path(__file__).resolve().parents[1]
+
+if args.case == 'public-entry-continuation':
+    if args.wake_admission_only or args.before_root or not args.emit_cpp:
+        parser.error('public-entry-continuation requires --emit-cpp and excludes --before-root/--wake-admission-only')
+    import ast,hashlib,json as json_module
+    extractor=(root/'tools/sleep_game_pause_selftest.py').read_text('utf-8-sig')
+    definitions=[node for node in ast.parse(extractor).body if isinstance(node,ast.FunctionDef) and node.name in ['mask','function']]
+    environment={'source':'','extracted':[],'hashlib':hashlib,'re':re}
+    exec(compile(ast.Module(body=definitions,type_ignores=[]),'original-function-extractor','exec'),environment)
+    def whole_structure(text,name):
+        masked=environment['mask'](text)
+        matches=list(re.finditer(r'\bstruct\s+'+re.escape(name)+r'\s*\{',masked))
+        if len(matches)!=1:raise RuntimeError('unique structure required: '+name)
+        start=matches[0].start();opening=masked.index('{',start);depth=1;end=opening+1
+        while depth and end<len(masked):
+            depth+=(masked[end]=='{')-(masked[end]=='}');end+=1
+        if depth or text[end:end+1]!=';':raise RuntimeError('complete structure required: '+name)
+        return text[start:end+1]
+    parts=[{'name': 'completedInteractiveResumeLocked', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_completedInteractiveResumeLocked@@'}, {'name': 'recordInteractiveResume', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_recordInteractiveResume@@'}, {'name': 'recordCompletedResume', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_recordCompletedResume@@'}, {'name': 'proofSupersededLocked', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_proofSupersededLocked@@'}, {'name': 'wakeOperationAllowedLocked', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_wakeOperationAllowedLocked@@'}, {'name': 'wakeOperationAllows', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_wakeOperationAllows@@'}, {'name': 'wakeReadinessLocked', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_wakeReadinessLocked@@'}, {'name': 'recordKernelWake', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_recordKernelWake@@'}, {'name': 'arm', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_arm@@'}, {'name': 'captureReady', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_captureReady@@'}, {'name': 'powerReady', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_powerReady@@'}, {'name': 'tick', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_tick@@'}, {'name': 'originalWakeIdentity', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_originalWakeIdentity@@'}, {'name': 'zeroWakeActionsLocked', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_zeroWakeActionsLocked@@'}, {'name': 'zeroActionOriginalCurrentLocked', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_zeroActionOriginalCurrentLocked@@'}, {'name': 'wakeProof', 'origin': 'native/steam_original_recovery_runtime.h', 'kind': 'function', 'token': '@@FUNCTION_wakeProof@@'}, {'name': 'legacyWakeProof', 'origin': 'native/steam_original_recovery_runtime.h', 'kind': 'function', 'token': '@@FUNCTION_legacyWakeProof@@'}, {'name': 'sharedWakeFactsLocked', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_sharedWakeFactsLocked@@'}, {'name': 'followsWakeBoundary', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'function', 'token': '@@FUNCTION_followsWakeBoundary@@'}, {'name': 'originalTargetCurrent', 'origin': 'native/sleep_steam_recovery.h', 'kind': 'function', 'token': '@@FUNCTION_originalTargetCurrent@@'}, {'name': 'State', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'struct', 'token': '@@STRUCT_State@@'}, {'name': 'WakeOperationObservation', 'origin': 'native/sleep_recovery_auto.h', 'kind': 'struct', 'token': '@@STRUCT_WakeOperationObservation@@'}]
+    content=(root/'tools/fixtures/sleep_public_entry_continuation.cpp.in').read_text('utf-8-sig')
+    paired=[]
+    for part in parts:
+        source=(root/part['origin']).read_text('utf-8-sig')
+        value=environment['function'](part['name'],source,part['origin']) if part['kind']=='function' else whole_structure(source,part['name'])
+        if content.count(part['token'])!=1:raise RuntimeError('unique original source marker required')
+        content=content.replace(part['token'],value,1)
+        paired.append({**part,'sha256':hashlib.sha256(value.encode('utf8')).hexdigest()})
+    if '@@FUNCTION_' in content or '@@STRUCT_' in content:raise RuntimeError('unconsumed original source marker')
+    args.emit_cpp.parent.mkdir(parents=True,exist_ok=True)
+    with args.emit_cpp.open('x',encoding='utf8',newline='\n') as output:output.write(content)
+    with args.emit_cpp.with_suffix('.pairing.json').open('x',encoding='utf8') as output:json_module.dump({'case':args.case,'status':'PREPARED_NOT_RUN','parts':paired,'completeFunctions':20,'completeTypes':2,'livePowerActions':0},output,indent=2)
+    print(json_module.dumps({'case':args.case,'status':'PREPARED_NOT_RUN','cpp':str(args.emit_cpp),'completeFunctions':20,'completeTypes':2,'livePowerActions':0}))
+    raise SystemExit(0)
+
+if args.case == 'public-final-wake':
+    if args.wake_admission_only or args.before_root or not args.emit_cpp:
+        parser.error('public-final-wake requires --emit-cpp and excludes --before-root/--wake-admission-only')
+    import json as json_module
+    content=(root/'tools/fixtures/sleep_public_final_wake.cpp.inc').read_text('utf-8-sig')
+    args.emit_cpp.parent.mkdir(parents=True,exist_ok=True)
+    with args.emit_cpp.open('x',encoding='utf8',newline='\n') as output:output.write(content)
+    print(json_module.dumps({'case':args.case,'status':'PREPARED_NOT_RUN','cpp':str(args.emit_cpp),'livePowerActions':0}))
+    raise SystemExit(0)
+
+# Explicit selector is isolated from the original/default source-wiring group.
+# It emits exact-consumer counter controls for the parent's existing owned compiler.
+if args.case == 'consumer-rejection-lineage':
+    if args.wake_admission_only or not args.before_root or not args.emit_cpp:
+        parser.error('consumer-rejection-lineage requires --before-root and --emit-cpp; incompatible with --wake-admission-only')
+    import json as json_module
+    def extract(text, name):
+        start=text.index('static bool '+name+'(')
+        opening=text.index('{',start); depth=1; end=opening+1
+        while depth:
+            depth+=(text[end]=='{')-(text[end]=='}'); end+=1
+        return text[start:end]
+    candidate=(root/'native/sleep_recovery_auto.h').read_text('utf-8-sig')
+    original=(args.before_root/'native/sleep_recovery_auto.h').read_text('utf-8-sig')
+    structure=candidate[candidate.index('struct WakeOperationObservation {'):candidate.index('static bool completedInteractiveResumeLocked(')]
+    funcs=['followsWakeBoundary','completedInteractiveResumeLocked','wakeOperationAllowedLocked']
+    parts=[]
+    for ns,source in [('before',original),('candidate',candidate)]:
+        parts.append('namespace '+ns+' {\n'+(structure if ns=='candidate' else '')+'\n'.join(extract(source,n) for n in funcs)+'\n}')
+    fixture=r'''#include <cassert>
+#include <climits>
+#include <cstdint>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <type_traits>
+#include "steam_original_recovery_engine/vendor/json.hpp"
+using json=nlohmann::json;
+using ULONGLONG=unsigned long long;
+namespace ymcc { namespace sleepsteam {
+constexpr ULONGLONG kWakeObserveLimitMs=60000;
+bool unsignedDecimal(const std::string& s,std::uint64_t& v);
+} }
+static std::vector<std::string> calls;
+static bool classified=true,consumer=true,retry=false,superseded=false;
+static ULONGLONG tickNow=1000,fileNow=1000000000ULL;
+enum class PowerLifecycle {Ready,Resuming,Suspending,Suspended};
+struct PhasePort {PowerLifecycle value=PowerLifecycle::Ready;PowerLifecycle load(){calls.push_back("power");return value;}} g_powerLifecycle;
+struct PendingPort {bool value=true;bool load(){calls.push_back("pending");return value;}} g_sleepRecoveryAutoPending;
+static bool sharedSleepWakeClassified(ULONGLONG){calls.push_back("classified");return classified;}
+static bool sleepSteamRecoveryAllows(ULONGLONG,ULONGLONG){calls.push_back("consumer");return consumer;}
+static bool sgSleepRetryActive(){calls.push_back("retry");return retry;}
+static ULONGLONG sgNowFileTime(){calls.push_back("file-clock");return fileNow;}
+static ULONGLONG GetTickCount64(){calls.push_back("tick-clock");return tickNow;}
+static bool flag(const json& v,const char* k){calls.push_back(std::string("flag:")+k);return v.is_object()&&v.value(k,false);}
+static ULONGLONG number(const json& v,const char* k){calls.push_back(std::string("number:")+k);return v.value(k,0ULL);}
+namespace ymcc { namespace sleepsteam {
+bool unsignedDecimal(const std::string& s,std::uint64_t& v){calls.push_back("decimal");if(s.empty())return false;v=0;for(char c:s){if(c<'0'||c>'9')return false;v=v*10+(c-'0');}return true;}
+} }
+struct State {ULONGLONG generation=9,configEpoch=4,armed=500;json wakeAdmission;};
+static State state;
+struct {ULONGLONG generation=9,configEpoch=4,boundaryFileTime=100,eventFileTime=999000000ULL;int eventId=507;bool uiWakeRequested=true;ULONGLONG requestGeneration=9;} kernelWake;
+struct {ULONGLONG generation=9,configEpoch=4,eventFileTime=0;} kernelSleepEntry;
+struct {ULONGLONG generation=9,configEpoch=4,boundaryFileTime=100,eventFileTime=999000000ULL,receiptTick=0;} interactiveResume;
+struct {ULONGLONG generation=9,configEpoch=4,boundaryFileTime=100,eventFileTime=999000000ULL;int eventId=507,reason=0;} completedResume;
+struct {ULONGLONG generation=9,configEpoch=4,boundaryFileTime=100;} readyCommit;
+static bool proofSupersededLocked(){calls.push_back("superseded");return superseded;}
+__EXACT_CONSUMERS__
+static_assert(std::is_trivially_copyable<candidate::WakeOperationObservation>::value,"observation must stay trivial-copy diagnostic");
+static void setup(){
+    classified=consumer=true;retry=superseded=false;tickNow=1000;fileNow=1000000000ULL;
+    g_powerLifecycle.value=PowerLifecycle::Ready;g_sleepRecoveryAutoPending.value=true;state=State{};
+    state.wakeAdmission={{"source","kernel-power-507-reason-1"},{"status","admitted"},{"kernelWakeConfirmed",true},{"proofFresh",true},
+        {"eventFileTime","999000000"},{"boundaryFileTime","100"},{"proofObservedGeneration",9},{"boundaryGeneration",9}};
+    kernelWake={9,4,100,999000000ULL,507,true,9};kernelSleepEntry={9,4,0};
+    interactiveResume={9,4,100,999000000ULL,0};completedResume={9,4,100,999000000ULL,507,0};readyCommit={9,4,100};calls.clear();
+}
+int main(){
+    // One existing consumer scenario, with rejection variants; no old default group.
+    for(int variant=0;variant<18;++variant){
+        setup();
+        switch(variant){
+        case 1:classified=false;break;
+        case 2:consumer=false;break;
+        case 3:retry=true;break;
+        case 4:g_powerLifecycle.value=PowerLifecycle::Suspended;break;
+        case 5:g_powerLifecycle.value=PowerLifecycle::Resuming;g_sleepRecoveryAutoPending.value=false;break;
+        case 6:g_powerLifecycle.value=PowerLifecycle::Resuming;state.wakeAdmission["source"]="unknown";break;
+        case 7:g_powerLifecycle.value=PowerLifecycle::Resuming;state.wakeAdmission["eventFileTime"]=false;break;
+        case 8:g_powerLifecycle.value=PowerLifecycle::Resuming;kernelWake.uiWakeRequested=false;break;
+        case 9:g_powerLifecycle.value=PowerLifecycle::Resuming;tickNow=60000+state.armed;break;
+        case 10:g_powerLifecycle.value=PowerLifecycle::Resuming;fileNow=kernelWake.eventFileTime+60000ULL*10000+1;break;
+        case 11:state.wakeAdmission["source"]="interactive-resume-committed-ready";readyCommit.configEpoch=3;break;
+        case 12:state.wakeAdmission["source"]="interactive-resume-committed-ready";interactiveResume.eventFileTime=fileNow-60000ULL*10000;break;
+        case 13:state.wakeAdmission["source"]="interactive-resume-committed-ready";completedResume.eventId=999;break;
+        case 14:state.wakeAdmission["source"]="interactive-resume-committed-ready";interactiveResume.eventFileTime=800000000;break;
+        case 15:state.wakeAdmission["source"]="interactive-resume-committed-ready";break;
+        case 16:g_powerLifecycle.value=PowerLifecycle::Resuming;break;
+        case 17:state.wakeAdmission["source"]="interactive-resume-committed-ready";completedResume.eventId=107;break;
+        }
+        const bool a=before::wakeOperationAllowedLocked(9,4);const auto originalCalls=calls;calls.clear();
+        const bool b=candidate::wakeOperationAllowedLocked(9,4);assert(a==b&&originalCalls==calls);calls.clear();
+        candidate::WakeOperationObservation observation;
+        const bool c=candidate::wakeOperationAllowedLocked(9,4,&observation);
+        assert(a==c&&originalCalls==calls);assert((observation.rejectedGuard==nullptr)==c);
+        assert(c==(variant==0||variant==15||variant==16||variant==17));
+        if(!c){const char* expected=nullptr;switch(variant){
+        case 1:case 2:case 3:expected="wake-classification-consumer-or-retry";break;
+        case 4:case 5:expected="resuming-admission-or-superseded";break;
+        case 6:expected="kernel-source";break;case 7:expected="kernel-admission-boundary";break;
+        case 8:expected="kernel-native-witness";break;case 9:case 10:expected="kernel-operation-or-proof-window";break;
+        case 11:expected="interactive-identity-ready-or-retry";break;case 12:expected="interactive-proof-window";break;
+        case 13:expected="completed-exit-kind-or-window";break;case 14:expected="interactive-exit-gap";break;}
+        assert(expected&&std::string(observation.rejectedGuard)==expected);}
+        if(observation.interactiveProofEvaluated){assert(observation.interactiveFileTime==interactiveResume.eventFileTime);assert(observation.exitFileTime==completedResume.eventFileTime);}
+        if(observation.interactiveProofEvaluated)assert(observation.proofNowFileTime==fileNow);
+        if(observation.kernelProofEvaluated)assert(observation.kernelProofNowFileTime==fileNow);
+        if(observation.interactiveProofEvaluated||observation.kernelProofEvaluated)assert(observation.proofLimitMs==60000);
+        std::cout<<"consumer-rejection-lineage variant="<<variant<<" operationAllowed="<<c<<" calls="<<originalCalls.size()<<"\n";
+    }
+}
+'''
+    args.emit_cpp.parent.mkdir(parents=True,exist_ok=True)
+    with args.emit_cpp.open('x',encoding='utf-8',newline='\n') as output:
+        output.write(fixture.replace('__EXACT_CONSUMERS__','\n'.join(parts)))
+    print(json_module.dumps({'case':args.case,'status':'PREPARED_NOT_RUN','compileExecuted':False,'oldGroupsExecuted':0,'cpp':str(args.emit_cpp)}))
+    raise SystemExit(0)
 
 main=(root/'native/main.cpp').read_text('utf-8-sig')
 
@@ -44,14 +215,20 @@ armProof=auto[auto.index('static void arm('):auto.index('static void run(')]
 check('raw kernel candidate alone cannot authorize: final arm rebinds actual captured generation/epoch and boundary',all(s in armProof for s in ['original.generation==gen','original.configEpoch==epoch','kernelWake.eventFileTime>original.powerBoundaryFileTime','kernelWake.eventFileTime<=sgNowFileTime()']) and 'eventFileTime>nowFileTime' in record)
 check('a synchronous prepared boundary outranks a completed prior capture at kernel proof collection','SleepSteamRecovery::wakeBoundaryFor(gen)' in record and 'preparedPending&&prepared.configEpoch==epoch' in recovery)
 check('proof follows only the exact immediately transferred prepared boundary','kernelWake.generation+1==gen' in armProof and 'original.boundaryGeneration==kernelWake.generation' in armProof)
-check('capture-ready promotion still requires a prior explicit wake request, not capture alone','state.phase=="wake-proof-wait"' in armProof and 'if(requested)arm(gen)' in armProof)
+check('capture-ready promotion joins explicit wake or independently completed interactive resume, never capture alone','state.phase=="wake-proof-wait"' in armProof and 'if(requested)arm(gen,true)' in armProof and 'completedInteractiveResumeLocked' in armProof)
+
+check('dynamic completion accepts any507 without an OS reason whitelist','if(eventId!=507&&!(eventId==107&&targetState==5))return;' in auto and 'recordCompletedResume(gen,eventId,reason,targetState,eventFileTime)' in record)
+check('interactive proof uses received PBT time rather than delayed GUI now','sleepRecoveryAutoInteractiveResume(currentPowerGeneration(),static_cast<int>(w),powerReceipt.tick)' in main and 'const auto age=(now-receiptTick)*10000ULL' in auto)
+commit_start=main.index('static bool commitPowerResume(unsigned long long generation, const char* source) {')
+check('both Ready commit branches rejoin Steam without changing shared admission',main[commit_start:main.index('static LRESULT gamepadDispatchRawInput',commit_start)].count('sleepRecoveryAutoPowerReady(generation);')==2)
+check('a newly joined admission relays the original runtime Wake exactly once','if(relayOriginal&&!deferred)steamOriginalRecoveryWake(gen)' in armProof and 'if(state.seenGeneration==gen)return;' in armProof)
 
 
 s0=main[main.index('case WM_SG_S0_WAKE:'):main.index('case WM_SG_S4_WAKE:')]
 
 check('confirmed S0 wake arms Steam even if shared duplicate classification returns early',bool(re.search(r'sgHandleModernStandbyWake\(true\);\s*sleepRecoveryAutoArm\(currentPowerGeneration\(\)\);',s0)))
 
-check('confirmed retry-abort wake preserves Steam entry after owned recovery queued',bool(re.search(r'sgAbortSleepIntent\("s0-user-power-button-wake"\);\s*sleepRecoveryAutoArm\(currentPowerGeneration\(\)\);',s0)))
+check('confirmed retry-abort wake preserves Steam entry after owned recovery queued',bool(re.search(r'sgAbortSleepIntent\("s0-user-power-button-wake",\s*eventFileTime\);\s*sleepRecoveryAutoArm\(currentPowerGeneration\(\)\);',s0)))
 
 s4=main[main.index('case WM_SG_S4_WAKE:'):main.index('case WM_SG_RESUME_GAME_FOCUS:')]
 
@@ -148,10 +325,13 @@ check('native primary read wrapper does not clip later primary updates or remova
 check('malformed, removed, nonlocal and incomplete native primary evidence cannot authorize the original', all(x in recovery for x in ['!tracker.complete||!primary.inventory.complete','if(row.removed)','if(!row.local)','row.pid==pid&&originalTracked']))
 check('unobserved primary fallback requires one exact tracker member and is not called verified', all(x in recovery for x in ['members==1&&originalTracked','unique-tracker-native-primary-unobserved','nativePrimaryVerified",false']))
 check('pre-sleep preferred and reverse joins require native primary allowance before YMCC one-PID validation', all(x in recovery for x in ['flag(preferredPrimary,"originalAllowed")','if(!flag(rowPrimary,"originalAllowed"))','nativePrimaryRejectedCandidates','!nativePrimaryAllowsOriginal(client,chosen,binding.appid,']))
-check('R34 uses one cumulative1000ms capture budget with separate rule/read/parse diagnostics and unchanged original boundary authority', all(x in recovery for x in ['captureReadBudgetMs=1000','maximumMs",captureReadBudgetMs','now-started>captureReadBudgetMs','ymcc-rules-snapshot','tracker-read','tracker-parse','stageElapsedMs','candidate-identity-and-ymcc-validation','postWakeRetargetAllowed",false']))
+check('R34 uses one cumulative1000ms active capture budget with separate rule/read/parse diagnostics and unchanged original boundary authority', all(x in recovery for x in ['captureReadBudgetMs=1000','maximumMs",captureReadBudgetMs','elapsed100ns>captureReadBudgetMs*10000ULL','QueryUnbiasedInterruptTime(&now)','ymcc-rules-snapshot','tracker-read','tracker-parse','stageElapsedMs','candidate-identity-and-ymcc-validation','postWakeRetargetAllowed",false']))
 check('fresh original primary is required at input admission, postflight and list rescope', recovery.count('nativePrimaryAllowsOriginal(original.client,original.game,')>=2 and 'nativePrimaryAllowsOriginal(client,game,originalAppid,' in recovery and 'steam-native-primary-game-changed' in recovery)
 check('wake primary proof is recorded and contributes to current original joint verification', all(x in recovery for x in ['{"nativePrimary",primary}','flag(original.targetSelection,"jointBindingVerified")&&flag(primary,"originalAllowed")','nativePrimaryAllowsOriginal",flag(primary,"originalAllowed")']))
 check('original verified primary proof is not downgraded to legacy unique tracker authority after capture', all(x in recovery for x in ['primaryWasVerified&&!flag(primary,"nativePrimaryVerified")','steam-native-primary-proof-lost','requireVerified||flag(proof,"nativePrimaryVerified")']))
+if args.wake_admission_only:
+    print(f'Steam final-wake/capture source wiring: {len(checks)} checks PASS; unrelated input diagnostics NOT_RUN')
+    raise SystemExit(0)
 owner=(root/'native/input_chain_owner_evidence.h').read_text('utf-8-sig')
 check('R38 native owner helper included before boot use', '#include "input_chain_owner_evidence.h"' in main and main.index('#include "input_chain_owner_evidence.h"')<main.index('ymcc::inputChainOwner::readSelf()'))
 check('R38 self owner read only occurs at existing boot boundary', main.count('ymcc::inputChainOwner::readSelf()')==1 and 'appendNativeLifecycleLog("boot-single-instance-acquired",\n            {{"nativeOwner", ymcc::inputChainOwner::readSelf()}})' in main)
@@ -165,7 +345,7 @@ command=(root/'native/input_chain_command_evidence.h').read_text('utf-8-sig')
 host=(root/'InputHost/Program.cs').read_text('utf-8-sig')
 lifetime=(root/'InputHost/TargetCreationLifetimeEvidence.cs').read_text('utf-8-sig')
 check('R39 command diagnostic header is included', '#include "input_chain_command_evidence.h"' in main)
-check('R39 lifecycle capture comes from actual merged envelope before pipe write', main.index('lifecycleCommandEvidence = ymcc::inputChainCommand::capture(request, g_inputHostHostInstanceId)')<main.index('const bool written = connected && inputHostPipeIo(pipe, true'))
+check('R39 lifecycle capture comes from actual merged envelope before pipe write', main.index('lifecycleCommandEvidence = ymcc::inputChainCommand::capture(request, g_inputHostHostInstanceId)')<main.index('inputHostPipeIo(pipe, true, const_cast<char*>(requestText.data())'))
 check('R39 command diagnostic capture excludes SUBMIT_FRAME', 'if (ymcc::inputChainCommand::supported(command))' in main and all(x in command for x in ['PREPARE_TARGET','RECREATE_TARGET','RELEASE_TARGET','SHUTDOWN']) and 'std::strcmp(c,"SUBMIT_FRAME")' not in command)
 check('R39 projection preserves request protocol namespace and consumption unknown', all(x in command for x in ['native-lifecycle-command-receipt','input-host-bound-protocol;not-current-shared-power','"gameInputUnverified",true','"steamConsumptionProven",false']))
 check('R39 accepted and rejected existing rows append diagnostic separately', 'append(acceptedLine,lifecycleCommandEvidence,response,true,expectedStatus)' in main and 'append(rejectedLine,lifecycleCommandEvidence,response,false,expectedStatus)' in main)

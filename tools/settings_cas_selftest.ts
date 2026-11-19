@@ -84,6 +84,16 @@ const stale = evaluateInputCas(current, 3, { outputTarget: { persona: 'xbox360' 
 if (stale.ok || stale.reason !== 'revision-conflict' || stale.value.outputTarget.persona !== 'disabled') throw new Error('stale revision was accepted');
 const accepted = evaluateInputCas(current, 4, { outputTarget: { persona: 'xbox360' } });
 if (!accepted.ok || accepted.revision !== 5 || accepted.value.outputTarget.persona !== 'xbox360' || !accepted.value.outputTarget.customFutureField.keep || accepted.value.appliedRevision !== null || accepted.value.applyStatus !== 'saved-pending' || !accepted.value.pendingConfigHash?.startsWith('sha256:') || accepted.value.hostAcknowledgedRevision !== null || accepted.value.hostAcknowledgedConfigHash !== null) throw new Error('CAS did not enter the T10 saved-pending state');
+// Stored overlays, including matching-session data, cannot lock global/four-mode edits.
+const legacyOverlay = { sessionId: 'same-session', identity: 'old-game', outputTarget: { persona: 'elite' }, gyroMotion: { enabled: true } };
+for (const patch of [{ outputTarget: { persona: 'steamdeck' } }, { gyroMotion: { enabled: true } }, { gameOverride: legacyOverlay }]) {
+  const legacyCurrent = { ...current, gameOverride: legacyOverlay };
+  const saved = evaluateInputCas(legacyCurrent, current.revision, patch);
+  if (!saved.ok || saved.value.gameOverride !== null || saved.value.applyStatus !== 'saved-pending' || saved.revision !== current.revision + 1) throw new Error('legacy overlay blocked global CAS or was resurrected');
+  if (JSON.stringify(legacyCurrent.gameOverride) !== JSON.stringify(legacyOverlay)) throw new Error('global CAS mutated the old document');
+  const staleOverlay = evaluateInputCas(legacyCurrent, current.revision - 1, patch);
+  if (staleOverlay.ok || staleOverlay.reason !== 'revision-conflict') throw new Error('overlay retirement bypassed revision fencing');
+}
 const replay = evaluateInputCas(accepted.value, 4, { diagnostics: { inputLoggingEnabled: true } });
 if (replay.ok) throw new Error('old revision replay was accepted');
 const failedWrite = evaluateInputCasWrite(current, 4, { outputTarget: { persona: 'xbox360' } }, false);
@@ -134,15 +144,16 @@ for (const [previous, current] of [['xbox360', 'elite'], ['dualshock4', 'dualsen
     } };
     const before = JSON.stringify(source), migrated = normalizeSettings(source);
     if (JSON.stringify(source) !== before) throw new Error('persona migration changed the caller-owned document');
-    const target = migrated.input.outputTarget, overlay = migrated.input.gameOverride.outputTarget;
+    const target = migrated.input.outputTarget;
     if (target.persona !== current || target.buttonMappingEnabled !== enabled || target.gyroEnabled !== gyro || target.descriptorHash !== null || target.closure !== 'UNENCLOSED' || target.extension !== 123) throw new Error('retired base persona migration lost settings or trusted the old identity');
-    if (overlay.persona !== current || overlay.buttonMappingEnabled !== enabled || overlay.gyroEnabled !== gyro || overlay.descriptorHash !== null || overlay.closure !== 'UNENCLOSED') throw new Error('retired overlay persona survived migration');
+    if (migrated.input.gameOverride !== null) throw new Error('retired game overlay survived normalization');
     if (migrated.startupDesired.virtualGamepadPersona !== current || migrated.startupDesired.extension !== 42) throw new Error('retired startup persona or extension migration failed');
     if (migrated.input.appliedConfigHash !== null || migrated.input.hostAcknowledgedConfigHash !== null || migrated.input.hostAcknowledgedRevision !== null || migrated.input.applyStatus !== 'saved-pending') throw new Error('old identity acknowledgement survived persona migration');
     if (JSON.stringify(normalizeSettings(migrated)) !== JSON.stringify(migrated)) throw new Error('persona migration is not idempotent');
   }
 }
 console.log('retired controller persona migration: PASS (12 target/overlay/startup/receipt cases)');
+if (process.argv.includes('--input-only')) process.exit(0);
 
 // Config storm: defaults describe known scalar types; unknown keys stay opaque.
 // Keep the original CAS, bounds, persona migration and write-failure assertions above.

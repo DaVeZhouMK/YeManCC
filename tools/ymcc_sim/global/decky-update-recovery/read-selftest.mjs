@@ -1,6 +1,8 @@
 import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import assert from 'node:assert/strict';
 export async function readTests(root,out){
- const source=fs.readFileSync(path.join(root,'native/steam_live.js'),'utf8'),header=fs.readFileSync(path.join(root,'native/steam_live_script.h'),'utf8').split('inline constexpr const char kUiModeScript[] =')[1],compact=[...header.matchAll(/R"YMSTEAM\(([\s\S]*?)\)YMSTEAM"/g)].map(m=>m[1]).join(''),cases=[];
+ const source=fs.readFileSync(path.join(root,'native/steam_live.js'),'utf8'),header=fs.readFileSync(path.join(root,'native/steam_live_script.h'),'utf8');
+ const modeBlocks=[...header.matchAll(/inline constexpr const char kUiModeScript\[\] =\s*((?:R"YMSTEAM\([\s\S]*?\)YMSTEAM"\s*)+);/g)];assert.equal(modeBlocks.length,1,'actual embedded UI mode constant must be unique');
+ const compact=[...modeBlocks[0][1].matchAll(/R"YMSTEAM\(([\s\S]*?)\)YMSTEAM"/g)].map(m=>m[1]).join(''),cases=[];
  for(const [kind,script]of Object.entries({source,compact})){
   const run=async(options={})=>{const window={location:{origin:'https://steamloopback.host'},DeckyPluginLoader:{},__YMCC_DECKY_FRONTEND__:{active:true,buildId:'a'.repeat(64)},__YMCC_DECKY_MIRROR__:{runId:'b'.repeat(32),token:'c'.repeat(64),endpoint:'ws://127.0.0.1:1822/mirror'}};window.top=window;
    if(options.noPrior)delete window.__YMCC_DECKY_FRONTEND__;if(options.inactive)window.__YMCC_DECKY_FRONTEND__.active=false;if(options.foreign)window.location.origin='https://example.invalid';if(options.frame)window.top={};if(options.badBridge)window.__YMCC_DECKY_MIRROR__.endpoint='ws://example.invalid/mirror';if(options.noLoader)delete window.DeckyPluginLoader;if(options.loadedFlag)window.deckyHasLoaded=true;if(options.loaderVersion)window.DeckyPluginLoader.deckyState={publicState:()=>({versionInfo:{current:options.loaderVersion}})};

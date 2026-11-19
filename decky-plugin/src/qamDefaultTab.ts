@@ -12,11 +12,12 @@ export function installConsoleDefault(dfl:any,host:any,id:number,owns:()=>boolea
   const source=String(toggle.value);
   if(!['GetOpenSideMenu','OpenSideMenu','CloseSideMenus'].every(k=>source.includes(k)))return inactive;
   let stopped=false;const patches:any[]=[];
-  const eligible=(menu:any)=>{
-    try{return !stopped&&owns()&&Object.getPrototypeOf(menu)===prototype&&menu.m_Instance?.MenuStore===menu&&
+  const checkable=(menu:any)=>{
+    try{return !stopped&&Object.getPrototypeOf(menu)===prototype&&menu.m_Instance?.MenuStore===menu&&
       menu.m_Instance?.IsGamepadUIWindow?.()===true&&menu.m_Instance?.IsAnyVRWindow?.()===false&&
       !(menu.m_cSuppressRequests>0)&&typeof menu.OpenQuickAccessMenu==='function';}catch{return false;}
   };
+  const eligible=(menu:any)=>{try{return checkable(menu)&&owns();}catch{return false;}};
   const navigationMenu=()=>{
     let windowInstance:any;
     try{windowInstance=host.SteamUIStore?.GetFocusedWindowInstance?.();}catch{}
@@ -51,6 +52,31 @@ export function installConsoleDefault(dfl:any,host:any,id:number,owns:()=>boolea
       }));
     }
   }catch{dispose();return inactive;}
+  // Observe the real MenuStore transition once, below Toggle and Navigation.
+  // Checking a connection does not require owning the console or selecting it.
+  // A missing afterPatch keeps the original selection-only behavior intact.
+  const open=Object.getOwnPropertyDescriptor(prototype,'OpenSideMenu');
+  if(typeof dfl.afterPatch==='function'&&typeof open?.value==='function'&&open.writable&&open.configurable){
+    const observation:any[]=[],opening=new WeakMap<object,boolean>();
+    try{
+      observation.push(dfl.beforePatch(prototype,'OpenSideMenu',function consoleCheckBefore(this:any,args:any[]){
+        try{if(args[0]===dfl.SideMenu.QuickAccess)opening.set(this,checkable(this)&&this.GetOpenSideMenu()!==dfl.SideMenu.QuickAccess);}catch{}
+      }));
+      observation.push(dfl.afterPatch(prototype,'OpenSideMenu',function consoleCheckAfter(this:any,args:any[],result:any){
+        try{
+          if(args[0]!==dfl.SideMenu.QuickAccess)return result;
+          const opened=opening.get(this);opening.delete(this);
+          // Consuming the receipt before dispatch coalesces nested calls. A new
+          // call replaces an unfinished receipt if an earlier Steam call threw.
+          if(opened&&checkable(this)&&this.GetOpenSideMenu()===dfl.SideMenu.QuickAccess&&
+            typeof host.dispatchEvent==='function'&&typeof host.Event==='function')
+            host.dispatchEvent(new host.Event('ymcc-decky-connection-check'));
+        }catch{/* Observation must never change Steam's action or its return value. */}
+        return result;
+      }));
+      patches.push(...observation);
+    }catch{for(const patch of observation.reverse())try{patch.unpatch();}catch{}}
+  }
   function dispose(){if(stopped)return;stopped=true;for(const patch of patches.reverse())try{patch.unpatch();}catch{}patches.length=0;}
   return {get active(){return !stopped&&owns();},dispose};
 }

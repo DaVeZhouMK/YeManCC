@@ -15,7 +15,7 @@ def extract(text,marker):
 parser=argparse.ArgumentParser()
 parser.add_argument('--baseline',required=True,type=Path)
 parser.add_argument('--output',required=True,type=Path)
-a=parser.parse_args();out=a.output.resolve();out.mkdir(parents=True,exist_ok=True)
+a=parser.parse_args();out=a.output.resolve();out.mkdir(parents=True,exist_ok=False)
 before=a.baseline.read_text(encoding='utf-8-sig');current=(root/'native/main.cpp').read_text(encoding='utf-8-sig')
 markers=['static bool acNameMatch(','static BOOL CALLBACK acCloseEnum(','static DWORD WINAPI autoCloseThread(']
 functions={side:{m:extract(text,m) for m in markers} for side,text in [('before',before),('after',current)]}
@@ -31,6 +31,7 @@ assert current.count('static ymcc::autoclose::ScanWait g_autoCloseWait{g_summonQ
 shims=r"""
 static Scenario scenario;
 static Observation observed;
+static bool realWaitCost=false;
 static std::atomic<bool> g_summonQuit{false},g_autoCloseEnabled{false};
 static std::mutex g_autoCloseMx;
 static std::vector<std::string> g_autoCloseProcs;
@@ -47,8 +48,15 @@ static void advance(unsigned amount){
         g_autoCloseProcs=observed.now>=23000?std::vector<std::string>{"aya*.exe"}:std::vector<std::string>{"OneXConsole"};
     }
 }
-static void Sleep(DWORD ms){advance(ms);}
-struct FakeWait{bool waitForNextScan(std::chrono::milliseconds interval){if(g_summonQuit)return false;advance(unsigned(interval.count()));return !g_summonQuit;}};
+static void Sleep(DWORD ms){if(realWaitCost){++observed.waits;fixtureRealSleep(ms);}else advance(ms);}
+struct FakeWait{
+    ::ymcc::autoclose::ScanWait timed{g_summonQuit};
+    bool waitForNextScan(std::chrono::milliseconds interval){
+        if(realWaitCost){++observed.waits;return timed.waitForNextScan(interval);}
+        if(g_summonQuit)return false;advance(unsigned(interval.count()));return !g_summonQuit;
+    }
+    void requestStop(){timed.requestStop();}
+};
 static FakeWait g_autoCloseWait;
 static DWORD GetCurrentProcessId(){return 99;}
 static HANDLE CreateToolhelp32Snapshot(DWORD,DWORD){observed.scans.push_back(observed.now);return scenario.mode=="snapshot-failure"?INVALID_HANDLE_VALUE:reinterpret_cast<HANDLE>(1);}
@@ -58,6 +66,21 @@ static BOOL CloseHandle(HANDLE){++observed.snapshotCloses;return TRUE;}
 static DWORD GetWindowThreadProcessId(HWND h,DWORD* pid){*pid=DWORD(reinterpret_cast<ULONG_PTR>(h));return 1;}
 static BOOL PostMessageW(HWND h,UINT message,WPARAM,LPARAM){if(message==WM_CLOSE)observed.closed.emplace_back(observed.now,DWORD(reinterpret_cast<ULONG_PTR>(h)));return TRUE;}
 static BOOL EnumWindows(WNDENUMPROC callback,LPARAM lp){for(auto& process:processes)callback(reinterpret_cast<HWND>(ULONG_PTR(process.pid)),lp);return TRUE;}
+namespace ymcc::processInventory {
+enum class Status { Complete, Unavailable, Failed };
+inline constexpr unsigned long long currentTime=~0ULL;
+struct Entry { DWORD pid;std::wstring name; };
+struct Snapshot { Status status=Status::Failed;std::vector<Entry> rows; };
+static void* resolveQuery(){return nullptr;}
+static std::shared_ptr<const Snapshot> read(void*,unsigned long long,unsigned) {
+    observed.scans.push_back(observed.now);
+    auto result=std::make_shared<Snapshot>();
+    if(scenario.mode=="snapshot-failure")return result;
+    result->status=Status::Complete;
+    for(const auto& p:processes)result->rows.push_back({p.pid,p.exe});
+    return result;
+}
+}
 static Observation run(const Scenario& input);
 """
 (out/'auto-close-shims.inc').write_text(shims,encoding='utf-8')
@@ -68,7 +91,7 @@ shutil.copy2(root/'native/auto_close_wait.h',out/'auto_close_wait.h')
 shutil.copy2(root/'tools/core_auto_close_wait_selftest.cpp',out/'selftest.cpp')
 vcvars=os.environ.get('YMCC_VCVARS64',r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
 cmd=out/'build.cmd';exe=out/'selftest.exe'
-cmd.write_text('@echo off\ncall "'+vcvars+'" >nul\nif errorlevel 1 exit /b 1\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNDEBUG /DUNICODE /D_UNICODE /I"'+str(out)+'" "'+str(out/'selftest.cpp')+'" /Fo"'+str(out/'selftest.obj')+'" /Fe"'+str(exe)+'"\nif errorlevel 1 exit /b 1\n"'+str(exe)+'"\nexit /b %errorlevel%\n',encoding='utf-8')
+cmd.write_text('@echo off\ncall "'+vcvars+'" >nul\nif errorlevel 1 exit /b 1\ncl /nologo /showIncludes /std:c++20 /utf-8 /EHsc /MT /O2 /DNDEBUG /DUNICODE /D_UNICODE /I"'+str(out)+'" "'+str(out/'selftest.cpp')+'" /Fo"'+str(out/'selftest.obj')+'" /Fe"'+str(exe)+'" /link /VERBOSE:LIB\nif errorlevel 1 exit /b 1\n"'+str(exe)+'"\nexit /b %errorlevel%\n',encoding='utf-8')
 run=subprocess.run(['cmd.exe','/d','/c',str(cmd)],cwd=out,capture_output=True,timeout=60)
 log=run.stdout.decode('utf-8',errors='replace')+run.stderr.decode('utf-8',errors='replace')
 (out/'test.log').write_text(log,encoding='utf-8')

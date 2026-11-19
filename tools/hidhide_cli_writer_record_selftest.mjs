@@ -5,9 +5,9 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),rawArgs=process.argv.slice(2);
-const nativeOnly=rawArgs.at(-1)==='--native-refresh-only',args=nativeOnly?rawArgs.slice(0,-1):rawArgs;
+const nativeOnly=rawArgs.at(-1)==='--native-refresh-only',bindingHintOnly=rawArgs.at(-1)==='--binding-hint-only',args=nativeOnly||bindingHintOnly?rawArgs.slice(0,-1):rawArgs;
 const started=Date.now();
-assert(args.length===4&&args[0]==='--out'&&args[2]==='--toolchain'&&path.isAbsolute(args[1])&&path.isAbsolute(args[3]),'Use --out ABS_FRESH_DIRECTORY --toolchain ABS_CAPTURED_TOOLCHAIN_DIRECTORY [--native-refresh-only]');
+assert(args.length===4&&args[0]==='--out'&&args[2]==='--toolchain'&&path.isAbsolute(args[1])&&path.isAbsolute(args[3]),'Use --out ABS_FRESH_DIRECTORY --toolchain ABS_CAPTURED_TOOLCHAIN_DIRECTORY [--native-refresh-only | --binding-hint-only]');
 const out=path.resolve(args[1]),toolchain=path.resolve(args[3]),key=p=>path.resolve(p).toLowerCase();
 const within=(a,b)=>{const r=path.relative(a,b);return r===''||(!r.startsWith('..'+path.sep)&&r!=='..'&&!path.isAbsolute(r));};
 assert(!within(repo,out)&&!within(out,repo)&&!within(toolchain,out)&&!within(out,toolchain),'Output cannot overlap product source or captured toolchain');
@@ -24,7 +24,7 @@ for(const name of ['build-environment.json','toolchain-manifest.json']){const p=
 const capture=json(path.join(toolchain,'build-environment.json')),manifest=json(path.join(toolchain,'toolchain-manifest.json'));
 fs.mkdirSync(out,{recursive:true});
 const save=(name,value)=>{const p=path.resolve(out,name);assert(within(out,p)&&p!==out,'evidence path boundary');fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(value,null,2)+'\n',{flag:'wx'});return id(p);};
-const sources=['native/native_refresh_writer_record.h','native/native_refresh_writer_store.h','native/hidhide_cli_writer_record.h','native/hidhide_cli_writer_store.h','native/virtual_target_return_record.h','native/virtual_target_return_store.h','tools/fixtures/hidhide_cli_writer_record/fixture.cpp','tools/fixtures/hidhide_cli_writer_record/README.md','tools/hidhide_cli_writer_record_selftest.mjs','deps/json/json.hpp'];
+const sources=['native/native_refresh_writer_record.h','native/native_refresh_writer_store.h','native/hidhide_cli_writer_record.h','native/hidhide_cli_writer_store.h','native/virtual_target_return_record.h','native/virtual_target_return_store.h','native/virtual_target_return_session.h','tools/fixtures/hidhide_cli_writer_record/fixture.cpp','tools/fixtures/hidhide_cli_writer_record/README.md','tools/hidhide_cli_writer_record_selftest.mjs','deps/json/json.hpp'];
 const frozen=sources.map(relative=>{const p=path.join(repo,relative),before=sha(p),dest=path.join(out,'source',relative);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(p,dest,fs.constants.COPYFILE_EXCL);assert.equal(sha(dest),before,'source copy identity');assert.equal(sha(p),before,'source stable at copy');return{relative,path:p,sha256:before,snapshot:dest,bytes:fs.statSync(dest).size};});
 save('SOURCES.json',{schemaVersion:1,sources:frozen,toolchain:id(path.join(toolchain,'toolchain-manifest.json')),capturedEnvironment:id(path.join(toolchain,'build-environment.json')),priorResult:id(priorResultPath)});
 const env={...capture.environment};for(const k of Object.keys(env))if(/^(CL|_CL_|LINK|_LINK_|YEMAN_SCREEN_NATIVE_INPUT_CANDIDATE)$/i.test(k))delete env[k];
@@ -53,14 +53,15 @@ const visibilityNegativeCases={
     'negative-owner-shared':['native/visibility/session-shared-owner-commit-order-reopen-and-noops'],
     'negative-publish-before-commit':[1,2,3,4,5,6,11].map(fault=>'native/visibility/store/fault-preserves/'+fault)
 };
-const variants=nativeOnly?originalVariants.filter(v=>v.name!=='Checked').map(v=>v.file?{
+const variants=bindingHintOnly?[originalVariants[0]]:nativeOnly?originalVariants.filter(v=>v.name!=='Checked').map(v=>v.file?{
     ...v,file:v.file.replace('hidhide_cli_writer_','native_refresh_writer_'),requiredCase:'native/'+v.requiredCase,requiredVisibilityCases:visibilityNegativeCases[v.name]
 }:v):originalVariants;
-save('PLAN.json',{canonicalTestId:'hidhide_cli_writer_record',selection:nativeOnly?'native-refresh-only':'all',
+save('PLAN.json',{canonicalTestId:'hidhide_cli_writer_record',selection:bindingHintOnly?'binding-hint-only':nativeOnly?'native-refresh-only':'all',
     variants:variants.map(v=>({name:v.name,requiredCase:v.requiredCase??null,requiredVisibilityCases:v.requiredVisibilityCases??[]})),
-    checkedExecuted:!nativeOnly,legacyCliCasesExecuted:!nativeOnly,originalAssertionsAndThreeNegativeOperatorsRetained:true,
+    checkedExecuted:!nativeOnly&&!bindingHintOnly,legacyCliCasesExecuted:!nativeOnly&&!bindingHintOnly,originalAssertionsAndThreeNegativeOperatorsRetained:true,
+    bindingHintOnly,selectedSemanticNegativeOperators:bindingHintOnly?0:3,
     sourceAndToolIdentityCheckMs:Date.now()-started,fixtureTimeoutMs:60000,buildTimeoutMs:60000,
-    ownerLeaseDuplicateSameProcessTested:true,ownerLeaseCrossProcessInheritanceTested:false,jobQuietOrTerminalProofTested:false,missingNamedJobIsUnknown:true});
+    ownerLeaseDuplicateSameProcessTested:!bindingHintOnly,ownerLeaseCrossProcessInheritanceTested:false,jobQuietOrTerminalProofTested:false,missingNamedJobIsUnknown:true});
 try {
     for(const variant of variants){
         const dir=path.join(out,variant.name);fs.mkdirSync(path.join(dir,'files'),{recursive:true});const generated=[];
@@ -86,15 +87,23 @@ try {
         const closure=save(variant.name+'/COMPILE-LINK-CLOSURE.json',{sourceDependencyReport:id(dependencyPath),actualCompilerInputs:actualInputs,unboundInputs:[],actualLinkerSearchedLibraries:libraries,mapContributors:contributors,map:id(path.join(dir,'fixture.map')),binary:id(exe),staticImportedDlls:imports,compiler:id(cl),linker:id(capture.tools['link.exe'].paths[0]),dumpbin:id(dump),scope:'Static imports and exact compile/link identities only; no runtime module trace.'});
         const executeStarted=Date.now();
         console.log('RUN '+variant.name);
-        const ran=await run(exe,[path.join(dir,'files'),path.join(dir,'RESULT.json'),...(nativeOnly?['--native-refresh-only']:[])],dir,path.join(dir,'run.log'),60000);assert(fs.existsSync(path.join(dir,'RESULT.json')),'fixture produced terminal receipt');
+        const ran=await run(exe,[path.join(dir,'files'),path.join(dir,'RESULT.json'),...(bindingHintOnly?['--binding-hint-only']:nativeOnly?['--native-refresh-only']:[])],dir,path.join(dir,'run.log'),60000);assert(fs.existsSync(path.join(dir,'RESULT.json')),'fixture produced terminal receipt');
         const executionMs=Date.now()-executeStarted;
         const result=json(path.join(dir,'RESULT.json'));
         assert.equal(result.nativeRefreshOnly,nativeOnly,'exact fixture selection');
-        assert.equal(result.ownerLeaseDuplicateSameProcessTested,true);assert.equal(result.ownerLeaseCrossProcessInheritanceTested,false);assert.equal(result.jobQuietOrTerminalProofTested,false);
+        if(bindingHintOnly){
+            assert.equal(result.bindingHintOnly,true);assert.equal(result.caseCount,22);assert.equal(result.legacyDefaultCasesExecuted,0);
+            assert.equal(result.cases.length,22);assert.equal(new Set(result.actualCaseNames).size,22);
+            assert.deepEqual(result.actualCaseNames,result.selectedCaseNames);assert.deepEqual(result.actualCaseNames,result.cases.map(x=>x.name));
+            assert(result.cases.every(x=>x.name.startsWith('binding-hint/')),'hint-only executes no default cases');
+        }else{assert.equal(result.ownerLeaseDuplicateSameProcessTested,true);assert.equal(result.ownerLeaseCrossProcessInheritanceTested,false);assert.equal(result.jobQuietOrTerminalProofTested,false);}
         if(nativeOnly)assert(result.cases.every(x=>x.name.startsWith('native/')),'native-only executes no legacy CLI cases');
         assert(!result.failures.some(x=>x.assertion.startsWith('scenario exception:')),'setup/runtime exceptions cannot count as semantic mutant detection');
         if(variant.file){assert.equal(ran.exitCode,1,'mutant must fail assertions, not compile/crash');assert(result.failures.some(x=>x.case===variant.requiredCase),'mutant trips original intended assertion: '+variant.requiredCase);for(const name of variant.requiredVisibilityCases??[])assert(result.failures.some(x=>x.case===name),'same original mutant must also trip new visibility boundary: '+name);}
-        else{assert.equal(ran.exitCode,0,'private fixture assertions failed: '+variant.name+'/RESULT.json');assert(result.pass);assert(result.realIndependentNativeProcesses>=(nativeOnly?7:14)&&result.ownerCreationCrashProcesses===(nativeOnly?2:4),'real independent native exclusion and exact owner-creation crash release');assert(result.childRuns.every(x=>x.pass),'independent process probes passed');}
+        else{assert.equal(ran.exitCode,0,'private fixture assertions failed: '+variant.name+'/RESULT.json');assert(result.pass);
+            if(bindingHintOnly)assert(result.realIndependentNativeProcesses===3&&result.ownerCreationCrashProcesses===0&&result.postCommitAbruptFixtureExits===3,'three exact owned post-commit abrupt exits');
+            else assert(result.realIndependentNativeProcesses>=(nativeOnly?7:14)&&result.ownerCreationCrashProcesses===(nativeOnly?2:4),'real independent native exclusion and exact owner-creation crash release');
+            assert(result.childRuns.every(x=>x.pass),'independent process probes passed');}
         for(const row of generated)assert.equal(sha(row.path),row.sha256,'compiled generated input remains unchanged');
         const receipt={buildMs,executionMs,variant:variant.name,status:variant.file?'PASS_EXPECTED_SEMANTIC_FAILURE':'PASS',expectedFailure:!!variant.file,requiredCase:variant.requiredCase??null,requiredVisibilityCases:variant.requiredVisibilityCases??[],caseCount:result.caseCount,assertions:result.assertions,observedFailures:result.failures,realIndependentNativeProcesses:result.realIndependentNativeProcesses,ownerCreationCrashProcesses:result.ownerCreationCrashProcesses,actualCompilerInputs:actualInputs.length,actualLinkerLibraries:libraries.length,staticImportedDlls:imports,closure,result:id(path.join(dir,'RESULT.json')),binary:id(exe),execution:ran};
         results.push(receipt);allArtifacts.push(closure,receipt.result,receipt.binary);console.log(JSON.stringify({variant:variant.name,status:receipt.status,cases:receipt.caseCount,assertions:receipt.assertions,observedFailures:result.failures.length,compilerInputs:actualInputs.length,libraries:libraries.length}));
@@ -105,7 +114,7 @@ try {
     assert(productionHeaders.every(x=>!forbidden.test(x.text)),'production headers have no process/liveness/Job/thread/command calls');
     const inventory=[];function collect(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(dir===out&&['temp'].includes(entry.name))continue;const p=path.join(dir,entry.name);if(entry.isDirectory())collect(p);else if(!['RESULT.json','RESULT.sha256','evidence-manifest.json'].includes(entry.name)||dir!==out)inventory.push(id(p));}}
     collect(out);const inventoryId=save('evidence-manifest.json',{schemaVersion:1,sealedAtUtc:new Date().toISOString(),files:inventory,toolchainManifest:id(path.join(toolchain,'toolchain-manifest.json'))});
-    save('RESULT.json',{schemaVersion:1,task:119,nativeRefreshOnly:nativeOnly,canonicalTestId:'hidhide_cli_writer_record',elapsedMs:Date.now()-started,jobQuietOrTerminalProofTested:false,missingNamedJobIsUnknown:true,status:'PASS_DATA_AND_SYNCHRONOUS_WRITER_SESSION_NOT_LIFECYCLE',pass:true,recordedAtUtc:new Date().toISOString(),results,sources:frozen,sourceDrift,toolchain:{explicitDirectory:toolchain,manifest:id(path.join(toolchain,'toolchain-manifest.json')),environment:id(path.join(toolchain,'build-environment.json')),rediscovered:false},evidenceManifest:inventoryId,realPrivateFileIo:true,ordinaryProductHostRealCliDevicesServicesJobsOrAppDataAccessed:false,onlyOwnedFixtureProcessesLaunched:true,productionProcessOrJobCalls:false,runtimeIntegrated:false,targetOrColdCleanupAuthorityGranted:false,scope:'Strict typed CLI/native helper record and bounded synchronous file Session with independently compiled semantic negatives. Native-only selects native cases and three existing negative operators on native headers. No Job proof, lifecycle/Job wiring, main integration or hardware acceptance.'});
+    save('RESULT.json',{schemaVersion:1,task:119,nativeRefreshOnly:nativeOnly,bindingHintOnly,canonicalTestId:'hidhide_cli_writer_record',elapsedMs:Date.now()-started,jobQuietOrTerminalProofTested:false,missingNamedJobIsUnknown:true,status:'PASS_DATA_AND_SYNCHRONOUS_WRITER_SESSION_NOT_LIFECYCLE',pass:true,recordedAtUtc:new Date().toISOString(),results,sources:frozen,sourceDrift,toolchain:{explicitDirectory:toolchain,manifest:id(path.join(toolchain,'toolchain-manifest.json')),environment:id(path.join(toolchain,'build-environment.json')),rediscovered:false},evidenceManifest:inventoryId,realPrivateFileIo:true,ordinaryProductHostRealCliDevicesServicesJobsOrAppDataAccessed:false,onlyOwnedFixtureProcessesLaunched:true,productionProcessOrJobCalls:false,runtimeIntegrated:false,targetOrColdCleanupAuthorityGranted:false,scope:bindingHintOnly?'Explicit 22 empty-hint/first-reserve Session cases, Release only, with three owned post-commit abrupt exits. Default cases, Checked and semantic operators not selected; no product Start or hardware acceptance.':'Strict typed CLI/native helper record and bounded synchronous file Session with independently compiled semantic negatives. Native-only selects native cases and three existing negative operators on native headers. No Job proof, lifecycle/Job wiring, main integration or hardware acceptance.'});
     fs.writeFileSync(path.join(out,'RESULT.sha256'),sha(path.join(out,'RESULT.json'))+'  RESULT.json\n',{flag:'wx'});
     console.log(JSON.stringify({status:'PASS',result:id(path.join(out,'RESULT.json')),variants:results.length}));
 } catch(error){save('FAILED.json',{status:'FAIL',error:error.stack,completedVariants:results,sources:frozen});console.error(error.stack);process.exitCode=1;}

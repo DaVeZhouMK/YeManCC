@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {installUpdaterFixtureEnvironment} from './lib/updater_fixture_environment';
 import { APP_VERSION } from '../src/version';
 const parts=APP_VERSION.split('.').map(Number),version=parts[0]+'.'+parts[1]+'.'+(parts[2]+1),sha='B'.repeat(64);
 let receive:(event:{data:any})=>void=()=>{};
@@ -19,7 +20,8 @@ win.chrome={webview:{addEventListener(_name:string,listener:typeof receive){rece
   else if(req.cmd==='app.cancelUpdateDownload')reply(false);
   else throw Error('FORBIDDEN '+req.cmd);
  });
-}}};(globalThis as any).window=win;
+}}};installUpdaterFixtureEnvironment(win, event => receive(event));
+(globalThis as any).window=win;
 const m=await import('../src/bridge/updateManager');let checks=0;
 function check(label:string,fn:()=>void){fn();checks++;console.log('PASS '+label);}
 await m.ensureUpdateManager();

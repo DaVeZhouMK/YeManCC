@@ -14,6 +14,7 @@ head=r'''
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <algorithm>
 #include <cctype>
@@ -53,6 +54,8 @@ static std::string ascii_lower(std::string s) {
 static std::unique_ptr<ymcc::VirtualStartProtection> startupProtection = std::make_unique<ymcc::VirtualStartProtection>();
 #define g_virtualStartProtection (*startupProtection)
 static std::atomic<bool> g_externalPriorityVirtualSuspended{false}, g_inputHostSwitchRecoveryPending{false}, g_inputHostSwitchExecutionReturnPending{false};
+// These scenarios do not stage a module compatibility update.
+static std::atomic<bool> g_inputModuleReplayPending{false};
 static std::uint64_t g_inputHostStartProtectionBoundTicket=0;
 static std::uint64_t inputHostStartProtectionNow() { return tick; }
 static void inputHostStartProtectionFinish(std::uint64_t, const char*, const char*) {}
@@ -86,10 +89,11 @@ static ymcc::GamepadDriverSetup g_gamepadDriverSetup;
 '''.replace('@ROOT@',root.as_posix())
 foot=r'''
 static int checks = 0;
-static void check(bool ok, const char* why) { ++checks; if (!ok) { std::fprintf(stderr,"FAIL: %s\n",why); std::exit(1); } }
+static void check(bool ok, const char* why) { ++checks; if (!ok) { std::fprintf(stderr,"FAIL: %s\nCHECKS=%d\n",why,checks); std::exit(1); } }
 static void reset() {
     startupProtection = std::make_unique<ymcc::VirtualStartProtection>();
     g_externalPriorityVirtualSuspended=g_inputHostSwitchRecoveryPending=g_inputHostSwitchExecutionReturnPending=false;
+    g_inputModuleReplayPending=false;
     g_startupInputState = S::Initializing; g_startupInputSince = 0;
     g_startupInputAttempted = g_startupInputStartSucceeded = false;
     g_inputCaptureStop = g_inputHostFaultHoldsStart = false;
@@ -100,7 +104,16 @@ static void reset() {
     g_inputShortcutRuntime.clear();
     messages = 0; logs.clear(); tick = 100;
 }
-int main() {
+int main(int argc, char** argv) {
+    const bool all=argc==1;
+    const std::string_view selected=argc==2?argv[1]:"";
+    if(!all && (argc!=2 || (selected!="old-15s-freeze" && selected!="renewed-observer-deadline" &&
+                           selected!="cancelled-intent-revival"))) {
+        std::fprintf(stderr,"Unknown startup observer case\n");
+        return 2;
+    }
+    if(!all) std::printf("CASE=%s\n",argv[1]);
+    if(all) {
     // Exercise the actual extracted startup observer for every preparation state.
     for (auto state : {ymcc::GamepadDriverSetup::NotStarted, ymcc::GamepadDriverSetup::Pending,
             ymcc::GamepadDriverSetup::Ready, ymcc::GamepadDriverSetup::Failed,
@@ -127,9 +140,10 @@ int main() {
     check(g_startupInputState == S::Skipped,"disabled persona ignores retained switches");
     reset(); settings = json::array(); skipDisabledStartupInputGate();
     check(g_startupInputState == S::Initializing,"unreadable config is not interpreted as disabled");
+    }
     // Full-screen logon may expose the physical pad after the old 15s observer.
     // Execute the actual observer against the production request authority.
-    for (const char* persona : {"elite","steamdeck","dualsense-edge"}) {
+    if(all || selected=="old-15s-freeze") for (const char* persona : {"elite","steamdeck","dualsense-edge"}) {
         reset(); g_realStickTest.persona=persona;
         auto admitted=g_virtualStartProtection.consume(persona,tick);
         initializeStartupInputGate(); tick += 16000; observeStartupInputGate();
@@ -142,6 +156,7 @@ int main() {
         check(g_startupInputState == S::Ready && messages==1,
               "same cold-start request can finish after a late source");
     }
+    if(all || selected=="renewed-observer-deadline") {
     reset(); auto original=g_virtualStartProtection.consume("elite",tick);
     tick += 12000; initializeStartupInputGate(); tick += 17999; observeStartupInputGate();
     check(g_startupInputState==S::Waiting,"startup observer does not shorten original deadline");
@@ -150,9 +165,13 @@ int main() {
           "startup observer honors original deadline, never its own renewed 30s");
     check(g_virtualStartProtection.view(tick).requestId==original.requestId,
           "expiration preserves original request identity");
+    }
+    if(all || selected=="cancelled-intent-revival") {
     reset(); g_virtualStartProtection.consume("elite",tick); initializeStartupInputGate();
     g_virtualStartProtection.cancel(tick+1); tick+=2; observeStartupInputGate();
     check(g_startupInputState==S::Failed,"cancelled original startup cannot be revived");
+    }
+    if(all) {
     reset(); initializeStartupInputGate(); tick += 29999; observeStartupInputGate();
     check(g_startupInputState == S::Waiting && messages == 0,"unbound startup source wait remains bounded by 30s");
     tick++; observeStartupInputGate();
@@ -181,6 +200,7 @@ int main() {
     check(g_startupInputState == S::Waiting,"stopping worker cannot signal before its cleanup");
     publishStartupInputState(S::Failed,"worker-stopped");
     check(g_startupInputState == S::Failed,"worker termination explicit failure closes init path");
+    }
     std::printf("STARTUP_NATIVE_OBSERVER_PASS checks=%d hardwareOperations=0\n",checks);
 }
 '''

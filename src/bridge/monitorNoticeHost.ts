@@ -5,6 +5,7 @@ import { registerUpdateReadyPresenter } from './updateReadyNotice';
 import { onShortcutActionFeedback, type ShortcutActionFeedback } from './shortcutActionFeedback';
 import { createMonitorNoticeState, noticeAppearance } from './monitorShortcutNotice';
 import type { MonitorOutputPreferences } from './monitorHudModel';
+import { onSharedPowerLifecycle, requestSharedPowerLifecycleReconcile, isSharedPowerLifecycleAdmitted } from './powerLifecycleState';
 
 const RECOVERY_POLICY=Object.freeze({
  maxAttempts:3,retryDelaysMs:Object.freeze([250,1000]),readyTimeoutMs:10000,
@@ -21,7 +22,7 @@ export function startMonitorNoticeHost(){
  let own:NoticeOwner|null=null,earlyReady:{id:number;nonce:string}|null=null,sequence=0,pendingFeedbackId:string|null=null;
  let attempts=0,retryTimer:ReturnType<typeof setTimeout>|null=null,retryRevision=0;
  let readyTimer:ReturnType<typeof setTimeout>|null=null,readyRevision=0;
- let powerHeld=false,powerGeneration:number|null=null,committedGeneration=-1,probeOwner=false;
+ let powerHeld=true,powerGeneration:number|null=null,committedGeneration=-1,probeOwner=false;
  let ambiguousCreate=false,ambiguousLease=0,carrierBlocked=false,lastRetiredLease=0;
  const retiring=new Map<number,Promise<boolean>>(),createRequests=new Map<number,AbortController>();
  let retirements=0,retirementFailures=0,fallbackRetirements=0,lastRetirement:Retirement|null=null;
@@ -196,28 +197,24 @@ export function startMonitorNoticeHost(){
   const recipient=own;const delivered=await send(value);const accepted=delivered&&!ended&&preferences?.popupEnabled===true&&own===recipient&&state.inspect().current?.id===value.id;
   if(!accepted&&state.inspect().current?.id===value.id)state.clear();return accepted;
  });
- function powerEventGeneration(event:unknown):number|null|false{
-  const value=(event as {generation?:unknown}|null)?.generation;
-  if(value===undefined)return powerGeneration===null?null:false;
-  return typeof value==='number'&&Number.isSafeInteger(value)&&value>=0?value:false;
- }
- function holdPower(event:unknown){
-  const generation=powerEventGeneration(event);
-  if(generation===false||generation!==null&&(generation<(powerGeneration??-1)||generation<=committedGeneration)){note('power-rejected',own,{reason:'stale-generation'});return;}
-  if(generation!==null)powerGeneration=generation;
+ function holdPower(generation:number){
+  powerGeneration=generation;
   if(powerHeld)return;
   powerHeld=true;++epoch;note('power-held');cancelRecovery();cancelReadyWait();prepareAgain=false;state.clear();
  }
- function resumePower(event:unknown){
-  const generation=powerEventGeneration(event);
-  if(generation===false||generation!==null&&(generation<(powerGeneration??-1)||generation<=committedGeneration)){note('power-rejected',own,{reason:'stale-generation'});return;}
-  if(generation===null&&!powerHeld){state.clear();return;}
-  if(generation!==null){powerGeneration=generation;committedGeneration=generation;}
+ function resumePower(generation:number){
+  const newGeneration=generation!==committedGeneration,wasHeld=powerHeld;
+  powerGeneration=generation;committedGeneration=generation;
+  if(!newGeneration&&!wasHeld)return;
   powerHeld=false;note('power-committed');state.clear();cancelRecovery();cancelReadyWait();
   if(!desired())return;
-  attempts=0;probeOwner=true;if(opening)prepareAgain=true;else void prepare();
+  if(newGeneration)attempts=0;probeOwner=true;if(opening)prepareAgain=true;else void prepare();
  }
- const offPower=[on('power.pending',holdPower),on('power.suspending',holdPower),on('power.resumed',resumePower)];
+ const offPower=onSharedPowerLifecycle(snapshot=>{
+  if(ended)return;
+  if(isSharedPowerLifecycleAdmitted(snapshot))resumePower(snapshot.generation);else holdPower(snapshot.generation);
+ });
+ requestSharedPowerLifecycleReconcile('monitor-notice-host');
  const onTheme=()=>{const value=state.inspect().current;if(value)void send(value);};
  window.addEventListener('theme:changed',onTheme);window.addEventListener('ui-settings:changed',onTheme);
  return {
@@ -244,7 +241,7 @@ export function startMonitorNoticeHost(){
    }
    if(!prefs.popupEnabled)close();else {if(opening)prepareAgain=true;else void prepare();const value=state.inspect().current;if(value)void send(value);}
   },
-  stop(){if(ended)return;ended=true;note('stop');offUpdateReady();offFeedback();offReady();offClosed();for(const stop of offPower)stop();window.removeEventListener('theme:changed',onTheme);window.removeEventListener('ui-settings:changed',onTheme);close();state.dispose();},
+  stop(){if(ended)return;ended=true;note('stop');offUpdateReady();offFeedback();offReady();offClosed();offPower();window.removeEventListener('theme:changed',onTheme);window.removeEventListener('ui-settings:changed',onTheme);close();state.dispose();},
   inspect:()=>({diagnostics:{failedDeliveries:diagnosticFailures},owner:own?{...own}:null,opening,enabled:preferences?.popupEnabled===true,state:state.inspect(),recovery:{policy:{...RECOVERY_POLICY,retryDelaysMs:[...RECOVERY_POLICY.retryDelaysMs],resetOn:[...RECOVERY_POLICY.resetOn]},attempts,scheduled:retryTimer!==null,readyWaitPending:readyTimer!==null,powerHeld,powerGeneration,committedGeneration,ambiguousCreate,carrierBlocked},cleanup:{pending:retiring.size,retirements,fallbackRetirements,retirementFailures,lastRetirement:lastRetirement?{...lastRetirement}:null,lastRetiredLease}})
  };
 }

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iostream>
 #include <map>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -34,13 +35,26 @@ void sgInitNt(){fnNtSuspend=available?countedNativeSuspend:nullptr;}
 DWORD GetCurrentProcessId(){return 42;}
 bool ProcessIdToSessionId(DWORD pid,DWORD* session){if(pid==42){*session=1;return currentSessionOk;}*session=rootSession;return rootSessionOk;}
 bool nativeValveValidateCurrentTarget(DWORD pid,ULONGLONG created,NativeDetectedGame* target){++valveCalls;if(throwValve)throw std::runtime_error("owned memory valve failure");*target={pid,created};return valveOk&&!(refuseSecondValve&&valveCalls>1);}
-bool sgPrepareWakeRecoveryForPauseUnlocked(DWORD){++reconcileCalls;return reconcileOk;}
-bool sgReleaseConflictingPauseLeaseUnlocked(DWORD){++conflictCalls;return conflictOk;}
+void sgCollectStartupResumeScopeUnlocked() {}
+namespace ymcc::sleepLegacyResume {
+struct ResumeLease {
+ bool held=false;
+ bool current(const std::function<bool()>& check) const { return held&&check(); }
+};
+}
+ymcc::sleepLegacyResume::ResumeLease sgAcquirePauseFiles(const std::wstring& dir,DWORD pid,const std::function<bool()>& current){
+ return {(dir==SG_SLEEP_LEASE_DIR||dir==SG_MANUAL_DIR)&&pid&&current()};
+}
+bool sgPrepareWakeRecoveryForPauseUnlocked(DWORD,const std::function<bool()>& current){++reconcileCalls;return (!current||current())&&reconcileOk;}
+bool sgReleaseConflictingPauseLeaseUnlocked(DWORD,const std::function<bool()>& current){++conflictCalls;return (!current||current())&&conflictOk;}
 bool focusQueryProcessIdentity(DWORD,void*,ULONGLONG* created){*created=actualCreated;return queryOk;}
 bool sgWriteProcessMarker(const std::wstring& dir,DWORD pid,const char* state,unsigned long long generation){++writeCalls;order.push_back("marker-write:"+std::to_string(pid));if(writeFailAt==writeCalls)return false;marker(pid,dir,actualCreated,generation,state);return true;}
 HANDLE OpenProcess(int,bool,DWORD pid){openedPids.push_back(pid);order.push_back("open:"+std::to_string(pid));return openOk?pid:0;}
 ULONGLONG nativeProcessCreatedFromHandle(HANDLE handle){return actualCreated+(openedBirthRace?1:0)+(handle==100?0:4444);}
 void CloseHandle(HANDLE handle){closedHandles.push_back(handle);order.push_back("close:"+std::to_string(handle));}
+DWORD GetLastError(){return 0;}
+ULONGLONG GetTickCount64(){return 1000;}
+static json sgSuspendGameByPidUnlocked(DWORD,const std::wstring&,ULONGLONG,const NativeDetectedGame* = nullptr,bool = true,unsigned long long = 0,const std::function<bool()>& = {},const std::function<LONG(HANDLE,bool&,ULONGLONG&)>& = {});
 // EXACT_HELPER_DEFINITIONS
 void reset(){markers.clear();order.clear();openedPids.clear();suspendedPids.clear();closedHandles.clear();g_sgManualPauseSerial=0;valveOk=true;refuseSecondValve=false;available=true;currentSessionOk=true;rootSessionOk=true;reconcileOk=true;conflictOk=true;queryOk=true;openOk=true;openedBirthRace=false;nativeOk=true;throwValve=false;rootSession=1;actualCreated=1234;valveCalls=reconcileCalls=conflictCalls=writeCalls=writeFailAt=0;nativeObservedFinalMarker=false;fnNtSuspend=countedNativeSuspend;activeDir=SG_SLEEP_LEASE_DIR;}
 json pause(DWORD pid=100,const std::wstring& dir=SG_SLEEP_LEASE_DIR,bool prevalidated=true,bool release=true,unsigned long long generation=7){NativeDetectedGame target{pid,1234};activeDir=dir;return sgSuspendGameByPidUnlocked(pid,dir,1234,prevalidated?&target:nullptr,release,generation);}

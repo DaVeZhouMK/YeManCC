@@ -1,0 +1,28 @@
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {spawnSync} from 'node:child_process';
+import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
+import {extract} from './fixtures/legion_motion_consumer/extract_main.mjs';
+const root=process.cwd(),args=process.argv.slice(2);const nativeHooks=args[2]==='--native-hooks';
+if(args.length!==(nativeHooks?3:2)||args[0]!=='--out'||!path.isAbsolute(args[1]))throw Error('Use --out new-absolute-directory [--native-hooks]');
+const out=path.resolve(args[1]);if(fs.existsSync(out))throw Error('Output already exists');fs.mkdirSync(out,{recursive:true});
+const native=path.join(out,'source/native');fs.mkdirSync(native,{recursive:true});
+const hash=b=>crypto.createHash('sha256').update(b).digest('hex'),inputs=[];
+function copy(file,destination){const bytes=fs.readFileSync(file);fs.mkdirSync(path.dirname(destination),{recursive:true});fs.writeFileSync(destination,bytes);inputs.push({path:file,frozen:destination,sha256:hash(bytes)});}
+for(const entry of fs.readdirSync(path.join(root,'native'),{withFileTypes:true}))if(entry.isFile()&&entry.name.endsWith('.h'))copy(path.join(root,'native',entry.name),path.join(native,entry.name));
+for(const entry of fs.readdirSync(path.join(root,'capabilities'),{withFileTypes:true}))if(entry.isFile()&&entry.name.endsWith('.h'))copy(path.join(root,'capabilities',entry.name),path.join(out,'source/capabilities',entry.name));
+copy(path.join(root,'deps/json/json.hpp'),path.join(out,'source/deps/json/json.hpp'));
+copy(path.join(root,'deps/webview2/build/native/include/WebView2.h'),path.join(out,'source/deps/webview2/WebView2.h'));
+const fixture=path.join(out,'source/tools/fixtures/overlay_layers_storm_win32.cpp');copy(path.join(root,'tools/fixtures/overlay_layers_storm_win32.cpp'),fixture);
+const main=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8'),surface=fs.readFileSync(path.join(root,'native/game_overlay_surface.h'),'utf8');
+const consumers=[extract(main,'gameOverlayOwnPresentationPeer'),extract(surface,'gameOverlaySurfacePeerOccluded')];
+fs.writeFileSync(path.join(out,'peers.inc'),consumers.map(c=>c.code).join('\n'));
+fs.writeFileSync(path.join(out,'selected-consumers.json'),JSON.stringify(consumers.map(({code,...v})=>v),null,2));
+fs.writeFileSync(path.join(out,'inputs.json'),JSON.stringify(inputs,null,2));
+const setup='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat',exe=path.join(out,'layers.exe'),driver=path.join(out,'compile.cmd');
+if(/["%\r\n]/.test(out))throw Error('Unsupported shell path');
+fs.writeFileSync(driver,calibrationToolchainPreamble(setup)+`cl /nologo /EHsc /std:c++20 /utf-8 /O1 /DNOMINMAX /DUNICODE /D_UNICODE /I"${native}" /I"${out}" /I"${path.join(out,'source/deps/json')}" /I"${path.join(out,'source/deps/webview2')}" "${fixture}" /Fe:"${exe}" /Fo:"${path.join(out,'layers.obj')}" /sourceDependencies "${path.join(out,'dependencies.json')}" /link user32.lib comctl32.lib gdi32.lib ole32.lib dcomp.lib\r\nexit /b %errorlevel%\r\n`);
+const built=spawnSync(process.env.ComSpec||'cmd.exe',['/d','/c',driver],{cwd:out,encoding:'utf8',timeout:90000,windowsHide:true});fs.writeFileSync(path.join(out,'compile.log'),(built.stdout||'')+(built.stderr||''));
+if(built.status!==0)throw Error('Compile failed: '+fs.readFileSync(path.join(out,'compile.log'),'utf8'));
+const ran=spawnSync(exe,[path.join(out,'REPORT.json'),...(nativeHooks?['--native-hooks']:[])],{cwd:out,encoding:'utf8',timeout:30000,windowsHide:true});fs.writeFileSync(path.join(out,'run.log'),(ran.stdout||'')+(ran.stderr||''));
+const result=fs.existsSync(path.join(out,'REPORT.json'))?JSON.parse(fs.readFileSync(path.join(out,'REPORT.json'),'utf8')):{pass:false,failure:ran.error?.message||'No report'};
+result.exitCode=ran.status;result.exeSha256=hash(fs.readFileSync(exe));result.frozenInputsUnchanged=inputs.every(i=>hash(fs.readFileSync(i.frozen))===i.sha256);fs.writeFileSync(path.join(out,'REPORT.json'),JSON.stringify(result,null,2));
+console.log(JSON.stringify(result));process.exitCode=result.pass&&ran.status===0&&result.frozenInputsUnchanged?0:1;

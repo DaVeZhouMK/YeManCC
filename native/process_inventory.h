@@ -28,6 +28,7 @@ struct Entry {
     ULONG64 sequence = 0;
     DWORD parentPid = 0;
 };
+struct ParentEntry { DWORD pid = 0, parentPid = 0; };
 // Positive name facts from a partial Toolhelp prefix are rejection-only.
 // They never establish absence, identity, parent topology or action authority.
 struct RejectionHint { DWORD pid=0; std::wstring name; };
@@ -148,8 +149,20 @@ inline bool parseDetailRows(const void* data, std::size_t bytes, std::vector<Det
 
 // Use memcpy for the fixed prefix; validate record offsets and the actual
 // WCHAR pointer alignment before dereferencing any borrowed string bytes.
+inline void projectBasicRow(std::vector<Entry>& rows, DWORD pid, DWORD parent,
+    const SYSTEM_BASICPROCESS_INFORMATION& record) {
+    Entry entry{pid, {}, record.SequenceNumber, parent};
+    if (record.ImageName.Length)
+        entry.name.assign(record.ImageName.Buffer, record.ImageName.Length / sizeof(wchar_t));
+    rows.push_back(std::move(entry));
+}
+inline void projectBasicRow(std::vector<ParentEntry>& rows, DWORD pid, DWORD parent,
+    const SYSTEM_BASICPROCESS_INFORMATION&) {
+    rows.push_back({pid, parent});
+}
+template<class Row>
 inline bool parseBasicRows(const void* data, std::size_t bytes,
-    std::vector<Entry>& rows, DWORD& error) {
+    std::vector<Row>& rows, DWORD& error) {
     rows.clear();
     error = ERROR_INVALID_DATA;
     const auto fail = [&] { rows.clear(); return false; };
@@ -180,12 +193,7 @@ inline bool parseBasicRows(const void* data, std::size_t bytes,
                 (name && (name < low || name > high || capacity > high - name || name % alignof(wchar_t))) ||
                 (!name && (length || capacity)))
                 return fail();
-            Entry entry;
-            entry.pid = static_cast<DWORD>(pid);
-            entry.parentPid = static_cast<DWORD>(parentPid);
-            entry.sequence = record.SequenceNumber;
-            if (length) entry.name.assign(record.ImageName.Buffer, length / sizeof(wchar_t));
-            rows.push_back(std::move(entry));
+            projectBasicRow(rows, static_cast<DWORD>(pid), static_cast<DWORD>(parentPid), record);
             if (!record.NextEntryOffset) { error = ERROR_SUCCESS; return true; }
             offset += extent;
         }
@@ -294,13 +302,8 @@ class Store {
             more = Process32NextW(handle.get(), &row);
         }
     }
-    void produce(Snapshot& snapshot, Query query, bool allowToolhelp) {
-        if (!query) {
-            if (allowToolhelp) toolhelp(snapshot);
-            else { snapshot.status = snapshot.basicStatus = Status::Unavailable; snapshot.error = ERROR_NOT_SUPPORTED; }
-            return;
-        }
-        snapshot.basicStatus = Status::Failed;
+    template<class Row>
+    Status queryBasic(Query query, std::vector<Row>& rows, DWORD& error) {
         constexpr std::size_t initialBytes = 64 * 1024, maximumBytes = 16 * 1024 * 1024;
         if (scratch_.empty()) scratch_.resize(initialBytes);
         for (unsigned attempt = 0; attempt < 4; ++attempt) {
@@ -309,37 +312,39 @@ class Store {
                 scratch_.data(), static_cast<ULONG>(scratch_.size()), &returned);
             if (status >= 0) {
                 if (!returned || returned > scratch_.size()) {
-                    detail::fail(snapshot, ERROR_INVALID_DATA); return;
+                    error = ERROR_INVALID_DATA;
+                    return Status::Failed;
                 }
-                DWORD error = ERROR_SUCCESS;
-                if (!detail::parseBasicRows(scratch_.data(), returned, snapshot.rows, error)) {
-                    detail::fail(snapshot, error); return;
-                }
-                snapshot.status = snapshot.basicStatus = Status::Complete;
-                snapshot.error = ERROR_SUCCESS;
-                return;
+                return detail::parseBasicRows(scratch_.data(), returned, rows, error) ? Status::Complete : Status::Failed;
             }
             if (status == static_cast<NTSTATUS>(0xC0000003L) || // INVALID_INFO_CLASS
                 status == static_cast<NTSTATUS>(0xC0000002L) || // NOT_IMPLEMENTED
                 status == static_cast<NTSTATUS>(0xC00000BBL)) { // NOT_SUPPORTED
-                snapshot.basicStatus = Status::Unavailable;
-                if (allowToolhelp) toolhelp(snapshot);
-                else { snapshot.status = Status::Unavailable; snapshot.error = ERROR_NOT_SUPPORTED; }
-                return;
+                error = ERROR_NOT_SUPPORTED;
+                return Status::Unavailable;
             }
             if (status != static_cast<NTSTATUS>(0xC0000004L) && // INFO_LENGTH_MISMATCH
                 status != static_cast<NTSTATUS>(0xC0000023L)) { // BUFFER_TOO_SMALL
                 using ToDos = ULONG (NTAPI*)(NTSTATUS);
                 static const auto toDos = reinterpret_cast<ToDos>(
                     GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlNtStatusToDosError"));
-                detail::fail(snapshot, toDos ? toDos(status) : ERROR_GEN_FAILURE);
-                return;
+                error = toDos ? toDos(status) : ERROR_GEN_FAILURE;
+                return Status::Failed;
             }
             const auto desired = (std::max)(scratch_.size() * 2, static_cast<std::size_t>(returned));
             if (desired > maximumBytes || attempt == 3) break;
             scratch_.resize(desired);
         }
-        detail::fail(snapshot, ERROR_INSUFFICIENT_BUFFER);
+        error = ERROR_INSUFFICIENT_BUFFER;
+        return Status::Failed;
+    }
+    void produce(Snapshot& snapshot, Query query, bool allowToolhelp) {
+        DWORD error = ERROR_NOT_SUPPORTED;
+        snapshot.basicStatus = query ? queryBasic(query, snapshot.rows, error) : Status::Unavailable;
+        if (snapshot.basicStatus == Status::Unavailable && allowToolhelp) { toolhelp(snapshot); return; }
+        if (snapshot.basicStatus == Status::Failed) { detail::fail(snapshot, error); return; }
+        snapshot.status = snapshot.basicStatus;
+        snapshot.error = error;
     }
     void produceDetails(DetailSnapshot& snapshot, Query query) {
         detailRows_.clear();
@@ -400,11 +405,15 @@ public:
     Store(const Store&) = delete;
     Store& operator=(const Store&) = delete;
 
-    std::shared_ptr<const Snapshot> read(Query query = resolveQuery(),
-        ULONGLONG now = currentTime, ULONGLONG maxAge = 250, bool allowToolhelp = true) {
+private:
+    std::shared_ptr<const Snapshot> readWithMode(Query query, ULONGLONG now,
+        ULONGLONG maxAge, bool allowToolhelp, bool waitForOwner) {
         detail::LastErrorScope restore;
         std::unique_lock<std::mutex> lock(mutex_, std::defer_lock);
-        try { lock.lock(); }
+        try {
+            if (waitForOwner) lock.lock();
+            else if (!lock.try_lock()) return detail::failedReceipt(query, now, ERROR_BUSY);
+        }
         catch (const std::bad_alloc&) { return detail::failedReceipt(query, now, ERROR_NOT_ENOUGH_MEMORY); }
         catch (...) { return detail::failedReceipt(query, now, ERROR_GEN_FAILURE); }
         if (now == currentTime) now = GetTickCount64();
@@ -429,6 +438,28 @@ public:
         cachedEpoch_ = ticket;
         cached_ = std::move(snapshot);
         return cached_;
+    }
+public:
+    std::shared_ptr<const Snapshot> read(Query query = resolveQuery(),
+        ULONGLONG now = currentTime, ULONGLONG maxAge = 250, bool allowToolhelp = true) {
+        return readWithMode(query, now, maxAge, allowToolhelp, true);
+    }
+    std::shared_ptr<const Snapshot> tryRead(Query query = resolveQuery(),
+        ULONGLONG now = currentTime, ULONGLONG maxAge = 250, bool allowToolhelp = true) {
+        return readWithMode(query, now, maxAge, allowToolhelp, false);
+    }
+    // This fresh, name-free receipt never replaces the shared name inventory.
+    bool readFreshParents(Query query, std::vector<ParentEntry>& rows) noexcept {
+        detail::LastErrorScope restore;
+        rows.clear();
+        if (!query) return false;
+        try {
+            std::lock_guard<std::mutex> lock(mutex_);
+            DWORD error = ERROR_SUCCESS;
+            if (queryBasic(query, rows, error) == Status::Complete) return true;
+        } catch (...) {}
+        rows.clear();
+        return false;
     }
     std::shared_ptr<const DetailSnapshot> readDetails(Query query = resolveQuery(),
         ULONGLONG now = currentTime, ULONGLONG maxAge = 250) {
@@ -467,6 +498,11 @@ inline std::shared_ptr<const Snapshot> read(Query query = resolveQuery(),
     ULONGLONG now = currentTime, ULONGLONG maxAge = 250, bool allowToolhelp = true) {
     detail::LastErrorScope restore;
     return owner().read(query, now, maxAge, allowToolhelp);
+}
+inline std::shared_ptr<const Snapshot> tryRead(Query query = resolveQuery(),
+    ULONGLONG now = currentTime, ULONGLONG maxAge = 250, bool allowToolhelp = true) {
+    detail::LastErrorScope restore;
+    return owner().tryRead(query, now, maxAge, allowToolhelp);
 }
 inline std::shared_ptr<const DetailSnapshot> readDetails(Query query = resolveQuery(),
     ULONGLONG now = currentTime, ULONGLONG maxAge = 250) {

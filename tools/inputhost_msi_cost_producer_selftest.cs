@@ -43,12 +43,15 @@ internal sealed class ProductionProducer
     private string _hostInstanceId="host-A";
     private ulong _lastSequence=1;
     private long _costWindowStartTicks;
-    private readonly bool _msiCostDeferredRequested=true;
+    private readonly bool _msiCostDeferredRequested;
     private readonly FixtureStage _msiHostStageEvidence=new();
     private HostCpuCostWindow? _costCpuWindow;
     private long _costLastAllocBytes;
-    // The common production branch is compiled but outside this MSI fixture.
-    // A wrong branch fails before any common runtime/file observation.
+    // Explicit out-of-scope diagnostic reset seam; no SDK or output ownership.
+    internal int SignalResetCalls { get; private set; }
+    private void ResetVirtualSignalEvidenceSafely()=>SignalResetCalls++;
+    // The legacy synchronous branch remains compiled as a forbidden boundary.
+    // Admission is copied from the real constructor, including non-MSI calls.
     private static string CostStateDir=>throw new InvalidOperationException("common path forbidden");
     private static bool CostLoggingRequestedByFlag()=>throw new InvalidOperationException("common path forbidden");
     private static double ComputeGcPauseMsPerSec(long ms)=>throw new InvalidOperationException("common path forbidden");
@@ -57,8 +60,11 @@ internal sealed class ProductionProducer
     internal void SetInitialCostGate(bool enabled)=>_costFlagEnabled=enabled;
     internal void RecordAt(long tick){FixtureClock.Tick=tick;RecordCostFrame(4,false);}
     internal (int Begin,int End) StageCalls=>(_msiHostStageEvidence.Begins,_msiHostStageEvidence.Ends);
-    internal ProductionProducer(D? diagnostics,object? controller)
-    { _msiCostDiagnostics=diagnostics;_controller=controller; }
+    internal ProductionProducer(D? diagnostics,object? controller,bool msiReleaseDiagnosticRequested=false)
+    {
+        _msiCostDiagnostics=diagnostics;_controller=controller;
+        // EXACT_PRODUCTION_DEFERRED_ADMISSION
+    }
     internal void Seed(int frames,long[] samples)
     {
         _costFrames=frames;_costSubmitUsCount=samples.Length;
@@ -122,6 +128,23 @@ internal static class ProducerTests
         if(!returned)worker.Release.Set();
         Check(producer.Join(5000),"producer cleanup");Check(returned,"producer returned before worker release");
         Check(error is null,"no producer exception");Check(!worker.Release.IsSet,"did not release blocked worker to make producer finish");return tid;
+    }
+    private static void ConstructorAdmissionBoundary()
+    {
+        // ROG field-113158 used no MSI launch switch. Both constructor inputs
+        // must reach the same real bounded producer, even while runtime I/O stalls.
+        foreach (var msi in new[] { false, true })
+        foreach (var persona in new[] { "steamdeck", "elite", "dualsense-edge" })
+        {
+            using var w=new Worker(blocked:true);
+            var host=new ProductionProducer(w.Diagnostic,new FixtureController("admission"),msi);
+            host.Mutate(new FixtureController("admission"),persona);
+            host.SetInitialCostGate(true);
+            CallAndReturnBeforeRelease(()=>host.RecordAt(1000),w);
+            Check(w.Entered.Wait(TimeSpan.FromSeconds(3)),"constructor admission reaches worker: "+msi+"/"+persona);
+            Check(w.Diagnostic.QueueCounters.Accepted==1,"one diagnostic window reserved: "+msi+"/"+persona);
+            Check(w.AppendCalls==0,"blocked observation is never a command-thread write: "+msi+"/"+persona);
+        }
     }
     private static void PadSubmissionSnapshot()
     {
@@ -187,7 +210,14 @@ internal static class ProducerTests
     {
         using var w=new Worker();var host=new ProductionProducer(w.Diagnostic,new FixtureController("failure"));
         w.FailFlagOnce=1;host.Seed(5,[1]);host.Queue(1000);Until(()=>w.Diagnostic.QueueCounters.Failed==1,"flag failure recorded");Check(host.CountersReset,"source reset before worker failure");
-        host.Seed(6,[2]);host.Queue(2000);Until(()=>w.Diagnostic.QueueCounters.Completed==1,"worker recovers after flag failure");Check(w.Rows.Count==1,"recovery row");
+        host.Seed(6,[2]);host.Queue(2000);Until(()=>w.Diagnostic.QueueCounters.Completed==1,"worker recovers after flag failure");
+        var rows=w.Rows.Select(x=>JsonDocument.Parse(x).RootElement.Clone()).ToArray();
+        Check(rows.Length==2,"one explicit failed diagnostic receipt and one recovery row");
+        Check(rows[0].GetProperty("kind").GetString()=="cost-window-failed"&&
+            rows[0].GetProperty("diagnosticBudget").GetProperty("reason").GetString()=="flag-read",
+            "failed flag read remains a failure receipt");
+        Check(rows[1].GetProperty("frames").GetInt64()==6&&rows[1].TryGetProperty("msiCostWindowDeferred",out _),
+            "next successful window retains its own counters and deferred boundary");
         long accepted=w.Diagnostic.QueueCounters.Accepted;host.Seed(7,[3]);host.SetInvalidCount();host.Queue(3000);
         Check(host.CountersReset&&w.Diagnostic.QueueCounters.Accepted==accepted,"copy error contained on source and finally reset");
         var absent=new ProductionProducer(null,new FixtureController("absent"));absent.Seed(8,[4]);absent.Queue(4000);Check(absent.CountersReset&&!absent.FlagEnabled,"unavailable diagnostics return/reset");
@@ -297,6 +327,7 @@ internal static class ProducerTests
     }
     private static int Main(string[] args)
     {
+        Group("actual constructor admission defers non-MSI and MSI cost work for all current personas",ConstructorAdmissionBoundary);
         Group("actual producer is nonblocking and captures immutable data",BlockedAndImmutable);
         Group("actual producer carries immutable per-report pad edges",PadSubmissionSnapshot);
         Group("disabled diagnostics use worker flag gate",OffGate);

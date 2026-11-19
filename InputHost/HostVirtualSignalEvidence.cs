@@ -20,6 +20,10 @@ internal static partial class Program
         private readonly string _directory;
         private readonly Func<long>? _clock;
         private readonly Action<string>? _write;
+        // Production supplies the existing diagnostic worker's bounded admission
+        // and read-only counters. The Action seam remains synchronous for old fixtures.
+        private readonly Func<string, bool>? _tryWrite;
+        private readonly Func<object>? _writeCounters;
         private readonly Counts[] _reasons = new Counts[5];
         private Counts _total;
         private readonly ParameterWindow _parameters = new();
@@ -36,8 +40,9 @@ internal static partial class Program
         private bool _active, _lastFailed, _outcomeChanged;
 
         // Optional pure clock/sink seams are used by the actual-source fake SDK fixture.
-        internal HostVirtualSignalEvidence(string directory, Func<long>? clock = null, Action<string>? write = null)
-        { _directory = directory; _clock = clock; _write = write; }
+        internal HostVirtualSignalEvidence(string directory, Func<long>? clock = null, Action<string>? write = null,
+            Func<string, bool>? tryWrite = null, Func<object>? writeCounters = null)
+        { _directory = directory; _clock = clock; _write = write; _tryWrite = tryWrite; _writeCounters = writeCounters; }
         private long Now => _clock is null ? Environment.TickCount64 : _clock();
         private struct Counts { public long Calls, Returned, Threw; }
         internal readonly record struct Attempt(long Generation, int Reason, long Ordinal, Sample? Snapshot)
@@ -101,7 +106,10 @@ internal static partial class Program
                 {
                     schema = 1, kind = "host-virtual-signal-tail", reason, tick = now,
                     evidenceScope = "pending-Host-SDK-argument-summary-only;not-new-SDK-attempt;not-driver/game-delivery",
-                    sdkAttempt = false, joinEligible = false, tailFlushed = true,
+                    sdkAttempt = false, joinEligible = false,
+                    tailFlushed = _tryWrite is null ? (bool?)true : null,
+                    deferredQueueAdmission = _tryWrite is not null,
+                    logWriter = SnapshotWriteCountersSafely(),
                     request = CaptureBindingTuple(),
                     parameterWindow = _parameters.Capture(_generation, _parameterWindowId, now, _loss)
                 };
@@ -110,6 +118,18 @@ internal static partial class Program
                 {
                     ++_loss.tailFlushFailures; ++_loss.tailFlushOversizeFailures; ++_loss.oversizeEmissionFailures;
                     return; // Reset explicitly accounts for every discarded attempt below.
+                }
+                if (_tryWrite is not null)
+                {
+                    if (TryQueueLine(line))
+                    {
+                        ++_loss.tailQueuedWindows; _loss.tailQueuedAttempts += _parameters.Calls;
+                    }
+                    else ++_loss.tailFlushFailures;
+                    // Rejected diagnostics are explicitly lost, never held for a later
+                    // tuple or synchronously retried. Queue acceptance is not a flush.
+                    _parameters.Clear();
+                    return;
                 }
                 if (_write is not null) _write(line); else WriteBounded(line);
                 ++_loss.tailFlushedWindows; _loss.tailFlushedAttempts += _parameters.Calls;
@@ -290,6 +310,9 @@ internal static partial class Program
                     _lastFailed = failed;
                     var sample = attempt.Snapshot;
                     if (sample is null) return;
+                    bool compactScope = !failed && !_outcomeChanged && _diagnosticFailures == 0 &&
+                        sample.WireTickKnown && sample.Reason == "live-frame" &&
+                        (sample.Selection is "wire-bucket-first-live" or "window-heartbeat") && _parameters.AllCompletedLiveReturns;
                     var now = Now;
                     var windowDue = now - _windowStart >= WindowMs;
                     object? window = null;
@@ -305,7 +328,7 @@ internal static partial class Program
                         };
                         _windowStart = now; _total = default; Array.Clear(_reasons); _suppressed = _diagnosticFailures = 0;
                     }
-                    var parameterWindow = _parameters.Capture(_generation, _parameterWindowId, now, _loss);
+                    var parameterWindow = _parameters.Capture(_generation, _parameterWindowId, now, _loss, compactScope);
                     var entry = new
                     {
                         schema = 1, kind = "host-virtual-signal", evidenceScope = "SDK-call-only;not-driver/game-delivery",
@@ -318,7 +341,8 @@ internal static partial class Program
                         request = sample.Binding, ordinal = attempt.Ordinal, reason = sample.Reason,
                         encoderIndex = sample.EncoderIndex, canonical = sample.Canonical, sdkArguments = sample.SdkArguments,
                         outcome = failed ? "threw" : "returned", exceptionType = failed ? Clip(sdkException!.GetType().FullName ?? "Exception") : null,
-                        exceptionHResult = failed ? (int?)sdkException!.HResult : null, window, parameterWindow
+                        exceptionHResult = failed ? (int?)sdkException!.HResult : null, window, parameterWindow,
+                        deferredQueueAdmission = _tryWrite is not null, logWriter = SnapshotWriteCountersSafely()
                     };
                     var line = JsonSerializer.Serialize(entry, StateOptions);
                     if (Encoding.UTF8.GetByteCount(line) + 1 > MaximumLineBytes)
@@ -333,17 +357,50 @@ internal static partial class Program
                             wireTickKnown = sample.WireTickKnown, wireMonotonicTick = sample.WireTickKnown ? (ulong?)sample.WireTick : null,
                             wireSampleSequence = sample.WireTickKnown ? (ulong?)sample.WireSampleSequence : null,
                             sampleBucket = sample.WireTickKnown ? (ulong?)(sample.WireTick / 1000UL) : null, joinEligible = sample.JoinEligible,
-                            outcome = failed ? "threw" : "returned", sampleOmitted = "line-byte-budget", window, parameterWindow
+                            outcome = failed ? "threw" : "returned", sampleOmitted = "line-byte-budget", window, parameterWindow,
+                            deferredQueueAdmission = _tryWrite is not null, logWriter = SnapshotWriteCountersSafely()
                         }, StateOptions);
                     }
                     if (Encoding.UTF8.GetByteCount(line) + 1 > MaximumLineBytes)
                     { ++_diagnosticFailures; ++_loss.oversizeEmissionFailures; return; }
+                    if (_tryWrite is not null)
+                    {
+                        if (!TryQueueLine(line)) ++_diagnosticFailures;
+                        _parameters.Clear(); ++_parameterWindowId;
+                        return;
+                    }
                     if (_write is not null) _write(line); else WriteBounded(line);
                     // Only successful existing-sample writes close a parameter window. Failures retain it.
                     _parameters.Clear(); ++_parameterWindowId;
                 }
             }
             catch { try { lock (_gate) { ++_diagnosticFailures; ++_loss.emissionFailures; } } catch { } }
+        }
+
+        private object? SnapshotWriteCountersSafely()
+        {
+            if (_tryWrite is null) return null;
+            try { return _writeCounters?.Invoke(); }
+            catch { return null; } // Missing diagnostic accounting is unknown, never success.
+        }
+
+        // Called only with immutable serialized text, under the command-thread
+        // evidence gate. The supplied production sink does memory/atomic admission.
+        private bool TryQueueLine(string line)
+        {
+            bool accepted;
+            try { accepted = _tryWrite!(line); }
+            catch { accepted = false; }
+            if (accepted)
+            {
+                ++_loss.queuedWindows; _loss.queuedAttempts += _parameters.Calls;
+            }
+            else
+            {
+                ++_loss.queueRejectedWindows; _loss.queueRejectedAttempts += _parameters.Calls;
+                ++_loss.emissionFailures;
+            }
+            return accepted;
         }
 
         // Fixed storage, independent of frame count and elapsed time. Text is copied into two
@@ -356,6 +413,10 @@ internal static partial class Program
             public long staleGenerationCompletions, lateWindowCompletions, parameterObservationFailures;
             public long rawCallsTruncated, rawBytesOmitted, requestTextTruncatedCalls;
             public long samplesOmittedForLineBudget, oversizeEmissionFailures, emissionFailures;
+            // Queue acceptance transfers only the immutable diagnostic; it is not
+            // durable output. Actual writes/failures/terminal discards are sink counters.
+            public long queuedWindows, queuedAttempts, queueRejectedWindows, queueRejectedAttempts;
+            public long tailQueuedWindows, tailQueuedAttempts;
             internal LossCounts Capture() => (LossCounts)MemberwiseClone();
         }
         private sealed class RequestStamp
@@ -394,6 +455,7 @@ internal static partial class Program
         {
             private long _calls, _analogCalls, _bothAnalog, _bothDigital, _touchCalls, _clickCalls;
             private long _firstBothOrdinal, _lastBothOrdinal;
+            private long _quickAccessCalls, _firstQuickAccessOrdinal, _lastQuickAccessOrdinal;
             private ulong _buttonsOr, _buttonsAnd;
             private float _ltMin, _ltMax, _rtMin, _rtMax;
             private byte _digitalOr, _digitalAnd, _touchOr, _touchAnd, _clickOr, _clickAnd;
@@ -407,6 +469,14 @@ internal static partial class Program
                 _buttonsOr |= p.Buttons; _buttonsAnd &= p.Buttons;
                 _digitalOr |= p.DigitalTriggers; _digitalAnd &= p.DigitalTriggers;
                 _touchOr |= p.Touch; _touchAnd &= p.Touch; _clickOr |= p.Click; _clickAnd &= p.Click;
+                // Passive SDK-argument evidence; repeated held reports are calls, not clicks.
+                // Bit 50 has QAM meaning only in the validated SD64 report domain.
+                if (p.Kind == 1 && (p.Buttons & (1UL << 50)) != 0)
+                {
+                    if (_quickAccessCalls++ == 0) _firstQuickAccessOrdinal = ordinal;
+                    else _firstQuickAccessOrdinal = Math.Min(_firstQuickAccessOrdinal, ordinal);
+                    _lastQuickAccessOrdinal = Math.Max(_lastQuickAccessOrdinal, ordinal);
+                }
                 if (p.DigitalTriggers == 3) ++_bothDigital;
                 if (p.Touch != 0) ++_touchCalls;
                 if (p.Click != 0) ++_clickCalls;
@@ -423,6 +493,12 @@ internal static partial class Program
             internal readonly object? Capture(int kind) => _calls == 0 ? null : new
             {
                 calls = _calls, buttonsOrHex = _buttonsOr.ToString("X16"), buttonsAndHex = _buttonsAnd.ToString("X16"),
+                quickAccess = kind != 1 ? null : new
+                {
+                    pressedCalls = _quickAccessCalls,
+                    firstPressedOrdinal = _quickAccessCalls == 0 ? (long?)null : _firstQuickAccessOrdinal,
+                    lastPressedOrdinal = _quickAccessCalls == 0 ? (long?)null : _lastQuickAccessOrdinal
+                },
                 analogKnownCalls = _analogCalls, ltMin = _analogCalls == 0 ? (float?)null : _ltMin,
                 ltMax = _analogCalls == 0 ? (float?)null : _ltMax, rtMin = _analogCalls == 0 ? (float?)null : _rtMin,
                 rtMax = _analogCalls == 0 ? (float?)null : _rtMax, bothAnalogNonzeroCalls = _bothAnalog,
@@ -545,18 +621,21 @@ internal static partial class Program
                 if (failed) _thrownControls.Record(attempt.Parameters, attempt.Ordinal);
                 else _returnedControls.Record(attempt.Parameters, attempt.Ordinal);
             }
-            internal object Capture(long generation, long id, long now, LossCounts loss)
+            internal bool AllCompletedLiveReturns => Calls != 0 && Calls == Returned &&
+                Calls == _reasons[0].Calls && ObservationFailures == 0;
+
+            internal object Capture(long generation, long id, long now, LossCounts loss, bool compactScope = false)
             {
                 var axes = _typedCalls == 0 ? null : new object[TypedAxes.Length];
                 if (axes is not null) for (int i = 0; i < axes.Length; ++i) axes[i] = _axes[i].Capture(TypedAxes[i]);
                 return new
                 {
-                    version = 1, bindingGeneration = generation, windowId = id, observedThroughTick = now,
-                    boundary = "since-last-successful-sample-or-tail-write;reset-on-controller-or-full-binding-change",
-                    tuple = "entry.request;shared-by-first-and-last;bindingGeneration-is-controller/binding-generation",
-                    scope = "actual-Host-SDK-arguments-only;not-system-wide;excludes-SDK-internal-writers,UU-internals,driver/game-consumption",
-                    acceptance = "SDK-void-return-is-not-acceptance-or-delivery", accepted = (long?)null,
-                    tail = "enabled-normal-reset/binding-change-flush;disabled-or-failed-flush-counted;kill/reboot-may-lose-unwritten-tail",
+                    version = compactScope ? 2 : 1, bindingGeneration = generation, windowId = id, observedThroughTick = now,
+                    boundary = compactScope ? null : "since-last-sample-or-tail-sink-boundary;queued-is-not-written;queue-rejection-discards-explicitly;reset-on-controller-or-full-binding-change",
+                    tuple = compactScope ? null : "entry.request;shared-by-first-and-last;bindingGeneration-is-controller/binding-generation",
+                    scope = compactScope ? null : "actual-Host-SDK-arguments-only;not-system-wide;excludes-SDK-internal-writers,UU-internals,driver/game-consumption",
+                    acceptance = compactScope ? null : "SDK-void-return-is-not-acceptance-or-delivery", accepted = (long?)null,
+                    tail = compactScope ? null : "enabled-reset/binding-change-sink-attempt;legacy-flush-and-deferred-queue-counted-separately;rejected/closed/failed-writes-may-lose-diagnostics;kill/reboot-may-lose-unwritten-tail",
                     attempts = Calls, sdkReturned = Returned, sdkThrew = Threw, pendingCompletions = Pending,
                     first = _first.Capture(), last = _last.Capture(),
                     liveFrame = _reasons[0], internalTouch = _reasons[1], neutral = _reasons[2], internalIdle = _reasons[3], other = _reasons[4],
@@ -564,23 +643,23 @@ internal static partial class Program
                     rawOnlyCalls = _rawOnlyCalls, mixedSemanticDomainCallsOmitted = _mixedCalls, observationFailures = ObservationFailures,
                     rawBytes = new
                     {
-                        scope = "attempts;byte-index-in-actual-argument;missing-indices-contribute-zero-to-AND;no-anomaly-classification",
+                        scope = compactScope ? null : "attempts;byte-index-in-actual-argument;missing-indices-contribute-zero-to-AND;no-anomaly-classification",
                         minLength = _rawCalls == 0 ? (int?)null : _minLength, maxLength = _rawCalls == 0 ? (int?)null : _maxLength,
                         prefixBudget = HexBytes, coveredPrefixBytes = _bytes,
                         orHex = Convert.ToHexString(_or.AsSpan(0, _bytes)), andHex = Convert.ToHexString(_and.AsSpan(0, _bytes)),
-                        counterAndImu = "included-in-raw;changes-are-not-input-anomalies;excluded-from-control-state-counts"
+                        counterAndImu = compactScope ? null : "included-in-raw;changes-are-not-input-anomalies;excluded-from-control-state-counts"
                     },
                     controls = new
                     {
                         domain = _kind switch { 1 => "SD64-button-bits;trigger-u16", 2 => "Sony-data-only63-digital-mask;trigger-u8",
                             3 => "HM-typed-buttons-and-Z/Rz-only;no-encoded-report-or-touch-semantics", _ => "unavailable-unknown-persona-or-shape" },
-                        masks = "trigger/touch:bit0-left,bit1-right;Sony-click:bit0-single-surface;SD64-click:bit0-left,bit1-right",
-                        bothAnalog = "same-call-LT>0-and-RT>0;raw-parameter-domain;no-deadzone-or-consumer-inference",
+                        masks = compactScope ? null : "trigger/touch:bit0-left,bit1-right;Sony-click:bit0-single-surface;SD64-click:bit0-left,bit1-right",
+                        bothAnalog = compactScope ? null : "same-call-LT>0-and-RT>0;raw-parameter-domain;no-deadzone-or-consumer-inference",
                         attempted = _attempted.Capture(_kind), sdkReturned = _returnedControls.Capture(_kind), sdkThrew = _thrownControls.Capture(_kind)
                     },
                     typed = axes is null ? null : new
                     {
-                        scope = "six-HM-axis-parameters-only;other-keys-and-encoded-report-unavailable;unknown-persona-has-no-wire-semantics",
+                        scope = compactScope ? null : "six-HM-axis-parameters-only;other-keys-and-encoded-report-unavailable;unknown-persona-has-no-wire-semantics",
                         axes, hatValuesMaskHex = _hatValues.ToString("X16"), hatOutsideMaskCalls = _hatOtherCalls
                     },
                     loss = loss.Capture() // immutable copy, also safe when returned to a later export serializer
@@ -596,14 +675,19 @@ internal static partial class Program
             }
         }
         private void WriteBounded(string line)
+            => WriteBounded(_directory, line);
+
+        // Static worker leaf: no evidence gate, HostSession, controller or borrowed
+        // report is captured. Production invokes this only on the existing worker.
+        internal static void WriteBounded(string directory, string line)
         {
             var text = line + "\n";
             var bytes = Encoding.UTF8.GetByteCount(text);
             if (bytes > MaximumLineBytes) return;
             lock (WriterGate)
             {
-                Directory.CreateDirectory(_directory);
-                var file = Path.Combine(_directory, "input-host-signal.log");
+                Directory.CreateDirectory(directory);
+                var file = Path.Combine(directory, "input-host-signal.log");
                 if (File.Exists(file) && new FileInfo(file).Length + bytes > MaximumFileBytes)
                     File.Move(file, file + ".prev", true);
                 File.AppendAllText(file, text, new UTF8Encoding(false));

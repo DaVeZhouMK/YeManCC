@@ -1,0 +1,156 @@
+<div id="ymcc-setup-real" data-core-app="fluent">
+  <section class="mc-window" aria-label="YeManCC 野蛮系统控制中心">
+    <header class="mc-top" id="ymcc-drag">
+      <div class="mc-app-brand"><img class="mc-brand-mark" src="__YMCC_APP_ICON__" alt=""><strong>YeManCC 野蛮系统控制中心</strong></div>
+      <div class="mc-window-controls"><button type="button" data-action="minimize" aria-label="最小化">−</button><button type="button" data-action="maximize" aria-label="最大化或还原">□</button><button type="button" data-action="close" aria-label="关闭">×</button></div>
+    </header>
+    <div class="mc-flow">
+      <main class="mc-main">
+        <header class="mc-heading" hidden><h1 id="ymcc-title"></h1></header>
+        <div id="ymcc-content"></div>
+        <p id="ymcc-notice" role="status" aria-live="polite" hidden></p>
+      </main>
+      <footer class="mc-footer"><div><button type="button" class="mc-button" id="ymcc-back" data-action="back" hidden>上一步</button><button type="button" class="mc-button mc-primary" id="ymcc-next" data-action="next">下一步 <span aria-hidden="true">→</span></button></div></footer>
+    </div>
+    <div class="mc-controller-strip"><span><span class="mc-pad-symbol" aria-hidden="true">✚</span> 方向选择 <kbd>A</kbd> 确认 <kbd>B</kbd> 返回</span><span id="ymcc-status" hidden>预览 · 安装已禁用</span></div>
+  </section>
+
+</div>
+<style>
+#ymcc-setup-real {
+  --mc-bg:light-dark(#f7f9fc,#0f141d);--mc-surface:light-dark(#fff,#161e2a);
+  --mc-subtle:light-dark(#edf1f7,#1d2838);--mc-text:light-dark(#192b40,#ecf3fb);
+  --mc-dim:light-dark(#53657b,#a5b5c9);--mc-line:light-dark(#d8e1ed,#2a3a4e);
+  --mc-blue:light-dark(#0879d9,#50b6ff);--mc-on-blue:light-dark(#fff,#071726);
+  --mc-selected:light-dark(#e8f3ff,#152e45);--mc-green:light-dark(#197345,#86dcae);
+  --mc-green-bg:light-dark(#e9f6ee,#172e25);--mc-warn:light-dark(#8c5a06,#f3cc85);
+  --mc-warn-bg:light-dark(#fff3dd,#332a19);
+  width:100%;min-width:0;font:14px/1.6 'Segoe UI','Microsoft YaHei UI',system-ui,sans-serif;
+  color:var(--mc-text);color-scheme:light dark;
+}
+#ymcc-setup-real *{box-sizing:border-box}
+#ymcc-setup-real [hidden]{display:none!important}
+#ymcc-setup-real h1,#ymcc-setup-real p{margin:0}
+#ymcc-setup-real button,#ymcc-setup-real input{font:inherit}
+#ymcc-setup-real button{color:inherit;cursor:pointer}
+#ymcc-setup-real button:disabled{opacity:.5;cursor:default}
+#ymcc-setup-real button:focus-visible,#ymcc-setup-real input:focus-visible,#ymcc-setup-real .mc-pad-focus{outline:2px solid var(--mc-blue);outline-offset:3px}
+#ymcc-setup-real .mc-check:has(>input.mc-pad-focus){outline:2px solid var(--mc-blue);outline-offset:3px}
+#ymcc-setup-real .mc-window{display:flex;flex-direction:column;min-height:540px;background:var(--mc-bg);border:1px solid var(--mc-line);border-radius:12px;overflow:hidden}
+#ymcc-setup-real[data-native] .mc-window{border:0;border-radius:0;min-height:100vh;height:100vh}
+#ymcc-setup-real .mc-top{display:flex;align-items:center;justify-content:space-between;gap:16px;height:50px;min-height:50px;padding-left:22px;background:var(--mc-surface);border-bottom:1px solid var(--mc-line);user-select:none}
+#ymcc-setup-real .mc-app-brand{display:flex;align-items:center;gap:10px;min-width:0}
+#ymcc-setup-real .mc-brand-mark{width:26px;height:26px;object-fit:contain;flex-shrink:0}
+#ymcc-setup-real .mc-app-brand strong{font-size:14px;font-weight:600;white-space:nowrap}
+#ymcc-setup-real .mc-window-controls{display:flex;align-self:stretch;flex-shrink:0}
+#ymcc-setup-real .mc-window-controls button{width:44px;border:0;background:transparent;font-size:19px}
+#ymcc-setup-real .mc-window-controls button:hover{background:var(--mc-subtle)}
+#ymcc-setup-real .mc-window-controls button:last-child:hover{background:#c42b1c;color:#fff}
+#ymcc-setup-real .mc-flow{display:flex;flex-direction:column;flex:1;min-height:0}
+#ymcc-setup-real .mc-main{width:100%;max-width:900px;margin:0 auto;padding:24px 28px;flex:1;min-height:0;min-width:0}
+#ymcc-setup-real[data-native] .mc-main{overflow:auto;scrollbar-width:thin}
+#ymcc-setup-real .mc-heading{margin-bottom:16px}
+#ymcc-setup-real h1{font-size:22px;line-height:1.45;font-weight:600}
+#ymcc-setup-real .mc-heading>p{font-size:13px;color:var(--mc-dim);margin-top:8px}
+#ymcc-setup-real .mc-version-card{display:flex;align-items:center;gap:14px;min-height:80px;padding:14px 18px;margin-bottom:16px;background:var(--mc-selected);border:1px solid var(--mc-line);border-radius:10px}
+#ymcc-setup-real .mc-version-icon{width:44px;height:44px;object-fit:contain;flex-shrink:0}
+#ymcc-setup-real .mc-version-card strong{display:block;font-size:19px;font-weight:600}
+#ymcc-setup-real .mc-version-card small{display:block;margin-top:2px;font-size:12px;color:var(--mc-dim)}
+#ymcc-setup-real .mc-package-surface{padding:4px 18px;background:var(--mc-surface);border:1px solid var(--mc-line);border-radius:10px}
+#ymcc-setup-real .mc-runtime-row{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:38px;padding:6px 0;border-bottom:1px solid var(--mc-line);font-size:13px;color:var(--mc-dim)}
+#ymcc-setup-real .mc-runtime-row:last-child{border-bottom:0}
+#ymcc-setup-real .mc-badge{font-size:11px;white-space:nowrap;padding:2px 8px;border-radius:4px;background:var(--mc-subtle);color:var(--mc-dim)}
+#ymcc-setup-real .mc-badge.ready{background:var(--mc-green-bg);color:var(--mc-green)}
+#ymcc-setup-real .mc-badge.failed{background:var(--mc-warn-bg);color:var(--mc-warn)}
+#ymcc-setup-real .mc-help{font-size:12px;line-height:1.7;color:var(--mc-dim)}
+#ymcc-setup-real #ymcc-version-change{margin-bottom:14px}
+#ymcc-setup-real .mc-location{padding:16px 18px 14px}
+#ymcc-setup-real .mc-field{font-size:13px;color:var(--mc-dim);padding-bottom:16px;margin-bottom:8px;border-bottom:1px solid var(--mc-line)}
+#ymcc-setup-real .mc-fixed-path{display:block;min-height:44px;margin-top:8px;padding:10px 12px;background:var(--mc-bg);border:1px solid var(--mc-line);border-radius:6px;font:13px/1.6 Consolas,monospace;color:var(--mc-text);overflow-wrap:anywhere}
+#ymcc-setup-real .mc-check{display:flex;align-items:center;gap:10px;min-height:44px;font-size:13px;cursor:pointer}
+#ymcc-setup-real .mc-check input{width:16px;height:16px;margin:0;accent-color:var(--mc-blue)}
+#ymcc-setup-real .mc-location .mc-help{margin-top:2px;font-size:11px}
+#ymcc-setup-real #ymcc-notice{margin-top:14px;padding:10px 13px;background:var(--mc-warn-bg);color:var(--mc-warn);border-radius:7px;font-size:12px;overflow-wrap:anywhere}
+#ymcc-setup-real .mc-footer{display:flex;align-items:center;justify-content:flex-end;min-height:64px;padding:11px 28px;border-top:1px solid var(--mc-line);background:var(--mc-surface);flex-shrink:0}
+#ymcc-setup-real .mc-footer>div{display:flex;align-items:center;gap:10px}
+#ymcc-setup-real .mc-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:9px 16px;border:1px solid var(--mc-line);border-radius:7px;background:var(--mc-surface);white-space:nowrap;font-size:13px}
+#ymcc-setup-real .mc-button:hover:not(:disabled){background:var(--mc-subtle)}
+#ymcc-setup-real .mc-primary{min-width:108px;background:var(--mc-blue);border-color:var(--mc-blue);color:var(--mc-on-blue);font-weight:600}
+#ymcc-setup-real .mc-primary:hover:not(:disabled){background:color-mix(in srgb,var(--mc-blue) 88%,var(--mc-text))}
+#ymcc-setup-real .mc-controller-strip{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:30px;padding:5px 16px;border-top:1px solid var(--mc-line);font-size:10px;color:var(--mc-dim);flex-shrink:0}
+#ymcc-setup-real .mc-controller-strip>span{display:flex;align-items:center;gap:7px}
+#ymcc-setup-real .mc-pad-symbol{color:var(--mc-blue)}
+#ymcc-setup-real kbd{display:inline-grid;place-items:center;width:17px;height:17px;border:1px solid var(--mc-line);border-radius:50%;font:10px 'Segoe UI',sans-serif;color:var(--mc-text)}
+#ymcc-setup-real .mc-live-heading{margin:12px 0 18px;font-size:14px;overflow-wrap:anywhere}
+#ymcc-setup-real .mc-activity{height:5px;background:var(--mc-subtle);border-radius:4px;overflow:hidden}
+#ymcc-setup-real .mc-activity>span{display:block;width:30%;height:100%;background:var(--mc-blue);animation:ymcc-activity 1.8s ease-in-out infinite alternate}
+@keyframes ymcc-activity{to{transform:translateX(230%)}}
+#ymcc-setup-real .mc-log{margin-top:20px;padding:0;list-style:none;font-size:12px;color:var(--mc-dim);overflow-wrap:anywhere}
+#ymcc-setup-real .mc-log li{padding:7px 0;border-bottom:1px solid var(--mc-line)}
+#ymcc-setup-real .mc-result-symbol{display:grid;place-items:center;width:44px;height:44px;margin:6px 0 16px;border-radius:50%;background:var(--mc-green-bg);color:var(--mc-green);font-size:23px}
+#ymcc-setup-real .mc-result-symbol.failed{background:var(--mc-warn-bg);color:var(--mc-warn)}
+#ymcc-setup-real .mc-result-path{margin-top:14px;font-size:12px;color:var(--mc-dim);overflow-wrap:anywhere}
+#ymcc-setup-real[data-view=result] .mc-help{margin-top:12px}
+@media(max-width:700px){#ymcc-setup-real .mc-top{padding-left:18px}#ymcc-setup-real .mc-main{padding:22px}#ymcc-setup-real .mc-footer{padding:11px 22px}}
+@media(max-width:480px){#ymcc-setup-real .mc-top{gap:8px;padding-left:12px}#ymcc-setup-real .mc-app-brand{gap:7px}#ymcc-setup-real .mc-app-brand strong{font-size:12px}#ymcc-setup-real .mc-window-controls button{width:30px}#ymcc-setup-real .mc-main{padding:20px 16px}#ymcc-setup-real .mc-controller-strip>span:last-child{display:none}}
+@media(pointer:coarse){#ymcc-setup-real .mc-button{min-height:44px}}
+@media(prefers-reduced-motion:reduce){#ymcc-setup-real .mc-activity>span{animation:none}}
+</style>
+<script>
+(()=>{
+'use strict';
+const root=document.getElementById('ymcc-setup-real'),q=s=>root.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const native=Boolean(window.chrome?.webview),state={view:'home',path:'C:\\SOFT\\YeMan',shortcut:true,preview:true,scan:null,logs:[],result:null,defender:true};
+let lastFocus='',lastPad='',heldAt=0,lastAt=0,frame=0;
+function post(action,data={}){if(native)window.chrome.webview.postMessage({action,...data});else if(action!=='ready')notice(action==='apply'?'浏览器中只预览真实界面，不会执行安装。':'此操作需要在设置中心的真实预览窗口中使用。');}
+function notice(text){q('#ymcc-notice').textContent=text;q('#ymcc-notice').hidden=!text;}
+function controls(){return [...root.querySelectorAll('button,input')].filter(e=>!e.disabled&&visible(e)&&!e.closest('.mc-window-controls'));}
+function visible(e){if(!e?.getClientRects().length||e.closest('[hidden]'))return false;for(let p=e.closest('details');p;p=p.parentElement?.closest('details'))if(!p.open&&!p.querySelector(':scope>summary').contains(e))return false;return !e.checkVisibility||e.checkVisibility();}
+function key(e){return e.id||e.dataset.action||e.name+':'+e.value;}
+function focus(e){if(!e)return;root.querySelectorAll('.mc-pad-focus').forEach(x=>x.classList.remove('mc-pad-focus'));e.classList.add('mc-pad-focus');lastFocus=key(e);e.focus({preventScroll:true});e.scrollIntoView({block:'nearest',inline:'nearest'});}
+function move(dir){const list=controls(),from=list.includes(document.activeElement)?document.activeElement:list.find(e=>key(e)===lastFocus)||list[0];if(!from)return;const box=e=>e.closest('.mc-mode')?.getBoundingClientRect()||e.getBoundingClientRect(),a=box(from),vertical=dir==='up'||dir==='down',sign=dir==='up'||dir==='left'?-1:1;let best=null,score=Infinity;for(const e of list){if(e===from)continue;const b=box(e),forward=((vertical?b.y+b.height/2:b.x+b.width/2)-(vertical?a.y+a.height/2:a.x+a.width/2))*sign;if(forward<3)continue;const overlap=vertical?Math.min(a.right,b.right)-Math.max(a.left,b.left):Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top);if(!vertical&&overlap<=0)continue;const cross=Math.abs((vertical?b.x+b.width/2:b.y+b.height/2)-(vertical?a.x+a.width/2:a.y+a.height/2)),cost=forward+cross*(overlap>0?.2:2);if(cost<score){score=cost;best=e;}}focus(best||from);}
+function input(name){if(state.view==='run')return;if(name==='b'){back();return;}if(['up','down','left','right'].includes(name)){move(name);return;}if(name==='a'){const list=controls(),e=list.includes(document.activeElement)?document.activeElement:list.find(x=>key(x)===lastFocus)||q('#ymcc-next');if(e&&!e.disabled){focus(e);e.click();}}}
+function runtimeRows(){return (state.scan?.runtimes||[{name:'WebView2 Runtime · x64',ready:null},{name:'.NET 10 桌面运行时 · x64',ready:null},{name:'VC++ v14 · x64',ready:null},{name:'VC++ v14 · x86',ready:null},{name:'HidHide 手柄驱动',ready:null}]).map(r=>`<div class="mc-runtime-row"><span>${esc(r.name)}</span><span class="mc-badge ${r.error?'failed':r.ready===true?'ready':''}" ${r.error?`title="${esc(r.error)}"`:''}>${r.error?'检测失败':r.ready===true?'已就绪':r.ready===false?(r.name.startsWith('WebView2')?'联网补齐':'自动补齐'):'正在检测'}</span></div>`).join('');}
+function render(){
+const old=lastFocus,s=state.scan,installation=s?.installation,action=installation?.Action||'install';
+q('#ymcc-back').hidden=state.view!=='review';q('#ymcc-next').disabled=state.view==='run'||(state.view==='home'&&!s)||(state.view==='review'&&installation?.Allowed===false);
+q('#ymcc-next').textContent=state.view==='home'?'下一步 →':state.view==='review'?(action==='update'?'更新安装 →':action==='reinstall'?'重新安装 →':action==='recover'?'恢复并继续 →':'开始安装 →'):state.view==='run'?'正在安装…':'关闭';
+root.dataset.view=state.view;q('#ymcc-status').hidden=!state.preview;
+q('.mc-heading').hidden=state.view==='home';
+if(state.view==='home'){
+q('#ymcc-title').textContent='';
+q('#ymcc-content').innerHTML=`<section class="mc-version-card" aria-label="本次安装版本"><img class="mc-version-icon" src="__YMCC_APP_ICON__" alt=""><div><strong id="ymcc-package-version">${s?'YeManCC '+esc(s.localVersion):'正在读取版本…'}</strong><small>HWiNFO ${esc(s?.hwVersion||'')} + RTSS</small></div></section><section class="mc-package-surface" aria-label="安装环境检测">${runtimeRows()}</section>`;
+}else if(state.view==='review'){
+q('#ymcc-title').textContent=action==='update'?'确认更新':action==='reinstall'?'确认重新安装':action==='recover'?'继续上次安装':'确认安装';
+q('#ymcc-content').innerHTML=`<p class="mc-help" id="ymcc-version-change">${esc((installation?.Label||'安装 YeManCC '+(s?.localVersion||'')).replace(/\bYMCC\b/g,'YeManCC'))}</p><section class="mc-package-surface mc-location" aria-label="安装选项"><div class="mc-field"><span>安装位置</span><code class="mc-fixed-path" id="ymcc-fixed-path">${esc(state.path)}</code></div><label class="mc-check"><input type="checkbox" id="ymcc-shortcut" ${state.shortcut?'checked':''}>创建桌面快捷方式</label><label class="mc-check"><input type="checkbox" id="ymcc-defender" ${state.defender?'checked':''}>添加 Defender 排除项</label><p class="mc-help">仅排除核心文件，会减少其扫描保护。</p></section>${installation?.Error?`<p class="mc-help">${esc(installation.Error)}</p>`:''}`;
+
+}else if(state.view==='run'){
+q('#ymcc-title').textContent='正在安装';
+q('#ymcc-content').innerHTML=`<div class="mc-live-heading">${esc(state.logs.at(-1)||'正在准备文件')}</div><div class="mc-activity" role="progressbar" aria-label="安装正在进行"><span></span></div><ul class="mc-log">${state.logs.slice(0,-1).slice(-5).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;
+}else{
+const r=state.result,ok=r&&['completed','reboot-required'].includes(r.Phase),pending=r?.Phase==='blocked-reboot';
+q('#ymcc-title').textContent=ok?(r.RebootRequired?'安装完成，重启后使用':'安装完成'):pending?'请重启后继续安装':'安装未完成';
+q('#ymcc-content').innerHTML=`<span class="mc-result-symbol ${ok?'':'failed'}" aria-hidden="true">${ok?'✓':'!'}</span><p>${esc(ok?(r.RebootRequired?'请保存工作后自行重启。':'可从桌面或安装目录打开 YeManCC。'):r?.Error||'请处理问题后重试。')}</p><p class="mc-result-path">${esc(r?.Root||state.path)}</p>${r?.Backup?`<p class="mc-result-path">记录与备份：${esc(r.Backup)}</p>`:''}${r?.Defender?.Message?`<p class="mc-help">Defender：${esc(r.Defender.Message)}</p>`:''}`;
+}
+notice('');requestAnimationFrame(()=>{const list=controls(),e=list.find(x=>key(x)===old)||q('#ymcc-next');if(e&&!e.disabled)focus(e);});
+}
+function next(){if(state.view==='home'){if(!state.scan)return;state.view='review';render();return;}if(state.view==='review'){if(state.scan?.installation?.Allowed===false){notice(state.scan.installation.Error);return;}if(state.preview){notice('当前为真实界面预览，安装已在程序端禁用。没有安装、下载或修改杀毒设置。');return;}post('apply',{plan:{Root:state.path,Mode:'install',ExpectedInstalledVersion:state.scan?.installedVersion||'',DesktopShortcut:state.shortcut,DefenderExclusions:state.defender}});return;}if(state.view==='result')post('close');}
+function back(){if(state.view==='run')return;if(state.view==='review'){state.view='home';render();}else if(state.view==='home'||state.view==='result')post('close');}
+function receive(data){
+if(data.type==='init'){state.preview=data.preview!==false;state.path=data.path||state.path;state.scan=data.scan;state.shortcut=data.shortcut!==false;state.defender=data.defender!==false;if(data.apply)state.view='run';if(native)root.dataset.native='true';render();}
+else if(data.type==='scan'){state.scan=data.scan;if(state.view==='home'||state.view==='review')render();}
+else if(data.type==='confirmation'){state.scan=data.scan;state.view='review';state.logs=[];state.result=null;render();notice(data.message);}
+else if(data.type==='notice')notice(data.message);
+else if(data.type==='progress'){state.view='run';state.logs.push(data.message);render();}
+else if(data.type==='result'){state.result=data.result;state.view='result';render();}
+}
+root.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el||el.disabled)return;const action=el.dataset.action;if(action==='next')next();else if(action==='back')back();else post(action);});
+root.addEventListener('change',e=>{if(e.target.id==='ymcc-shortcut')state.shortcut=e.target.checked;else if(e.target.id==='ymcc-defender')state.defender=e.target.checked;});
+root.addEventListener('focusin',e=>{if(controls().includes(e.target))lastFocus=key(e.target);});
+root.addEventListener('keydown',e=>{if(e.altKey||e.ctrlKey||e.metaKey)return;const name={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',Enter:'a',Escape:'b'}[e.key];if(name){e.preventDefault();input(name);}});
+q('#ymcc-drag').addEventListener('mousedown',e=>{if(e.button===0&&!e.target.closest('button'))post('drag');});
+function poll(now){frame=0;if(document.hidden||native)return;const p=[...(navigator.getGamepads?.()||[])].find(p=>p?.connected&&p.mapping==='standard');if(!p)return;const down=i=>p.buttons[i]?.pressed,a=p.axes,name=down(0)?'a':down(1)?'b':down(2)?'x':down(12)||a[1]<-.6?'up':down(13)||a[1]>.6?'down':down(14)||a[0]<-.6?'left':down(15)||a[0]>.6?'right':'';if(name){if(name!==lastPad){heldAt=now;lastAt=now;input(name);}else if(now-heldAt>380&&now-lastAt>150&&['up','down','left','right'].includes(name)){lastAt=now;input(name);}}else heldAt=0;lastPad=name;frame=requestAnimationFrame(poll);}
+function startPad(){if(!frame&&!native&&!document.hidden)frame=requestAnimationFrame(poll);}window.addEventListener('gamepadconnected',startPad);window.addEventListener('focus',startPad);document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelAnimationFrame(frame);frame=0;lastPad='';}else startPad();});
+window.YMCCSetup={receive,input,getState:()=>JSON.parse(JSON.stringify(state)),next,back};if(native)window.chrome.webview.addEventListener('message',e=>receive(e.data));render();post('ready');
+})();
+</script>

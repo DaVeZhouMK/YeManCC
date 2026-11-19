@@ -21,7 +21,8 @@ static class Program
     {
         if (args.Length == 1 && args[0] == "--self-test") return SelfTests.Run();
         if (args.Length == 1 && args[0] == "--self-test-liveness") return SelfTests.RunLiveness();
-        if (args.Length < 4 || args[2] != "--target-pid") { Console.Error.WriteLine("PreciseCpu <captureRoot> <freshOutputRoot> --target-pid PID [--warmup-seconds 15] | --self-test"); return 2; }
+        if (args.Length == 1 && args[0] == "--self-test-saved-sample") return SavedSampleTests.Run();
+        if (args.Length < 4 || args[2] != "--target-pid") { Console.Error.WriteLine("PreciseCpu <captureRoot> <freshOutputRoot> --target-pid PID [--warmup-seconds 15] [--sample ID] | --self-test"); return 2; }
         string? output = null; bool outputCreated = false;
         try
         {
@@ -30,11 +31,19 @@ static class Program
             if (output.Equals(root, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Output equals capture root.");
             int pid = int.Parse(args[3], CultureInfo.InvariantCulture);
             decimal warmup = 15;
-            if (args.Length > 4) { if (args.Length != 6 || args[4] != "--warmup-seconds") throw new InvalidDataException("Unknown arguments."); warmup = decimal.Parse(args[5], CultureInfo.InvariantCulture); }
+            long? requestedSample = null; bool warmupProvided = false;
+            for (int i = 4; i < args.Length; i += 2)
+            {
+                if (i + 1 >= args.Length) throw new InvalidDataException("Missing argument value.");
+                if (args[i] == "--warmup-seconds" && !warmupProvided) { warmup = decimal.Parse(args[i + 1], CultureInfo.InvariantCulture); warmupProvided = true; }
+                else if (args[i] == "--sample" && requestedSample == null) requestedSample = long.Parse(args[i + 1], CultureInfo.InvariantCulture);
+                else throw new InvalidDataException("Unknown or duplicate arguments.");
+            }
+            if (requestedSample < 0) throw new InvalidDataException("Invalid saved sample.");
             if (pid <= 0 || warmup < 0) throw new InvalidDataException("Invalid PID/warmup.");
             Directory.CreateDirectory(output); outputCreated = true;
             var watch = Stopwatch.StartNew();
-            var input = Capture.Load(root, pid, warmup);
+            var input = Capture.Load(root, pid, warmup, requestedSample);
             Save(Path.Combine(output, "WINDOW.json"), input.Evidence());
             var etls = Directory.GetFiles(root, "*.etl", SearchOption.TopDirectoryOnly);
             var etl = Path.Combine(root, "YMCC-CPU.etl");
@@ -85,8 +94,9 @@ sealed class Capture
     public decimal WindowMs, CounterMs, Percent, QpcWindowMs, UtcWindowMs;
     public readonly List<string> Problems = new();
     public readonly List<object> Hashes = new();
-    public static Capture Load(string root, int pid, decimal warmup)
+    public static Capture Load(string root, int pid, decimal warmup, long? requestedSample = null)
     {
+        if (requestedSample < 0) throw new InvalidDataException("Invalid saved sample.");
         var id = Program.Read(Path.Combine(root, "IDENTITY.json"));
         var final = Program.Read(Path.Combine(root, "CAPTURE.json"));
         if (Program.I(id, "pid") != pid) throw new InvalidDataException("IDENTITY PID mismatch.");
@@ -107,13 +117,15 @@ sealed class Capture
         var failures = new List<string>();
         foreach (var pair in rows.OrderBy(x => x.Key))
         {
-            if (trigger.HasValue && Program.I(trigger.Value, "sample") != pair.Key) continue;
-            if (!trigger.HasValue && Program.D(pair.Value, "wallMs") < warmup * 1000) continue;
+            if (requestedSample.HasValue && pair.Key != requestedSample.Value) continue;
+            if (!requestedSample.HasValue && trigger.HasValue && Program.I(trigger.Value, "sample") != pair.Key) continue;
+            if (!requestedSample.HasValue && !trigger.HasValue && Program.D(pair.Value, "wallMs") < warmup * 1000) continue;
             try
             {
                 var candidate = Window(rows, pair.Key, pid, cpus, Program.S(id, "birthFileTime"));
                 candidate.Identity = id; candidate.Final = final;
-                if (trigger.HasValue)
+                if (requestedSample.HasValue && Program.D(candidate.Baseline, "wallMs") < warmup * 1000) throw new InvalidDataException("Explicit saved window begins before warmup.");
+                if (!requestedSample.HasValue && trigger.HasValue)
                 {
                     var t = trigger.Value;
                     if (Program.Utc(Program.S(t, "atUtc")) != candidate.End || Math.Abs(Program.D(t, "windowMs") - candidate.WindowMs) > 0.000001m || Math.Abs(Program.D(t, "cpuPercentMachine") - candidate.Percent) > 0.000000001m) throw new InvalidDataException("Trigger does not match selected CPU row.");
@@ -123,7 +135,8 @@ sealed class Capture
             catch (Exception e) { if (failures.Count < 10) failures.Add($"sample {pair.Key}: {e.Message}"); }
         }
         if (selected == null) throw new InvalidDataException("No valid exact sample-4 window (actual trigger cannot fall back): " + string.Join("; ", failures));
-        selected.Selection = trigger.HasValue ? "actual trigger row" : "maximum valid row after warmup";
+        selected.Selection = requestedSample.HasValue ? "explicit saved sample (not runtime trigger)" :
+            (trigger.HasValue ? "actual trigger row" : "maximum valid row after warmup");
         selected.ValidateIdentity();
         foreach (var file in new[] { "CPU.jsonl", "IDENTITY.json", "CAPTURE.json", "TRIGGER.json" })
         { var p = Path.Combine(root, file); if (File.Exists(p)) selected.Hashes.Add(new { path = p, sha256 = Program.Hash(p) }); }
@@ -212,6 +225,9 @@ sealed class Model
     public readonly Dictionary<string, long> Counts = new();
     public bool SamplesTruncated;
     public long Switches, Dpcs, Isrs;
+    // Raw observed bounds diagnose per-CPU ring retention. They do not prove
+    // uninterrupted coverage, ownership, or completeness of the peak window.
+    public readonly Dictionary<int, (long First, long Last, long Count)> SwitchBounds = new();
     public bool TargetLifecycleConflict;
     public Model(long a, long b, int n, decimal wallMs, int pid) { begin = a; end = b; cpus = n; wall = wallMs; target = pid; if (n <= 0 || n > 4096 || b <= a) throw new InvalidDataException("Invalid window/CPU count."); }
     void Count(string k) { Counts[k] = Counts.GetValueOrDefault(k) + 1; }
@@ -298,6 +314,8 @@ sealed class Model
     {
         Switches++;
         if (negative || cpu < 0 || cpu >= cpus || oldTid < 0 || newTid < 0) { Count(negative ? "negativeEventTime" : "invalidCSwitchFields"); open.Remove(cpu); return; }
+        var bounds = SwitchBounds.GetValueOrDefault(cpu, (time, time, 0L));
+        SwitchBounds[cpu] = (Math.Min(bounds.Item1, time), Math.Max(bounds.Item2, time), bounds.Item3 + 1);
         if (lastCpu.TryGetValue(cpu, out var last) && time < last) { Count("negativePerCpuTimeDelta"); open.Remove(cpu); lastCpu[cpu] = time; return; }
         lastCpu[cpu] = time;
         if (open.Remove(cpu, out var o))
@@ -391,7 +409,7 @@ sealed class Model
         bool binding = input != null && input.Problems.Count == 0 && targetKeys == 1 && !TargetLifecycleConflict;
         string status = !complete ? "REJECTED_INCOMPLETE_CSWITCH_COVERAGE" : "ANALYZED";
         decimal rawTarget = procs.Where(r => r.Pid == target).Sum(r => r.ScheduledMs), adjustedTarget = procs.Where(r => r.Pid == target).Sum(r => r.AdjustedMs);
-        return new Result(status, complete, "UNKNOWN", "UNKNOWN", coverage.ToArray(), procs.Where(r => r.Pid != 0).ToArray(), targetThreads, procs.Where(r => family.Contains(r.ProcessKey)).ToArray(), new { status = "UNKNOWN", targetBinding = binding ? "HELD_IDENTITY_CONSISTENT_WITH_OBSERVED_WINDOW" : "UNKNOWN", targetKeys, TargetLifecycleConflict, inputProblems = input?.Problems, counterMs = input?.CounterMs, scheduledTargetMs = rawTarget, interruptAdjustedTargetEstimateMs = adjustedTarget, counterMinusRawMs = input == null ? (decimal?)null : input.CounterMs - rawTarget, counterMinusAdjustedMs = input == null ? (decimal?)null : input.CounterMs - adjustedTarget, note = "Residency includes interrupts; union-adjusted duration is an estimate. Counter reads/UTC/QPC are sequential and counter quantization and unobserved kernel work prevent exact reconciliation. DCStart is never OS birth." }, new { Switches, Dpcs, Isrs, EventsLost = lost, unknownOwners = unknown, Counts, openRunsWithoutInventedFinalEdge = open.Count, idleScheduledMs = procs.Where(r => r.Pid == 0).Sum(r => r.ScheduledMs), interruptUnionMs = unions.Values.Sum(v => v.Sum(r => r.B - r.A)) / 10000m, adjustmentEvidence = Dpcs > 0 && Isrs > 0 ? "DPC_AND_ISR_EVENTS_OBSERVED" : "UNKNOWN_MISSING_INTERRUPT_EVENT_CLASS", familyMapping = "Observed parent-instance mapping only; missing/rundown parent generation can leave descendants unknown", limits = "No exact claim: inspect loss, each CPU's coverage, unknown ownership, identity and interrupt evidence separately; zero loss alone is insufficient" });
+        return new Result(status, complete, "UNKNOWN", "UNKNOWN", coverage.ToArray(), procs.Where(r => r.Pid != 0).ToArray(), targetThreads, procs.Where(r => family.Contains(r.ProcessKey)).ToArray(), new { status = "UNKNOWN", targetBinding = binding ? "HELD_IDENTITY_CONSISTENT_WITH_OBSERVED_WINDOW" : "UNKNOWN", targetKeys, TargetLifecycleConflict, inputProblems = input?.Problems, counterMs = input?.CounterMs, scheduledTargetMs = rawTarget, interruptAdjustedTargetEstimateMs = adjustedTarget, counterMinusRawMs = input == null ? (decimal?)null : input.CounterMs - rawTarget, counterMinusAdjustedMs = input == null ? (decimal?)null : input.CounterMs - adjustedTarget, note = "Residency includes interrupts; union-adjusted duration is an estimate. Counter reads/UTC/QPC are sequential and counter quantization and unobserved kernel work prevent exact reconciliation. DCStart is never OS birth." }, new { Switches, Dpcs, Isrs, EventsLost = lost, observedSwitchBounds = SwitchBounds.OrderBy(pair => pair.Key).Select(pair => new { cpu = pair.Key, firstUtc = Program.Iso(pair.Value.First), lastUtc = Program.Iso(pair.Value.Last), events = pair.Value.Count, boundsOnlyNotCoverageProof = true }), unknownOwners = unknown, Counts, openRunsWithoutInventedFinalEdge = open.Count, idleScheduledMs = procs.Where(r => r.Pid == 0).Sum(r => r.ScheduledMs), interruptUnionMs = unions.Values.Sum(v => v.Sum(r => r.B - r.A)) / 10000m, adjustmentEvidence = Dpcs > 0 && Isrs > 0 ? "DPC_AND_ISR_EVENTS_OBSERVED" : "UNKNOWN_MISSING_INTERRUPT_EVENT_CLASS", familyMapping = "Observed parent-instance mapping only; missing/rundown parent generation can leave descendants unknown", limits = "No exact claim: inspect loss, each CPU's coverage, unknown ownership, identity and interrupt evidence separately; zero loss alone is insufficient" });
     }
 }
 

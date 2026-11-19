@@ -147,23 +147,47 @@ export async function ensureUpdateManager(): Promise<void> {
   finally { if (initialization === task) initialization = null; }
 }
 
-export async function checkForUpdate(appVersion: string, background = false): Promise<void> {
+export async function checkForUpdate(appVersion: string, background = false, admissionCurrent?: () => boolean): Promise<boolean> {
+  const backgroundTicket = backgroundGeneration;
+  const backgroundCurrent = () => !background || (!backgroundGamePaused && backgroundTicket === backgroundGeneration && (admissionCurrent?.() ?? true));
   await ensureUpdateManager();
-  if (downloadTask || installRequested || updateCacheState.busy) return;
-  if (['checking', 'downloading', 'validating', 'installing'].includes(updateSnapshot.phase)) return;
+  if (!backgroundCurrent() || downloadTask || installRequested || updateCacheState.busy || updateSnapshot.installerActive === true ||
+      background && updateSnapshot.stage === 'install' && updateSnapshot.repairAuthorized === true) return false;
+  if (['checking', 'downloading', 'validating', 'installing'].includes(updateSnapshot.phase)) return false;
   const priorInfo = updateInfo.value;
   const priorPhase = updateSnapshot.phase;
+  const priorInstallFailure = background && updateSnapshot.stage === 'install' && ['failed', 'interrupted'].includes(priorPhase);
+  const priorError = updateSnapshot.error;
+  const priorOperation = activeOperation;
+  const priorDisplay = { operationId: updateSnapshot.operationId, phase: priorPhase, error: priorError, message: updateSnapshot.message };
   const generation = maintenanceGeneration;
-  activeOperation = makeOperationId();
+  const checkOperation = makeOperationId();
+  activeOperation = checkOperation;
   updateSnapshot.operationId = activeOperation;
   updateSnapshot.phase = 'checking';
   updateSnapshot.error = '';
   updateSnapshot.message = '正在连接更新服务器';
+  const ownsCheck = () => generation === maintenanceGeneration && !updateCacheState.busy &&
+    activeOperation === checkOperation && updateSnapshot.operationId === checkOperation && updateInfo.value === priorInfo;
+  const acceptCheckResult = () => {
+    if (!ownsCheck()) return false;
+    if (backgroundCurrent()) return true;
+    // Native can return after a new Ready reopens admission. Retire the old
+    // display without treating the late manifest as current or as a failure.
+    activeOperation = priorOperation;
+    Object.assign(updateSnapshot, priorDisplay);
+    return false;
+  };
   try {
     const info = await checkUpdate(UPDATE_MANIFEST_URL, background);
-    if (generation !== maintenanceGeneration || updateCacheState.busy) return;
+    if (!acceptCheckResult()) return false;
     if (compareVersions(info.version, appVersion) > 0) {
       updateInfo.value = info;
+      if (priorInstallFailure && priorInfo?.version === info.version && priorInfo.sha256.toUpperCase() === info.sha256.toUpperCase()) {
+        Object.assign(updateSnapshot, { phase: priorPhase, stage: 'install', error: priorError,
+          message: '上次安装未完成，请在更新页重试安装' });
+        return true;
+      }
       updateSnapshot.phase = priorPhase === 'downloaded' && priorInfo?.version === info.version && priorInfo.sha256.toUpperCase() === info.sha256.toUpperCase() ? 'downloaded' : 'available';
       updateSnapshot.stage = updateSnapshot.phase === 'downloaded' ? 'install' : 'download';
       updateSnapshot.sha256 = info.sha256;
@@ -179,11 +203,13 @@ export async function checkForUpdate(appVersion: string, background = false): Pr
       updateSnapshot.phase = 'latest';
       updateSnapshot.message = '当前已是最新版本';
     }
+    return true;
   } catch (error) {
-    if (generation !== maintenanceGeneration || updateCacheState.busy) return;
+    if (!acceptCheckResult()) return false;
     updateSnapshot.phase = 'failed';
     updateSnapshot.error = `检查失败：${error instanceof Error ? error.message : String(error)}`;
     updateSnapshot.message = updateSnapshot.error;
+    return false;
   }
 }
 
@@ -313,7 +339,9 @@ function isSuccessor(next: UpdateInfo, current: UpdateInfo): boolean {
   } catch { return false; }
 }
 function selectPendingTarget(): void {
-  if (!pendingTarget || installRequested || backgroundGamePaused || updateCacheState.busy) return;
+  if (!pendingTarget || installRequested || updateSnapshot.installerActive === true ||
+      updateSnapshot.phase === 'installing' || updateSnapshot.stage === 'install' && updateSnapshot.repairAuthorized === true ||
+      backgroundGamePaused || updateCacheState.busy) return;
   if (updateInfo.value && !isSuccessor(pendingTarget, updateInfo.value)) { pendingTarget = null; return; }
   updateInfo.value = pendingTarget; pendingTarget = null;
   activeOperation = makeOperationId();
@@ -328,10 +356,12 @@ export function setBackgroundGamePaused(paused: boolean): void {
 /** A persisted successor hint prevents a killed renderer from resuming or
  * announcing an old package that it already knows has been superseded. */
 export async function restoreBackgroundTarget(next: UpdateInfo): Promise<void> {
-  if (updateCacheState.busy || !isValidSha256(next.sha256) || compareVersions(next.version, APP_VERSION) <= 0 || installRequested) return;
+  if (updateCacheState.busy || !isValidSha256(next.sha256) || compareVersions(next.version, APP_VERSION) <= 0) return;
   if (updateInfo.value && !isSuccessor(next, updateInfo.value)) return;
   if (pendingTarget && !isSuccessor(next, pendingTarget)) return;
   pendingTarget = next;
+  if (installRequested || updateSnapshot.installerActive === true || updateSnapshot.phase === 'installing' ||
+      updateSnapshot.stage === 'install' && updateSnapshot.repairAuthorized === true) return;
   if (downloadTask || ['downloading', 'validating'].includes(updateSnapshot.phase)) await cancelNativeBackground();
   else selectPendingTarget();
 }
@@ -366,6 +396,8 @@ export async function refreshAdoptedUpdate(): Promise<void> {
     activeOperation = saved.operationId || '';
     restoreSavedUpdateInfo(saved);
     merge(saved);
+    if (saved.installerActive === false && saved.repairAuthorized === false &&
+        ['completed', 'failed', 'interrupted'].includes(saved.phase || '')) selectPendingTarget();
     return;
   }
   if (updateCacheState.busy || downloadTask || !['downloading', 'validating'].includes(updateSnapshot.phase)) return;

@@ -1,8 +1,11 @@
 #pragma once
 #include "controller_persona_settings.h"
+#include <charconv>
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace ymcc {
 // Cold-start intent is independent of the input buttons' persisted live state.
@@ -161,8 +164,16 @@ inline nlohmann::json bootModeInputStartupPreferences(const nlohmann::json& mode
         return it != value.end() && it->is_object() ? *it : json::object();
     };
     const auto global = objectAt(modes, "global");
-    auto input = objectAt(global, "input"), motion = objectAt(objectAt(global, "gyro"), "motion");
-    const auto selected = modes.value("boot", json(nullptr));
+    // Missing old module fields inherit the explicit saved startup preference;
+    // explicit global/scene OFF still replaces these defaults. Validating the
+    // document above continues to reject corrupt, rather than absent, fields.
+    const auto startup = normalizeInputStartupPreferences(fallback);
+    auto input = json{{"persona", startup.at("virtualGamepadPersona")}};
+    auto motion = json{{"enabled", startup.at("gyroPreset") != "off"},
+                       {"preset", startup.at("gyroPreset")}};
+    input.update(objectAt(global, "input"), true);
+    motion.update(objectAt(objectAt(global, "gyro"), "motion"), true);
+    const auto selected = modes.value("bootEnabled", json(nullptr)) == false ? json("global") : modes.value("boot", json(nullptr));
     if (selected == "xbox" || selected == "steam" || selected == "xbox-steam") {
         const auto scene = objectAt(objectAt(modes, "scenes"), selected.get<std::string>().c_str());
         const auto own = objectAt(scene, "overrides");
@@ -175,14 +186,33 @@ inline nlohmann::json bootModeInputStartupPreferences(const nlohmann::json& mode
         if (!(legacy && ownInput == oldFactory)) input.update(ownInput, true);
         motion.update(objectAt(objectAt(own, "gyro"), "motion"), true);
     }
-    const bool enabled = modes.value("bootEnabled", json(nullptr)) != false;
-    const auto persona = enabled ? input.value("persona", json("disabled")) : json("disabled");
-    const bool gyro = enabled && motion.value("enabled", json(nullptr)) == true;
+    const auto persona = input.value("persona", json("disabled"));
+    const bool gyro = motion.value("enabled", json(nullptr)) == true;
     auto preset = motion.value("activePreset", json(nullptr));
     if (preset.is_null()) preset = motion.value("preset", json(nullptr));
     if (preset.is_null()) preset = "custom";
     return normalizeInputStartupPreferences({{"virtualGamepadPersona", persona},
         {"gyroPreset", gyro ? preset : json("off")}});
+}
+
+inline bool isLegacyInputStartupBoot(const nlohmann::json& value) {
+    if (!value.is_string()) return false;
+    std::string_view identity = value.get_ref<const std::string&>();
+    constexpr std::string_view prefix = "windows-loader-v1|";
+    if (!identity.starts_with(prefix)) return false;
+    identity.remove_prefix(prefix.size());
+    if (identity.size() < 40 || identity.size() > 49 ||
+        identity[0] != '{' || identity[37] != '}' || identity[38] != '|') return false;
+    for (std::size_t i = 1; i < 37; ++i) {
+        const char c = identity[i];
+        if (i == 9 || i == 14 || i == 19 || i == 24) {
+            if (c != '-') return false;
+        } else if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f'))) return false;
+    }
+    std::uint32_t sequence = 0;
+    const auto end = identity.data() + identity.size();
+    const auto parsed = std::from_chars(identity.data() + 39, end, sequence);
+    return parsed.ec == std::errc{} && parsed.ptr == end;
 }
 
 // The process identity still retires dead game/Host owners. Only a new confirmed
@@ -212,18 +242,21 @@ inline nlohmann::json initializeBootModeInputStartup(nlohmann::json document,
     // An explicit scene save records the Windows boot where it was selected.
     // That receipt is already a boundary: the next boot must consume its input
     // even if an older native build never wrote input.startupAppliedBoot.
-    auto selectionBoot = extensions.value("bootModesAppliedBoot", json(nullptr));
+    const auto selectionBoot = extensions.value("bootModesAppliedBoot", json(nullptr));
+    const bool haveSelectionBoot = selectionBoot.is_string() && !selectionBoot.get_ref<const std::string&>().empty();
     // A v1 loader tuple cannot prove which boot an old draft belongs to. Anchor
     // once on upgrade, preserving live input. Explicit selection in this build
     // records v2; the very next reboot must consume that configured preset.
+    // Native v1 could persist input startup before the renderer claimed the scene.
+    // A known selection takes precedence over that earlier input observation.
+    const auto& migrationSource = haveSelectionBoot ? selectionBoot : previousBoot;
     const bool identityUpgrade = configured && boot.rfind("windows-volatile-v2|", 0) == 0 &&
-        selectionBoot.is_string() && selectionBoot.get<std::string>().rfind("windows-loader-v1|", 0) == 0;
+        (haveSelectionBoot ? selectionBoot.get_ref<const std::string&>().rfind("windows-loader-v1|", 0) == 0
+                           : isLegacyInputStartupBoot(previousBoot));
     if (identityUpgrade) {
-        extensions["bootModesIdentityMigration"] = {{"from", selectionBoot}, {"to", boot}, {"policy", "preserve-current-until-next-boot"}};
+        extensions["bootModesIdentityMigration"] = {{"from", migrationSource}, {"to", boot}, {"policy", "preserve-current-until-next-boot"}};
         extensions["bootModesAppliedBoot"] = boot;
-        selectionBoot = boot;
     }
-    const bool haveSelectionBoot = selectionBoot.is_string() && !selectionBoot.get<std::string>().empty();
     // Anchor only truly unobserved legacy installs, not a known next-boot choice.
     const bool migration = configured && !haveSelectionBoot && (!previousBoot.is_string() || previousBoot.get<std::string>().empty()) && previousSession.is_string() &&
         !previousSession.get<std::string>().empty();
@@ -236,6 +269,7 @@ inline nlohmann::json initializeBootModeInputStartup(nlohmann::json document,
             *decision = {{"schema", 1}, {"configured", configured},
                 {"source", configured ? "four-mode-startup" : "legacy-startupDesired"},
                 {"selectedMode", validMode ? selected : json(nullptr)},
+                {"effectiveMode", configured && modes.value("bootEnabled", json(true)) != false && validMode ? selected : json("global")},
                 {"bootEnabled", configured && (!modes.contains("bootEnabled") || modes.at("bootEnabled").is_boolean()) ? modes.value("bootEnabled", json(true)) : json(nullptr)},
                 {"revision", configured && modes.contains("revision") && modes.at("revision").is_number_integer() ? modes.at("revision") : json(nullptr)},
                 {"requestedPersona", preferences.at("virtualGamepadPersona")},
@@ -255,6 +289,8 @@ inline nlohmann::json initializeBootModeInputStartup(nlohmann::json document,
     document["input"] = std::move(next);
     if ((migration || identityUpgrade) && !boot.empty()) {
         extensions["bootModesAppliedBoot"] = boot;
+        // The renderer must not repair this deliberate anchor as an old disabled-scene claim.
+        extensions["bootModesDeferredBoot"] = boot;
         document["extensions"] = std::move(extensions);
     }
     return document;

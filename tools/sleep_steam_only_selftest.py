@@ -2,14 +2,128 @@
 Does not access live Steam, sleep Windows, resume games or create input devices.
 """
 from pathlib import Path
-import argparse,subprocess,re,json,uuid
+import argparse,subprocess,re,json,uuid,importlib.util,sys
+sys.dont_write_bytecode=True
 p=argparse.ArgumentParser();p.add_argument('--output',type=Path,default=Path('../../Build/Validation/SleepSteamOnly-20261011'))
+p.add_argument('--finish-evidence-only',action='store_true')
+p.add_argument('--command-busy-only',action='store_true')
+p.add_argument('--command-busy-case',choices=('basic','lifecycle','input','late'),default='basic')
+p.add_argument('--capture-budget-only',action='store_true')
+p.add_argument('--wake-admission-only',action='store_true')
+p.add_argument('--shared-account-only',action='store_true')
+p.add_argument('--prepare-only',action='store_true')
+p.add_argument('--game-link-selection-only',action='store_true')
+p.add_argument('--game-selection-cache-only',action='store_true')
 p.add_argument('--coordinator-cost-only',action='store_true');p.add_argument('--expect-capture-budget-rejected',action='store_true');p.add_argument('--expect-native-primary-old-target',action='store_true');p.add_argument('--expect-native-predispatch-blocked',action='store_true');p.add_argument('--expect-delayed-window-blocked',action='store_true');args=p.parse_args()
+if args.finish_evidence_only and any((args.coordinator_cost_only,args.expect_capture_budget_rejected,args.expect_native_primary_old_target,args.expect_native_predispatch_blocked,args.expect_delayed_window_blocked)):
+    p.error('--finish-evidence-only is mutually exclusive with existing cost/baseline selectors')
+if args.capture_budget_only and any((args.finish_evidence_only,args.coordinator_cost_only,args.expect_capture_budget_rejected,args.expect_native_primary_old_target,args.expect_native_predispatch_blocked,args.expect_delayed_window_blocked)):
+    p.error('--capture-budget-only is mutually exclusive with existing selectors')
+if args.wake_admission_only and any((args.capture_budget_only,args.finish_evidence_only,args.coordinator_cost_only,args.expect_capture_budget_rejected,args.expect_native_primary_old_target,args.expect_native_predispatch_blocked,args.expect_delayed_window_blocked)):
+    p.error('--wake-admission-only is mutually exclusive with existing selectors')
+if args.shared_account_only and any((args.wake_admission_only,args.capture_budget_only,args.finish_evidence_only,args.coordinator_cost_only,args.expect_capture_budget_rejected,args.expect_native_primary_old_target,args.expect_native_predispatch_blocked,args.expect_delayed_window_blocked)):
+    p.error('--shared-account-only is mutually exclusive with existing selectors')
+if args.game_link_selection_only and any((args.shared_account_only,args.wake_admission_only,args.capture_budget_only,args.finish_evidence_only,args.coordinator_cost_only,args.expect_capture_budget_rejected,args.expect_native_primary_old_target,args.expect_native_predispatch_blocked,args.expect_delayed_window_blocked)):
+    p.error('--game-link-selection-only is mutually exclusive with existing selectors')
+if args.game_selection_cache_only and any((args.game_link_selection_only,args.shared_account_only,args.wake_admission_only,args.capture_budget_only,args.finish_evidence_only,args.coordinator_cost_only,args.expect_capture_budget_rejected,args.expect_native_primary_old_target,args.expect_native_predispatch_blocked,args.expect_delayed_window_blocked)):
+    p.error('--game-selection-cache-only is mutually exclusive with existing selectors')
+if args.command_busy_only and any(value for key,value in vars(args).items() if key not in ('output','prepare_only','command_busy_only','command_busy_case')):
+    p.error('--command-busy-only is mutually exclusive with existing selectors')
+if args.command_busy_case!='basic' and not args.command_busy_only:p.error('--command-busy-case requires --command-busy-only')
 out=args.output.resolve();out.mkdir(parents=True,exist_ok=True);root=Path.cwd()
+if args.command_busy_only:
+    import hashlib
+    queue_spec=importlib.util.spec_from_file_location('steam_original_recovery_dual_route_selftest',root/'tools/steam_original_recovery_dual_route_selftest.py')
+    queue_module=importlib.util.module_from_spec(queue_spec);queue_spec.loader.exec_module(queue_module)
+    cpp=(root/'tools/fixtures/sleep_auto_command_busy.cpp.in').read_text('utf-8-sig')
+    pieces=[]
+    def command_part(relative,name,token,pattern,semicolon=False):
+        nonlocal_unused=None
+        text=(root/relative).read_text('utf-8-sig');clean=queue_module.masked(text)
+        hits=list(re.finditer(pattern,clean,re.M))
+        if len(hits)!=1:raise RuntimeError('nonunique actual command function '+name)
+        start=hits[0].start();opening=hits[0].end()-1
+        if clean[opening]!='{':raise RuntimeError('command function body opening not selected '+name)
+        depth=1;end=opening+1
+        while depth and end<len(clean):depth+=(clean[end]=='{')-(clean[end]=='}');end+=1
+        if depth:raise RuntimeError('unbalanced actual command function '+name)
+        if semicolon:
+            while end<len(clean)and clean[end].isspace():end+=1
+            if clean[end:end+1]!=';':raise RuntimeError('missing struct semicolon '+name)
+            end+=1
+        value=text[start:end]
+        pieces.append(dict(relative=relative,name=name,token=token,start=start,end=end,sourceSha256=hashlib.sha256((root/relative).read_bytes()).hexdigest(),textSha256=hashlib.sha256(value.encode()).hexdigest(),exactText=value,newlines='normalized LF by original Python reader'))
+        return value
+    selected=[
+        ('native/steam_session_observer.h','Session','@@SESSION@@',r'^struct Session\s*\{',True),
+        ('native/steam_live_cdp.h','isRunningLinkRead','@@LINK_READ@@',r'^inline bool isRunningLinkRead\([\s\S]*?\)\s*\{',False),
+        ('native/steam_live_cdp.h','menuGameMutation','@@MENU_MUTATION@@',r'^inline bool menuGameMutation\([\s\S]*?\)\s*\{',False),
+        ('native/steam_live_cdp.h','normalizedPath','@@NORMALIZED_PATH@@',r'^inline std::wstring normalizedPath\([\s\S]*?\)\s*\{',False),
+        ('native/steam_live_cdp.h','ModeTransportWait','@@MODE_TRANSPORT_WAIT@@',r'^enum class ModeTransportWait\s*\{',True),
+        ('native/steam_live_cdp.h','runOwned','@@RUN_OWNED@@',r'^template<class Source>\s*\ninline Json runOwned\([\s\S]*?\)\s*\{',False),
+        ('native/main.cpp','steamLiveRequest','@@MAIN_LIVE_REQUEST@@',r'^static json steamLiveRequest\([\s\S]*?\)\s*\{',False),
+        ('native/sleep_steam_recovery.h','sameClientEvidence','@@SAME_CLIENT_EVIDENCE@@',r'^static bool sameClientEvidence\([\s\S]*?\)\s*\{',False),
+        ('native/sleep_steam_recovery.h','liveRequest','@@LIVE_REQUEST@@',r'^static json liveRequest\([\s\S]*?\)\s*\{',False),
+        ('native/sleep_steam_recovery.h','reconcile','@@RECONCILE@@',r'^static json reconcile\([\s\S]*?\)\s*\{',False),
+        ('native/sleep_steam_recovery.h','resumeInputContext','@@INPUT_RESUME@@',r'^static json resumeInputContext\([\s\S]*?\)\s*\{',False)]
+    for relative,name,token,pattern,semicolon in selected:
+        value=command_part(relative,name,token,pattern,semicolon)
+        if cpp.count(token)!=1:raise RuntimeError('command template token not unique '+token)
+        cpp=cpp.replace(token,value)
+    transport=(root/'native/steam_live_cdp.h').read_text('utf-8-sig')
+    needle='        if (!current() || !process.current() || (admitAction && !admitAction())'
+    if transport.count(needle)!=1:raise RuntimeError('nonunique final native guard')
+    at=transport.index(needle);end=transport.index('        sent = true;',at);value=transport[at:end].strip()
+    if cpp.count('@@FINAL_GUARD@@')!=1:raise RuntimeError('final guard token not unique')
+    cpp=cpp.replace('@@FINAL_GUARD@@',value)
+    pieces.append(dict(relative='native/steam_live_cdp.h',name='nativeBeforeSendGuard',start=at,end=end,exactText=value,textSha256=hashlib.sha256(value.encode()).hexdigest(),sourceSha256=hashlib.sha256((root/'native/steam_live_cdp.h').read_bytes()).hexdigest()))
+    cpp=cpp.replace('@@HAS_ACCOUNTING@@','1' if 'struct CommandReservation {'in(root/'native/sleep_recovery_auto.h').read_text('utf-8-sig')else'0')
+    if '@@'in cpp:raise RuntimeError('unconsumed actual command template token')
+    source=out/'sleep_steam_only_selftest.cpp'
+    with source.open('x',encoding='utf-8',newline='\n')as target:target.write(cpp)
+    with(out/'sleep-command-parts.json').open('x',encoding='utf-8')as target:json.dump(dict(scope='actual-public-command-parent',pieces=pieces,actualWholeParentHeader=True),target,ensure_ascii=False,indent=2)
+    if args.prepare_only:
+        print(json.dumps(dict(status='PREPARED_ONLY',source=str(source),selection='command-busy-only',businessExecuted=False)))
+        raise SystemExit(0)
+    exe=out/'sleep_steam_only_selftest.exe'
+    compile_result=subprocess.run(['cl','/nologo','/std:c++20','/utf-8','/EHsc','/MT','/W3','/I'+str(root/'native'),'/I'+str(root/'deps/json'),'/sourceDependencies',str(out/'dependencies.json'),str(source),'/Fo'+str(out/'sleep_steam_only_selftest.obj'),'/Fe'+str(exe),'/link','/INCREMENTAL:NO','/VERBOSE:LIB','advapi32.lib'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    with(out/'sleep-command-compile.log').open('xb')as target:target.write(compile_result.stdout)
+    print(compile_result.stdout.decode('utf-8',errors='replace'))
+    if compile_result.returncode:raise SystemExit(compile_result.returncode)
+    native_result=subprocess.run([str(exe),dict(basic='command-busy-only',lifecycle='command-lifecycle-boundaries',input='command-input-only',late='command-late-only')[args.command_busy_case]],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    with(out/'sleep-command-native.json').open('x',encoding='utf-8')as target:json.dump(dict(returnCode=native_result.returncode,stdoutBytes=len(native_result.stdout),stderrBytes=len(native_result.stderr)),target)
+    with(out/'sleep-command-native.stdout.log').open('xb')as target:target.write(native_result.stdout)
+    with(out/'sleep-command-native.stderr.log').open('xb')as target:target.write(native_result.stderr)
+    print(native_result.stdout.decode('utf-8',errors='replace'));print(native_result.stderr.decode('utf-8',errors='replace'),file=sys.stderr)
+    raise SystemExit(native_result.returncode)
+
+queue_spec=importlib.util.spec_from_file_location('steam_original_recovery_dual_route_selftest',root/'tools/steam_original_recovery_dual_route_selftest.py')
+queue_module=importlib.util.module_from_spec(queue_spec);queue_spec.loader.exec_module(queue_module)
+queue_runtime=(root/'native/steam_original_recovery_runtime.h').read_text('utf-8-sig').replace('\r\n','\n')
+queue_parts={name:queue_module.extract(queue_runtime,r'^static\s+[^;{}]*?\b'+name+r'\s*\([^;{}]*\)\s*\{')[0] for name in ['enqueue','steamOriginalRecoveryWake','steamOriginalRecoveryPowerReady','steamOriginalRecoverySuspend']}
+queue_consumer=r'''
+#include "steam_original_recovery_policy.h"
+namespace SteamOriginalRecovery {
+using Trigger=ymcc::steamOriginal::Trigger;
+struct Pending {Trigger kind;unsigned long long generation=0,sequence=0;};
+// Host-state ports only; the event producer and bounded queue bodies are exact.
+struct Control {std::mutex mx;std::condition_variable cv;bool stop=false;std::deque<Pending> pending;
+ unsigned long long latestPower=0,deferredWake=0,sequence=0,observationSequence=0;std::shared_ptr<void> observationEvent;};
+static std::shared_ptr<Control> fixtureControl=std::make_shared<Control>();
+static std::shared_ptr<Control> current(){return fixtureControl;}
+__ENQUEUE__
+}
+__EVENTS__
+static unsigned fixturePendingWakeCount(){unsigned count=0;for(const auto& item:SteamOriginalRecovery::fixtureControl->pending)if(item.kind==ymcc::steamOriginal::Trigger::Wake)++count;return count;}
+'''.replace('__ENQUEUE__',queue_parts['enqueue']).replace('__EVENTS__','\n'.join(queue_parts[n] for n in ['steamOriginalRecoveryWake','steamOriginalRecoveryPowerReady','steamOriginalRecoverySuspend']))
 api=(root/'native/sleep_recovery_api.h').read_text('utf-8-sig')
 tail=api[api.index('struct Tail {'):api.index('struct Leases {')]
+observer_source=(root/'native/steam_session_observer.h').read_text('utf-8-sig').replace('\r\n','\n')
+same_identity_epoch=queue_module.extract(observer_source,r'^[ \t]*bool\s+sameIdentityEpoch\s*\([^;{}]*\)\s*const\s*\{')[0]
 main=(root/'native/main.cpp').read_text('utf-8-sig')
 one_pid=main[main.index('enum class NativeOnePidResult {'):main.index('// C-D1（155 §3.1-2）')]
+valve_snapshot=queue_module.extract(main,r'\bstruct\s+NativeGameValveSnapshot\s*\{',True)[0]
+valve_selection=queue_module.extract(main,r'\bstruct\s+NativeGameSelectionReceipt\s*\{',True)[0]+'\n'+'\n'.join(queue_module.extract(main,r'^static\s+[^;{}]*?\b'+name+r'\s*\([^;{}]*\)\s*\{')[0] for name in ['nativeValveSelectionCurrent','nativeValveReadCurrentSelection','nativeValveReadCachedSelection'])
 ws_constants='\n'.join(re.findall(r'^static const uint64_t\s+SG_(?:MIN_WS|CAPTURE_MIN_WS)\s*=.*?;',main,re.M))
 assert len(ws_constants.splitlines())==2
 live_wrapper=main[main.index('static bool sleepSteamLiveProcessMatches('):main.index('static bool steamLiveCanDefer(')]
@@ -17,11 +131,326 @@ field_predispatch=json.loads((root/'tools/fixtures/sleep_steam_msi_tmnt_r30_pred
 assert field_predispatch['exactCancelPredicateKnown'] is False and field_predispatch['mutated'] is False
 assert field_predispatch['jointBindingVerified'] and field_predispatch['nativeOverviewFirstWakeRead']==11
 transport=(root/'native/steam_live_cdp.h').read_text('utf-8-sig')
-cancel_guard=transport[transport.index('        if (admitAction && !admitAction()) return '):transport.index('        sent = true;')].strip()
+cancel_at=transport.index('        if (!current() || !process.current() || (admitAction && !admitAction())')
+cancel_guard=transport[cancel_at:transport.index('        sent = true;',cancel_at)].strip()
 link_source=(root/'native/steam_game_link_runtime.h').read_text('utf-8-sig')
 link_dense_seam=(link_source[link_source.index('struct Handle {'):link_source.index('struct Control {')]
- +link_source[link_source.index('struct TrackerRead {'):link_source.index('static bool sameClientProcess(')]
+ +link_source[link_source.index('struct TrackerRead {'):link_source.index('static Client discoverClient(')]
  +link_source[link_source.index('static Game discoverGame('):link_source.index('static json base()')])
+binding_begin=link_source.index('if(clientHandle.value&&gameHandle.value&&tracker.complete')
+binding_end=link_source.index('){',binding_begin)
+initial_binding_predicate=link_source[binding_begin+3:binding_end]
+steam_log_source_port=r'''
+// Deterministic original SleepOnly OS/readTail seam; no new product owner.
+#include "game_steam_scope.h"
+#include "steam_game_tracker_observation.h"
+#include <limits>
+#include <memory>
+#include <sstream>
+#include <utility>
+namespace SleepOnlyFreshPort {
+// Original definitions follow recovery.h; preserve their metadata semantics.
+static std::uint64_t nextReceipt();
+static ymcc::steamgamefacts::TrackerSourceObservation observation(
+    const json&, std::shared_ptr<const std::string>);
+}
+static std::shared_ptr<const ymcc::steamgamefacts::SteamLogSourceView> nativeSteamLogSource(
+    const ymcc::steamgamefacts::SteamLogIdentity& expected,
+    ymcc::steamgamefacts::SteamLogKind kind,
+    ymcc::steamgamefacts::SteamLogReadPolicy policy,
+    const ymcc::steamgamefacts::SteamLogReadAdmission& admit) {
+    using namespace ymcc::steamgamefacts;
+    using Reason=TrackerSourceObservation::ReadReason;
+    auto view=std::make_shared<SteamLogSourceView>();view->kind=kind;view->policy=policy;
+    view->observation.availableKnown=true;
+    view->observation.limitBytesKnown=true;
+    view->observation.limitBytes=ymcc::sleepsteam::trackerMaximumBytes;
+    const auto refuse=[&](Reason reason)->std::shared_ptr<const SteamLogSourceView>{
+        view->observation.readReason=reason;view->observation.metadataComplete=false;
+        view->complete=false;view->diagnosticOnly=false;return view;
+    };
+    const auto allowed=[&](){try{return admit&&admit();}catch(...){return false;}};
+    if((kind!=SteamLogKind::GameProcess&&kind!=SteamLogKind::Console)||
+       (policy!=SteamLogReadPolicy::Raw&&policy!=SteamLogReadPolicy::CompleteOnly&&
+        policy!=SteamLogReadPolicy::TruncatedDiagnostic))return refuse(Reason::InvalidRequest);
+    if(!expected.pid||!expected.birth||expected.root.empty()||expected.root.size()>32768||
+       expected.root.find(L'\0')!=std::wstring::npos)return refuse(Reason::IdentityUnavailable);
+    const auto receipt=g_steamSettingsObserver.identitySnapshot();
+    if(!receipt||receipt->presence!=1||receipt->rootReadError!=ERROR_SUCCESS||
+       !receipt->windowsSessionKnown||!receipt->processEpoch||
+       receipt->session.pid!=expected.pid||receipt->session.created!=expected.birth||
+       ymcc::sleepsteam::pathKey(W2U(receipt->session.root))!=ymcc::sleepsteam::pathKey(W2U(expected.root)))
+        return refuse(Reason::IdentityUnavailable);
+    view->steam.present=true;view->steam.rootKnown=true;view->steam.windowsSessionKnown=true;
+    view->steam.pid=receipt->session.pid;view->steam.birth=receipt->session.created;
+    view->steam.root=receipt->session.root;view->steam.windowsSession=receipt->windowsSession;
+    view->steam.processEpoch=receipt->processEpoch;view->steam.accountEpoch=receipt->accountEpoch;
+    // 1: preserve original cumulative active-time admission before pinning.
+    if(!allowed())return refuse(Reason::ContextChanged);
+    struct HeldSteam {HANDLE value=nullptr;~HeldSteam(){if(value)CloseHandle(value);}}
+        held{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,expected.pid)};
+    DWORD windowsSession=0;wchar_t image[32768]{};DWORD imageSize=32768;
+    if(!held.value||WaitForSingleObject(held.value,0)!=WAIT_TIMEOUT||
+       nativeProcessCreatedFromHandle(held.value)!=expected.birth||
+       !QueryFullProcessImageNameW(held.value,0,image,&imageSize)||
+       ymcc::sleepsteam::pathKey(W2U(std::wstring(image,imageSize)))!=
+           ymcc::sleepsteam::pathKey(W2U(view->steam.root+L"\\steam.exe"))||
+       !ProcessIdToSessionId(expected.pid,&windowsSession)||windowsSession!=view->steam.windowsSession)
+        return refuse(Reason::IdentityUnavailable);
+    const auto current=[&](){
+        const auto now=g_steamSettingsObserver.identitySnapshot();
+        return now&&now->presence==1&&now->rootReadError==ERROR_SUCCESS&&now->windowsSessionKnown&&
+            now->session.pid==view->steam.pid&&now->session.created==view->steam.birth&&
+            now->session.root==view->steam.root&&now->processEpoch==view->steam.processEpoch&&
+            now->windowsSession==view->steam.windowsSession&&WaitForSingleObject(held.value,0)==WAIT_TIMEOUT&&
+            nativeProcessCreatedFromHandle(held.value)==view->steam.birth;
+    };
+    // 2: held process and immutable source publication immediately before read.
+    if(!current()||!allowed())return refuse(Reason::ContextChanged);
+    const auto revision=SleepOnlyFreshPort::nextReceipt();
+    if(!revision)return refuse(Reason::SequenceExhausted);
+    view->observation.sourceRevision=revision;view->observation.readAttempted=true;
+    try {
+        auto tail=SleepRecoveryApi::readTail(view->steam.root+
+            (kind==SteamLogKind::GameProcess?L"\\logs\\gameprocess_log.txt":L"\\logs\\console_log.txt"),
+            static_cast<DWORD>(ymcc::sleepsteam::trackerMaximumBytes));
+        std::shared_ptr<const std::string> bytes;
+        if(tail.bytes.size()<=ymcc::sleepsteam::trackerMaximumBytes)
+            bytes=std::make_shared<const std::string>(std::move(tail.bytes));
+        view->observation=SleepOnlyFreshPort::observation(tail.meta,std::move(bytes));
+        view->observation.sourceRevision=revision;
+    } catch(...) {return refuse(Reason::ReadException);}
+    const bool metadataComplete=view->observation.metadataComplete;
+    view->observation.metadataComplete=false;
+    // 3: final held/current/admit check before any parsed fact or diagnostic view.
+    if(!current()||!allowed())return refuse(Reason::ContextChanged);
+    view->observation.metadataComplete=metadataComplete;
+    const auto& observed=view->observation;
+    view->complete=observed.readAttempted&&observed.readReason==Reason::None&&metadataComplete;
+    view->diagnosticOnly=kind==SteamLogKind::GameProcess&&policy==SteamLogReadPolicy::TruncatedDiagnostic&&
+        observed.readAttempted&&observed.readReason==Reason::None&&observed.availableKnown&&observed.available&&
+        observed.truncatedKnown&&observed.truncated&&observed.bytes;
+    if(kind==SteamLogKind::GameProcess&&policy!=SteamLogReadPolicy::Raw&&(view->complete||view->diagnosticOnly)){
+        std::istringstream input(*observed.bytes);std::string line;
+        if(view->diagnosticOnly)std::getline(input,line); // drop only the first residual line
+        while(std::getline(input,line))view->lines.push_back(line);
+        view->runningInventory=ymcc::sleepsteam::trackedProcessInventory(view->lines,ymcc::sleepsteam::TrackingScope::RunningListAndProcess);
+        view->lifetimeInventory=ymcc::sleepsteam::trackedProcessInventory(view->lines,ymcc::sleepsteam::TrackingScope::ProcessLifetime);
+    }
+    return view;
+}
+'''
+fresh_source_port=r'''
+// PREPARED ONLY: not compiled, executed or imported into the mainline.
+// C++ assembly insertion: after sleep_steam_recovery.h / steam_game_link_state.h,
+// immediately BEFORE `namespace DenseTrackerRuntimeSeam {`, at global scope.
+// Requires the real DTO header's forthcoming TrackerFreshObservation definition.
+// This is the deterministic SleepOnly facade PORT, not another product producer.
+#include "steam_game_tracker_observation.h"
+#include "steam_game_group_lease.h"
+#include "steam_game_tracker_completion.h"
+#include <limits>
+#include <memory>
+#include <sstream>
+#include <utility>
+struct NativeSteamTrackerFreshCompletion {
+    bool freshSourceBusy=false;
+    ymcc::steamgamefacts::TrackerCompletionWitness witness;
+};
+namespace SleepOnlyFreshPort {
+using namespace ymcc::steamgamefacts;
+
+// Diagnostic receipt serials only. No FactKey, process proof, owner version,
+// file identity, cache freshness or action authority is minted here.
+static std::uint64_t nextReceipt() {
+    static std::uint64_t serial = 0;
+    if (serial == (std::numeric_limits<std::uint64_t>::max)()) return 0;
+    return ++serial;
+}
+
+// Convert only fields actually emitted by the ORIGINAL readTail. In particular,
+// missing byte counts/errors remain unknown; absent errors are not invented.
+// No clock reads: GetTickCount64 is an injected budget clock in this fixture.
+static TrackerSourceObservation observation(const json& meta,
+    std::shared_ptr<const std::string> bytes = {}) {
+    TrackerSourceObservation out;
+    out.readAttempted = true;
+    out.bytes = std::move(bytes);
+    const auto field = [&](const char* name) -> const json* {
+        if (!meta.is_object()) return nullptr;
+        const auto found = meta.find(name);
+        return found == meta.end() ? nullptr : &*found;
+    };
+    const auto boolean = [&](const char* name, bool& known) {
+        const auto* value = field(name);
+        known = value && value->is_boolean();
+        return known ? value->get<bool>() : false;
+    };
+    const auto number = [&](const char* name, bool& known) -> std::uint64_t {
+        const auto* value = field(name);
+        known = false;
+        if (!value || !value->is_number_integer()) return 0;
+        if (value->is_number_unsigned()) {
+            known = true;
+            return value->get<std::uint64_t>();
+        }
+        const auto result = value->get<std::int64_t>();
+        if (result < 0) return 0;
+        known = true;
+        return static_cast<std::uint64_t>(result);
+    };
+    out.available = boolean("available", out.availableKnown);
+    out.truncated = boolean("truncated", out.truncatedKnown);
+    out.originalBytes = number("originalBytes", out.originalBytesKnown);
+    out.copiedBytes = number("copiedBytes", out.copiedBytesKnown);
+    out.limitBytes = number("limitBytes", out.limitBytesKnown);
+    const auto error = number("win32Error", out.win32ErrorKnown);
+    if (error > (std::numeric_limits<std::uint32_t>::max)())
+        out.win32ErrorKnown = false;
+    if (out.win32ErrorKnown) out.win32Error = static_cast<std::uint32_t>(error);
+    // readNativePrimary exposes the original copied-byte count, not console
+    // contents. Never perform a second console read to manufacture bytes.
+    out.returnedBytes = out.bytes ? out.bytes->size() :
+        (out.copiedBytesKnown ? out.copiedBytes : 0);
+    using Reason = TrackerSourceObservation::ReadReason;
+    const auto* reason = field("reason");
+    if (!reason && out.availableKnown && out.available) out.readReason = Reason::None;
+    else if (reason && reason->is_string()) {
+        const auto& text = reason->get_ref<const std::string&>();
+        if (text == "missing-or-not-regular-file") out.readReason = Reason::MissingOrNotRegular;
+        else if (text == "read-denied") out.readReason = Reason::ReadDenied;
+        else if (text == "size-unavailable") out.readReason = Reason::SizeUnavailable;
+        else if (text == "read-failed") out.readReason = Reason::ReadFailed;
+    }
+    out.metadataComplete = out.bytes && out.availableKnown && out.available &&
+        out.truncatedKnown && !out.truncated && out.originalBytesKnown &&
+        out.copiedBytesKnown && out.limitBytesKnown &&
+        out.limitBytes == ymcc::sleepsteam::trackerMaximumBytes &&
+        out.originalBytes == out.copiedBytes && out.copiedBytes == out.returnedBytes &&
+        out.returnedBytes <= out.limitBytes;
+    return out;
+}
+
+static std::shared_ptr<const TrackerSnapshot> receipt(
+    const TrackerSourceObservation& source, std::uint64_t serial,
+    std::shared_ptr<const TrackerParsedSource> parsed = {}) {
+    TrackerCacheProvenance provenance;
+    provenance.sourceReadThisFlight = source.readAttempted;
+    provenance.observationSequence = serial;
+    provenance.source = "sleep-only-fixture-receipt-no-game-key";
+    // Empty key, currentSource=false, processValidated=false, no historical
+    // binding status and no top-level certified game identity. Only parsedSource
+    // holds the original parser's log observations for this fixture consumer.
+    return std::make_shared<const TrackerSnapshot>(TrackerStatus::NoExecutionToken,
+        TrackerKey{}, source, provenance, false, 0, 0, false, 0,
+        std::string{}, std::string{}, std::string{}, std::move(parsed));
+}
+} // namespace SleepOnlyFreshPort
+
+static ymcc::steamgamefacts::TrackerFreshObservation nativeSteamGameTrackerReadFresh(
+    const SleepSteamRecovery::Session& client, const SleepSteamRecovery::Game& game,
+    ymcc::steamgamefacts::TrackerLogScope requestedScope,json* diagnostic=nullptr,
+    ymcc::steamgamefacts::TrackerGroupCapturePolicy groupPolicy=ymcc::steamgamefacts::TrackerGroupCapturePolicy::None,
+    const ymcc::steamgamefacts::TrackerOwnerCurrent& requestCurrent={},NativeSteamTrackerFreshCompletion* completion=nullptr) {
+    if(completion)*completion={}; // No fabricated completion witness or handoff.
+    const auto requestAllowed=[&]()noexcept{try{return !requestCurrent||requestCurrent();}catch(...){return false;}};
+    if(groupPolicy!=ymcc::steamgamefacts::TrackerGroupCapturePolicy::None||!requestAllowed()){
+        if(diagnostic)*diagnostic={{"stage","sleep-only-controlled-port"},{"reason","unsupported-group-or-retired-request"}};
+        return {};
+    }
+    if(diagnostic)*diagnostic={{"stage","sleep-only-controlled-port"}};
+    using namespace ymcc::steamgamefacts;
+    using ymcc::sleepsteam::TrackingScope;
+    TrackerFreshObservation result;
+    TrackingScope scope;
+    if (requestedScope == TrackerLogScope::ProcessLifetime) scope = TrackingScope::ProcessLifetime;
+    else if (requestedScope == TrackerLogScope::RunningListAndProcess) scope = TrackingScope::RunningListAndProcess;
+    else return result;
+
+    const auto revision = SleepOnlyFreshPort::nextReceipt();
+    if (!revision) return result;
+    auto tail = SleepRecoveryApi::readTail(client.root + L"\\logs\\gameprocess_log.txt");
+    const auto source = SleepOnlyFreshPort::observation(tail.meta,
+        std::make_shared<const std::string>(std::move(tail.bytes)));
+    result.tracker = SleepOnlyFreshPort::receipt(source, revision);
+    // EXACT original early refusal: no parser/native-primary read after a
+    // missing or truncated tracker. metadataComplete is diagnostic, not a new gate.
+    if (!ymcc::sleepsteam::flag(tail.meta, "available") ||
+        ymcc::sleepsteam::flag(tail.meta, "truncated")) return result;
+
+    std::vector<std::string> lines;
+    std::string line;
+    std::istringstream input(*source.bytes);
+    while (std::getline(input, line)) lines.push_back(line);
+    auto parsed = std::make_shared<TrackerParsedSource>();
+    parsed->sourceRevision = revision;
+    parsed->processLifetime.inventory.scope = parsed->processLifetime.binding.scope = TrackerLogScope::ProcessLifetime;
+    parsed->runningList.inventory.scope = parsed->runningList.binding.scope = TrackerLogScope::RunningListAndProcess;
+    auto& projected = requestedScope == TrackerLogScope::ProcessLifetime ?
+        parsed->processLifetime : parsed->runningList;
+    projected.inventory.sourceRevision = projected.binding.sourceRevision = revision;
+    const auto inventory = ymcc::sleepsteam::trackedProcessInventory(lines, scope);
+    projected.inventory.complete = inventory.complete;
+    projected.inventory.reason = inventory.reason;
+    for (const auto& member : inventory.rows)
+        projected.inventory.members.push_back({member.appid, member.pid});
+    if (!inventory.complete) {
+        result.tracker = SleepOnlyFreshPort::receipt(source, revision, parsed);
+        return result;
+    }
+
+    const auto binding = ymcc::sleepsteam::track(lines, game.pid, W2U(game.path),
+        SleepSteamRecovery::localSecond(game.created > 20000000ULL ? game.created - 20000000ULL : 0),
+        SleepSteamRecovery::localSecond(game.created <= (std::numeric_limits<ULONGLONG>::max)() - 30000000ULL ?
+            game.created + 30000000ULL : game.created), scope);
+    projected.binding.status = binding.status;
+    projected.binding.at = binding.at;
+    projected.binding.appid = binding.appid;
+    projected.binding.sourceLine = binding.line;
+    projected.binding.exactPath = binding.exactPath;
+    // Preserve old tracking()'s exact-row raw GameID extraction, including short
+    // and signed AppIDs. Never synthesize a decimal GameID from an AppID.
+    if (binding.status == "tracked" && binding.line && binding.line <= lines.size()) {
+        const auto& row = lines[binding.line - 1];
+        const auto begin = row.find("AppID ");
+        if (begin != std::string::npos) {
+            const auto end = row.find(' ', begin + 6);
+            if (end != std::string::npos) {
+                const auto raw = row.substr(begin + 6, end - begin - 6);
+                std::uint32_t canonical = 0;
+                if (ymcc::sleepsteam::appId(raw, canonical) && canonical == binding.appid) {
+                    projected.binding.gameIdRaw = raw;
+                    std::uint64_t full = 0;
+                    // DTO metadata only: the same exact GameID shape, without
+                    // loading ProcessOwner/ProcessLease or minting a FactKey.
+                    if (ymcc::sleepsteam::unsignedDecimal(raw, full) &&
+                        ((canonical <= 0xffffffU && full == canonical) ||
+                         ((full >> 32) == canonical && (full & 0xffffffffULL) == 0x02000000ULL))) {
+                        projected.binding.fullGameId = full;
+                        projected.binding.fullGameIdKnown = true;
+                    }
+                }
+            }
+        }
+    }
+    result.tracker = SleepOnlyFreshPort::receipt(source, revision, parsed);
+    // Only the requested scope is populated. The other inventory remains
+    // incomplete, binding unknown and revision zero; it is not a cached result.
+    const auto consoleRevision = SleepOnlyFreshPort::nextReceipt();
+    if (!consoleRevision) return result;
+    result.absoluteBoundary = sgNowFileTime();
+    const auto primary = SleepSteamRecovery::readNativePrimary(client, result.absoluteBoundary);
+    result.consoleRevision = consoleRevision;
+    result.consoleObservation = SleepOnlyFreshPort::observation(primary.log);
+    result.nativePrimary = std::make_shared<const ymcc::sleepsteam::NativePrimaryProcessInventory>(primary.inventory);
+    // Same old meaning: complete tracker read+inventory, even for a removed or
+    // unknown binding. Console failure/truncation remains in the ACTUAL primary
+    // inventory for the unchanged nativePrimaryJoin; it is never upgraded here.
+    result.complete = true;
+    return result;
+}
+
+'''
 cpp=r'''
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -37,9 +466,13 @@ cpp=r'''
 #include <functional>
 #include <set>
 #include <condition_variable>
+#include <deque>
+#include <memory>
 #include <iostream>
 #include "json.hpp"
 #include "steam_native_return_evidence.h"
+#include "steam_request_policy.h"
+#include "steam_session_observer.h"
 #include "sleep_recovery_diagnostics.h"
 #include "sleep_steam_tracking.h"
 #include "monitor_identity.h"
@@ -58,7 +491,21 @@ std::condition_variable g_sgWorkCv;
 unsigned workNotifications=0;
 void sgNotifyWork(){++workNotifications;g_sgWorkCv.notify_one();}
 unsigned long long currentPowerGeneration(){return generation;}
-ULONGLONG fakeTick(){return tick;}
+// Terminal classification port for this account/coordinator fixture only.
+// The actual shared PBT producer and pending/revocation cases are exercised by
+// steam_original_recovery_dual_route_selftest; this port grants no hardware IO.
+static bool sharedSleepWakeClassified(unsigned long long gen) noexcept {
+ return gen&&gen==currentPowerGeneration()&&!g_exitRequested.load();
+}
+// Capture-only clock ports: elapsed boot time includes injected suspend, while
+// unbiased time excludes it. Other original cases keep both clocks advancing.
+std::function<void(unsigned)> fixtureCaptureTickHook;
+unsigned fixtureCaptureTickReads=0;
+ULONGLONG fixtureCaptureSleep100ns=0,fixtureCaptureExtra100ns=0;
+bool fixtureCaptureClockAvailable=true;
+ULONGLONG fakeTick(){if(fixtureCaptureTickHook)fixtureCaptureTickHook(++fixtureCaptureTickReads);return tick;}
+BOOL fakeCaptureUnbiasedTime(PULONGLONG value){if(!fixtureCaptureClockAvailable)return FALSE;*value=tick*10000-fixtureCaptureSleep100ns+fixtureCaptureExtra100ns;return TRUE;}
+#define QueryUnbiasedInterruptTime fakeCaptureUnbiasedTime
 #define GetTickCount64 fakeTick
 bool sgSleepRetryActive(){return retry;}
 bool hardwareWriteAllowed(){return writes&&g_powerLifecycle==PowerLifecycle::Ready;}
@@ -69,7 +516,16 @@ std::wstring U2W(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,MB_ERR_
 std::wstring sgBaseName(const std::wstring& s){return nativeIdentityNormalizeName(s);}
 double sgNowEpoch(){return tick/1000.0;}
 bool sgEnsureMarkerDir(const std::wstring& dir){std::error_code e;fspath::create_directories(dir,e);return !e;}
-bool sgWriteFileAtomic(const std::wstring& file,const std::string& text){std::ofstream f{fspath::path(file),std::ios::binary};f<<text;return bool(f);}
+// One controlled synchronous port used only by the finish-evidence helper.
+std::function<void()> fixtureFinishEvidenceWriteHook;
+bool fixtureFinishEvidenceWriteFailure=false;
+bool sgWriteFileAtomic(const std::wstring& file,const std::string& text){
+ if(fixtureFinishEvidenceWriteHook&&file==SG_DIR+L"\\wake-recovery-last.json"){
+  auto once=std::move(fixtureFinishEvidenceWriteHook);fixtureFinishEvidenceWriteHook={};once();
+  if(fixtureFinishEvidenceWriteFailure)return false;
+ }
+ std::ofstream f{fspath::path(file),std::ios::binary};f<<text;return bool(f);
+}
 std::string readFile(const std::wstring& file){std::ifstream f{fspath::path(file),std::ios::binary};return {std::istreambuf_iterator<char>(f),{}};}
 std::vector<std::pair<std::string,json>> facts,events;
 void sgRecordFact(const char* name,json data=json::object()){facts.push_back({name,data});}
@@ -81,6 +537,11 @@ struct SgSleepTarget {DWORD pid=0;ULONGLONG processCreated=0;bool markerOwned=fa
 SgSleepTarget owner;
 struct NativeDetectedGame {DWORD pid=12932;ULONGLONG processCreated=134361596976806475ULL;std::wstring path=L"E:\\GAME\\TMNT.exe";std::wstring name,whitelistRule;SIZE_T workingSet=0;bool whitelisted=false,customConfigured=false;};
 NativeDetectedGame selected;
+enum class NativeGameDiscoveryState { Complete, Pending, Unavailable };
+__VALVE_SNAPSHOT__
+NativeGameValveSnapshot g_gameValveTarget;std::mutex g_gameValveMx;
+std::function<void()> onValveRead;
+unsigned fixtureValveReadCalls=0,fixtureWindowsQueries=0;
 std::map<DWORD,NativeDetectedGame> captureProcesses;std::set<DWORD> captureWindowPids;
 std::set<DWORD> captureForeignSessionPids,captureIdentityUnavailablePids;std::vector<std::wstring> captureExcludes,captureWhitelist;
 std::function<void()> onCaptureRulesSnapshot;
@@ -100,22 +561,51 @@ std::vector<std::wstring> sgExcludes(){return captureExcludes;}
 std::vector<std::wstring> sgGameWhitelist(){return captureWhitelist;}
 bool sgNameExcludedBy(const std::wstring& name,const std::vector<std::wstring>& list){return std::find(list.begin(),list.end(),name)!=list.end();}
 bool nativeMonitorExcluded(const std::wstring& name){return name==L"redengineerrorreporter"||name==L"steamwebhelper";}
-BOOL fakeSessionId(DWORD pid,DWORD* out){if(captureSessionQueryFails)return FALSE;*out=captureForeignSessionPids.count(pid)?2:1;return TRUE;}
+BOOL fakeSessionId(DWORD pid,DWORD* out){++fixtureWindowsQueries;if(captureSessionQueryFails)return FALSE;*out=captureForeignSessionPids.count(pid)?2:1;return TRUE;}
 
 bool gameExists=true,valveAvailable=true,accessDenied=false;
 DWORD steamAccount=42,steamPid=4000,registrySteamPid=0,registryAccountOverride=0;ULONGLONG steamCreated=134361500000000000ULL;
 int sessionDiscoveryCalls=0;bool sessionReadMalformed=false;
 bool steamProcessAvailable=true,observerAvailable=true,registryAccountUnavailable=false,observerWrongRoot=false,observerWrongBirth=false;std::string steamReadFailure;
-struct SteamObservedSession{std::wstring root;DWORD pid=0,account=0;ULONGLONG created=0;};
-struct MockSteamObserver{SteamObservedSession sessionSnapshot(){return observerAvailable?SteamObservedSession{observerWrongRoot?steamRoot+L"-other":steamRoot,steamPid,registryAccountOverride?registryAccountOverride:steamAccount,steamCreated+(observerWrongBirth?1:0)}:SteamObservedSession{};}};
+using SteamObservedSession=ymcc::steamsession::Session;
+std::function<void(unsigned)> onObserverReceiptRead;unsigned observerReceiptReads=0;
+bool observerReceiptFrozen=false,observerRootUnreadable=false;
+unsigned privateSessionRegistryReads=0;
+struct MockSteamObserver{
+ using IdentitySnapshot=ymcc::steamsession::IdentitySnapshot;
+ mutable std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> cached;
+ unsigned refreshes=0;
+ SteamObservedSession sessionSnapshot(){const auto r=identitySnapshot();return r?r->session:SteamObservedSession{};}
+ std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> identitySnapshot() const{
+  using Receipt=ymcc::steamsession::IdentitySnapshot;
+  if(onObserverReceiptRead)onObserverReceiptRead(++observerReceiptReads);
+  if(observerReceiptFrozen&&cached)return cached;
+  if(!observerAvailable){cached.reset();return std::shared_ptr<const Receipt>{};}
+  Receipt next;next.session={observerWrongRoot?steamRoot+L"-other":steamRoot,steamPid,registryAccountOverride?registryAccountOverride:steamAccount,steamCreated+(observerWrongBirth?1:0)};
+  next.presence=steamProcessAvailable?1:-1;next.registeredPid=registrySteamPid?registrySteamPid:steamPid;
+  next.rootReadError=observerRootUnreadable?ERROR_ACCESS_DENIED:ERROR_SUCCESS;next.registeredPidReadError=ERROR_SUCCESS;next.accountReadError=registryAccountUnavailable?ERROR_ACCESS_DENIED:ERROR_SUCCESS;
+  // Original mock publisher Windows-session facts, without new OS/clock queries.
+  next.windowsSessionKnown=steamProcessAvailable&&!captureSessionQueryFails;
+  next.windowsSession=next.windowsSessionKnown?(captureForeignSessionPids.count(steamPid)?2:1):0;
+  next.windowsSessionError=next.windowsSessionKnown?ERROR_SUCCESS:ERROR_NOT_READY;
+  const bool same=cached&&cached->session.root==next.session.root&&cached->session.pid==next.session.pid&&cached->session.created==next.session.created&&cached->presence==next.presence&&cached->windowsSessionKnown==next.windowsSessionKnown&&cached->windowsSession==next.windowsSession;
+  const bool accountSame=cached&&cached->session.account==next.session.account&&cached->accountReadError==next.accountReadError&&cached->registeredPid==next.registeredPid;
+  if(same&&accountSame)return cached;
+  next.processEpoch=cached?cached->processEpoch+(!same):1;next.accountEpoch=cached?cached->accountEpoch+(!accountSame):1;
+  next.revision=cached?cached->revision+1:1;cached=std::make_shared<const Receipt>(std::move(next));return cached;
+ }
+__SAME_IDENTITY_EPOCH__
+ bool requestIdentityRefresh(){++refreshes;return true;}
+};
 MockSteamObserver g_steamSettingsObserver;
 DWORD extraForegroundPid=0;ULONGLONG extraForegroundCreated=134361500000000111ULL;
 std::wstring extraForegroundPath;bool extraForegroundAvailable=true;
 
 bool sgReadSleepTarget(SgSleepTarget& t){t=owner;return bool(owner.pid);}
-bool nativeValveReadCurrentTarget(NativeDetectedGame* t){*t=selected;return valveAvailable&&selected.pid;}
-bool focusQueryProcessIdentity(DWORD pid,std::wstring* path,ULONGLONG* created){if(captureIdentityUnavailablePids.count(pid))return false;if(captureProcesses.count(pid)){const auto& g=captureProcesses.at(pid);if(path)*path=g.path;if(created)*created=g.processCreated;return true;}if(extraForegroundPid&&pid==extraForegroundPid){if(!extraForegroundAvailable)return false;if(path)*path=extraForegroundPath;if(created)*created=extraForegroundCreated;return true;}if(pid==steamPid&&steamProcessAvailable){if(created)*created=steamCreated;if(path)*path=steamRoot+L"\\steam.exe";return true;}if(!gameExists||accessDenied||pid!=selected.pid)return false;if(path)*path=selected.path;if(created)*created=selected.processCreated;return true;}
-HANDLE fakeOpen(DWORD access,BOOL,DWORD pid){if((access&PROCESS_VM_READ)&&captureVmReadDeniedPids.count(pid))return nullptr;if(captureProcesses.count(pid))return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(pid));if(pid==steamPid&&steamProcessAvailable)return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(pid));return gameExists&&!accessDenied&&pid==selected.pid?reinterpret_cast<HANDLE>(static_cast<uintptr_t>(pid)):nullptr;}
+bool nativeValveReadCurrentTarget(NativeDetectedGame* t){++fixtureValveReadCalls;if(onValveRead)onValveRead();*t=selected;return valveAvailable&&selected.pid;}
+__VALVE_SELECTION__
+bool focusQueryProcessIdentity(DWORD pid,std::wstring* path,ULONGLONG* created){++fixtureWindowsQueries;if(captureIdentityUnavailablePids.count(pid))return false;if(captureProcesses.count(pid)){const auto& g=captureProcesses.at(pid);if(path)*path=g.path;if(created)*created=g.processCreated;return true;}if(extraForegroundPid&&pid==extraForegroundPid){if(!extraForegroundAvailable)return false;if(path)*path=extraForegroundPath;if(created)*created=extraForegroundCreated;return true;}if(pid==steamPid&&steamProcessAvailable){if(created)*created=steamCreated;if(path)*path=steamRoot+L"\\steam.exe";return true;}if(!gameExists||accessDenied||pid!=selected.pid)return false;if(path)*path=selected.path;if(created)*created=selected.processCreated;return true;}
+HANDLE fakeOpen(DWORD access,BOOL,DWORD pid){++fixtureWindowsQueries;if((access&PROCESS_VM_READ)&&captureVmReadDeniedPids.count(pid))return nullptr;if(captureProcesses.count(pid))return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(pid));if(pid==steamPid&&steamProcessAvailable)return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(pid));return gameExists&&!accessDenied&&pid==selected.pid?reinterpret_cast<HANDLE>(static_cast<uintptr_t>(pid)):nullptr;}
 BOOL fakeImagePath(HANDLE h,DWORD,wchar_t* image,DWORD* length){const auto pid=static_cast<DWORD>(reinterpret_cast<uintptr_t>(h));if(captureImageFailsPids.count(pid))return FALSE;std::wstring path;ULONGLONG birth=0;if(!focusQueryProcessIdentity(pid,&path,&birth)||path.size()>=*length)return FALSE;std::copy(path.begin(),path.end(),image);*length=static_cast<DWORD>(path.size());return TRUE;}
 BOOL fakeMemory(HANDLE h,PROCESS_MEMORY_COUNTERS* memory,DWORD){const auto pid=static_cast<DWORD>(reinterpret_cast<uintptr_t>(h));if(onOnePidMemory)onOnePidMemory(pid);if(captureMemoryFailsPids.count(pid))return FALSE;memory->WorkingSetSize=captureWorkingSets.count(pid)?captureWorkingSets.at(pid):1024ULL*1024*1024;return TRUE;}
 
@@ -151,11 +641,16 @@ json inputContext(){json result={{"focus",{{"available",true},{"appid",steamFocu
 json lastInputRequest,preflightShapeOverride,contactReconcileReceiptOverride;int preflightRejects=0,windowPrepCalls=0;bool postMutationGuardFailure=false;
 bool uiReadbackStale=false,rejectListMutation=false,keepMissingList=false;std::string listRejectReason="steam-list-readback-unconfirmed";std::function<void()> onReturn;
 std::function<void(const std::string&)> onSteamCall;
-void sofRegDWORD(HKEY,const wchar_t*,const wchar_t* key,DWORD* out){*out=std::wstring(key)==L"pid"?(registrySteamPid?registrySteamPid:steamPid):(registryAccountUnavailable?0:registryAccountOverride?registryAccountOverride:steamAccount);}
-std::wstring sofRegSZ(HKEY,const wchar_t*,const wchar_t*){return steamRoot;}
+void sofRegDWORD(HKEY,const wchar_t*,const wchar_t* key,DWORD* out){++privateSessionRegistryReads;*out=std::wstring(key)==L"pid"?(registrySteamPid?registrySteamPid:steamPid):(registryAccountUnavailable?0:registryAccountOverride?registryAccountOverride:steamAccount);}
+std::wstring sofRegSZ(HKEY,const wchar_t*,const wchar_t*){++privateSessionRegistryReads;return steamRoot;}
 json privateNativeRecordReply,nativeReturnFixture;
 std::string sha256File(const std::wstring&){return {};}// no host file hashing in deterministic OS fixture
-json fakeSteamLiveRun(json request,const std::function<bool()>& admit={}) {
+struct FixtureTransportProcess {
+ ymcc::steamsession::Session expected;bool required=false;
+ bool current()const{return !required||(steamProcessAvailable&&expected.pid==steamPid&&expected.created==steamCreated&&expected.root==steamRoot);}
+};
+json fakeSteamLiveRun(json request,const std::function<bool()>& admit={},const std::function<bool()>& ownerCurrent={},const FixtureTransportProcess& process={}) {
+ using Json=json;const auto current=[&]{return !ownerCurrent||ownerCurrent();};
  const DWORD account=request.value("account",DWORD{0});
  const auto op=request.value("operation",std::string());if(onSteamCall)onSteamCall(op);
  if(!steamReadFailure.empty())return {{"ok",false},{"mutated",false},{"reason",steamReadFailure}};
@@ -210,18 +705,31 @@ struct MockIsolation {bool isolated=false;} g_aiFanMockSession;
 namespace ymcc::steamlive {
 std::wstring normalizedPath(std::wstring path){path=U2W(ymcc::sleepsteam::pathKey(W2U(path)));while(!path.empty()&&path.back()==L'\\')path.pop_back();return path;}
 bool isRunningLinkRead(const json& request){const auto operation=request.find("operation"),flag=request.find("runningLinkRead");return operation!=request.end()&&operation->is_string()&&(operation->get<std::string>()=="sleep.inspect"||operation->get<std::string>()=="sleep.session.inspect")&&flag!=request.end()&&flag->is_boolean()&&flag->get<bool>();}
-json run(const std::wstring&,const json& request,const std::function<bool()>& admit={},DWORD budget=0){return fakeSteamLiveRun(request,admit);}
+json run(const std::wstring&,const json& request,const std::function<bool()>& admit={},DWORD budget=0,
+ const std::function<bool()>& ownerCurrent={},const ymcc::steamsession::Session* expected=nullptr){
+ const FixtureTransportProcess process{expected?*expected:ymcc::steamsession::Session{},expected!=nullptr};
+ if(!process.current()||(ownerCurrent&&!ownerCurrent()))return {{"ok",false},{"reason","steam-session-changed"},{"mutated",false}};
+ auto result=fakeSteamLiveRun(request,admit,ownerCurrent,process);
+ if(!process.current()||(ownerCurrent&&!ownerCurrent()))return {{"ok",false},{"reason","steam-session-changed"},{"mutated",result.value("mutated",false)}};
+ return result;
+}
 }
 __LIVE_WRAPPER__
 #include "log_snapshot_state.h"
 bool domainLogEnabled(const char*){return false;}
 void appendNativeLifecycleLog(const char* name,const json& data){sgRecordFact(name,data);}
+__STEAM_LOG_SOURCE_PORT__
 #include "sleep_steam_recovery.h"
 #include "steam_game_link_state.h"
+__FRESH_SOURCE_PORT__
 namespace DenseTrackerRuntimeSeam {
 using namespace ymcc::sleepsteam;using namespace ymcc::steamlink;
 using Game=SleepSteamRecovery::Game;using Client=SleepSteamRecovery::Session;
 __LINK_DENSE_SEAM__
+static bool fixtureInitialBindingCurrent(const Handle& clientHandle,const Handle& gameHandle,const TrackerRead& tracker,
+    const Client& client,unsigned long long epoch,const NativeGameSelectionReceipt& selectedIdentity) {
+    return __INITIAL_BINDING_PREDICATE__;
+}
 }
 #undef QueryFullProcessImageNameW
 #undef GetProcessMemoryInfo
@@ -248,14 +756,17 @@ bool poolSubmit(std::function<void()> job){if(!queueAllowed)return false;jobs.pu
 bool ymSettingsPatchSection(const char*,const json&){return saveAllowed;}
 // Native original-instance owner is independently tested; this fixture runs
 // the legacy coordinator against the production consumers below.
-static void steamOriginalRecoverySuspend(unsigned long long){}
-static void steamOriginalRecoveryWake(unsigned long long){}
-static void steamOriginalRecoveryPowerReady(unsigned long long){}
+__ORIGINAL_RECOVERY_EVENTS__
 static bool steamOriginalRecoveryOwnsRunning(DWORD,ULONGLONG){return false;}
+namespace SleepRecoveryAuto { static json get(); }
+void postSleepRecoveryAutoStatus(){ipc_emit("sleep.recovery-auto",SleepRecoveryAuto::get());}
 #include "sleep_recovery_auto.h"
 int passed=0,cases=0;std::wstring base;
 void pass(const char* label){++passed;std::cout<<"PASS "<<label<<"\n";}
 void reset(){
+ onObserverReceiptRead={};observerReceiptReads=0;observerReceiptFrozen=observerRootUnreadable=false;privateSessionRegistryReads=0;g_steamSettingsObserver.cached.reset();g_steamSettingsObserver.refreshes=0;
+ SteamOriginalRecovery::fixtureControl=std::make_shared<SteamOriginalRecovery::Control>();
+ fixtureCaptureTickHook={};fixtureCaptureTickReads=0;fixtureCaptureSleep100ns=fixtureCaptureExtra100ns=0;fixtureCaptureClockAvailable=true;
  privateNativeRecordReply=nullptr;nativeReturnFixture=nullptr;SleepSteamRecovery::nativeRecordPrefetch={};
  captureConfigured.clear();captureWorkingSets.clear();captureVmReadDeniedPids.clear();captureImageFailsPids.clear();captureMemoryFailsPids.clear();onOnePidMemory={};onCaptureRulesSnapshot={};g_gameRulesEpoch=1;
  captureProcesses.clear();captureWindowPids.clear();captureForeignSessionPids.clear();captureIdentityUnavailablePids.clear();captureExcludes.clear();captureWhitelist.clear();onCaptureWindow={};captureSessionQueryFails=false;
@@ -268,10 +779,12 @@ void reset(){
  keepMissingList=false;listRejectReason="steam-list-readback-unconfirmed";preflightRejects=0;windowPrepCalls=0;preflightShapeOverride=nullptr;postMutationGuardFailure=false;lastInputRequest=nullptr;uiReadbackStale=rejectListMutation=false;onReturn={};deferForeground=false;steamOverlayApp=0;foregroundWaitCalls=0;onForegroundWait={};
  ++cases;SG_DIR=base+L"\\case-"+std::to_wstring(cases);steamRoot=SG_DIR+L"\\steam";
  SG_SLEEP_LEASE_DIR=SG_DIR+L"\\leases";assert(sgEnsureMarkerDir(SG_SLEEP_LEASE_DIR));
- assert(sgEnsureMarkerDir(steamRoot+L"\\logs"));SleepRecoveryAuto::state={};SleepRecoveryAuto::kernelWake={};SleepRecoveryAuto::kernelSleepEntry={};modernStandby=false;jobs.clear();facts.clear();events.clear();
+ assert(sgEnsureMarkerDir(steamRoot+L"\\logs"));SleepRecoveryAuto::state={};SleepRecoveryAuto::kernelWake={};SleepRecoveryAuto::kernelSleepEntry={};SleepRecoveryAuto::interactiveResume={};SleepRecoveryAuto::completedResume={};SleepRecoveryAuto::readyCommit={};modernStandby=false;jobs.clear();facts.clear();events.clear();
  fileTimeBase=134362144573220276ULL;generation=7;tick=0;retry=false;writes=true;g_exitRequested=false;g_powerLifecycle=PowerLifecycle::Ready;
  g_sleepRecoveryAutoEnabled=false;g_sleepRecoveryAutoConfigEpoch=1;g_sleepRecoveryAutoPending=false;
- selected={};owner={};gameExists=valveAvailable=steamAvailable=true;accessDenied=false;steamAccount=42;steamPid=4000;steamCreated=134361500000000000ULL;running=false;localStatus=4;
+ selected={};onValveRead={};fixtureValveReadCalls=fixtureWindowsQueries=0;g_gameValveTarget={};g_gameValveTarget.game=selected;
+ g_gameValveTarget.qualificationPower=0; g_gameValveTarget.discoveryState=NativeGameDiscoveryState::Complete;g_gameValveTarget.rulesEpoch=1;g_gameValveTarget.generation=g_gameValveTarget.identityGeneration=11;
+ owner={};gameExists=valveAvailable=steamAvailable=true;accessDenied=false;steamAccount=42;steamPid=4000;steamCreated=134361500000000000ULL;running=false;localStatus=4;
  steamReads=scopeCalls=0;queueAllowed=saveAllowed=true;onSteamCall={};
  const auto at=SleepSteamRecovery::localSecond(selected.processCreated);
  assert(sgWriteFileAtomic(steamRoot+L"\\logs\\gameprocess_log.txt","["+at+"] Client version: 1788652215\n["+at+"] AppID 10307630032478011392 adding PID 12932 as a tracked process \"\"E:\\GAME\\TMNT.exe\"\"\n"));
@@ -284,10 +797,467 @@ void complete(bool simulateConnectedContext=true){
  assert(!g_sleepRecoveryAutoPending);
 }
 void begin(bool capture=true,ULONGLONG firstTick=1500){SleepRecoveryAuto::set({{"enabled",true}});if(capture){g_powerLifecycle=PowerLifecycle::Suspending;sleepRecoveryAutoCaptureSuspend(7);if(!jobs.empty())job();g_powerLifecycle=PowerLifecycle::Ready;steamReads=0;}sleepRecoveryAutoArm(7);tick=firstTick;sleepRecoveryAutoTick();}
+// Synchronous port interleaving proves terminal snapshot attribution, not a native race crash.
+static json fixtureRunFinishEvidenceSnapshotCases(){
+ const char* names[]={"stable-finish","next-generation-arm","off-on-next-generation-arm","save-failed-next-generation-arm"};
+ json rows=json::array();unsigned checks=0,failed=0;
+ for(int mode=0;mode<4;++mode){
+  fixtureFinishEvidenceWriteHook={};fixtureFinishEvidenceWriteFailure=false;reset();
+  SleepRecoveryAuto::set({{"enabled",true}});SleepRecoveryAuto::arm(7);
+  const auto oldEpoch=g_sleepRecoveryAutoConfigEpoch.load();
+  const json oldReadiness={{"generation",7},{"configEpoch",oldEpoch},{"basis","finish-owned-old-episode"},{"operationAllowed",true},{"healthVerified",false}};
+  const json oldAttempts={{"list",1},{"input",1},{"inputDispatches",2u}};
+  {
+   std::lock_guard<std::mutex> lock(SleepRecoveryAuto::mx);
+   SleepRecoveryAuto::state.wakeReadiness=oldReadiness;
+   SleepRecoveryAuto::state.listAttempted=true;SleepRecoveryAuto::state.inputAttempted=true;SleepRecoveryAuto::state.inputDispatches=2;
+  }
+  unsigned writeHookCalls=0;
+  fixtureFinishEvidenceWriteFailure=mode==3;
+  fixtureFinishEvidenceWriteHook=[&,mode]{
+   ++writeHookCalls;
+   if(mode==0)return;
+   if(mode==2){SleepRecoveryAuto::set({{"enabled",false}});SleepRecoveryAuto::set({{"enabled",true}});}
+   generation=8;SleepRecoveryAuto::arm(8);
+  };
+  SleepRecoveryAuto::finish(7,oldEpoch,"recorded","finish-evidence-owned-terminal",json::object());
+  json result;unsigned resultFacts=0;
+  for(const auto& fact:facts)if(fact.first=="sleep-recovery-automatic-result"){++resultFacts;result=fact.second;}
+  const auto expectedGeneration=mode==0?7ULL:8ULL,expectedEpoch=oldEpoch+(mode==2?2ULL:0ULL);
+  json current;
+  {
+   std::lock_guard<std::mutex> lock(SleepRecoveryAuto::mx);
+   current={{"generation",SleepRecoveryAuto::state.generation},{"configEpoch",SleepRecoveryAuto::state.configEpoch},
+    {"phase",SleepRecoveryAuto::state.phase},{"readiness",SleepRecoveryAuto::state.wakeReadiness},
+    {"list",SleepRecoveryAuto::state.listAttempted},{"input",SleepRecoveryAuto::state.inputAttempted},{"inputDispatches",SleepRecoveryAuto::state.inputDispatches}};
+  }
+  json assertions=json::array();unsigned caseChecks=0,caseFailed=0;
+  const auto check=[&](bool ok,const char* name){++checks;++caseChecks;if(!ok){++failed;++caseFailed;}assertions.push_back({{"name",name},{"passed",ok}});};
+  check(resultFacts==1&&writeHookCalls==1&&!fixtureFinishEvidenceWriteHook,"one-old-result-and-one-write-port");
+  check(result.value("generation",0ULL)==7,"old-result-generation-retained");
+  check(result.value("wakeReadiness",json())==oldReadiness,"old-result-wake-readiness-snapshot");
+  check(result.value("attempts",json())==oldAttempts,"old-result-three-attempt-fields-snapshot");
+  check(result.value("feedbackSaved",true)==(mode!=3),"feedback-save-result-retained");
+  check(current.value("generation",0ULL)==expectedGeneration&&current.value("configEpoch",0ULL)==expectedEpoch,"actual-current-generation-and-config-epoch");
+  check(current.value("phase",std::string())==(mode==0?"recorded":"waiting"),"new-state-phase-preserved");
+  check(g_sleepRecoveryAutoPending.load()==(mode!=0),"new-state-pending-preserved");
+  check(current.value("list",false)==(mode==0)&&current.value("input",false)==(mode==0)&&current.value("inputDispatches",0u)==(mode==0?2u:0u)&&current.value("readiness",json())==(mode==0?oldReadiness:json()),"current-state-counters-and-readiness-preserved");
+  check(steamReads==0&&scopeCalls==0&&inputCalls==0&&pidActivateCalls==0&&jobs.empty(),"zero-steam-input-scope-pid-actions-or-jobs");
+  rows.push_back({{"name",names[mode]},{"checks",caseChecks},{"failed",caseFailed},{"passed",caseFailed==0},{"assertions",assertions}});
+  fixtureFinishEvidenceWriteHook={};fixtureFinishEvidenceWriteFailure=false;
+ }
+ return {{"selection","finish-evidence-only"},{"tests",rows.size()},{"checks",checks},{"failed",failed},{"passed",failed==0},{"cases",rows},
+  {"synchronousPortInterleave",true},{"nativeRaceCrashReproduced",false},{"fullSuiteExecuted",false}};
+}
+
+// Directed extension of this original production-header consumer. OS/CDP/file
+// seams remain deterministic; no real suspend, application or device access.
+static json fixtureRunCaptureBudgetCases(){
+ json rows=json::array();unsigned failed=0;
+ const auto record=[&](const char* name,const SleepSteamRecovery::TargetSelection& choice,bool ok){
+  rows.push_back({{"name",name},{"passed",ok},{"selectedPid",choice.game.pid},{"evidence",choice.evidence},
+   {"inputCalls",inputCalls},{"scopeCalls",scopeCalls}});
+  if(!ok)++failed;std::cout<<(ok?"PASS ":"FAIL ")<<"CAPTURE "<<name<<"\n";
+ };
+ const auto select=[&](){return SleepSteamRecovery::selectPreSleepSteamTarget(SleepSteamRecovery::session(),fileTimeBase,{selected.pid,selected.processCreated,selected.path});};
+ const auto denied=[&](const auto& c){return !c.game.pid&&!c.evidence.value("jointBindingVerified",false)&&inputCalls==0&&scopeCalls==0;};
+ for(const ULONGLONG delay:{0ULL,172ULL,500ULL,1000ULL}){
+  reset();onCaptureRulesSnapshot=[=]{tick+=delay;};const auto c=select();
+  record(("active-"+std::to_string(delay)+"ms-keeps-original").c_str(),c,
+   c.game.pid==selected.pid&&c.evidence.value("jointBindingVerified",false)&&c.evidence.value("captureReadBudget",json::object()).value("elapsedMs",~0ULL)==delay);
+ }
+ reset();onCaptureRulesSnapshot=[]{tick+=1001;};{const auto c=select();record("active-1001ms-still-exceeds-budget",c,denied(c)&&c.evidence.value("reason","")=="steam-capture-read-budget-exceeded");}
+ reset();onCaptureRulesSnapshot=[]{tick+=1000;fixtureCaptureExtra100ns=1;};{const auto c=select();record("active-1000ms-plus-100ns-still-exceeds-budget",c,denied(c)&&c.evidence.value("reason","")=="steam-capture-read-budget-exceeded");}
+ reset();tick=10;onCaptureRulesSnapshot=[]{tick=9;};{const auto c=select();record("activity-clock-regression-refused",c,denied(c)&&c.evidence.value("captureReadBudget",json::object()).value("clockRegressed",false));}
+ reset();fixtureCaptureClockAvailable=false;{const auto c=select();record("unavailable-activity-clock-refused",c,denied(c)&&c.evidence.value("reason","")=="steam-capture-activity-clock-unavailable");}
+ reset();onCaptureRulesSnapshot=[]{fixtureCaptureClockAvailable=false;};{const auto c=select();record("lost-activity-clock-refused",c,denied(c)&&c.evidence.value("reason","")=="steam-capture-activity-clock-unavailable");}
+ const auto suspendAtParse=[&](const std::function<void()>& change={}){
+  fixtureCaptureTickHook=[=](unsigned call){if(call==4){tick+=597860;fixtureCaptureSleep100ns+=597800ULL*10000;if(change)change();}};
+ };
+ reset();suspendAtParse();{const auto c=select();const auto budget=c.evidence.value("captureReadBudget",json::object());
+  record("tracker-parse-excludes-597800ms-suspend-same-original",c,c.game.pid==selected.pid&&c.evidence.value("jointBindingVerified",false)&&
+   budget.value("clock","")=="QueryUnbiasedInterruptTime"&&budget.value("elapsedMs",~0ULL)==60&&budget.value("bootElapsedMs",0ULL)==597860&&
+   budget.value("suspendGapObserved",false)&&!c.evidence.value("physicalPreSleepVerified",true));}
+ reset();suspendAtParse([]{generation++;});{const auto c=select();record("10518-to-10519-during-parse-never-captures-as-original",c,denied(c)&&c.evidence.value("reason","")=="steam-capture-context-changed");}
+ for(int mode=0;mode<7;++mode){reset();g_sleepRecoveryAutoEnabled=true;
+  const char* names[]={"generation-change-during-rules","config-change-during-rules","disable-during-rules","exit-during-rules","suspended-during-rules","resuming-during-rules","ready-to-suspending-during-rules"};
+  onCaptureRulesSnapshot=[=]{if(mode==0)generation++;if(mode==1)++g_sleepRecoveryAutoConfigEpoch;if(mode==2)g_sleepRecoveryAutoEnabled=false;
+   if(mode==3)g_exitRequested=true;if(mode==4)g_powerLifecycle=PowerLifecycle::Suspended;if(mode==5)g_powerLifecycle=PowerLifecycle::Resuming;if(mode==6)g_powerLifecycle=PowerLifecycle::Suspending;};
+  const auto c=select();record(names[mode],c,denied(c)&&c.evidence.value("reason","")=="steam-capture-context-changed");
+ }
+ for(int mode=0;mode<7;++mode){reset();const auto original=selected;
+  const char* names[]={"suspend-original-exits","suspend-pid-reused","suspend-path-changed","suspend-steam-account-changed","suspend-steam-birth-changed","suspend-windows-session-changed","suspend-rules-epoch-changed"};
+  suspendAtParse([=]{if(mode==0)gameExists=false;if(mode==1)selected.processCreated++;if(mode==2)selected.path=L"E:\\GAME\\Different.exe";
+   if(mode==3)steamAccount++;if(mode==4)steamCreated++;if(mode==5)captureForeignSessionPids.insert(original.pid);if(mode==6)++g_gameRulesEpoch;});
+  const auto client=SleepSteamRecovery::session();const auto c=SleepSteamRecovery::selectPreSleepSteamTarget(client,fileTimeBase,{original.pid,original.processCreated,original.path});
+  record(names[mode],c,denied(c));
+ }
+ for(int mode=0;mode<2;++mode){reset();const auto original=selected;captureProcesses[original.pid]=original;captureWindowPids.insert(original.pid);
+  selected={14904,original.processCreated,L"C:\\Fixtures\\Unrelated.exe"};if(mode)suspendAtParse();const auto c=select();
+  record(mode?"suspend-cannot-elect-unpinned-fallback":"unpaused-existing-reverse-join-kept",c,
+   mode?denied(c)&&c.evidence.value("reason","")=="steam-capture-paused-original-not-pinned":c.game.pid==original.pid&&c.evidence.value("jointBindingVerified",false));
+ }
+
+ reset();suspendAtParse();onOnePidMemory=[](DWORD){sgWriteFileAtomic(steamRoot+L"\\logs\\console_log.txt","["+SleepSteamRecovery::localSecond(fileTimeBase)+"] Game process updated : AppID 2399932135 \"other\", ProcID 99999, IP 0.0.0.0:0\n");};
+ {const auto c=select();record("suspend-primary-migration-still-refused",c,denied(c));}
+ reset();suspendAtParse();onOnePidMemory=[](DWORD){auto text=readFile(steamRoot+L"\\logs\\gameprocess_log.txt");sgWriteFileAtomic(steamRoot+L"\\logs\\gameprocess_log.txt",text+"["+SleepSteamRecovery::localSecond(fileTimeBase)+"] AppID 2399932135 no longer tracking PID 12932, exit code 0\n");};
+ {const auto c=select();record("suspend-final-tracker-invalidation-still-refused",c,denied(c));}
+ reset();fixtureCaptureTickHook=[](unsigned call){if(call==8)++generation;};
+ {const auto c=select();record("final-checkpoint-generation-change-refused",c,denied(c)&&c.evidence.value("reason","")=="steam-capture-context-changed");}
+
+ return {{"scope","capture-budget-only"},{"cases",rows},{"executed",rows.size()},{"failed",failed},
+  {"physicalSleepPerformed",false},{"physicalPreSleepVerified",false},{"completeWakeRecoveryVerified",false}};
+}
+
+static json fixtureRunWakeAdmissionCases(){
+ json rows=json::array();unsigned failed=0,checks=0;
+ const auto check=[&](bool ok,const char* why){++checks;if(!ok)throw std::runtime_error(why);};
+ const auto test=[&](const std::string& name,const std::function<void()>& body){const auto count=checks;try{body();rows.push_back({{"name",name},{"passed",true},{"checks",checks-count}});}catch(const std::exception& e){++failed;rows.push_back({{"name",name},{"passed",false},{"checks",checks-count},{"reason",e.what()}});}};
+ const auto setup=[&](){reset();running=true;inputContextAvailable=true;modernStandby=true;SleepRecoveryAuto::set({{"enabled",true}});
+  sleepRecoveryAutoPrepareSuspend();g_powerLifecycle=PowerLifecycle::Suspending;sleepRecoveryAutoCaptureSuspend(7);while(!jobs.empty())job();
+  tick=598000;g_powerLifecycle=PowerLifecycle::Ready;};
+ const auto component=[&](char part,int reason=5){if(part=='I')sleepRecoveryAutoInteractiveResume(7,7,tick-170);if(part=='C')sleepRecoveryAutoRecordKernelWake(7,507,reason,-1,sgNowFileTime());if(part=='R')sleepRecoveryAutoPowerReady(7);};
+ const auto admitted=[&](){return g_sleepRecoveryAutoPending.load()&&SleepRecoveryAuto::state.wakeAdmission.value("status",std::string())=="admitted"&&SleepRecoveryAuto::state.wakeAdmission.value("source",std::string())=="interactive-resume-committed-ready";};
+ for(const std::string order:{"ICR","IRC","CIR","CRI","RIC","RCI"})test("win5-reason5-join-order-"+order,[&]{setup();for(char part:order)component(part);check(admitted(),"completed-resume-not-admitted");
+  check(SleepRecoveryAuto::state.armed==tick&&SleepRecoveryAuto::state.seenGeneration==7,"wake-budget-not-started-at-join");
+  check(fixturePendingWakeCount()==1,"original-engine-not-relayed-on-new-admission");
+  check(SleepSteamRecovery::captured.game.pid==selected.pid&&SleepSteamRecovery::captured.game.created==selected.processCreated,"original-instance-replaced");
+  check(inputCalls==0&&scopeCalls==0&&jobs.empty(),"proof-collection-performed-actions");});
+ for(const int reason:{7,8,28,-1,16777220})test("completed-interactive-wide-reason-"+std::to_string(reason),[&]{setup();component('I');component('R');component('C',reason);check(admitted(),"reason-whitelist-blocked-completed-wake");check(SleepRecoveryAuto::kernelWake.eventFileTime==0,"strict-proof-was-forged");});
+ for(const char missing:{'I','C','R'})test(std::string("incomplete-join-no-")+missing,[&]{setup();for(const char part:{'I','C','R'})if(part!=missing)component(part);check(!g_sleepRecoveryAutoPending&&fixturePendingWakeCount()==0,"raw-or-incomplete-proof-armed");});
+ test("automatic18-never-substitutes-interactive",[&]{setup();sleepRecoveryAutoInteractiveResume(7,18,tick);component('C');component('R');check(!admitted()&&SleepRecoveryAuto::interactiveResume.eventFileTime==0,"automatic-resume-became-interactive");});
+ test("late-s4-event-uses-fresh-interactive-without-rejuvenating-kernel",[&]{setup();const auto late=sgNowFileTime()-160000ULL*10000;sleepRecoveryAutoRecordKernelWake(7,107,0,5,late);
+  check(SleepRecoveryAuto::kernelWake.eventFileTime==0,"stale-kernel-accepted-as-fresh");component('R');sleepRecoveryAutoInteractiveResume(7,6,tick);check(admitted(),"late-s4-dynamic-not-admitted");check(SleepRecoveryAuto::state.wakeAdmission["eventFileTime"]==std::to_string(sgNowFileTime()),"s4-fresh-proof-not-pbt");});
+ test("entry-intermediate-pbt-can-be-replaced-by-later-real-callback",[&]{setup();tick=1;sleepRecoveryAutoInteractiveResume(7,7,tick);tick=598000;component('C');component('R');check(!admitted(),"entry-intermediate-pbt-authorized-exit");component('I');check(admitted(),"real-later-interactive-callback-lost");});
+ test("delayed-gui-callback-keeps-original-receive-time",[&]{setup();sleepRecoveryAutoInteractiveResume(7,7,1);component('C');component('R');check(!admitted()&&SleepRecoveryAuto::interactiveResume.eventFileTime==0,"queued-old-pbt-rejuvenated");});
+ test("duplicate-ready-pbt-kernel-do-not-refund-or-relay-again",[&]{setup();for(char part:std::string("ICR"))component(part);const auto armed=SleepRecoveryAuto::state.armed,event=SleepRecoveryAuto::interactiveResume.eventFileTime;tick+=1000;
+  for(char part:std::string("RICIR"))component(part);check(admitted()&&SleepRecoveryAuto::state.armed==armed&&SleepRecoveryAuto::interactiveResume.eventFileTime==event,"duplicate-extended-budget");check(fixturePendingWakeCount()==1,"duplicate-relayed-engine-wake");});
+ test("new-entry-revokes-queued-read-and-does-not-create-return",[&]{setup();for(char part:std::string("ICR"))component(part);sleepRecoveryAutoTick();check(!jobs.empty(),"first-read-not-queued");++tick;sleepRecoveryAutoRecordKernelWake(7,506,1,-1,sgNowFileTime());job();check(inputCalls==0&&scopeCalls==0,"new-sleep-used-old-authority");});
+ test("dynamic-proof-expires-from-received-pbt-not-late-join",[&]{setup();component('I');component('C');tick+=59000;component('R');check(admitted(),"still-fresh-late-join-refused");tick+=1001;check(!SleepRecoveryAuto::wakeOperationAllows(7,1),"late-join-extended-proof-lifetime");});
+ for(int mode=0;mode<4;++mode)test("completed-wake-retains-current-context-"+std::to_string(mode),[&]{setup();component('I');component('C');if(mode==0)retry=true;if(mode==1)g_exitRequested=true;if(mode==2)g_sleepRecoveryAutoEnabled=false;if(mode==3)g_powerLifecycle=PowerLifecycle::Suspended;component('R');check(!g_sleepRecoveryAutoPending,"current-context-cancellation-bypassed");});
+ test("prepared-generation-transfer-joins-when-capture-finishes",[&]{reset();running=true;inputContextAvailable=true;modernStandby=true;SleepRecoveryAuto::set({{"enabled",true}});sleepRecoveryAutoPrepareSuspend();tick=598000;g_powerLifecycle=PowerLifecycle::Ready;
+  sleepRecoveryAutoInteractiveResume(7,7,tick);sleepRecoveryAutoRecordKernelWake(7,507,5,-1,sgNowFileTime());generation=8;sleepRecoveryAutoPowerReady(8);check(!g_sleepRecoveryAutoPending,"uncaptured-generation-armed");sleepRecoveryAutoCaptureSuspend(8);
+  check(g_sleepRecoveryAutoPending&&SleepRecoveryAuto::state.seenGeneration==8,"prepared-transfer-did-not-rejoin");check(SleepSteamRecovery::captured.boundaryGeneration==7&&SleepSteamRecovery::captured.game.pid==selected.pid,"transfer-replaced-original-boundary");check(fixturePendingWakeCount()==1,"capture-completion-lost-original-engine");});
+ return {{"selection","wake-admission-only"},{"tests",rows.size()},{"checks",checks},{"failed",failed},{"passed",failed==0},{"cases",rows},{"fullSuiteExecuted",false},{"physicalSleepPerformed",false},{"inputAndContinueVerified",false}};
+}
+static void fixtureRunSharedAccountCases(){
+ // Exercise the production session() replacement against the published pure
+ // epoch predicate. These subcases extend this original R27 selector only.
+ for(int mode=0;mode<8;++mode){
+  reset();
+  if(mode==0)observerAvailable=false;
+  if(mode==1)observerRootUnreadable=true;
+  if(mode==2){registryAccountUnavailable=true;}
+  if(mode==3){g_steamSettingsObserver.identitySnapshot();observerReceiptFrozen=true;++steamCreated;}
+  if(mode==4)onObserverReceiptRead=[](unsigned n){if(n==2)++steamCreated;};
+  if(mode==5)onObserverReceiptRead=[](unsigned n){if(n==2)registryAccountOverride=43;};
+  if(mode==6)onObserverReceiptRead=[](unsigned n){if(n==2&&g_steamSettingsObserver.cached){auto copy=std::make_shared<ymcc::steamsession::IdentitySnapshot>(*g_steamSettingsObserver.cached);++copy->revision;g_steamSettingsObserver.cached=copy;}};
+  const auto session=SleepSteamRecovery::session();
+  assert(privateSessionRegistryReads==0&&sessionDiscoveryCalls==0&&inputCalls==0&&scopeCalls==0);
+  if(mode<6)assert(!SleepSteamRecovery::validSession(session));
+  else assert(SleepSteamRecovery::validSession(session)&&session.pid==steamPid&&session.created==steamCreated&&session.account==42);
+  if(mode==0||mode==1||mode==3)assert(g_steamSettingsObserver.refreshes>0);
+ }
+ std::cout << "SHARED_RECEIPT_BOUNDARIES=8 private-session-registry-reads=0\n";
+
+ // R27: execute the production main.cpp request wrapper, not a mock account gate.
+ reset();running=true;inputContextAvailable=true;registrySteamPid=selected.pid;registryAccountOverride=99;
+ begin();assert(SleepSteamRecovery::captured.client.account==42&&SleepSteamRecovery::captured.client.liveAccountPinned&&sessionDiscoveryCalls==1);
+ job();assert(inputCalls==1&&scopeCalls==0&&lastInputRequest["sleepSessionProcess"]["pid"]==steamPid&&lastInputRequest["account"]==42);
+ assert(SleepSteamRecovery::captured.client.foreignRegistryAccountIgnored&&!SleepRecoveryAuto::state.receipt.value("healthVerified",false));
+ pass("foreign game registry PID/account and corrupt observer account bind only the verified Steam UI account; actual wrapper admits original-game resume");
+ reset();registrySteamPid=selected.pid;registryAccountOverride=99;SleepRecoveryAuto::set({{"enabled",true}});
+ SleepSteamRecovery::prepareSuspend();const auto pinned=SleepSteamRecovery::prepared.client;assert(pinned.account==42&&sessionDiscoveryCalls==1);
+ steamAccount=43;SleepSteamRecovery::prepareSuspend();g_powerLifecycle=PowerLifecycle::Suspending;SleepSteamRecovery::captureSuspend(7);
+ SleepSteamRecovery::captureSuspend(7);assert(sessionDiscoveryCalls==1&&SleepSteamRecovery::captured.client.account==42&&SleepSteamRecovery::liveAccountSession.account==42);
+ while(!jobs.empty())job();g_powerLifecycle=PowerLifecycle::Resuming;
+ auto pinnedRead=SleepSteamRecovery::inspect(7);assert(!pinnedRead["steam"]["ok"].get<bool>()&&inputCalls==0&&scopeCalls==0&&sessionDiscoveryCalls==1);
+ pass("duplicate preparation and queued capture preserve the earliest account; actual UI account change is rejected without wake discovery");
+ for(int mode=0;mode<9;++mode){reset();registrySteamPid=selected.pid;registryAccountOverride=99;
+   auto client=SleepSteamRecovery::prepareSession();assert(client.account==42&&sessionDiscoveryCalls==1);
+   json witness={{"pid",client.pid},{"created",std::to_string(client.created)},{"root",W2U(client.root)}};
+   if(mode==0)witness["pid"]=selected.pid;
+   if(mode==1)witness["created"]=std::to_string(client.created+1);
+   if(mode==2)witness["root"]=W2U(client.root+L"-wrong");
+   if(mode==3)steamCreated++;
+   if(mode==4)steamPid++;
+   if(mode==5)steamAccount=43;
+   if(mode==6)steamProcessAvailable=false;
+   if(mode==7)witness["created"]="+"+std::to_string(client.created);
+   if(mode==8)witness["pid"]=0U;
+   auto denied=steamLiveRequest(42,{{"operation","sleep.inspect"},{"appids",json::array()},{"sleepSessionProcess",witness}});
+   assert(!denied.value("ok",true)&&!denied.value("mutated",true)&&inputCalls==0&&scopeCalls==0&&sessionDiscoveryCalls==1);
+ }
+ pass("production wrapper rejects foreign PID, wrong birth/root, restart/account switch, exited Steam and malformed witness");
+ for(int mode=0;mode<8;++mode){reset();registrySteamPid=selected.pid;registryAccountOverride=99;
+   if(mode==0)steamAccount=0;
+   if(mode==1)steamReadFailure="live-timeout";
+   if(mode==2)sessionReadMalformed=true;
+   if(mode==3)onSteamCall=[](const auto& op){if(op=="sleep.session.inspect")steamCreated++;};
+   if(mode==4)onSteamCall=[](const auto& op){if(op=="sleep.session.inspect")registrySteamPid=steamPid;};
+   if(mode==5)onSteamCall=[](const auto& op){if(op=="sleep.session.inspect")g_powerLifecycle=PowerLifecycle::Resuming;};
+   if(mode==6)onSteamCall=[](const auto& op){if(op=="sleep.session.inspect")generation++;};
+   if(mode==7)onSteamCall=[](const auto& op){if(op=="sleep.session.inspect")g_sleepRecoveryAutoConfigEpoch++;};
+   auto failed=SleepSteamRecovery::prepareSession();assert(!SleepSteamRecovery::validSession(failed)&&!SleepSteamRecovery::liveAccountSession.liveAccountPinned);
+ }
+ pass("zero/mutating/unavailable UI discovery and process/registry/wake/generation/epoch swap never pin a replacement account");
+ for(auto lifecycle:{PowerLifecycle::Resuming,PowerLifecycle::Suspended}){reset();registrySteamPid=selected.pid;registryAccountOverride=99;g_powerLifecycle=lifecycle;
+   auto unbound=SleepSteamRecovery::prepareSession();assert(!SleepSteamRecovery::validSession(unbound)&&sessionDiscoveryCalls==0);
+ }
+ pass("unbound resumed or suspended client cannot discover or adopt an account");
+ reset();registrySteamPid=selected.pid;registryAccountOverride=99;auto client=SleepSteamRecovery::prepareSession();g_powerLifecycle=PowerLifecycle::Resuming;
+ assert(SleepSteamRecovery::prepareSession().account==42&&sessionDiscoveryCalls==1);registryAccountOverride=101;
+ assert(SleepSteamRecovery::session().account==42&&SleepSteamRecovery::sameSession(client));
+ auto ordinary=steamLiveRequest(42,{{"operation","overlay.get"},{"sleepSessionProcess",{{"pid",steamPid},{"created",std::to_string(steamCreated)},{"root",W2U(steamRoot)}}}});
+ assert(!ordinary.value("ok",true)&&ordinary["reason"]=="steam-account-changed");
+ assert(!steamLiveRequest(0,{{"operation","sleep.session.inspect"}}).value("ok",true));
+ pass("pinned fallback account survives foreign registry noise; ordinary feature gates and required process witness remain enforced");
+ reset();registrySteamPid=selected.pid;registryAccountOverride=99;SleepSteamRecovery::prepareSuspend();SleepSteamRecovery::captureSuspend(7);
+ assert(sessionDiscoveryCalls==0&&inputCalls==0&&scopeCalls==0);pass("disabled owner performs no account discovery or recovery actions");
+ reset();registrySteamPid=selected.pid;registryAccountOverride=99;auto readClient=SleepSteamRecovery::prepareSession();
+ steamReadFailure="live-transport-uncertain";auto noWrite=SleepSteamRecovery::liveRequest(readClient,{{"operation","sleep.inspect"},{"appids",json::array()}});
+ assert(!noWrite.value("ok",true)&&!noWrite.value("mutated",true)&&noWrite["reason"]=="live-read-unavailable");
+ pass("bounded sleep account and inspection reads preserve fixed read-only transport uncertainty mapping");
+
+ reset();running=false;inputContextAvailable=true;registrySteamPid=selected.pid;registryAccountOverride=99;SleepRecoveryAuto::set({{"enabled",true}});
+ g_powerLifecycle=PowerLifecycle::Suspending;SleepSteamRecovery::captureSuspend(7);while(!jobs.empty())job();g_powerLifecycle=PowerLifecycle::Ready;
+ auto boundInspection=SleepSteamRecovery::inspect(7);auto listReceipt=SleepSteamRecovery::reconcile(boundInspection,7,g_sleepRecoveryAutoConfigEpoch);
+ assert(listReceipt.value("accepted",false)&&scopeCalls==1&&sessionDiscoveryCalls==1&&SleepSteamRecovery::captured.client.account==42);
+ pass("foreign registry account also permits exact same-session native list rescope through the production wrapper without invented Running state");
+ reset();json exactWitness={{"pid",steamPid},{"created",std::to_string(steamCreated)},{"root",W2U(steamRoot)+"/"}};
+ auto normalizedRead=steamLiveRequest(42,{{"operation","sleep.inspect"},{"appids",json::array()},{"sleepSessionProcess",exactWitness}});
+ assert(normalizedRead.value("ok",false)&&!normalizedRead.value("mutated",true));
+ pass("normalized install-root separators keep the same verified Steam birth/image witness");
+}
+static void fixtureRunDenseTrackerConsumers(){
+ using namespace ymcc::sleepsteam;
+ {
+  // All five production wrappers, with filesystem/OS/CDP mocks only.
+  for(int ending=0;ending<4;++ending){
+   reset();running=true;inputContextAvailable=true;pidWindowExists=true;
+   const auto original=selected;const auto at=SleepSteamRecovery::localSecond(original.processCreated);
+   const std::string add="["+at+"] AppID 10307630032478011392 adding PID "+std::to_string(original.pid)+" as a tracked process \"\""+W2U(original.path)+"\"\"\n";
+   std::string dense;for(unsigned i=0;i<20001;++i)dense+="["+at+"] unrelated observation\n";dense+=add;
+   const std::string primary="["+SleepSteamRecovery::localSecond(fileTimeBase)+"] Game process updated : AppID 2399932135 \"fixture\", ProcID "+std::to_string(original.pid)+", IP 0.0.0.0:0\n";
+   assert(dense.size()<trackerMaximumBytes&&sgWriteFileAtomic(steamRoot+L"\\logs\\gameprocess_log.txt",dense));
+   assert(sgWriteFileAtomic(steamRoot+L"\\logs\\console_log.txt",primary));
+   const auto client=SleepSteamRecovery::session();const SleepSteamRecovery::Game game{original.pid,original.processCreated,original.path};
+   assert(SleepSteamRecovery::nativePrimaryAllowsOriginal(client,game,2399932135U,true));
+   auto choice=SleepSteamRecovery::selectPreSleepSteamTarget(client,fileTimeBase,game);assert(choice.game.pid==game.pid&&choice.evidence["jointBindingVerified"]==true);
+   auto tracked=DenseTrackerRuntimeSeam::tracking(client,game);assert(tracked.complete&&tracked.binding.status=="tracked"&&tracked.binding.line==20002);
+   json discovery;assert(DenseTrackerRuntimeSeam::discoverGame(client,1,discovery).pid==game.pid);
+   begin();assert(SleepSteamRecovery::captured.game.pid==game.pid);
+   if(ending){dense+="["+at+"] "+(ending==1?"AppID 2399932135 no longer tracking PID "+std::to_string(original.pid)+", exit code 0":ending==2?"Remove 2399932135 from running list":"Client version: 1")+"\n";assert(sgWriteFileAtomic(steamRoot+L"\\logs\\gameprocess_log.txt",dense));}
+   const auto inspected=SleepSteamRecovery::inspect(7);
+   assert(inspected["originalGameRecovery"]["jointBindingVerified"]==(ending==0));
+   auto after=DenseTrackerRuntimeSeam::tracking(client,game,TrackingScope::RunningListAndProcess);assert(after.complete&&(after.binding.status=="tracked")==!ending);
+   const auto retained=DenseTrackerRuntimeSeam::tracking(client,game);assert(retained.complete&&(retained.binding.status=="tracked")==(!ending||ending==2));
+   assert(SleepSteamRecovery::nativePrimaryAllowsOriginal(client,game,2399932135U,true)==!ending);
+   assert((DenseTrackerRuntimeSeam::discoverGame(client,1,discovery).pid==game.pid)==!ending);
+   assert(inputCalls==0&&scopeCalls==0&&pidActivateCalls==0);
+  }
+  pass("all5 production tracker consumers read dense complete snapshots and late invalidation without app input scope or focus writes");
+  for(int kind=0;kind<2;++kind){reset();const auto client=SleepSteamRecovery::session();const SleepSteamRecovery::Game game{selected.pid,selected.processCreated,selected.path};
+   const auto file=steamRoot+L"\\logs\\gameprocess_log.txt";
+   if(kind==0)assert(DeleteFileW(file.c_str()));else assert(sgWriteFileAtomic(file,std::string(trackerMaximumBytes+1,'x')));
+   assert(!SleepSteamRecovery::nativePrimaryAllowsOriginal(client,game,2399932135U));
+   assert(!SleepSteamRecovery::selectPreSleepSteamTarget(client,fileTimeBase,game).game.pid);
+   assert(!DenseTrackerRuntimeSeam::tracking(client,game).complete);json evidence;assert(!DenseTrackerRuntimeSeam::discoverGame(client,1,evidence).pid);
+   assert(inputCalls==0&&scopeCalls==0);
+  }
+  pass("dense fix preserves unavailable and file-truncated tracker refusal in production readers");
+ }
+}
+static void fixtureLinkRequire(bool value,const char* name){
+ if(!value){std::cout<<"FAIL GAME_LINK "<<name<<"\n";std::exit(3);}
+ pass(name);
+}
+static SleepSteamRecovery::Session fixtureLinkSetup(){
+ reset();running=true;inputContextAvailable=true;pidWindowExists=true;g_sleepRecoveryAutoEnabled=true;
+ const auto primary="["+SleepSteamRecovery::localSecond(fileTimeBase)+"] Game process updated : AppID 2399932135 \"fixture\", ProcID "+std::to_string(selected.pid)+", IP 0.0.0.0:0\n";
+ assert(sgWriteFileAtomic(steamRoot+L"\\logs\\console_log.txt",primary));
+ return SleepSteamRecovery::session();
+}
+static void fixtureRunGameLinkSelectionCases(){
+ using namespace DenseTrackerRuntimeSeam;
+ {
+  const auto client=fixtureLinkSetup();const auto original=selected;json detail;NativeGameSelectionReceipt receipt;
+  const auto scans=g_gameValveOnePidChecks.load();const auto found=discoverGame(client,1,detail,&receipt);
+  fixtureLinkRequire(found.pid==original.pid&&found.created==original.processCreated&&found.path==original.path&&
+   receipt.target.identityGeneration==11&&detail.value("gameIdentitySource","")=="ymcc-unique-game-valve"&&
+   detail.value("acceptedCandidateCount",0)==1&&!detail.value("repairAuthorized",true)&&fixtureValveReadCalls==0&&!receipt.processValidated&&
+   g_gameValveOnePidChecks.load()==scans,"selected-exact-pid-birth-path-is-consumed-once-without-second-election");
+  const auto tracked=tracking(client,found);Handle clientHandle(reinterpret_cast<HANDLE>(uintptr_t{client.pid})),gameHandle(reinterpret_cast<HANDLE>(uintptr_t{found.pid}));
+  fixtureLinkRequire(fixtureInitialBindingCurrent(clientHandle,gameHandle,tracked,client,1,receipt),"actual-initial-binding-predicate-accepts-current-selection");
+  ++g_gameValveTarget.generation;
+  fixtureLinkRequire(nativeValveSelectionCurrent(receipt)&&fixtureInitialBindingCurrent(clientHandle,gameHandle,tracked,client,1,receipt),"ordinary-publication-heartbeat-keeps-selection-lease");
+  g_gameValveTarget.game.path=L"e:\\game\\tmnt.EXE";
+  fixtureLinkRequire(nativeValveSelectionCurrent(receipt),"selection-path-case-does-not-revoke-identical-windows-exe");
+  g_gameValveTarget.game=original;g_gameValveTarget.identityGeneration+=2;
+  fixtureLinkRequire(!nativeValveSelectionCurrent(receipt)&&!fixtureInitialBindingCurrent(clientHandle,gameHandle,tracked,client,1,receipt),"aba-before-worker-begin-cannot-bind-old-selection");
+ }
+ {
+  const auto client=fixtureLinkSetup();const auto original=selected;
+  NativeDetectedGame other=original;other.pid=14904;other.path=L"E:\\Other\\Other.exe";captureProcesses[other.pid]=other;captureWindowPids.insert(other.pid);
+  const auto at=SleepSteamRecovery::localSecond(other.processCreated);
+  assert(sgWriteFileAtomic(steamRoot+L"\\logs\\gameprocess_log.txt","["+at+"] Client version: 1788652215\n["+at+"] AppID 945360 adding PID "+std::to_string(other.pid)+" as a tracked process \"\""+W2U(other.path)+"\"\"\n"));
+  assert(sgWriteFileAtomic(steamRoot+L"\\logs\\console_log.txt","["+SleepSteamRecovery::localSecond(fileTimeBase)+"] Game process updated : AppID 945360 \"other\", ProcID "+std::to_string(other.pid)+", IP 0.0.0.0:0\n"));
+  json detail;NativeGameSelectionReceipt receipt;receipt.target.identityGeneration=123;
+  fixtureLinkRequire(!discoverGame(client,1,detail,&receipt).pid&&!receipt.target.identityGeneration&&selected.pid==original.pid&&
+   detail.value("acceptedCandidateCount",0)==0,"steam-tracked-game-b-never-replaces-ymcc-selected-game-a");
+ }
+ for(int mode=0;mode<9;++mode){
+  const auto client=fixtureLinkSetup();const auto original=selected;json detail;NativeGameSelectionReceipt receipt;
+  const char* names[]={"missing-target-is-unknown-not-exited","zero-pid-cannot-authorize-binding","missing-birth-cannot-authorize-binding",
+   "missing-path-cannot-authorize-binding","pending-discovery-cannot-authorize-binding","unavailable-discovery-cannot-authorize-binding",
+   "foreign-windows-session-rejected","game-older-than-steam-rejected","missing-selection-lease-rejected"};
+  if(mode==0){valveAvailable=false;g_gameValveTarget.discoveryState=NativeGameDiscoveryState::Unavailable;}
+  if(mode==1)selected.pid=g_gameValveTarget.game.pid=0;
+  if(mode==2)selected.processCreated=g_gameValveTarget.game.processCreated=0;
+  if(mode==3)selected.path=g_gameValveTarget.game.path=L"";
+  if(mode==4)g_gameValveTarget.discoveryState=NativeGameDiscoveryState::Pending;
+  if(mode==5)g_gameValveTarget.discoveryState=NativeGameDiscoveryState::Unavailable;
+  if(mode==6)captureForeignSessionPids.insert(original.pid);
+  if(mode==7)selected.processCreated=g_gameValveTarget.game.processCreated=client.created-1;
+  if(mode==8)g_gameValveTarget.identityGeneration=0;
+  fixtureLinkRequire(!discoverGame(client,1,detail,&receipt).pid&&!receipt.target.identityGeneration&&
+   detail.value("acceptedCandidateCount",0)==0&&!detail.value("repairAuthorized",true),names[mode]);
+ }
+ for(int mode=0;mode<8;++mode){
+  const auto client=fixtureLinkSetup();json detail;NativeGameSelectionReceipt receipt;
+  const char* names[]={"aba-during-association-revokes-old-selection","target-switch-during-association-revokes-old-selection",
+   "pid-birth-reuse-during-association-revokes-old-selection","exe-path-change-during-association-revokes-old-selection",
+   "rules-change-during-association-revokes-old-selection","pending-during-association-revokes-old-selection",
+   "selection-clear-during-association-revokes-old-selection","unknown-during-association-revokes-old-selection"};
+  onCaptureWindow=[mode](DWORD){if(mode==0)g_gameValveTarget.identityGeneration+=2;
+   if(mode==1)g_gameValveTarget.game.pid=14904;
+   if(mode==2)++g_gameValveTarget.game.processCreated;
+   if(mode==3)g_gameValveTarget.game.path=L"E:\\Other.exe";
+   if(mode==4)++g_gameRulesEpoch;
+   if(mode==5)g_gameValveTarget.discoveryState=NativeGameDiscoveryState::Pending;
+   if(mode==6)g_gameValveTarget.game.pid=0;
+   if(mode==7)g_gameValveTarget.discoveryState=NativeGameDiscoveryState::Unavailable;};
+  fixtureLinkRequire(!discoverGame(client,1,detail,&receipt).pid&&!receipt.target.identityGeneration&&
+   detail.value("reason","")=="running-link-selected-identity-changed",names[mode]);
+ }
+ for(int mode=0;mode<4;++mode){
+  fixtureLinkSetup();NativeGameSelectionReceipt receipt;
+  const char* names[]={"aba-inside-shared-reader-revokes-receipt","rules-change-inside-shared-reader-revokes-receipt",
+   "birth-change-inside-shared-reader-revokes-receipt","path-change-inside-shared-reader-revokes-receipt"};
+  onValveRead=[mode]{if(mode==0)g_gameValveTarget.identityGeneration+=2;if(mode==1)++g_gameRulesEpoch;
+   if(mode==2)++selected.processCreated;if(mode==3)selected.path=L"E:\\Other.exe";};
+  fixtureLinkRequire(!nativeValveReadCurrentSelection(&receipt)&&!receipt.target.identityGeneration,names[mode]);
+ }
+ for(int mode=0;mode<4;++mode){
+  const auto client=fixtureLinkSetup();json detail;NativeGameSelectionReceipt receipt;const auto found=discoverGame(client,1,detail,&receipt);
+  assert(found.pid);const auto tracked=tracking(client,found);Handle clientHandle(reinterpret_cast<HANDLE>(uintptr_t{client.pid})),gameHandle(reinterpret_cast<HANDLE>(uintptr_t{found.pid}));
+  const char* names[]={"off-before-initial-binding-rejected","config-change-before-initial-binding-rejected","sleep-before-initial-binding-rejected","rules-change-before-initial-binding-rejected"};
+  if(mode==0)g_sleepRecoveryAutoEnabled=false;if(mode==1)++g_sleepRecoveryAutoConfigEpoch;
+  if(mode==2)g_powerLifecycle=PowerLifecycle::Resuming;if(mode==3)++g_gameRulesEpoch;
+  fixtureLinkRequire(!fixtureInitialBindingCurrent(clientHandle,gameHandle,tracked,client,1,receipt),names[mode]);
+ }
+ {
+  const auto client=fixtureLinkSetup();json detail;NativeGameSelectionReceipt receipt;
+  ++generation;
+  fixtureLinkRequire(discoverGame(client,1,detail,&receipt).pid==selected.pid&&receipt.powerGeneration==generation&&g_gameValveTarget.qualificationPower==0,"fresh-validation-admits-positive-target-without-borrowing-empty-proof-power");
+ }
+ {
+  const auto client=fixtureLinkSetup();json detail;NativeGameSelectionReceipt receipt;
+  onCaptureWindow=[](DWORD){++generation;};
+  fixtureLinkRequire(!discoverGame(client,1,detail,&receipt).pid&&!receipt.target.identityGeneration,"power-change-during-association-revokes-selection");
+ }
+ {
+  const auto client=fixtureLinkSetup();json detail;NativeGameSelectionReceipt receipt;const auto found=discoverGame(client,1,detail,&receipt);
+  assert(found.pid);const auto tracked=tracking(client,found);Handle clientHandle(reinterpret_cast<HANDLE>(uintptr_t{client.pid})),gameHandle(reinterpret_cast<HANDLE>(uintptr_t{found.pid}));
+  ++generation;g_gameValveTarget.qualificationPower=0;
+  fixtureLinkRequire(!fixtureInitialBindingCurrent(clientHandle,gameHandle,tracked,client,1,receipt),"ready-to-ready-power-generation-change-revokes-queued-binding");
+ }
+ fixtureLinkRequire(inputCalls==0&&scopeCalls==0&&pidActivateCalls==0,"selection-integration-does-not-write-game-input-focus-or-steam-scope");
+}
+
+static void fixtureRunGameSelectionCacheCases(){
+ using namespace DenseTrackerRuntimeSeam;
+ {
+  fixtureLinkSetup();fixtureWindowsQueries=fixtureValveReadCalls=0;const auto beforeChecks=g_gameValveOnePidChecks.load();
+  for(unsigned i=0;i<1001;++i){NativeGameSelectionReceipt cached;
+   assert(nativeValveReadCachedSelection(&cached)&&cached.target.game.pid==selected.pid&&cached.target.game.processCreated==selected.processCreated&&
+    cached.target.game.path==selected.path&&!cached.processValidated&&nativeValveSelectionCurrent(cached));}
+  fixtureLinkRequire(fixtureWindowsQueries==0&&fixtureValveReadCalls==0&&g_gameValveOnePidChecks.load()==beforeChecks,
+   "1001-game-cache-reads-use-zero-windows-process-or-fresh-rule-queries");
+ }
+ {
+  fixtureLinkSetup();fixtureWindowsQueries=fixtureValveReadCalls=0;NativeGameSelectionReceipt cached,fresh;
+  assert(nativeValveReadCachedSelection(&cached));assert(nativeValveReadCurrentSelection(&fresh));
+  fixtureLinkRequire(!cached.processValidated&&fresh.processValidated&&fixtureValveReadCalls==1&&
+   cached.target.game.pid==fresh.target.game.pid&&cached.target.identityGeneration==fresh.target.identityGeneration,
+   "cached-observation-and-fresh-process-validation-remain-explicitly-different");
+ }
+ {
+  const auto client=fixtureLinkSetup();fixtureWindowsQueries=fixtureValveReadCalls=0;json detail;NativeGameSelectionReceipt cached;
+  const auto found=discoverGame(client,1,detail,&cached);
+  fixtureLinkRequire(found.pid==selected.pid&&!cached.processValidated&&fixtureValveReadCalls==0&&
+   detail.value("selectionRead","")=="cached-observation"&&!detail.value("processValidatedAtSelectionRead",true),
+   "actual-steam-link-consumer-no-longer-repeats-game-layer-fresh-pid-read");
+ }
+ for(int mode=0;mode<11;++mode){
+  fixtureLinkSetup();fixtureWindowsQueries=fixtureValveReadCalls=0;NativeGameSelectionReceipt cached;cached.target.identityGeneration=123;cached.processValidated=true;
+  const char* names[]={"cached-pending-is-unknown","cached-unavailable-is-unknown","cached-zero-pid-is-unknown","cached-zero-birth-is-unknown",
+   "cached-empty-path-is-unknown","cached-zero-identity-generation-is-unknown","cached-rule-epoch-change-is-unknown",
+   "cached-exit-in-progress-is-unknown","cached-sleep-in-progress-is-unknown","cached-zero-rule-epoch-is-unknown","cached-zero-power-generation-is-unknown"};
+  if(mode==0)g_gameValveTarget.discoveryState=NativeGameDiscoveryState::Pending;
+  if(mode==1)g_gameValveTarget.discoveryState=NativeGameDiscoveryState::Unavailable;
+  if(mode==2)g_gameValveTarget.game.pid=0;if(mode==3)g_gameValveTarget.game.processCreated=0;
+  if(mode==4)g_gameValveTarget.game.path.clear();if(mode==5)g_gameValveTarget.identityGeneration=0;
+  if(mode==6)++g_gameRulesEpoch;if(mode==7)g_exitRequested=true;if(mode==8)g_powerLifecycle=PowerLifecycle::Resuming;
+  if(mode==9)g_gameValveTarget.rulesEpoch=0;if(mode==10)generation=0;
+  fixtureLinkRequire(!nativeValveReadCachedSelection(&cached)&&!cached.target.identityGeneration&&!cached.processValidated&&
+   fixtureWindowsQueries==0&&fixtureValveReadCalls==0,names[mode]);
+ }
+ {
+  fixtureLinkSetup();fixtureWindowsQueries=fixtureValveReadCalls=0;NativeGameSelectionReceipt cached;
+  assert(nativeValveReadCachedSelection(&cached));++g_gameValveTarget.generation;
+  fixtureLinkRequire(nativeValveSelectionCurrent(cached)&&fixtureWindowsQueries==0&&fixtureValveReadCalls==0,
+   "cached-current-check-short-circuits-ordinary-heartbeat-without-refresh");
+  g_gameValveTarget.identityGeneration+=2;
+  fixtureLinkRequire(!nativeValveSelectionCurrent(cached)&&fixtureWindowsQueries==0&&fixtureValveReadCalls==0,
+   "cached-a-b-a-receipt-cannot-authorize-new-selection");
+ }
+ {
+  fixtureLinkSetup();fixtureWindowsQueries=fixtureValveReadCalls=0;NativeGameSelectionReceipt old,current;
+  assert(nativeValveReadCachedSelection(&old));++generation;
+  assert(nativeValveReadCachedSelection(&current));
+  fixtureLinkRequire(!nativeValveSelectionCurrent(old)&&current.powerGeneration==generation&&!current.processValidated&&
+   fixtureWindowsQueries==0&&fixtureValveReadCalls==0,"new-power-scope-can-observe-cached-game-but-cannot-borrow-old-validation");
+ }
+ {
+  const auto client=fixtureLinkSetup();fixtureWindowsQueries=fixtureValveReadCalls=0;json detail;NativeGameSelectionReceipt cached;
+  NativeDetectedGame other=selected;other.pid=14904;other.path=L"E:\\Other\\Other.exe";
+  const auto at=SleepSteamRecovery::localSecond(other.processCreated);
+  assert(sgWriteFileAtomic(steamRoot+L"\\logs\\gameprocess_log.txt","["+at+"] AppID 945360 adding PID "+std::to_string(other.pid)+" as a tracked process \"\""+W2U(other.path)+"\"\"\n"));
+  fixtureLinkRequire(!discoverGame(client,1,detail,&cached).pid&&selected.pid!=other.pid&&fixtureValveReadCalls==0,
+   "cache-fast-path-does-not-redirect-current-game-to-another-steam-candidate");
+ }
+ fixtureLinkRequire(inputCalls==0&&scopeCalls==0&&pidActivateCalls==0,"cache-query-and-association-retain-zero-control-writes");
+}
+
 int wmain(int argc,wchar_t** argv){std::cout<<std::unitbuf;assert(argc==9);base=fspath::absolute(argv[1]).wstring();assert(base.find(L"SleepSteamOnly-20261011")!=std::wstring::npos);assert(sgEnsureMarkerDir(base));
+ if(__GAME_SELECTION_CACHE_ONLY__){fixtureRunGameSelectionCacheCases();fixtureRunGameLinkSelectionCases();std::cout<<"GAME_SELECTION_CACHE_ONLY groups="<<passed<<" realSteamOperations=0\n";return 0;}
+ if(__GAME_LINK_SELECTION_ONLY__){fixtureRunDenseTrackerConsumers();fixtureRunGameLinkSelectionCases();std::cout<<"GAME_LINK_SELECTION_ONLY groups="<<passed<<" realSteamOperations=0\n";return 0;}
+ if(__SHARED_ACCOUNT_ONLY__){fixtureRunSharedAccountCases();std::cout<<"SHARED_ACCOUNT_ONLY groups="<<passed<<" realSteamOperations=0\n";return 0;}
+ if(__WAKE_ADMISSION_ONLY__){const auto r=fixtureRunWakeAdmissionCases();std::cout<<"WAKE_ADMISSION_ONLY "<<r.dump()<<"\n";return r.value("failed",0u)==0?0:3;}
+ if(__CAPTURE_BUDGET_ONLY__){const auto r=fixtureRunCaptureBudgetCases();std::cout<<"CAPTURE_BUDGET_ONLY "<<r.dump()<<"\n";return r.value("failed",0u)==0?0:3;}
+ if(__FINISH_EVIDENCE_ONLY__){const auto finishEvidenceResult=fixtureRunFinishEvidenceSnapshotCases();std::cout<<"FINISH_EVIDENCE_ONLY "<<finishEvidenceResult.dump()<<"\n";return finishEvidenceResult.value("failed",0u)==0?0:3;}
  using namespace ymcc::sleepsteam;
  std::uint32_t app=0;assert(appId("2399932135",app)&&app==2399932135U);assert(appId("-1895035161",app)&&app==2399932135U);assert(appId("10307630032478011392",app)&&app==2399932135U);assert(appId("945360",app)&&app==945360);
  pass("three exact TMNT shortcut identities normalize to one app without 64bit rounding");
+ reset();{
+  const auto priorEpoch=g_sleepRecoveryAutoConfigEpoch.load();const bool priorEnabled=g_sleepRecoveryAutoEnabled.load();unsigned saves=0;
+  const auto same=SleepRecoveryAuto::set({{"enabled",priorEnabled}},[&](bool value){++saves;return value==priorEnabled;});
+  assert(same.value("ok",false)&&saves==1&&g_sleepRecoveryAutoConfigEpoch==priorEpoch&&jobs.empty());
+  const auto failed=SleepRecoveryAuto::set({{"enabled",!priorEnabled}},[&](bool){++saves;return false;});
+  assert(!failed.value("ok",true)&&saves==2&&g_sleepRecoveryAutoConfigEpoch==priorEpoch&&g_sleepRecoveryAutoEnabled==priorEnabled&&jobs.empty());
+ }
+ pass("explicit same-state preference save never rearms recovery and failed save changes no admission or epoch");
  reset();begin(true,0);assert(jobs.size()==1);pass("confirmed ready wake inspects immediately without separate 1500ms grace");
  reset();assert(sleepRecoveryAutoWaitMs(tick)==~ULONGLONG{0});begin(true,0);
  assert(SleepRecoveryAuto::get()["phase"]=="inspecting"&&sleepRecoveryAutoWaitMs(tick)==45001);
@@ -1644,6 +2614,7 @@ reset();running=true;inputContextAvailable=true;steamFocusedApp=2399932135U;capt
  assert(!sleepSteamWakeOperationAllows(7,g_sleepRecoveryAutoConfigEpoch.load())&&g_powerLifecycle==PowerLifecycle::Resuming);
  SleepRecoveryAuto::exportCurrentSnapshot();auto exported=json::parse(readFile(SG_DIR+L"\\wake-recovery-current.json"));
  assert(exported["wakeReadiness"]["basis"]==saved["wakeReadiness"]["basis"]&&exported["attempts"]["input"]==1);
+ const auto finishEvidenceSnapshot=fixtureRunFinishEvidenceSnapshotCases();assert(finishEvidenceSnapshot["tests"]==4&&finishEvidenceSnapshot["checks"]==40&&finishEvidenceSnapshot["failed"]==0);
  pass("automatic result/current export retain true shared-Resuming/Steam-only wake basis and joint PID evidence without claiming device admission or gameplay success");
  reset();prepare();tick=1000;sleepRecoveryAutoRecordKernelWake(7,507,1,-1,sgNowFileTime());g_powerLifecycle=PowerLifecycle::Resuming;
  assert(!sleepSteamWakeOperationAllows(7,g_sleepRecoveryAutoConfigEpoch.load())&&!g_sleepRecoveryAutoPending&&jobs.empty());
@@ -1719,74 +2690,7 @@ reset();running=true;inputContextAvailable=true;steamFocusedApp=2399932135U;capt
  pass("queued worker delayed beyond the unchanged sixty-second final-wake observation budget performs no late CDP mutation");
  }
 
- // R27: execute the production main.cpp request wrapper, not a mock account gate.
- reset();running=true;inputContextAvailable=true;registrySteamPid=selected.pid;registryAccountOverride=99;
- begin();assert(SleepSteamRecovery::captured.client.account==42&&SleepSteamRecovery::captured.client.liveAccountPinned&&sessionDiscoveryCalls==1);
- job();assert(inputCalls==1&&scopeCalls==0&&lastInputRequest["sleepSessionProcess"]["pid"]==steamPid&&lastInputRequest["account"]==42);
- assert(SleepSteamRecovery::captured.client.foreignRegistryAccountIgnored&&!SleepRecoveryAuto::state.receipt.value("healthVerified",false));
- pass("foreign game registry PID/account and corrupt observer account bind only the verified Steam UI account; actual wrapper admits original-game resume");
- reset();registrySteamPid=selected.pid;registryAccountOverride=99;SleepRecoveryAuto::set({{"enabled",true}});
- SleepSteamRecovery::prepareSuspend();const auto pinned=SleepSteamRecovery::prepared.client;assert(pinned.account==42&&sessionDiscoveryCalls==1);
- steamAccount=43;SleepSteamRecovery::prepareSuspend();g_powerLifecycle=PowerLifecycle::Suspending;SleepSteamRecovery::captureSuspend(7);
- SleepSteamRecovery::captureSuspend(7);assert(sessionDiscoveryCalls==1&&SleepSteamRecovery::captured.client.account==42&&SleepSteamRecovery::liveAccountSession.account==42);
- while(!jobs.empty())job();g_powerLifecycle=PowerLifecycle::Resuming;
- auto pinnedRead=SleepSteamRecovery::inspect(7);assert(!pinnedRead["steam"]["ok"].get<bool>()&&inputCalls==0&&scopeCalls==0&&sessionDiscoveryCalls==1);
- pass("duplicate preparation and queued capture preserve the earliest account; actual UI account change is rejected without wake discovery");
- for(int mode=0;mode<9;++mode){reset();registrySteamPid=selected.pid;registryAccountOverride=99;
-   auto client=SleepSteamRecovery::prepareSession();assert(client.account==42&&sessionDiscoveryCalls==1);
-   json witness={{"pid",client.pid},{"created",std::to_string(client.created)},{"root",W2U(client.root)}};
-   if(mode==0)witness["pid"]=selected.pid;
-   if(mode==1)witness["created"]=std::to_string(client.created+1);
-   if(mode==2)witness["root"]=W2U(client.root+L"-wrong");
-   if(mode==3)steamCreated++;
-   if(mode==4)steamPid++;
-   if(mode==5)steamAccount=43;
-   if(mode==6)steamProcessAvailable=false;
-   if(mode==7)witness["created"]="+"+std::to_string(client.created);
-   if(mode==8)witness["pid"]=0U;
-   auto denied=steamLiveRequest(42,{{"operation","sleep.inspect"},{"appids",json::array()},{"sleepSessionProcess",witness}});
-   assert(!denied.value("ok",true)&&!denied.value("mutated",true)&&inputCalls==0&&scopeCalls==0&&sessionDiscoveryCalls==1);
- }
- pass("production wrapper rejects foreign PID, wrong birth/root, restart/account switch, exited Steam and malformed witness");
- for(int mode=0;mode<8;++mode){reset();registrySteamPid=selected.pid;registryAccountOverride=99;
-   if(mode==0)steamAccount=0;
-   if(mode==1)steamReadFailure="live-timeout";
-   if(mode==2)sessionReadMalformed=true;
-   if(mode==3)onSteamCall=[](const auto& op){if(op=="sleep.session.inspect")steamCreated++;};
-   if(mode==4)onSteamCall=[](const auto& op){if(op=="sleep.session.inspect")registrySteamPid=steamPid;};
-   if(mode==5)onSteamCall=[](const auto& op){if(op=="sleep.session.inspect")g_powerLifecycle=PowerLifecycle::Resuming;};
-   if(mode==6)onSteamCall=[](const auto& op){if(op=="sleep.session.inspect")generation++;};
-   if(mode==7)onSteamCall=[](const auto& op){if(op=="sleep.session.inspect")g_sleepRecoveryAutoConfigEpoch++;};
-   auto failed=SleepSteamRecovery::prepareSession();assert(!SleepSteamRecovery::validSession(failed)&&!SleepSteamRecovery::liveAccountSession.liveAccountPinned);
- }
- pass("zero/mutating/unavailable UI discovery and process/registry/wake/generation/epoch swap never pin a replacement account");
- for(auto lifecycle:{PowerLifecycle::Resuming,PowerLifecycle::Suspended}){reset();registrySteamPid=selected.pid;registryAccountOverride=99;g_powerLifecycle=lifecycle;
-   auto unbound=SleepSteamRecovery::prepareSession();assert(!SleepSteamRecovery::validSession(unbound)&&sessionDiscoveryCalls==0);
- }
- pass("unbound resumed or suspended client cannot discover or adopt an account");
- reset();registrySteamPid=selected.pid;registryAccountOverride=99;auto client=SleepSteamRecovery::prepareSession();g_powerLifecycle=PowerLifecycle::Resuming;
- assert(SleepSteamRecovery::prepareSession().account==42&&sessionDiscoveryCalls==1);registryAccountOverride=101;
- assert(SleepSteamRecovery::session().account==42&&SleepSteamRecovery::sameSession(client));
- auto ordinary=steamLiveRequest(42,{{"operation","overlay.get"},{"sleepSessionProcess",{{"pid",steamPid},{"created",std::to_string(steamCreated)},{"root",W2U(steamRoot)}}}});
- assert(!ordinary.value("ok",true)&&ordinary["reason"]=="steam-account-changed");
- assert(!steamLiveRequest(0,{{"operation","sleep.session.inspect"}}).value("ok",true));
- pass("pinned fallback account survives foreign registry noise; ordinary feature gates and required process witness remain enforced");
- reset();registrySteamPid=selected.pid;registryAccountOverride=99;SleepSteamRecovery::prepareSuspend();SleepSteamRecovery::captureSuspend(7);
- assert(sessionDiscoveryCalls==0&&inputCalls==0&&scopeCalls==0);pass("disabled owner performs no account discovery or recovery actions");
- reset();registrySteamPid=selected.pid;registryAccountOverride=99;auto readClient=SleepSteamRecovery::prepareSession();
- steamReadFailure="live-transport-uncertain";auto noWrite=SleepSteamRecovery::liveRequest(readClient,{{"operation","sleep.inspect"},{"appids",json::array()}});
- assert(!noWrite.value("ok",true)&&!noWrite.value("mutated",true)&&noWrite["reason"]=="live-read-unavailable");
- pass("bounded sleep account and inspection reads preserve fixed read-only transport uncertainty mapping");
-
- reset();running=false;inputContextAvailable=true;registrySteamPid=selected.pid;registryAccountOverride=99;SleepRecoveryAuto::set({{"enabled",true}});
- g_powerLifecycle=PowerLifecycle::Suspending;SleepSteamRecovery::captureSuspend(7);while(!jobs.empty())job();g_powerLifecycle=PowerLifecycle::Ready;
- auto boundInspection=SleepSteamRecovery::inspect(7);auto listReceipt=SleepSteamRecovery::reconcile(boundInspection,7,g_sleepRecoveryAutoConfigEpoch);
- assert(listReceipt.value("accepted",false)&&scopeCalls==1&&sessionDiscoveryCalls==1&&SleepSteamRecovery::captured.client.account==42);
- pass("foreign registry account also permits exact same-session native list rescope through the production wrapper without invented Running state");
- reset();json exactWitness={{"pid",steamPid},{"created",std::to_string(steamCreated)},{"root",W2U(steamRoot)+"/"}};
- auto normalizedRead=steamLiveRequest(42,{{"operation","sleep.inspect"},{"appids",json::array()},{"sleepSessionProcess",exactWitness}});
- assert(normalizedRead.value("ok",false)&&!normalizedRead.value("mutated",true));
- pass("normalized install-root separators keep the same verified Steam birth/image witness");
+ fixtureRunSharedAccountCases();
 
  {
   reset();std::ifstream pf{fspath::path(argv[2]).parent_path()/"sleep_steam_msi_tmnt_r31_primary_split_080143.json"};json field;pf>>field;
@@ -1959,46 +2863,17 @@ reset();running=true;inputContextAvailable=true;steamFocusedApp=2399932135U;capt
   assert(!trackedProcessInventory(many).complete&&trackedProcessInventory(many).reason=="steam-tracker-live-process-limit");
   pass("dense tracker retains32-live-process discovery cap");
  }
- {
-  // All five production wrappers, with filesystem/OS/CDP mocks only.
-  for(int ending=0;ending<4;++ending){
-   reset();running=true;inputContextAvailable=true;pidWindowExists=true;
-   const auto original=selected;const auto at=SleepSteamRecovery::localSecond(original.processCreated);
-   const std::string add="["+at+"] AppID 10307630032478011392 adding PID "+std::to_string(original.pid)+" as a tracked process \"\""+W2U(original.path)+"\"\"\n";
-   std::string dense;for(unsigned i=0;i<20001;++i)dense+="["+at+"] unrelated observation\n";dense+=add;
-   const std::string primary="["+SleepSteamRecovery::localSecond(fileTimeBase)+"] Game process updated : AppID 2399932135 \"fixture\", ProcID "+std::to_string(original.pid)+", IP 0.0.0.0:0\n";
-   assert(dense.size()<trackerMaximumBytes&&sgWriteFileAtomic(steamRoot+L"\\logs\\gameprocess_log.txt",dense));
-   assert(sgWriteFileAtomic(steamRoot+L"\\logs\\console_log.txt",primary));
-   const auto client=SleepSteamRecovery::session();const SleepSteamRecovery::Game game{original.pid,original.processCreated,original.path};
-   assert(SleepSteamRecovery::nativePrimaryAllowsOriginal(client,game,2399932135U,true));
-   auto choice=SleepSteamRecovery::selectPreSleepSteamTarget(client,fileTimeBase,game);assert(choice.game.pid==game.pid&&choice.evidence["jointBindingVerified"]==true);
-   auto tracked=DenseTrackerRuntimeSeam::tracking(client,game);assert(tracked.complete&&tracked.binding.status=="tracked"&&tracked.binding.line==20002);
-   json discovery;assert(DenseTrackerRuntimeSeam::discoverGame(client,1,discovery).pid==game.pid);
-   begin();assert(SleepSteamRecovery::captured.game.pid==game.pid);
-   if(ending){dense+="["+at+"] "+(ending==1?"AppID 2399932135 no longer tracking PID "+std::to_string(original.pid)+", exit code 0":ending==2?"Remove 2399932135 from running list":"Client version: 1")+"\n";assert(sgWriteFileAtomic(steamRoot+L"\\logs\\gameprocess_log.txt",dense));}
-   const auto inspected=SleepSteamRecovery::inspect(7);
-   assert(inspected["originalGameRecovery"]["jointBindingVerified"]==(ending==0));
-   auto after=DenseTrackerRuntimeSeam::tracking(client,game);assert(after.complete&&(after.binding.status=="tracked")==!ending);
-   assert(SleepSteamRecovery::nativePrimaryAllowsOriginal(client,game,2399932135U,true)==!ending);
-   assert((DenseTrackerRuntimeSeam::discoverGame(client,1,discovery).pid==game.pid)==!ending);
-   assert(inputCalls==0&&scopeCalls==0&&pidActivateCalls==0);
-  }
-  pass("all5 production tracker consumers read dense complete snapshots and late invalidation without app input scope or focus writes");
-  for(int kind=0;kind<2;++kind){reset();const auto client=SleepSteamRecovery::session();const SleepSteamRecovery::Game game{selected.pid,selected.processCreated,selected.path};
-   const auto file=steamRoot+L"\\logs\\gameprocess_log.txt";
-   if(kind==0)assert(DeleteFileW(file.c_str()));else assert(sgWriteFileAtomic(file,std::string(trackerMaximumBytes+1,'x')));
-   assert(!SleepSteamRecovery::nativePrimaryAllowsOriginal(client,game,2399932135U));
-   assert(!SleepSteamRecovery::selectPreSleepSteamTarget(client,fileTimeBase,game).game.pid);
-   assert(!DenseTrackerRuntimeSeam::tracking(client,game).complete);json evidence;assert(!DenseTrackerRuntimeSeam::discoverGame(client,1,evidence).pid);
-   assert(inputCalls==0&&scopeCalls==0);
-  }
-  pass("dense fix preserves unavailable and file-truncated tracker refusal in production readers");
- }
+ fixtureRunDenseTrackerConsumers();
+ fixtureRunGameLinkSelectionCases();
+ fixtureRunGameSelectionCacheCases();
 
  std::cout<<"Steam-only production-header selftest: "<<passed<<" groups PASS\n";
 }
-'''.replace('__COORDINATOR_COST_ONLY__','true' if args.coordinator_cost_only else 'false').replace('__LINK_DENSE_SEAM__',link_dense_seam).replace('__CAPTURE_BUDGET_BASELINE__','true' if args.expect_capture_budget_rejected else 'false').replace('__TAIL__',tail).replace('__ONE_PID__',one_pid).replace('__WS_CONSTANTS__',ws_constants).replace('__LIVE_WRAPPER__',live_wrapper).replace('__PREDISPATCH_GUARD__',cancel_guard).replace('__PREDISPATCH_BASELINE__','true' if args.expect_native_predispatch_blocked else 'false').replace('__FIELD_PREDISPATCH_ELAPSED__',str(field_predispatch['terminalElapsedMs'])).replace('__DELAYED_WINDOW_BASELINE__','1' if args.expect_delayed_window_blocked else '0').replace('__NATIVE_PRIMARY_BASELINE__','true' if args.expect_native_primary_old_target else 'false')
+'''.replace('__GAME_SELECTION_CACHE_ONLY__','true' if args.game_selection_cache_only else 'false').replace('__GAME_LINK_SELECTION_ONLY__','true' if args.game_link_selection_only else 'false').replace('__VALVE_SNAPSHOT__',valve_snapshot).replace('__VALVE_SELECTION__',valve_selection).replace('__INITIAL_BINDING_PREDICATE__',initial_binding_predicate).replace('__SAME_IDENTITY_EPOCH__',same_identity_epoch).replace('__SHARED_ACCOUNT_ONLY__','true' if args.shared_account_only else 'false').replace('__ORIGINAL_RECOVERY_EVENTS__',queue_consumer).replace('__WAKE_ADMISSION_ONLY__','true' if args.wake_admission_only else 'false').replace('__CAPTURE_BUDGET_ONLY__','true' if args.capture_budget_only else 'false').replace('__COORDINATOR_COST_ONLY__','true' if args.coordinator_cost_only else 'false').replace('__LINK_DENSE_SEAM__',link_dense_seam).replace('__STEAM_LOG_SOURCE_PORT__',steam_log_source_port).replace('__FRESH_SOURCE_PORT__',fresh_source_port).replace('__CAPTURE_BUDGET_BASELINE__','true' if args.expect_capture_budget_rejected else 'false').replace('__TAIL__',tail).replace('__ONE_PID__',one_pid).replace('__WS_CONSTANTS__',ws_constants).replace('__LIVE_WRAPPER__',live_wrapper).replace('__PREDISPATCH_GUARD__',cancel_guard).replace('__PREDISPATCH_BASELINE__','true' if args.expect_native_predispatch_blocked else 'false').replace('__FIELD_PREDISPATCH_ELAPSED__',str(field_predispatch['terminalElapsedMs'])).replace('__DELAYED_WINDOW_BASELINE__','1' if args.expect_delayed_window_blocked else '0').replace('__NATIVE_PRIMARY_BASELINE__','true' if args.expect_native_primary_old_target else 'false').replace('__FINISH_EVIDENCE_ONLY__','true' if args.finish_evidence_only else 'false')
 source=out/'sleep_steam_only_selftest.cpp';source.write_text(cpp,'utf-8')
+if args.prepare_only:
+    print(json.dumps({'status':'PREPARED_ONLY','source':str(source),'selection':'game-selection-cache-only' if args.game_selection_cache_only else 'game-link-selection-only' if args.game_link_selection_only else 'shared-account-only' if args.shared_account_only else 'existing','businessExecuted':False}))
+    raise SystemExit(0)
 vs=Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat');exe=out/'sleep_steam_only_selftest.exe';fixtureDir=out/("owned-SleepSteamOnly-20261011-fixture-"+uuid.uuid4().hex[:12])
 cmd=out/'run-steam-only.cmd'
 toolchain_js='import {calibrationToolchainPreamble} from "./tools/fixtures/hc_reviewed_calibration/toolchain.mjs";process.stdout.write(calibrationToolchainPreamble(process.argv[1]));'

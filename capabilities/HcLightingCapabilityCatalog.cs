@@ -7,6 +7,10 @@ using System.Collections.ObjectModel;
 using System.Linq;
 namespace YeManFanBackend.Capabilities;
 
+public enum LightingOemOwnershipProtocol { LegacyCec, CeiiRam }
+public sealed record LightingOemOwnershipCapability(string DeviceId, LightingOemOwnershipProtocol Protocol,
+    string MethodOwner, bool SharedChargeIndicatorDeclared);
+
 public enum LightingSourceAdapter { FrozenHc, Oxp3Hid, SuperJoyCec, OneXX2MiniHid, ApexHidV2 }
 
 public sealed record LightingCapabilityDescriptor(string DeviceId, bool Brightness, bool SecondColor,
@@ -46,6 +50,11 @@ public static partial class HcLightingCapabilityCatalog
     public static HcCapabilityBinding<LightingCapabilityDescriptor>? Resolve(string? deviceClass) =>
         dispatcher.Resolve(deviceClass) ??
         (deviceClass is not null && extensionRoutes.TryGetValue(deviceClass, out var binding) ? binding : null);
+    public static LightingOemOwnershipCapability? ResolveOemOwnership(string? deviceClass)
+    {
+        var binding = Resolve(deviceClass);
+        return binding is null ? null : GeneratedOemOwnership.FirstOrDefault(row => row.DeviceId == binding.Device.DeviceId);
+    }
     public static bool IsReviewedExtension(string? deviceClass) =>
         deviceClass is not null && extensionRoutes.ContainsKey(deviceClass);
     public static bool IdentityMatches(string? actual, string? expected)
@@ -68,12 +77,13 @@ public static partial class HcLightingCapabilityCatalog
             "color" => levels.TryGetValue(effect, out var flag) && c.DeclaredEffects.HasFlag(flag),
             "brightness" => c.Brightness,
             "status" => c.StatusAvailable,
+            "restore-oem" => ResolveOemOwnership(actual) is not null,
             "off" => c.DeclaredEffects.HasFlag(HcSourceLedEffect.SolidColor),
             "preset" => c.PresetAvailable && presetId is not null && presetIds.Contains(presetId, StringComparer.Ordinal),
             _ => false };
         if (!allowed) throw new NotSupportedException("LIGHTING_OPERATION_UNAVAILABLE: " + action + ":" + effect);
         var independent = c.IndependentCore && GeneratedIndependentActionAllowed(binding.Device.DeviceId, action, effect);
-        var provider = c.SourceAdapter switch {
+        var provider = action == "restore-oem" ? "aya-oem-ownership" : c.SourceAdapter switch {
             LightingSourceAdapter.ApexHidV2 => "onex-apex-hid-v2",
             LightingSourceAdapter.SuperJoyCec => "superjoy-cec-v1",
             _ => independent ? IndependentProvider : "hc-device-core" };

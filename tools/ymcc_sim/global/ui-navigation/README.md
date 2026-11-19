@@ -29,3 +29,21 @@ Playwright复用现有Codex依赖，可通过YMCC_SIM_BROWSER_RUNTIME_ENTRY指�
 同轮全页验收发现当前开机模式页的独立通用设置 scope 可进入却无法返回上方模式卡。PowerView 显式共享页面 scope，并把 details summary 纳入既有手柄焦点；其他 SettingsSections 默认隔离不变。通用服务/工具状态继续做全页可达和可返回检查，入口改用正式 A 操作，不删失败或缩小受测范围。
 
 2026-10-23：原四驱赛车小游戏由原创轻量暴力摩托替换，清理 live race.ts、旧方向盘组件、旧赛车引用和四项旧赛车自测；FPS 靶场保留。新的 motorcycle 模型/绘制/车把通过 gyro.motorcycle；gyro.preset-save 覆盖原生推进版本后的同编辑对象有界重读和拒绝跨游戏写入。gyroPresetSwitchCases 在真实 GyroMotionView 内注入 native CAS 冲突、持有写入并连续选择预设，要求最终为用户最后一次选择；旧页面须失败。默认720/800导航同时验证X实际命中AI、RT加速、LT刹车、B返回与场景切换。原有电源/全屏/safe-zero检查转接到摩托实际输出，未把旧检查置空。历史 frozen B43 夹具继续引用自己的旧快照，不重签为当前产品通过。
+# 修改器定向回归
+
+`Run-Ui.ps1 -EvidenceDir <新证据目录> -Scope trainer` 复用原 `controller.ui-navigation`，只执行正式顶部/修改器菜单在 720/800 的导航、B 返回和启动回执展示；不扩大默认 minimum 或完整验收范围。`-ToolManifest <清单>` 可显式绑定当前本机工具，仍执行完整声明目录、实际加载输入、源码及关闭回执核对，不放宽原预算。
+
+`Run-Ui.ps1 -EvidenceDir <新证据目录> -Scope virtual-click-start` 执行 720/800 两种视口的本机手柄 → Xbox 成功、保存后启动失败、已受理但设置未提交三种场景。实际界面点击和设置消费者走原代码；内存 IPC 注入后端回执与状态。逐项校验三个场景各出现两次，不执行其它页面或发布门。设置未提交仅在定向范围执行；原全 UI 范围的两个场景、测试 ID 和模块 minimum 不变。
+
+### 回放封存的原生启动失败回执
+
+沿用原定向入口、已核本机工具清单及外层进程守卫。两项回放参数须同时提供，且只允许显式 `-Scope virtual-click-start`。
+
+```powershell
+& 'G:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\tools\ymcc_sim\global\ui-navigation\Run-Ui.ps1' `
+  -EvidenceDir '<新证据目录>' -Scope virtual-click-start -ToolManifest '<本机工具清单>' `
+  -VirtualStartNativeReceipt '<封存的原生 result.json>' `
+  -VirtualStartNativeReceiptSha256 '<原件的 64 位小写 SHA-256>'
+```
+
+同一请求的失败 ACK 与 `verifying` / `failure` 分开交给真实 Vue 消费者，只重定位到期时间。720/800 各跑一次：失败不报开启、设置不改、验证中按钮保持锁定、不清快捷键、不重发。未传回放参数仍执行原定向 6 项。回放不执行原生写入或挂载，不代签现场根因、自愈、设备归还或完整 UI 验收。

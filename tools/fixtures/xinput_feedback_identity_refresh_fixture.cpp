@@ -61,7 +61,7 @@ static std::condition_variable g_gamepadSerialCv;
 static bool g_gamepadSerialStopping=false;
 struct FeedbackStopDeadline {unsigned long long generation=0,due=0;};
 static std::optional<FeedbackStopDeadline> g_gamepadSerialFeedbackStop;
-static void gamepadSerialStartLocked(){}
+static bool gamepadSerialStartLocked(){return true;}
 static bool gamepadSerialScheduleFeedbackStop(unsigned long long,int);
 @@POLICY_HELPER@@
 @@TARGET@@

@@ -1,0 +1,558 @@
+#define NOMINMAX
+#define YMCC_ROG_FSE_DIAGNOSTICS 0
+#include <windows.h>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstdlib>
+#include <cstring>
+#include <cctype>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <mutex>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
+#include "json.hpp"
+#include "log_frequency_policy.h"
+#include "log_snapshot_state.h"
+#include "log_jsonl_boundary.h"
+#include "sleep_fact_log_record.h"
+#include "input_pipe_test_allocation_fault.h"
+using json=nlohmann::json;namespace fspath=std::filesystem;
+static std::wstring g_testRoot;
+static std::mutex g_nativeLifecycleLogMx;
+struct FixtureStream:std::ofstream {
+    bool failClose=false;
+    void close(){if(failClose){setstate(std::ios::failbit);return;}std::ofstream::close();}
+};
+static FixtureStream g_nativeLifecycleLog,g_nativeDetailLog;
+static uint32_t g_nativeLifecycleFrameWrites=0,g_nativeDetailWrites=0;
+static ULONGLONG g_nativeDetailLastFlushTick=0;
+static unsigned long long kLogMaxBytes=4*1024*1024;
+static std::atomic<bool> g_domainLogEnabled[2]={false,false};
+static std::atomic<int> g_powerLifecycle{0};static std::atomic<unsigned long long> g_powerGeneration{1};
+static HWND g_hwnd=nullptr;
+static int pathAllocationFailureAfter=-1;
+static std::wstring app_data_dir(){if(pathAllocationFailureAfter>=0)ymcc::testing::allocationFault::failAfter(pathAllocationFailureAfter);return g_testRoot;}
+static bool timestampAllocationFault=false;static unsigned timestampAllocationFaults=0;
+static std::string nativeLifecycleTimestamp(){
+    if(timestampAllocationFault){++timestampAllocationFaults;ymcc::testing::allocationFault::failAfter(0);return std::string(128,'x');}
+    return "2000-01-01T00:00:00.000";
+}
+static const char* powerLifecycleName(int){return "fixture";}
+static bool mirrorThrows=false;
+#ifdef YMCC_SENSOR_RETIREMENT_ONLY
+static unsigned gyroDomainRows=0,virtualDomainRows=0,modelObserverEntered=0,virtualObserverEntered=0;
+static bool domainLogEnabled(const char* domain);
+static void mirrorLifecycleToDomains(const char* event,const json& detail);
+#else
+static void mirrorLifecycleToDomains(const char*,const json&){if(mirrorThrows)throw std::runtime_error("mirror-only injection");}
+#endif
+static void rotateOneLogFile(const std::wstring&,unsigned long long=kLogMaxBytes){}
+#ifdef YMCC_SENSOR_RETIREMENT_ONLY
+// ACTUAL_SENSOR_OBSERVER_GUARDS
+#else
+static bool domainLogEnabled(const char*){return g_domainLogEnabled[1].load();}
+static void modelAdaptationObserveRecord(const char*,const json&){}
+static void virtualAdaptationObserveRecord(const char*,const json&){}
+#endif
+static bool adaptationFlushThrows=false,domainFlushThrows=false;
+static void modelAdaptationFlush(){if(adaptationFlushThrows)throw std::runtime_error("adaptation flush");}
+static void flushDomainLogs(bool){if(domainFlushThrows)throw std::runtime_error("domain flush");}
+static void flushTdpObservationLogs(bool){}
+static json nativeSteamGameLinkLogDetail(const json& value){return value;}
+namespace ymcc::inputHost::diagnostics {struct Scope{static bool active(){return false;}};}
+static void inputHostDeferNativeDiagnostic(const char*,json,bool,bool=false){throw std::runtime_error("inactive port");}
+#ifdef YMCC_SENSOR_RETIREMENT_ONLY
+#include <winrt/base.h>
+#include "log_ai_index.h"
+static json sensorErrorFixtureDetail(const char* sensor,unsigned kind,unsigned long code=0x80070005UL){
+    const char* name=kind==1?"winrt-hresult":kind==2?"allocation-exception":kind==3?"standard-exception":"unknown-exception";
+    return {{"sensor",sensor},{"failure",{{"schema",1},{"kind",name},{"codeKnown",kind==1},
+        {"codeDomain",kind==1?json("HRESULT-from-caught-WinRT-exception"):json(nullptr)},{"code",kind==1?json(code):json(nullptr)}}}};
+}
+struct SensorPort {
+    bool available=true,failRevoke=true,failInterval=true;
+    unsigned revokeCalls=0,intervalCalls=0,revokeKind=0,intervalKind=0;
+    unsigned long revokeHresult=0x80070005UL,intervalHresult=0x80070005UL;
+    explicit operator bool()const{return available;}
+    static void fail(unsigned kind,unsigned long code){
+        if(kind==1)throw winrt::hresult_error(winrt::hresult(static_cast<int32_t>(code)));
+        if(kind==2)throw std::bad_alloc();
+        if(kind==3)throw std::runtime_error("opaque-fixture-exception");
+        throw 1;
+    }
+    void ReadingChanged(unsigned){++revokeCalls;if(failRevoke)fail(revokeKind,revokeHresult);}
+    void ReportInterval(unsigned value){++intervalCalls;if(value!=0||failInterval)fail(intervalKind,intervalHresult);}
+};
+static SensorPort g_gyroSensor,g_accelSensor;
+static bool g_gyroReadingChangedSubscribed=true,g_accelReadingChangedSubscribed=true;
+static unsigned g_gyroReadingChangedToken=11,g_accelReadingChangedToken=22;
+static std::atomic<unsigned long long> g_inputCaptureSensorGeneration{0},g_msiSensorApiGeneration{0};
+static std::atomic<bool> g_sensorWakePollActive{false};
+struct CancelPort{void cancelPending(){}};static CancelPort g_virtualGyroWake;
+struct ResetPort{void reset(){}};static ResetPort g_windowsSensorDeviceChange;
+struct SinkPort{void SetBindingGeneration(unsigned long long){}};
+static SinkPort fixtureSink;static SinkPort* g_inputCaptureSink=&fixtureSink;
+struct ProviderPort{bool stop(){return true;}};static ProviderPort g_msiSensorApiProvider;
+static bool inputCaptureStopHcWindowsSensorApi(){return true;}
+static std::mutex g_sensorMetaMx;
+struct SensorMetaPort{std::string gyroFamily="winrt",accelFamily="winrt";bool gyroPresent=true,accelPresent=true;};
+static SensorMetaPort g_sensorMeta;
+static void appendDomainLog(const char* domain,const char* event,const json& detail){
+    if(!domainLogEnabled(domain))return;
+    if((!std::strcmp(event,"gyro-power-unsubscribe-failed")||!std::strcmp(event,"gyro-power-interval-reset-failed"))&&detail.contains("failure")){
+        if(!std::strcmp(domain,"gyro"))++gyroDomainRows;
+        if(!std::strcmp(domain,"virtual"))++virtualDomainRows;
+    }
+}
+#endif
+// ACTUAL_FUNCTIONS
+static json exportEvidence(){json availability; // ACTUAL_EXPORT
+    return availability;}
+static json checks=json::array();
+static void check(bool value,const char* name){checks.push_back({{"name",name},{"pass",value}});}
+using Failure=ymcc::logging::NativeLogFailureEvidence;
+static unsigned long long count(Failure::Kind kind){return ymcc::logging::nativeLogFailureEvidence().snapshot()["buckets"][size_t(kind)]["observedFailures"].get<unsigned long long>();}
+static void closeStreams(){g_nativeLifecycleLog.exceptions(std::ios::goodbit);g_nativeDetailLog.exceptions(std::ios::goodbit);g_nativeLifecycleLog.clear();g_nativeDetailLog.clear();g_nativeLifecycleLog.close();g_nativeDetailLog.close();g_nativeLifecycleLog.clear();g_nativeDetailLog.clear();}
+struct ControlledBuffer:std::streambuf {
+    enum class Mode{writeFail,flushFail,throwing};Mode mode;
+    explicit ControlledBuffer(Mode value):mode(value){}
+    std::streamsize xsputn(const char*,std::streamsize n)override{if(mode==Mode::throwing)throw std::runtime_error("write injection");return mode==Mode::writeFail?0:n;}
+    int_type overflow(int_type value)override{if(mode==Mode::throwing)throw std::runtime_error("write injection");return mode==Mode::writeFail?traits_type::eof():value;}
+    int sync()override{return mode==Mode::flushFail?-1:0;}
+};
+struct BufferLease {
+    std::ofstream& stream;std::streambuf* previous;
+    BufferLease(std::ofstream& value,ControlledBuffer& buffer):stream(value),previous(static_cast<std::ostream&>(value).rdbuf(&buffer)){}
+    ~BufferLease(){stream.exceptions(std::ios::goodbit);static_cast<std::ostream&>(stream).rdbuf(previous);stream.clear();}
+};
+static json readRecoveryRows(const fspath::path& root){
+    std::ifstream input(root/L"native-lifecycle.log");json rows=json::array();std::string line;
+    while(std::getline(input,line))if(!line.empty())rows.push_back(json::parse(line));return rows;
+}
+int wmain(int argc,wchar_t** argv){try{
+    if(argc!=2)return 3;const fspath::path root(argv[1]);fspath::create_directories(root);g_testRoot=(root/L"missing"/L"parent").wstring();
+    (void)ymcc::sleepfactlog::writerIdentity();
+#ifdef YMCC_SENSOR_RETIREMENT_ONLY
+    // Warm the actual C++/WinRT exception support before the handle baseline.
+    try{throw winrt::hresult_error(E_ACCESSDENIED);}catch(const winrt::hresult_error&){}
+#endif
+    DWORD before=0,after=0;
+    if(!GetProcessHandleCount(GetCurrentProcess(),&before))return 3;
+    const json detail={{"reason","controlled"}};
+#ifdef YMCC_SENSOR_RETIREMENT_ONLY
+    g_testRoot=root.wstring();
+#if defined(YMCC_SENSOR_SOURCE_GATE_ONLY)
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==4&&g_gyroReadingChangedSubscribed&&g_accelReadingChangedSubscribed,
+        "source preflight does not consume the original four first-failure selections");
+    const auto preparationBefore=count(Failure::preparationException);
+    ymcc::testing::allocationFault::failAfter(0);
+    for(unsigned i=0;i<50000;++i)inputCaptureUnsubscribeWinRtSensorsImpl();
+    const auto sourceArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(sourceArm==0&&count(Failure::preparationException)==preparationBefore&&readRecoveryRows(root).size()==4&&
+        g_gyroSensor.revokeCalls==50001&&g_accelSensor.revokeCalls==50001&&g_gyroSensor.intervalCalls==50001&&g_accelSensor.intervalCalls==50001,
+        "50000 actual original four-API retirement calls skip repeated JSON without consuming a C++ allocation fault");
+#ifndef YMCC_SENSOR_SOURCE_GATE_OLD_PREFIX_ONLY
+    check(modelObserverEntered==0&&virtualObserverEntered==0,"actual adaptation rejection guards exclude both sensor retirement event names");
+    const auto mirrorBefore=gyroDomainRows;g_domainLogEnabled[0]=true;
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);g_domainLogEnabled[0]=false;
+    check(gyroDomainRows==mirrorBefore+4&&readRecoveryRows(root).size()==4,
+        "actual gyro-only gate and mirror routing keep all four repeat offers while Native detail remains OFF");
+    g_domainLogEnabled[1]=true;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);g_domainLogEnabled[1]=false;
+    {std::ifstream in(root/L"native-detail.log");std::string line;unsigned rows=0;while(std::getline(in,line))if(!line.empty())++rows;
+     check(rows==4&&readRecoveryRows(root).size()==4,"actual virtual gate retains four Native detailed repeats");}
+    ymcc::testing::allocationFault::failAfter(0);inputCaptureUnsubscribeWinRtSensorsImpl();
+    const auto gateOffArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(gateOffArm==0&&readRecoveryRows(root).size()==4,"turning both detail gates OFF returns to the same known repeat without JSON");
+    g_gyroSensor.revokeKind=1;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    auto rows=readRecoveryRows(root);
+    check(rows.size()==5&&rows.back()["failure"]["kind"]=="winrt-hresult"&&rows.back()["failure"]["code"]==0x80070005UL,
+        "exception kind change bypasses source repeat suppression");
+    g_gyroSensor.revokeHresult=0x80070057UL;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    rows=readRecoveryRows(root);check(rows.size()==6&&rows.back()["failure"]["code"]==0x80070057UL,
+        "HRESULT change bypasses source repeat suppression");
+    g_gyroSensor.failRevoke=false;inputCaptureUnsubscribeWinRtSensorsImpl();g_gyroSensor.failRevoke=true;g_gyroReadingChangedSubscribed=true;
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==7,"original API success rearms source preflight through the same existing scalar slot");
+    g_gyroSensor.available=false;inputCaptureUnsubscribeWinRtSensorsImpl();g_gyroSensor.available=true;
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==7,"skipping an absent sensor does not manufacture source recovery");
+    ++g_powerGeneration;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==11,"power change retains all four original failures after source preflight");
+    const auto preparationStart=count(Failure::preparationException);
+    g_gyroSensor.revokeHresult=0x80004005UL;timestampAllocationFault=true;inputCaptureUnsubscribeWinRtSensorsImpl();timestampAllocationFault=false;
+    check(count(Failure::preparationException)==preparationStart+1&&ymcc::logging::nativeLogFailureEvidence().sensorRetirementPreparationFailurePending.load(),
+        "changed failure still reaches original Native preparation failure accounting");
+    ymcc::testing::allocationFault::failAfter(0);for(unsigned i=0;i<1000;++i)inputCaptureUnsubscribeWinRtSensorsImpl();
+    const auto pendingArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(pendingArm==0&&readRecoveryRows(root).size()==11,"original pending-preparation guard remains quiet before real event recovery");
+    appendNativeLifecycleLog("session-clean-exit",{{"sourceGateFixture",true}});
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==16&&!ymcc::logging::nativeLogFailureEvidence().sensorRetirementPreparationFailurePending.load(),
+        "original good event append rearms all four current failure offers without replaying a lost row");
+    ymcc::logging::SensorRetirementLogState pure;
+    check(!pure.repeatKnown(0,1)&&pure.retain(0,1)&&pure.repeatKnown(0,1)&&!pure.retain(0,1)&&!pure.repeatKnown(99,1),
+        "repeat lookup is nonmutating and never grants suppression to unknown slots");
+#endif
+
+#elif defined(YMCC_SENSOR_ERROR_DETAIL_ONLY)
+    g_gyroSensor.revokeKind=g_accelSensor.revokeKind=g_gyroSensor.intervalKind=g_accelSensor.intervalKind=1;
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    auto rows=readRecoveryRows(root);
+    bool exact=rows.size()==4&&g_gyroReadingChangedSubscribed&&g_accelReadingChangedSubscribed;
+    for(const auto& row:rows)exact=exact&&row.contains("failure")&&row["failure"]["kind"]=="winrt-hresult"&&
+        row["failure"]["codeKnown"]==true&&row["failure"]["code"]==0x80070005UL&&
+        row["failure"]["codeDomain"]=="HRESULT-from-caught-WinRT-exception";
+    check(exact,"four original catches retain actual WinRT exception HRESULT bits and failed subscription flags");
+#ifndef YMCC_SENSOR_ERROR_OLD_PREFIX_ONLY
+    g_gyroSensor.revokeHresult=0x80070057UL;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    rows=readRecoveryRows(root);
+    check(rows.size()==5&&rows.back()["failure"]["code"]==0x80070057UL&&rows.back()["sensor"]=="gyro"&&
+        rows.back()["event"]=="gyro-power-unsubscribe-failed","changed HRESULT retains one new witness for its own operation and sensor");
+#ifndef YMCC_SENSOR_ERROR_KEY_PREFIX_ONLY
+    const auto stable=rows.size();for(unsigned i=0;i<100;++i)inputCaptureUnsubscribeWinRtSensorsImpl();
+    check(readRecoveryRows(root).size()==stable,"same actual caught HRESULTs remain detailed when repeated");
+    g_gyroSensor.revokeKind=3;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    rows=readRecoveryRows(root);check(rows.size()==stable+1&&rows.back()["failure"]["kind"]=="standard-exception"&&
+        rows.back()["failure"]["codeKnown"]==false&&rows.back()["failure"]["code"].is_null()&&rows.back()["failure"]["codeDomain"].is_null(),
+        "standard exception is visible without manufacturing an HRESULT or message");
+    g_gyroSensor.revokeKind=2;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    rows=readRecoveryRows(root);check(rows.size()==stable+2&&rows.back()["failure"]["kind"]=="allocation-exception"&&
+        rows.back()["failure"]["codeKnown"]==false,"allocation exception remains a separate unknown-code category");
+    g_gyroSensor.revokeKind=0;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    rows=readRecoveryRows(root);check(rows.size()==stable+3&&rows.back()["failure"]["kind"]=="unknown-exception"&&
+        !rows.back()["failure"].contains("message"),"nonstandard exception preserves unknown kind without raw text");
+    const char* events[]={"gyro-power-unsubscribe-failed","gyro-power-unsubscribe-failed","gyro-power-interval-reset-failed","gyro-power-interval-reset-failed"};
+    const json payloads[]={sensorErrorFixtureDetail("gyro",0),sensorErrorFixtureDetail("accel",1),
+        sensorErrorFixtureDetail("gyro",1),sensorErrorFixtureDetail("accel",1)};
+    const auto beforeHot=rows.size();ymcc::testing::allocationFault::failAfter(0);
+    for(unsigned i=0;i<50000;++i)for(unsigned slot=0;slot<4;++slot)appendNativeLifecycleLog(events[slot],payloads[slot]);
+    const auto hotArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(hotArm==0&&readRecoveryRows(root).size()==beforeHot,"50000 repeats per typed slot allocate no C++ heap in Native selection and add no resident rows");
+    g_domainLogEnabled[1]=true;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);g_domainLogEnabled[1]=false;
+    {std::ifstream in(root/L"native-detail.log");std::string line;unsigned count=0;bool detailed=true;
+     while(std::getline(in,line))if(!line.empty()){++count;detailed=detailed&&json::parse(line).contains("failure");}
+     check(count==4&&detailed&&readRecoveryRows(root).size()==beforeHot,"original detail gate retains all four typed repeat receipts");}
+    g_gyroSensor.failRevoke=false;inputCaptureUnsubscribeWinRtSensorsImpl();g_gyroSensor.failRevoke=true;g_gyroReadingChangedSubscribed=true;
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==beforeHot+1,"actual revoke success rearms only that typed failure slot");
+    const auto beforePower=readRecoveryRows(root).size();++g_powerGeneration;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==beforePower+4,"power generation still rearms all four typed failure slots");
+    auto malformed=payloads[0];malformed["failure"]["kind"]="future";
+    auto booleanCode=payloads[1];booleanCode["failure"]["code"]=true;
+    auto badKnown=payloads[2];badKnown["failure"]["codeKnown"]=false;
+    auto badSchema=payloads[3];badSchema["failure"]["schema"]=true;
+    const auto beforeMalformed=readRecoveryRows(root).size();
+    for(unsigned repeat=0;repeat<2;++repeat){appendNativeLifecycleLog(events[0],malformed);appendNativeLifecycleLog(events[1],booleanCode);
+        appendNativeLifecycleLog(events[2],badKnown);appendNativeLifecycleLog(events[3],badSchema);}
+    flushNativeLifecycleLogs(false);check(readRecoveryRows(root).size()==beforeMalformed+8,"future contradictory and malformed error payloads cannot enter known repeat selection");
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==beforeMalformed+12,"malformed error payloads rearm the original four supported witnesses");
+    ymcc::logging::SensorRetirementLogState legacy;bool oldShape=true;
+    for(size_t slot=0;slot<4;++slot)oldShape=oldShape&&legacy.retain(slot,1)&&!legacy.retain(slot,1);
+    check(oldShape,"existing two-argument memo consumers keep sensor-only behavior");
+    ymcc::logging::SensorRetirementErrorKey key;
+    auto zero=sensorErrorFixtureDetail("gyro",1,0);auto maximum=sensorErrorFixtureDetail("gyro",1,0xffffffffUL);
+    check(ymcc::logging::SensorRetirementErrorKey::read(zero,key)&&key.kind==1&&key.code==0&&
+        ymcc::logging::SensorRetirementErrorKey::read(maximum,key)&&key.code==0xffffffffUL,
+        "synthetic reported HRESULT uint32 boundaries are accepted without claiming those exceptions occurred");
+    check(ymcc::logging::SensorRetirementErrorKey::read({{"sensor","gyro"}},key)&&key.kind==0&&key.code==0,
+        "reused parsed key clears prior HRESULT when a legacy sensor-only row is read");
+#endif
+#endif
+
+#elif defined(YMCC_SENSOR_SOURCE_PREPARATION_ONLY)
+    const auto preparationBefore=count(Failure::preparationException);
+    ymcc::testing::allocationFault::failAfter(0);inputCaptureUnsubscribeWinRtSensorsImpl();
+    const auto sourceArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    auto sourceRecovery=ymcc::logging::nativeLogFailureEvidence().snapshot()["eventAppendRecovery"];
+    check(sourceArm==-1&&count(Failure::preparationException)==preparationBefore+1&&
+        sourceRecovery["unrecoveredSensorRetirementPreparationFailureObserved"]==true&&
+        sourceRecovery["unrecoveredFailureObserved"]==false&&readRecoveryRows(root).empty(),
+        "actual failed receipt construction arms named preparation evidence before Native append");
+#ifndef YMCC_SENSOR_SOURCE_PREP_PREFIX_ONLY
+    ymcc::testing::allocationFault::failAfter(0);
+    for(unsigned i=0;i<50000;++i)inputCaptureUnsubscribeWinRtSensorsImpl();
+    const auto pendingSourceArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(pendingSourceArm==0&&count(Failure::preparationException)==preparationBefore+1&&!g_nativeLifecycleLog.is_open()&&
+        g_gyroSensor.revokeCalls==50001&&g_accelSensor.revokeCalls==50001&&g_gyroSensor.intervalCalls==50001&&g_accelSensor.intervalCalls==50001,
+        "50000 pending source receipts skip diagnostic allocation while original four API calls still execute");
+    g_domainLogEnabled[1]=true;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);g_domainLogEnabled[1]=false;
+    {std::ifstream in(root/L"native-detail.log");std::string line;unsigned rows=0;while(std::getline(in,line))if(!line.empty())++rows;
+     check(rows==4&&readRecoveryRows(root).empty()&&ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==0,
+        "explicit detailed gate can still observe source failures without inventing event-file recovery");}
+    const auto epoch=ymcc::logging::nativeLogFailureEvidence().recoveryEpoch();
+    appendNativeLifecycleLog("session-clean-exit",{{"fixture","natural-source-recovery"}});
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==5&&ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==epoch+1&&
+        !ymcc::logging::nativeLogFailureEvidence().sensorRetirementPreparationFailurePending.load()&&
+        g_gyroReadingChangedSubscribed&&g_accelReadingChangedSubscribed,
+        "natural good append reopens four current source receipts without changing failed API flags");
+#endif
+#else
+    const char* events[]={"gyro-power-unsubscribe-failed","gyro-power-unsubscribe-failed","gyro-power-interval-reset-failed","gyro-power-interval-reset-failed"};
+    const json payloads[]={sensorErrorFixtureDetail("gyro",0),sensorErrorFixtureDetail("accel",0),sensorErrorFixtureDetail("gyro",0),sensorErrorFixtureDetail("accel",0)};
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==4,"first four original sensor API failures remain resident with detail OFF");
+#ifndef YMCC_SENSOR_OLD_PREFIX_ONLY
+    auto rows=readRecoveryRows(root);
+    check(rows[0]["sensor"]=="gyro"&&rows[1]["sensor"]=="accel"&&rows[2]["event"]==events[2]&&rows[3]["sensor"]=="accel"&&g_gyroReadingChangedSubscribed&&g_accelReadingChangedSubscribed,
+        "actual catch sites retain sensor identity and original failed subscription flags");
+#ifndef YMCC_SENSOR_SUCCESS_PREFIX_ONLY
+    const auto initialSize=rows.size();
+    for(unsigned i=0;i<100;++i)inputCaptureUnsubscribeWinRtSensorsImpl();
+    check(readRecoveryRows(root).size()==initialSize,"same original failure sites do not brush resident rows on repeated retirement calls");
+    ymcc::testing::allocationFault::failAfter(0);
+    for(unsigned i=0;i<50000;++i)for(unsigned slot=0;slot<4;++slot)appendNativeLifecycleLog(events[slot],payloads[slot]);
+    const auto repeatArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(repeatArm==0&&readRecoveryRows(root).size()==initialSize,"50000 alternating observations per slot do not allocate in Native logging or brush resident rows");
+#endif
+    g_gyroSensor.failRevoke=g_accelSensor.failRevoke=g_gyroSensor.failInterval=g_accelSensor.failInterval=false;
+    const auto beforeSuccess=readRecoveryRows(root).size();
+    ymcc::testing::allocationFault::failAfter(0);
+    inputCaptureUnsubscribeWinRtSensorsImpl();
+    const auto successArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(successArm==0&&!g_gyroReadingChangedSubscribed&&!g_accelReadingChangedSubscribed&&readRecoveryRows(root).size()==beforeSuccess,
+        "actual successful API returns rearm silently without C++ heap allocation");
+    g_gyroSensor.failRevoke=g_accelSensor.failRevoke=g_gyroSensor.failInterval=g_accelSensor.failInterval=true;
+    g_gyroReadingChangedSubscribed=g_accelReadingChangedSubscribed=true;
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==beforeSuccess+4,"same-power errors after corresponding actual success retain four fresh witnesses");
+#ifndef YMCC_SENSOR_SUCCESS_PREFIX_ONLY
+    auto size=readRecoveryRows(root).size();
+    g_domainLogEnabled[1]=true;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);g_domainLogEnabled[1]=false;
+    {std::ifstream in(root/L"native-detail.log");std::string line;unsigned detailRows=0;while(std::getline(in,line))if(!line.empty())++detailRows;
+     check(detailRows==4&&readRecoveryRows(root).size()==size,"known repeats remain available through the original detailed gate");}
+    ++g_powerGeneration;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==size+4,"power change rearms all four operation sensor slots");size+=4;
+    g_gyroSensor.failRevoke=false;inputCaptureUnsubscribeWinRtSensorsImpl();
+    g_gyroSensor.failRevoke=true;g_gyroReadingChangedSubscribed=true;inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==size+1&&readRecoveryRows(root).back()["event"]==events[0]&&readRecoveryRows(root).back()["sensor"]=="gyro",
+        "one revoke success does not rearm accel or interval failures");++size;
+    g_gyroSensor.failInterval=false;inputCaptureUnsubscribeWinRtSensorsImpl();g_gyroSensor.failInterval=true;
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==size+1&&readRecoveryRows(root).back()["event"]==events[2]&&readRecoveryRows(root).back()["sensor"]=="gyro",
+        "one interval success rearms only its own original API failure");++size;
+    g_gyroSensor.available=false;inputCaptureUnsubscribeWinRtSensorsImpl();g_gyroSensor.available=true;
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==size,"skipped missing sensor does not invent a successful API return");
+    const json unknownSensor={{"sensor","future"}},extended={{"sensor","gyro"},{"futureError",123}},badType={{"sensor",true}},missing=json::object();
+    appendNativeLifecycleLog(events[0],unknownSensor);appendNativeLifecycleLog(events[0],unknownSensor);
+    appendNativeLifecycleLog(events[0],extended);appendNativeLifecycleLog(events[0],extended);
+    appendNativeLifecycleLog(events[2],badType);appendNativeLifecycleLog(events[2],missing);flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==size+6,"unknown sensor extra fields bad type and missing schema stay resident");size+=6;
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==size+4,"unknown schemas rearm the next supported first evidence without conflating sensors");size+=4;
+    ++g_powerGeneration;const auto preparationBefore=count(Failure::preparationException);
+    timestampAllocationFault=true;appendNativeLifecycleLog(events[0],payloads[0]);timestampAllocationFault=false;
+    auto recovery=ymcc::logging::nativeLogFailureEvidence().snapshot()["eventAppendRecovery"];
+    check(count(Failure::preparationException)==preparationBefore+1&&recovery["unrecoveredSensorRetirementPreparationFailureObserved"]==true&&recovery["unrecoveredFailureObserved"]==false&&recovery["unrecoveredPreparationFailureObserved"]==false,
+        "named Native preparation failure is distinct from file and screen causes");
+    ymcc::testing::allocationFault::failAfter(0);
+    for(unsigned i=0;i<50000;++i)for(unsigned slot=0;slot<4;++slot)appendNativeLifecycleLog(events[slot],payloads[slot]);
+    const auto pendingArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(pendingArm==0&&readRecoveryRows(root).size()==size&&count(Failure::preparationException)==preparationBefore+1,
+        "pending Native preparation fault does not start same-state diagnostic retries");
+    const auto epoch=ymcc::logging::nativeLogFailureEvidence().recoveryEpoch();appendNativeLifecycleLog("session-clean-exit",{{"fixture","natural-good-append"}});
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==size+5&&ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==epoch+1&&
+        !ymcc::logging::nativeLogFailureEvidence().sensorRetirementPreparationFailurePending.load(),
+        "natural good event append rearms four current failures after Native preparation fault");size+=5;
+    ++g_powerGeneration;const auto unavailable=count(Failure::eventUnavailable);g_nativeLifecycleLog.setstate(std::ios::badbit);
+    appendNativeLifecycleLog(events[0],payloads[0]);
+    for(unsigned i=0;i<50000;++i)appendNativeLifecycleLog(events[0],payloads[0]);
+    check(count(Failure::eventUnavailable)==unavailable+1&&readRecoveryRows(root).size()==size,
+        "original event stream failure records one selected exit and repeats do not retry it");
+    g_nativeLifecycleLog.clear();appendNativeLifecycleLog("session-clean-exit",{{"fixture","next-natural-good-append"}});
+    inputCaptureUnsubscribeWinRtSensorsImpl();flushNativeLifecycleLogs(false);
+    check(readRecoveryRows(root).size()==size+5&&ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==epoch+2,
+        "original event file recovery reopens current sensor evidence without restoring lost rows");
+    Failure other;other.record(Failure::preparationException,"unrelated");other.observeEventAppendSuccess();
+    check(other.recoveryEpoch()==0,"unrelated preparation failure does not create a sensor or screen recovery epoch");
+#endif
+#endif
+#endif
+#elif defined(YMCC_SCREEN_PREPARATION_ONLY)
+    g_testRoot=root.wstring();
+    const json state={{"enabled",true},{"mode","steamdeck"}};const std::string elite="elite",persona="steamdeck";
+#if !defined(YMCC_SCREEN_PREP_NATIVE_PREFIX_ONLY)
+    ymcc::testing::allocationFault::failAfter(0);logScreenTouchpadObservation("screenTouchpads.get",elite,state);const auto sourceFaultConsumed=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    auto recovery=ymcc::logging::nativeLogFailureEvidence().snapshot()["eventAppendRecovery"];
+    check(sourceFaultConsumed==-1&&count(Failure::preparationException)==1&&recovery["unrecoveredPreparationFailureObserved"]==true&&recovery["unrecoveredFailureObserved"]==false&&recovery["epoch"]==0,"actual source allocation failure is recorded separately from file failures");
+#if !defined(YMCC_SCREEN_PREP_SOURCE_PREFIX_ONLY)
+    ymcc::testing::allocationFault::failAfter(0);for(unsigned i=0;i<50000;++i)logScreenTouchpadObservation("screenTouchpads.get",elite,state);const auto sourceQuietArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(sourceQuietArm==0&&count(Failure::preparationException)==1&&!g_nativeLifecycleLog.is_open(),"50000 pending source preparation reads allocate nothing and open no log file");
+    appendNativeLifecycleLog("domain-log-gate",{{"reason","natural-source-recovery"}});logScreenTouchpadObservation("screenTouchpads.get",elite,state);
+    check(ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==1&&readRecoveryRows(root).size()==2,"original natural event append reopens the failed source preparation witness");
+    ymcc::testing::allocationFault::failAfter(0);for(unsigned i=0;i<50000;++i)logScreenTouchpadObservation("screenTouchpads.get",elite,state);const auto stableArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(stableArm==0&&readRecoveryRows(root).size()==2,"50000 recovered stable source reads remain silent without diagnostic allocation");
+#endif
+#endif
+#if !defined(YMCC_SCREEN_PREP_SOURCE_PREFIX_ONLY)
+    logScreenTouchpadObservation("screenTouchpads.get",persona,state);
+    const auto beforeNativeRows=readRecoveryRows(root).size();const auto beforePreparation=count(Failure::preparationException);const auto beforeEpoch=ymcc::logging::nativeLogFailureEvidence().recoveryEpoch();
+    const json changed={{"enabled",false},{"mode","steamdeck"}};
+    timestampAllocationFault=true;logScreenTouchpadObservation("screenTouchpads.get",persona,changed);timestampAllocationFault=false;
+    const auto nativeFaultConsumed=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    auto nativeRecovery=ymcc::logging::nativeLogFailureEvidence().snapshot()["eventAppendRecovery"];
+    check(nativeFaultConsumed==-1&&timestampAllocationFaults==1&&count(Failure::preparationException)==beforePreparation+1&&nativeRecovery["unrecoveredPreparationFailureObserved"]==true&&nativeRecovery["unrecoveredFailureObserved"]==false&&ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==beforeEpoch&&readRecoveryRows(root).size()==beforeNativeRows,"actual Native preparation allocation failure rearms current screen evidence without pretending file failure");
+#if !defined(YMCC_SCREEN_PREP_NATIVE_PREFIX_ONLY)
+    ymcc::testing::allocationFault::failAfter(0);for(unsigned i=0;i<50000;++i)logScreenTouchpadObservation("screenTouchpads.get",persona,changed);const auto nativeQuietArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(nativeQuietArm==0&&count(Failure::preparationException)==beforePreparation+1&&readRecoveryRows(root).size()==beforeNativeRows,"50000 pending Native preparation reads do not retry allocation or file writes");
+    logScreenTouchpadObservation("screenTouchpads.set",persona,changed);logScreenTouchpadObservation("screenTouchpads.get",persona,changed);
+    auto rows=readRecoveryRows(root);
+    check(ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==beforeEpoch+1&&rows.size()==beforeNativeRows+2&&rows[beforeNativeRows]["callSite"]=="screenTouchpads.set"&&rows.back()["state"]==changed,"original setting receipt stays admitted and the next get retains current state");
+    logScreenTouchpadObservation("screenTouchpads.set",persona,changed);logScreenTouchpadObservation("screenTouchpads.saveProfiles",persona,changed);
+    check(readRecoveryRows(root).size()==rows.size()+2&&ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==beforeEpoch+1,"identical setting actions retain every receipt without inventing more recovery epochs");
+    Failure unrelated;unrelated.record(Failure::preparationException,"other-event");unrelated.observeEventAppendSuccess();
+    check(unrelated.recoveryEpoch()==0&&unrelated.snapshot()["eventAppendRecovery"]["unrecoveredPreparationFailureObserved"]==false,"unrelated preparation exceptions cannot rearm screen logging");
+    const auto finalRecovery=exportEvidence()["nativeLogFailureEvidence"]["stats"]["eventAppendRecovery"];
+    check(finalRecovery["schemaVersion"]==7&&finalRecovery["unrecoveredMsiFeedbackPreparationFailureObserved"]==false&&finalRecovery["unrecoveredPreparationFailureObserved"]==false&&finalRecovery["unrecoveredFailureObserved"]==false&&finalRecovery["oldLostRowRestored"]==false&&finalRecovery["currentFileHealthProven"]==false,"versioned exported preparation and file causes remain distinct without delivery proof");
+#endif
+#endif
+#elif defined(YMCC_SCREEN_RECOVERY_ONLY)
+    const json screenState={{"enabled",true},{"mode","steamdeck"},{"events",0}};
+    const std::string persona="steamdeck";
+    logScreenTouchpadObservation("screenTouchpads.get",persona,screenState);
+    check(count(Failure::eventOpen)==1,"first actual screen observation reaches original failing file open");
+    auto firstRecovery=ymcc::logging::nativeLogFailureEvidence().snapshot()["eventAppendRecovery"];
+    check(firstRecovery["epoch"]==0&&firstRecovery["unrecoveredFailureObserved"]==true,"failed first observation does not create a recovery epoch");
+    ymcc::testing::allocationFault::failAfter(0);for(unsigned i=0;i<50000;++i)logScreenTouchpadObservation("screenTouchpads.get",persona,screenState);const auto armedBefore=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(armedBefore==0&&count(Failure::eventOpen)==1,"50000 stable reads while file failed perform no new allocation or open attempt");
+    g_testRoot=root.wstring();appendNativeLifecycleLog("domain-log-gate",{{"reason","existing-real-write"}});
+    check(ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==1,"unrelated original successful event append and flush creates one recovery edge");
+    logScreenTouchpadObservation("screenTouchpads.get",persona,screenState);
+    auto rows=readRecoveryRows(root);
+    check(rows.size()==2&&rows.back()["event"]=="screen-touchpads-state"&&rows.back()["state"]==screenState,"same current screen state is retained after original file exit recovers");
+#ifndef YMCC_SCREEN_RECOVERY_PREFIX_ONLY
+    ymcc::testing::allocationFault::failAfter(0);for(unsigned i=0;i<50000;++i)logScreenTouchpadObservation("screenTouchpads.get",persona,screenState);const auto armedAfter=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(armedAfter==0&&readRecoveryRows(root).size()==2,"50000 stable reads after recovery stay silent and allocate no diagnostic payload");
+    const json changedState={{"enabled",false},{"mode","steamdeck"},{"events",0}};
+    {ControlledBuffer buffer(ControlledBuffer::Mode::writeFail);BufferLease lease(g_nativeLifecycleLog,buffer);logScreenTouchpadObservation("screenTouchpads.get",persona,changedState);}
+    check(count(Failure::eventWrite)==1&&ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==1,"failed changed-state append leaves epoch unchanged");
+    for(unsigned i=0;i<1000;++i)logScreenTouchpadObservation("screenTouchpads.get",persona,changedState);
+    check(count(Failure::eventWrite)==1&&readRecoveryRows(root).size()==2,"failed reoffer creates no same-state retry loop");
+    appendNativeLifecycleLog("domain-log-gate",{{"reason","second-natural-write"}});logScreenTouchpadObservation("screenTouchpads.get",persona,changedState);
+    rows=readRecoveryRows(root);check(rows.size()==4&&rows.back()["state"]==changedState&&ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==2,"second actual recovery permits one current changed-state witness");
+    g_domainLogEnabled[1]=true;appendNativeLifecyclePrepared("seed-detail",detail,false,nullptr);
+    {ControlledBuffer buffer(ControlledBuffer::Mode::writeFail);BufferLease lease(g_nativeDetailLog,buffer);appendNativeLifecyclePrepared("detail-failed",detail,false,nullptr);}
+    g_domainLogEnabled[1]=false;logScreenTouchpadObservation("screenTouchpads.get",persona,changedState);
+    check(count(Failure::detailWrite)==1&&ymcc::logging::nativeLogFailureEvidence().recoveryEpoch()==2&&readRecoveryRows(root).size()==4,"detailed file failure never rearms resident screen snapshots");
+    Failure local;local.record(Failure::eventOpen,"local");ymcc::testing::allocationFault::failAfter(0);for(unsigned i=0;i<50000;++i)local.observeEventAppendSuccess();const auto localArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(localArm==0&&local.recoveryEpoch()==1,"successful writes after one failure advance only once and allocate no C++ heap");
+    local.eventRecoveryEpoch.store(~0ULL);local.record(Failure::eventWrite,"saturation");local.observeEventAppendSuccess();
+    check(local.recoveryEpoch()==~0ULL&&local.snapshot()["eventAppendRecovery"]["epochLimitReached"]==true,"recovery epoch saturates without wrapping to an old cache identity");
+    const auto exported=exportEvidence()["nativeLogFailureEvidence"]["stats"]["eventAppendRecovery"];
+    check(exported["epoch"]==2&&exported["oldLostRowRestored"]==false&&exported["currentFileHealthProven"]==false,"exported recovery edge never claims original missing row or current file health");
+#endif
+#elif defined(YMCC_NATIVE_FAILURE_FLUSH_ONLY)
+    g_testRoot=root.wstring();g_domainLogEnabled[1]=true;
+#if !defined(YMCC_NATIVE_CLOSE_CONTROL)
+    appendNativeLifecyclePrepared("flush-event",detail,true,nullptr);
+    {ControlledBuffer buffer(ControlledBuffer::Mode::flushFail);BufferLease lease(g_nativeLifecycleLog,buffer);flushNativeLifecycleLogs(false);}
+    check(count(Failure::eventFlush)==1,"original explicit event flush failure is retained");
+#ifndef YMCC_NATIVE_FLUSH_PREFIX_ONLY
+    appendNativeLifecyclePrepared("flush-detail",detail,false,nullptr);
+    {ControlledBuffer buffer(ControlledBuffer::Mode::flushFail);BufferLease lease(g_nativeDetailLog,buffer);flushNativeLifecycleLogs(true);}
+    auto boundary=ymcc::logging::nativeLogFailureEvidence().snapshot()["flushCloseBoundary"];
+    check(count(Failure::detailFlush)==1&&boundary["closePriorBadStateObservations"]==1&&boundary["knownCloseFailures"]==0,"bad state before close stays unknown rather than inferred close failure");
+    check(!g_nativeDetailLog.is_open()&&g_nativeDetailLog.good(),"original close then clear behavior remains");
+    auto beforeBoundary=boundary;flushNativeLifecycleLogs(true);
+    check(ymcc::logging::nativeLogFailureEvidence().snapshot()["flushCloseBoundary"]==beforeBoundary,"closing already closed detail stream invents no close failure");
+    appendNativeLifecyclePrepared("good-close",detail,false,nullptr);flushNativeLifecycleLogs(true);
+    check(ymcc::logging::nativeLogFailureEvidence().snapshot()["flushCloseBoundary"]==beforeBoundary,"successful original close changes no failure counters");
+    appendNativeLifecyclePrepared("throw-flush",detail,true,nullptr);
+    {ControlledBuffer buffer(ControlledBuffer::Mode::flushFail);BufferLease lease(g_nativeLifecycleLog,buffer);g_nativeLifecycleLog.exceptions(std::ios::badbit);flushNativeLifecycleLogs(false);}
+    check(count(Failure::eventException)==1,"explicit flush exception is attributed to original event stream");
+    const auto fileExceptions=count(Failure::eventException)+count(Failure::detailException);
+    adaptationFlushThrows=true;flushNativeLifecycleLogs(false);adaptationFlushThrows=false;
+    domainFlushThrows=true;flushNativeLifecycleLogs(false);domainFlushThrows=false;
+    boundary=ymcc::logging::nativeLogFailureEvidence().snapshot()["flushCloseBoundary"];
+    check(boundary["unassignedWrapperExceptions"]==2&&count(Failure::eventException)+count(Failure::detailException)==fileExceptions,"adaptation and domain wrapper exceptions are not Native file failures");
+#endif
+#endif
+#if !defined(YMCC_NATIVE_FLUSH_PREFIX_ONLY)
+    appendNativeLifecyclePrepared("controlled-close-failure",detail,false,nullptr);g_nativeDetailLog.failClose=true;flushNativeLifecycleLogs(true);g_nativeDetailLog.failClose=false;
+    auto controlledBoundary=ymcc::logging::nativeLogFailureEvidence().snapshot()["flushCloseBoundary"];
+    check(controlledBoundary["knownCloseFailures"]==1&&g_nativeDetailLog.is_open(),"controlled close refusal is retained before original clear");
+#ifndef YMCC_NATIVE_CLOSE_CONTROL
+    g_nativeDetailLog.close();g_nativeDetailLog.clear();
+    appendNativeLifecyclePrepared("controlled-close-exception",detail,false,nullptr);g_nativeDetailLog.failClose=true;g_nativeDetailLog.exceptions(std::ios::failbit);flushNativeLifecycleLogs(true);g_nativeDetailLog.exceptions(std::ios::goodbit);g_nativeDetailLog.failClose=false;g_nativeDetailLog.clear();
+    check(ymcc::logging::nativeLogFailureEvidence().snapshot()["flushCloseBoundary"]["knownCloseFailures"]==2,"controlled close exception preserves failed operation stage");
+    Failure local;ymcc::testing::allocationFault::failAfter(0);for(unsigned i=0;i<50000;++i)local.recordBoundary(Failure::closePriorBadState);const auto allocationArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(allocationArm==0&&local.snapshot()["flushCloseBoundary"]["closePriorBadStateObservations"]==50000,"50000 unknown close observations allocate no C++ heap");
+    {std::lock_guard<std::mutex> lock(local.mutex);local.boundary[Failure::closeFailure]=~0ULL;}local.recordBoundary(Failure::closeFailure);
+    check(local.snapshot()["flushCloseBoundary"]["knownCloseFailures"]==~0ULL,"close counter saturates rather than wraps");
+    const auto exported=exportEvidence()["nativeLogFailureEvidence"]["stats"];
+    check(exported["buckets"].size()==11&&exported["flushCloseBoundary"]["schemaVersion"]==1&&!exported["zeroProvesCompleteHistory"].get<bool>(),"actual export retains original eleven buckets and separate three scalar boundary observations");
+#endif
+#endif
+#else
+#ifdef YMCC_NATIVE_FAILURE_MIRROR_ONLY
+    g_testRoot=root.wstring();mirrorThrows=true;
+    appendNativeLifecyclePrepared("successful-file-before-mirror-exception",detail,true,nullptr);mirrorThrows=false;
+    check(count(Failure::eventException)==0,"postwrite mirror exception is not misclassified as Native file sink exception");
+    std::ifstream readBack(root/L"native-lifecycle.log");std::string stored;std::getline(readBack,stored);readBack.close();
+    check(json::parse(stored)==detail,"file row remains present before independently failed mirror");
+    check(exportEvidence()["nativeLogFailureEvidence"]["stats"]["buckets"][0]["stage"]=="record-wrapper-exception","outer catch stage does not falsely claim only preparation was reached");
+#else
+    const auto start=count(Failure::eventOpen);appendNativeLifecyclePrepared("first-event",detail,true,nullptr);
+    check(count(Failure::eventOpen)==start+1,"actual open failure is counted in event lane");
+#ifndef YMCC_NATIVE_FAILURE_PREFIX_ONLY
+    g_domainLogEnabled[1]=true;appendNativeLifecyclePrepared("first-detail",detail,false,nullptr);
+    check(count(Failure::detailOpen)==1,"actual open failure is counted in detail lane");
+    closeStreams();g_testRoot=root.wstring();
+    appendNativeLifecyclePrepared("success-event",detail,true,nullptr);appendNativeLifecyclePrepared("success-detail",detail,false,nullptr);
+    g_nativeDetailLog.flush();
+    std::ifstream readEvent(root/L"native-lifecycle.log"),readDetail(root/L"native-detail.log");std::string eventLine,detailLine;std::getline(readEvent,eventLine);std::getline(readDetail,detailLine);readEvent.close();readDetail.close();
+    check(json::parse(eventLine)==detail&&json::parse(detailLine)==detail,"successful actual file rows retain exact payload and lane");
+    const auto initialFlush=count(Failure::eventFlush);
+    {ControlledBuffer buffer(ControlledBuffer::Mode::writeFail);BufferLease lease(g_nativeLifecycleLog,buffer);appendNativeLifecyclePrepared("event-write",detail,true,nullptr);}
+    check(count(Failure::eventWrite)==1&&count(Failure::eventFlush)==initialFlush,"failed insertion counts write without reclassifying bad state as flush failure");
+    {ControlledBuffer buffer(ControlledBuffer::Mode::flushFail);BufferLease lease(g_nativeLifecycleLog,buffer);appendNativeLifecyclePrepared("event-flush",detail,true,nullptr);}
+    check(count(Failure::eventFlush)==initialFlush+1,"successful insertion then failed sync counts event flush");
+    g_nativeDetailWrites=15;
+    {ControlledBuffer buffer(ControlledBuffer::Mode::flushFail);BufferLease lease(g_nativeDetailLog,buffer);appendNativeLifecyclePrepared("detail-flush",detail,false,nullptr);}
+    check(count(Failure::detailFlush)==1,"original sixteenth detailed write retains flush failure");
+    {ControlledBuffer buffer(ControlledBuffer::Mode::writeFail);BufferLease lease(g_nativeDetailLog,buffer);appendNativeLifecyclePrepared("detail-write",detail,false,nullptr);}
+    check(count(Failure::detailWrite)==1,"detailed write failure remains distinct");
+    {ControlledBuffer buffer(ControlledBuffer::Mode::throwing);BufferLease lease(g_nativeLifecycleLog,buffer);g_nativeLifecycleLog.exceptions(std::ios::badbit);appendNativeLifecyclePrepared("event-exception",detail,true,nullptr);}
+    check(count(Failure::eventException)==1,"sink exception is observed without escaping original writer");
+    g_nativeLifecycleLog.setstate(std::ios::badbit);appendNativeLifecyclePrepared("unusable-event",detail,true,nullptr);
+    check(count(Failure::eventUnavailable)==1&&!g_nativeLifecycleLog.is_open(),"preexisting unusable open stream retains original close and clear behavior");
+    g_domainLogEnabled[1]=false;const auto offBefore=ymcc::logging::nativeLogFailureEvidence().snapshot();
+    const std::string invalid(1,static_cast<char>(0xff));const json malformed={{"bad",invalid}};
+    appendNativeLifecyclePrepared("off-detail",malformed,false,nullptr);
+    check(ymcc::logging::nativeLogFailureEvidence().snapshot()==offBefore,"detail OFF returns before serialization and does not claim failure");
+    appendNativeLifecycleLog("system-xinput-readback",{{"reason",nullptr}});
+    check(count(Failure::preparationException)==1,"actual classifier exception is visible as unassigned preparation failure");
+    auto exported=exportEvidence();check(exported["nativeLogFailureEvidence"]["stats"]["buckets"].size()==Failure::Capacity&&exported["nativeLogFailureEvidence"]["writerPid"]==GetCurrentProcessId(),"actual export block exposes fixed buckets and cached writer");
+    check(!exported["nativeLogFailureEvidence"]["stats"]["zeroProvesCompleteHistory"].get<bool>()&&!exported["nativeLogFailureEvidence"]["stats"]["deduplicationIsDeliveryProof"].get<bool>(),"export never promotes zero failures or memo selection into delivery proof");
+    Failure bounded;std::string longEvent(200,'x');longEvent[2]=static_cast<char>(0xff);bounded.record(Failure::eventOpen,longEvent.c_str());
+    auto boundedView=bounded.snapshot();const auto first=boundedView["buckets"][size_t(Failure::eventOpen)];
+    check(first["firstEvent"].get<std::string>().size()==95&&first["firstEventTruncated"]==true&&first["firstEventAsciiSanitized"]==true,"first event evidence is bounded and invalid bytes cannot poison export JSON");
+    ymcc::testing::allocationFault::failAfter(0);for(unsigned i=0;i<50000;++i)bounded.record(Failure::eventOpen,"repeat");const auto allocationArm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);
+    check(allocationArm==0&&bounded.snapshot()["buckets"][size_t(Failure::eventOpen)]["observedFailures"]==50001,"50000 failure observations allocate no C++ heap and retain fixed first witness");
+    {std::lock_guard<std::mutex> lock(bounded.mutex);bounded.buckets[Failure::eventOpen].count=~0ULL;}
+    bounded.record(Failure::eventOpen,"overflow");check(bounded.snapshot()["buckets"][size_t(Failure::eventOpen)]["counterLimitReached"]==true,"counter saturates without wrapping");
+    Failure concurrent;std::vector<std::thread> threads;for(unsigned t=0;t<4;++t)threads.emplace_back([&]{for(unsigned i=0;i<1000;++i)concurrent.record(Failure::detailWrite,"parallel");});for(auto& thread:threads)thread.join();
+    check(concurrent.snapshot()["buckets"][size_t(Failure::detailWrite)]["observedFailures"]==4000,"concurrent failures retain exact count without new product worker");
+#endif
+#endif
+#endif
+    closeStreams();if(!GetProcessHandleCount(GetCurrentProcess(),&after))return 3;check(before==after,"all owned stream and private test thread handles returned before exit");
+    unsigned failures=0;for(const auto& row:checks)failures+=!row["pass"].get<bool>();
+    std::cout<<json{{"selectedCase","native-sink-failure"},{"pass",failures==0},{"checks",checks},{"failures",failures},{"handlesBefore",before},{"handlesAfter",after},{"evidence",exportEvidence()},{"ports",
+#ifdef YMCC_SENSOR_RETIREMENT_ONLY
+ "actual domain getter and mirror routing;actual adaptation event-rejection guards;domain writes/provider stops/sensor operations are deterministic ports;real ofstream"
+#else
+ "domain mirrors and adaptation observers inactive;controlled streambuf injection;real ofstream open and successful writes"
+#endif
+ },{"productSdkDeviceSleepExecuted",false}}.dump(2)<<'\n';return failures?2:0;
+}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 3;}}

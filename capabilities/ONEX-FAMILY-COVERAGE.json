@@ -5722,7 +5722,7 @@
         "identity"
       ],
       "state": "UNMAPPED_DISCOVERY",
-      "title": "固定20类/21精确Product与当前家族覆盖仍有差额",
+      "title": "额外商业机型仍缺精确来源；固定21个Product已有选择入口",
       "observed": "本地固定 HC source union 无专用 X2Mini(Intel Arc G3 Extreme)/X2Air/X1Air/ApexAir/SuperX/SuperXPro/SuperV 类或 factory case。此为固定 HC 来源缺类，不等于 YMCC 整机未消费：Super X 已通过独立固定来源进入既有风扇与充电消费者，退出整机未映射名单；其灯光域仍缺已审路线。其余商业名到旧类的候选对应只作检索，不作 DMI 别名或能力准入。",
       "finiteRepair": [
         "保留尚未映射型号及逐能力域差额表和已有官方引用；仅无来源或无真实消费者的域标 UNKNOWN。Super X 已消费的风扇与充电不列为未接入；实机与物理效果验收仍独立保持 UNKNOWN。",
@@ -5782,6 +5782,12 @@
           "bytes": 40677,
           "sha256": "afabae4c0883b26303f72e65a1cf1bad35440c48309d5ec31035772175204bf6"
         }
+      },
+      "titleBeforeHc100": "固定20类/21精确Product与当前家族覆盖仍有差额",
+      "currentExactFactorySelectorAudit100": {
+        "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-100-INTEL-OP3-LIFECYCLE-CONSUMPTION/LIFECYCLE-SOURCE-REVIEW.json",
+        "bytes": 16010,
+        "sha256": "b5165ea5ba882e1f75b4489b22a2fbe457183717eea3b2bd0649945d075be6d5"
       }
     },
     {
@@ -8251,7 +8257,7 @@
       "conservativeSetupAndOuterShellMs": 521.9297,
       "ceilingMs": 1800000,
       "previousRemainingMs": 8193.7988,
-      "newChargeMs": 4971.0,
+      "newChargeMs": 4971,
       "additional90SecondsAuthorized": false,
       "reviewerModifiedLedger": false,
       "consumerBudgetBlocked": true
@@ -8260,5 +8266,190 @@
     "actualPreparedReuseExecuted": false,
     "packageOrHardwareAccepted": false,
     "wholeFamilyComplete": false
+  },
+  "currentIntelOp3Priority099": {
+    "phaseId": "HC-CODEX-099",
+    "status": "SOURCE_CONTRACT_CONFIRMED_EXISTING_CONSUMERS_INTEL_FIELD_NOT_OBSERVED",
+    "contract": {
+      "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-099-INTEL-OP3-PRIORITY/INTEL-OP3-CONTRACT.json",
+      "bytes": 10080,
+      "sha256": "b488fb0f262357b91c65ae2388b8075e11d52e58a60752cfa4d74a531b08b6cc"
+    },
+    "sourceManifest": {
+      "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-099-INTEL-OP3-PRIORITY/SOURCE-MANIFEST.json",
+      "bytes": 10492,
+      "sha256": "a38f803a04229618bb24aeed78d6934b7f6bbeeb3014558319c82adcaa523fc5"
+    },
+    "identity": "HandheldCompanion.Devices.OneXPlayer3",
+    "deviceId": "ymcc.device.OneXPlayer3",
+    "profile": "OneXX3",
+    "keyTable": "kOneXX3Keys",
+    "keys": [
+      {
+        "keyId": "turbo",
+        "currentLabel": "Turbo",
+        "route": "keyboard-vk",
+        "keys": [
+          "Ctrl",
+          "Win",
+          "Alt"
+        ],
+        "physicalOneXLabelBinding": "UNKNOWN; source does not establish electrical mapping from manufacturer OneX label"
+      },
+      {
+        "keyId": "keyboard",
+        "currentLabel": "Keyboard",
+        "route": "keyboard-vk",
+        "keys": [
+          "Ctrl",
+          "Win",
+          "O"
+        ],
+        "manufacturerBehaviorEvidenceOnly": "keyboard/mouse switch: long press changes mode, short press opens keyboard"
+      },
+      {
+        "keyId": "home",
+        "currentLabel": "Home",
+        "route": "onex-x2-vendor-held",
+        "vendorButtonIds": [
+          "0x21",
+          "0x24"
+        ],
+        "held": true,
+        "source": "OneXPlayer3.MapVendorButton / inherited X2.MapVendorButton; real KeyPress/KeyRelease",
+        "sessionBit": 4
+      },
+      {
+        "keyId": "l4",
+        "currentLabel": "M1",
+        "route": "onex-x2-vendor-held",
+        "vendorButtonIds": [
+          "0x22"
+        ],
+        "backIndex": 1,
+        "sessionBit": 1,
+        "held": true
+      },
+      {
+        "keyId": "r4",
+        "currentLabel": "M2",
+        "route": "onex-x2-vendor-held",
+        "vendorButtonIds": [
+          "0x23"
+        ],
+        "backIndex": 2,
+        "sessionBit": 2,
+        "held": true
+      },
+      {
+        "keyId": "gkey",
+        "currentLabel": "G-Key",
+        "route": "onex-x2-vendor-held",
+        "vendorButtonIds": [
+          "0x25"
+        ],
+        "sessionBit": 8,
+        "held": true,
+        "source": "OneXPlayer3.BuildRemapPage3 and HandleEvent; keyboard-type mapping yields down/up; standard Guide equivalence UNKNOWN"
+      }
+    ],
+    "consumerIssue": {
+      "id": "INTEL-OP3-HOME-ROUTE-DIAGNOSTIC-099",
+      "status": "RESOLVED_CURRENT_MAINLINE_SOURCE_ONLY",
+      "file": "native/main.cpp",
+      "symbol": "onexX2LogOwner",
+      "before": "homeRoute is unconditional vendor-click",
+      "expected": "Use current model-aware protocol clickOnly(requested, Home); X2/MiniPro click, OXP3 held",
+      "behaviorChangeRequired": false,
+      "testsOrBudgetResetAuthorized": false,
+      "receipt": {
+        "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-099-INTEL-OP3-PRIORITY/INTEL-OP3-CONSUMER-INTAKE.json",
+        "bytes": 4817,
+        "sha256": "1399dacc7295a545c5f56e75671d7d5c0d90f9c73b03d8182d0f17eb663f3227"
+      },
+      "executionAcceptance": "NOT_RUN; source-only diagnostic correction"
+    },
+    "hardwareAccepted": false,
+    "wholeFamilyComplete": false,
+    "consumerDiagnosticReceipt": {
+      "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-099-INTEL-OP3-PRIORITY/INTEL-OP3-CONSUMER-INTAKE.json",
+      "bytes": 4817,
+      "sha256": "1399dacc7295a545c5f56e75671d7d5c0d90f9c73b03d8182d0f17eb663f3227"
+    }
+  },
+  "currentIntelOp3Lifecycle100": {
+    "phaseId": "HC-CODEX-100",
+    "atUtc": "2026-11-07T05:29:52.818Z",
+    "status": "SOURCE_CHAIN_AND_FIXED_FACTORY_SELECTOR_AUDITED_INTEL_TARGET_EVIDENCE_OPEN",
+    "sourceReview": {
+      "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-100-INTEL-OP3-LIFECYCLE-CONSUMPTION/LIFECYCLE-SOURCE-REVIEW.json",
+      "bytes": 16010,
+      "sha256": "b5165ea5ba882e1f75b4489b22a2fbe457183717eea3b2bd0649945d075be6d5"
+    },
+    "fieldInventory": {
+      "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-100-INTEL-OP3-LIFECYCLE-CONSUMPTION/NOVEMBER-FIELD-IDENTITY-INVENTORY.json",
+      "bytes": 63595,
+      "sha256": "c8ba8ff67adc50b6ac50c4188d25e763bf65b8119394d08b156f19658ce53389"
+    },
+    "consumerContractIntake": {
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-OneXFamily-20261105/intel-op3-home-route-label-20261107/HC099-CONTRACT-INTAKE.json",
+      "bytes": 10970,
+      "sha256": "63bf903caf9fbbb716f677e3bcd091e177e02670713dec6eef5e572d78243759"
+    },
+    "scope": "Existing enabled OEM input source and exact factory selection; not new capabilities or runtime acceptance",
+    "fixedFactoryIdentity": {
+      "classes": 17,
+      "distinctProductLabels": 21,
+      "state": "EXISTING_EXACT_SELECTOR_BRANCHES_PRESENT",
+      "apexCanonicalAlias": "Existing explicit sourceType/runtimeType/consumerClass catalog alias retained"
+    },
+    "heldNeutrality": {
+      "state": "SOURCE_IMPLEMENTED_EXECUTION_NOT_RUN",
+      "scope": "Original session bits, OEM producer authority and queued action admission; final physical/target neutral not proven"
+    },
+    "fieldIdentity": {
+      "scope": "All44 ZIP names containing202611 under authorized log root, native-lifecycle identity records only",
+      "archivesWithIdentity": 39,
+      "oneXPlayer3Observed": false,
+      "apexArchives": 5,
+      "x2MiniProArchives": 6,
+      "msiClawCG3EMArchives": 2,
+      "marketingG3eIsNotIdentity": true
+    },
+    "wmiTakeoverParity": "EXPLICITLY_UNCONSUMED_BY_CURRENT_KEYBOARD_OWNED_ROUTE_NO_PRODUCT_MUST_FIX_PROVEN",
+    "newRuntimeCapabilities": 0,
+    "newTests": 0,
+    "newBuilds": 0,
+    "hardwareAccepted": false,
+    "wholeFamilyComplete": false,
+    "wmiTakeoverSourceReview": {
+      "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-100-INTEL-OP3-LIFECYCLE-CONSUMPTION/WMI-TAKEOVER-PARENT-REVIEW.json",
+      "bytes": 11367,
+      "sha256": "983ceac686ccac15d485126624baf7112474154b1a55321c3d34c4cfaa897b3a"
+    },
+    "wmiTakeoverCurrentBoundary": {
+      "current04EB40AcquireOrRestoreEntryFound": false,
+      "nativeKeyboardOwnedBoundaryExplicit": true,
+      "currentFanOrLightingProvidesEquivalentTakeover": false,
+      "existingRuntimeReadTakeoverMetadataFound": false,
+      "existingOfflineTakeoverObligationMetadataFound": true,
+      "legitimateDataOnlyRuntimeFixPathExistsNow": false,
+      "newApiRequiredByEvidence": false,
+      "productMustChangeProven": false,
+      "sourceEquivalentHcLifecycleComplete": false,
+      "recommendation": "Keep current keyboard ownership and fan/lighting domains. Record fixed-source OEM1 takeover as explicitly unconsumed; do not enable hardware writes from method presence. Need a demonstrated enabled-key lifecycle requirement and actual existing-owner contract before any implementation."
+    },
+    "consumerPrerequisiteReview": {
+      "path": "G:/YeManCC-Work/Docs/Tasks/HC/Capability-Library-TraeCode-CN/Codex/observations/HC-CODEX-100-INTEL-OP3-LIFECYCLE-CONSUMPTION/CONSUMER-EC-PRECONDITION-INTAKE.json",
+      "bytes": 930,
+      "sha256": "7b7045291a9c3fa0d36e3ebb3807f8a6cad72ce825fae13f96f61c720955e874"
+    },
+    "conditionalTurboVendorOnlyRisk": {
+      "state": "SOURCE_CONDITIONAL_NOT_OBSERVED_ON_INTEL",
+      "condition": "Only vendor0x20 and no keyboard full chord on all current channels",
+      "currentBehavior": "Turbo vendor event skipped by keyboard-owned original owner",
+      "requiredEvidence": "Actual Intel identity and saved rules plus same-press keyboard/raw/vendor DOWN-UP, canonical edge to final action result, and OEM default behavior observation",
+      "automaticEcTakeoverRequired": false
+    }
   }
 }

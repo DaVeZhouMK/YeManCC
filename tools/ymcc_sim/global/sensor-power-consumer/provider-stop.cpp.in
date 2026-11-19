@@ -1,0 +1,132 @@
+#define _WIN32_WINNT 0x0A00
+#define NOMINMAX
+#include <Windows.h>
+#include <objbase.h>
+#include <initguid.h>
+#include <atomic>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+struct NativeHandle{HANDLE value;bool thread,closed=false;DWORD id=0;};
+static std::mutex traceMx;
+static std::vector<NativeHandle> handles;
+static std::atomic<bool> failThreadClose{false},failEventClose{false},failThreadWait{false};
+static std::atomic<DWORD> heldWaitCaller{0};
+static HANDLE waitEntered=nullptr,waitRelease=nullptr;
+static unsigned cancellationCalls=0,unexpectedDiscoveries=0;
+static std::vector<HRESULT> cancelResults;
+static bool ownedThread(HANDLE h){std::lock_guard<std::mutex> lock(traceMx);for(auto it=handles.rbegin();it!=handles.rend();++it)if(it->value==h&&!it->closed)return it->thread;return false;}
+static HANDLE providerEvent(LPSECURITY_ATTRIBUTES a,BOOL manual,BOOL initial,LPCWSTR n){const auto h=::CreateEventW(a,manual,initial,n);if(h){std::lock_guard<std::mutex> lock(traceMx);handles.push_back({h,false,false,0});}return h;}
+static HANDLE providerThread(LPSECURITY_ATTRIBUTES a,SIZE_T size,LPTHREAD_START_ROUTINE entry,LPVOID p,DWORD flags,LPDWORD id){const auto h=::CreateThread(a,size,entry,p,flags,id);if(h){std::lock_guard<std::mutex> lock(traceMx);handles.push_back({h,true,false,id?*id:0});}return h;}
+static BOOL providerClose(HANDLE h){std::lock_guard<std::mutex> lock(traceMx);for(auto it=handles.rbegin();it!=handles.rend();++it)if(it->value==h&&!it->closed){if((it->thread&&failThreadClose)||(!it->thread&&failEventClose)){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}const auto ok=::CloseHandle(h);if(ok)it->closed=true;return ok;}return ::CloseHandle(h);}
+static DWORD providerWait(HANDLE h,DWORD budget){if(ownedThread(h)){if(failThreadWait){SetLastError(ERROR_INVALID_HANDLE);return WAIT_FAILED;}if(budget&&heldWaitCaller==GetCurrentThreadId()){::SetEvent(waitEntered);::WaitForSingleObject(waitRelease,2500);}}return ::WaitForSingleObject(h,budget);}
+static HRESULT providerCancel(DWORD id,ULONG timeout){++cancellationCalls;const auto hr=::CoCancelCall(id,timeout);cancelResults.push_back(hr);return hr;}
+static HRESULT noDeviceDiscovery(REFCLSID,LPUNKNOWN,DWORD,REFIID,LPVOID* output){++unexpectedDiscoveries;if(output)*output=nullptr;return E_UNEXPECTED;}
+#define CreateEventW providerEvent
+#define CreateThread providerThread
+#define CloseHandle providerClose
+#define WaitForSingleObject providerWait
+#define CoCancelCall providerCancel
+#define CoCreateInstance noDeviceDiscovery
+#define YMCC_FAULT_INJECT
+#include "msi_legacy_sensor.h"
+#undef YMCC_FAULT_INJECT
+#undef CoCreateInstance
+#undef CoCancelCall
+#undef WaitForSingleObject
+#undef CloseHandle
+#undef CreateThread
+#undef CreateEventW
+#include "sensor_thread_mailbox.h"
+#include "sleep_power_dispatch.h"
+#include "input_host_shared_power.h"
+#include "log_snapshot_state.h"
+using json=nlohmann::json;
+@@SDK_TRANSPORT@@
+@@SDK_OPTIONS@@
+@@POWER_ENUM@@
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<int> g_idleSessionDisplayState{1},g_idleLegacyMonitorState{1};
+static ymcc::sleeppower::Dispatch g_sleepPowerDispatch;
+static ymcc::sensors::ThreadMailbox g_sensorThreadMailbox;
+static std::atomic<bool> g_exitRequested{false};
+static std::atomic<std::shared_ptr<ymcc::inputHost::sharedPower::Scope>> g_sensorActivePower;
+static ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
+static std::atomic<UINT64> g_powerGeneration{1};
+static bool domainLogEnabled(const char*){return false;}
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* output,uint32_t bytes){
+ if(!output||bytes<sizeof(*output)||g_exitRequested.load())return 0;
+ ymcc::sleeppower::SharedPowerV1 power;power.generation=1;power.publicationRevision=1;
+ power.phase=static_cast<uint32_t>(g_powerLifecycle.load());power.observedNotificationSequence=g_sleepPowerDispatch.observedSequence();
+ power.flags=ymcc::sleeppower::kKnown|(power.phase==0?ymcc::sleeppower::kHardwareAllowed:0u)|
+  (g_sleepPowerDispatch.pendingSuspend()?ymcc::sleeppower::kNotificationPending:0u);*output=power;return 1;
+}
+static std::atomic<bool> g_sensorSuspendCallbackActive{false},g_inputCaptureSensorsSuspended{false},g_sensorWakePollActive{false},g_sensorUnsubscribeRetained{false};
+static std::atomic<UINT64> g_msiSensorApiGeneration{0},g_hcWindowsSensorApiGeneration{0};
+static Provider g_msiSensorApiProvider,g_hcWindowsSensorApiProvider;
+static bool g_gyroReadingChangedSubscribed=false,g_accelReadingChangedSubscribed=false;
+static int g_gyroReadingChangedToken=1,g_accelReadingChangedToken=1;
+static UINT64 g_inputCaptureSensorGeneration=1;
+static constexpr UINT32 kInputCaptureRequestedSensorIntervalMs=100;
+static struct{void cancelPending(){}}g_virtualGyroWake;
+static struct{void reset(){}}g_windowsSensorDeviceChange;
+struct InputCaptureSensorMeta{std::string gyroFamily="winrt",accelFamily="winrt";bool gyroPresent=false,accelPresent=false;UINT32 gyroIntervalMs=0,accelIntervalMs=0;std::string gyroDeviceId,accelDeviceId;};
+static InputCaptureSensorMeta g_sensorMeta;
+static std::mutex g_sensorMetaMx;
+struct Sink{std::atomic<UINT64> activeBindingGeneration{1};void SetBindingGeneration(UINT64 n){activeBindingGeneration=n;}void ResetSamples(){}template<class... Args>void OnGyro(Args&&...){}template<class... Args>void OnAccel(Args&&...){};};
+static auto g_inputCaptureSink=std::make_shared<Sink>();
+struct WinRtPort{bool present=true,failRevoke=false,failInterval=false;UINT32 interval=100;unsigned subscriptions=0,revocations=0,intervalAttempts=0;explicit operator bool()const{return present;}WinRtPort& operator=(std::nullptr_t){present=false;return *this;}UINT32 MinimumReportInterval()const{return 10;}std::wstring DeviceId()const{return L"fixture-port";}void ReportInterval(UINT32 n){++intervalAttempts;if(failInterval)throw std::runtime_error("interval failed");interval=n;}template<class F>int ReadingChanged(F&&){++subscriptions;return 1;}void ReadingChanged(int){if(failRevoke)throw std::runtime_error("revoke failed");++revocations;}};
+static WinRtPort g_gyroSensor,g_accelSensor;
+static std::vector<json> logs;
+static bool throwDiagnostic=false;
+static void appendDomainLog(const char*,const char* event,const json& data){if(throwDiagnostic)throw std::runtime_error("domain diagnostic failed");auto v=data;v["event"]=event;logs.push_back(v);}
+static void appendNativeLifecycleLog(const char* event,const json& data){if(throwDiagnostic)throw std::runtime_error("native diagnostic failed");auto v=data;v["event"]=event;logs.push_back(v);}
+static bool inputCaptureStartMsiSensorApi(UINT64){return false;}
+static bool inputCaptureStartHcWindowsSensorApi(UINT64){return false;}
+static void inputCaptureArmWakeSensorPollIfAbsent(){}
+namespace winrt {struct hresult_error:std::exception{struct Code{HRESULT value;};Code code()const{return {E_FAIL};}};namespace Windows::Devices::Sensors{using Gyrometer=WinRtPort;using Accelerometer=WinRtPort;}}
+static std::atomic<bool> g_inputCaptureSawRealGyro{false};
+static unsigned winrtDiscoveryAttempts=0;
+template<class Sensor>static Sensor inputCaptureAvailableWinRtSensor(const char*){++winrtDiscoveryAttempts;Sensor result;result.present=false;return result;}
+static std::string W2U(const std::wstring& value){const int length=static_cast<int>(value.size());const int bytes=WideCharToMultiByte(CP_UTF8,0,value.data(),length,nullptr,0,nullptr,nullptr);std::string result(static_cast<size_t>(bytes),'\0');if(bytes)WideCharToMultiByte(CP_UTF8,0,value.data(),length,result.data(),bytes,nullptr,nullptr);return result;}
+static struct{} g_machineIdentity;
+template<class Identity>static bool inputCaptureMsiLegacyNeeded(const Identity&,bool,bool){return false;}
+template<class Identity>static bool inputCaptureHcWindowsLegacyNeeded(const Identity&,bool,bool){return false;}
+static InputCaptureSensorMeta inputCaptureSensorMetaSnapshot(){std::lock_guard<std::mutex> lock(g_sensorMetaMx);return g_sensorMeta;}
+static bool inputCaptureMockHandshakeFlag(){return false;}
+static void writeLog(const char*,const std::string&){}
+static void inputCaptureStartWinRtSensorsImpl();
+@@PREDICATES@@
+@@CONSUMERS@@
+static unsigned assertions=0,resourcesReturned=0;
+static void check(bool ok,const char* why){++assertions;if(!ok)throw std::runtime_error(why);}
+static void until(const std::function<bool()>& done){const auto end=GetTickCount64()+2500;while(!done()){if(GetTickCount64()>=end)throw std::runtime_error("actual provider deadline");Sleep(1);}}
+static unsigned openHandles(){std::lock_guard<std::mutex> lock(traceMx);unsigned n=0;for(const auto& h:handles)if(!h.closed)++n;return n;}
+static HANDLE latestThread(){std::lock_guard<std::mutex> lock(traceMx);for(auto it=handles.rbegin();it!=handles.rend();++it)if(it->thread&&!it->closed)return it->value;return nullptr;}
+struct Scope{
+ std::vector<std::shared_ptr<Shared>> sdk;
+ Scope(){check(g_msiSensorApiProvider.stopped()&&g_hcWindowsSensorApiProvider.stopped(),"prior original provider owners returned");handles.clear();winrtDiscoveryAttempts=0;cancelResults.clear();cancellationCalls=0;unexpectedDiscoveries=0;failThreadClose=false;failEventClose=false;failThreadWait=false;heldWaitCaller=0;throwDiagnostic=false;logs.clear();g_powerLifecycle=PowerLifecycle::Ready;g_idleSessionDisplayState=1;g_idleLegacyMonitorState=1;g_sensorSuspendCallbackActive=false;g_inputCaptureSensorsSuspended=false;g_sensorWakePollActive=false;g_sensorUnsubscribeRetained=false;g_gyroReadingChangedSubscribed=false;g_accelReadingChangedSubscribed=false;g_gyroSensor=WinRtPort{};g_accelSensor=WinRtPort{};g_sensorMeta={};g_sensorThreadMailbox.close();g_sensorThreadMailbox.open();waitEntered=::CreateEventW(nullptr,TRUE,FALSE,nullptr);waitRelease=::CreateEventW(nullptr,TRUE,FALSE,nullptr);g_sensorActivePower.store(ymcc::inputHost::sharedPower::Scope::create(&readSharedSystemPower,g_sharedPowerRevocations,true,ymcc::inputHost::sharedPower::Use::Lifecycle));}
+ std::shared_ptr<Shared> blocked(Provider& provider,UINT64 generation=11){auto state=std::make_shared<Shared>();state->block=true;sdk.push_back(state);check(provider.start(options(state,generation)),"complete original Provider.start accepted SDK interface transport");check(::WaitForSingleObject(state->readEntered,2500)==WAIT_OBJECT_0,"actual original MTA reaches blocked SDK GetData");return state;}
+ ~Scope(){g_sensorActivePower.store({});failThreadClose=false;failEventClose=false;failThreadWait=false;heldWaitCaller=0;throwDiagnostic=false;::SetEvent(waitRelease);for(const auto& state:sdk)::SetEvent(state->release);const bool retired=g_msiSensorApiProvider.stop(2500)&&g_hcWindowsSensorApiProvider.stop(2500)&&g_msiSensorApiProvider.stopped()&&g_hcWindowsSensorApiProvider.stopped();bool com=true;for(const auto& s:sdk)com&=s->managers==0&&s->sensors==0&&s->reports==0&&s->writes==0&&s->permissions==0&&s->createdThread==s->destroyedThread;sdk.clear();const bool gates=::CloseHandle(waitEntered)&&::CloseHandle(waitRelease);waitEntered=waitRelease=nullptr;if(retired&&com&&gates&&openHandles()==0&&unexpectedDiscoveries==0)++resourcesReturned;else std::terminate();}
+};
+struct StopAttempt{std::thread worker;std::atomic<bool> result{true};explicit StopAttempt(Provider& provider){worker=std::thread([this,&provider]{const auto com=::CoInitializeEx(nullptr,COINIT_MULTITHREADED);heldWaitCaller=GetCurrentThreadId();result=provider.stop(20);heldWaitCaller=0;if(SUCCEEDED(com))::CoUninitialize();});check(::WaitForSingleObject(waitEntered,2500)==WAIT_OBJECT_0,"actual stop holds original lifecycle mutex at thread wait");}void finish(){::SetEvent(waitRelease);if(worker.joinable())worker.join();}~StopAttempt(){finish();}};
+static void readyResume(){g_inputCaptureSensorsSuspended=false;inputCaptureResubscribeWinRtSensorsImpl();}
+int main(int argc,char** argv){const auto com=::CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);if(FAILED(com))return 2;std::vector<std::pair<std::string,std::function<void()>>> cases;
+ cases.emplace_back("busy-provider-is-not-retired",[]{Scope owner;const auto state=owner.blocked(g_msiSensorApiProvider);StopAttempt stopping(g_msiSensorApiProvider);check(!g_msiSensorApiProvider.running()&&!g_msiSensorApiProvider.stopped(),"busy actual provider query is unknown rather than stopped");readyResume();const bool rejected=g_inputCaptureSensorsSuspended&&g_gyroSensor.subscriptions==0&&g_accelSensor.subscriptions==0;stopping.finish();check(rejected,"busy provider lifecycle is not permission to resubscribe");::SetEvent(state->release);until([&]{return !g_msiSensorApiProvider.running();});readyResume();check(g_msiSensorApiProvider.stopped()&&g_gyroSensor.subscriptions==1&&g_accelSensor.subscriptions==1,"fresh consumer Resume first returns exact old provider resources");check(state->samples==0&&state->createdThread!=GetCurrentThreadId()&&state->createdThread==state->destroyedThread,"late cancelled SDK reading cannot publish and COM returns on original MTA");});
+ cases.emplace_back("partial-stop-event-keeps-owner-debt",[]{Scope owner;const auto state=owner.blocked(g_msiSensorApiProvider);check(!g_msiSensorApiProvider.stop(0),"blocked provider stop remains pending");const auto thread=latestThread();::SetEvent(state->release);check(::WaitForSingleObject(thread,2500)==WAIT_OBJECT_0,"actual provider thread returned before stop-event close fault");failEventClose=true;check(!g_msiSensorApiProvider.stop(0)&&!g_msiSensorApiProvider.stopped()&&!g_msiSensorApiProvider.running(),"partial close retains stop event and State after thread close");readyResume();check(g_inputCaptureSensorsSuspended&&g_gyroSensor.subscriptions==0,"returned thread with retained stop event is not resource return");failEventClose=false;readyResume();check(g_msiSensorApiProvider.stopped()&&g_gyroSensor.subscriptions==1,"later original stop closes exact pending event before resubscribe");});
+ cases.emplace_back("failed-thread-close-keeps-owner-debt",[]{Scope owner;const auto state=owner.blocked(g_msiSensorApiProvider);check(!g_msiSensorApiProvider.stop(0),"first stop retained blocked owner");const auto thread=latestThread();::SetEvent(state->release);check(::WaitForSingleObject(thread,2500)==WAIT_OBJECT_0,"actual thread terminal before close fault");failThreadClose=true;check(!g_msiSensorApiProvider.stop(0)&&openHandles()==2,"failed CloseHandle retains exact thread and event");readyResume();check(g_inputCaptureSensorsSuspended&&g_gyroSensor.subscriptions==0,"unclosed provider thread cannot authorize WinRT subscriptions");failThreadClose=false;readyResume();check(g_msiSensorApiProvider.stopped()&&openHandles()==0&&g_gyroSensor.subscriptions==1,"actual original close path returns both resources");});
+ cases.emplace_back("unknown-provider-wait-keeps-ownership",[]{Scope owner;const auto state=owner.blocked(g_msiSensorApiProvider);failThreadWait=true;check(!g_msiSensorApiProvider.stop(0)&&!g_msiSensorApiProvider.running()&&!g_msiSensorApiProvider.stopped(),"unknown wait is not stopped or owner return");readyResume();check(g_inputCaptureSensorsSuspended&&g_gyroSensor.subscriptions==0&&openHandles()==2,"consumer preserves provider debt under unknown wait");failThreadWait=false;::SetEvent(state->release);until([&]{return !g_msiSensorApiProvider.running();});readyResume();check(g_msiSensorApiProvider.stopped()&&g_gyroSensor.subscriptions==1,"fresh actual return allows same objects after unknown observation");});
+ cases.emplace_back("blocked-stop-is-bounded-and-no-stack",[]{Scope owner;const auto state=owner.blocked(g_msiSensorApiProvider);const auto before=GetTickCount64();check(!g_msiSensorApiProvider.stop(20)&&GetTickCount64()-before<1000,"original Provider.stop keeps bounded wait");auto fresh=std::make_shared<Shared>();check(!g_msiSensorApiProvider.start(options(fresh,22))&&fresh->managers==0,"same Provider cannot stack worker while old GetData blocked");readyResume();check(g_inputCaptureSensorsSuspended&&g_gyroSensor.subscriptions==0&&cancellationCalls>=1,"consumer defers until actual MTA returns after cancellation request");::SetEvent(state->release);until([&]{return !g_msiSensorApiProvider.running();});readyResume();check(g_msiSensorApiProvider.stopped()&&state->samples==0,"actual late GetData remains cancelled while resources drain");});
+ cases.emplace_back("hc-provider-slot-uses-same-strict-return",[]{Scope owner;const auto state=owner.blocked(g_hcWindowsSensorApiProvider,33);StopAttempt stopping(g_hcWindowsSensorApiProvider);readyResume();const bool paused=g_inputCaptureSensorsSuspended&&g_accelSensor.subscriptions==0;stopping.finish();check(paused,"second actual provider slot cannot be mistaken stopped while locked");::SetEvent(state->release);until([&]{return !g_hcWindowsSensorApiProvider.running();});readyResume();check(g_hcWindowsSensorApiProvider.stopped()&&g_hcWindowsSensorApiGeneration==0&&g_accelSensor.subscriptions==1,"original HC stop helper retires actual slot and generation");});
+ cases.emplace_back("power-suspend-does-not-start-new-subscriptions",[]{Scope owner;const auto state=owner.blocked(g_msiSensorApiProvider);g_powerLifecycle=PowerLifecycle::Suspended;readyResume();check(g_gyroSensor.subscriptions==0&&g_msiSensorApiProvider.running(),"original power predicate refuses Resume before provider work");g_powerLifecycle=PowerLifecycle::Ready;check(!g_msiSensorApiProvider.stop(0),"old provider cancellation still pending");::SetEvent(state->release);until([&]{return !g_msiSensorApiProvider.running();});readyResume();check(g_msiSensorApiProvider.stopped()&&g_gyroSensor.subscriptions==1,"new admitted consumer request returns old provider first");});
+ cases.emplace_back("full-stop-keeps-provider-debt-separate",[]{Scope owner;const auto state=owner.blocked(g_msiSensorApiProvider);inputCaptureStopWinRtSensorsImpl();check(!g_sensorUnsubscribeRetained&&!g_gyroSensor&&!g_accelSensor&&!g_msiSensorApiProvider.stopped(),"original full Stop retires apartment objects but retains separate provider debt");::SetEvent(state->release);until([&]{return !g_msiSensorApiProvider.running();});check(g_msiSensorApiProvider.stop(0)&&g_msiSensorApiProvider.stopped()&&openHandles()==0,"only actual provider return discharges its remaining debt");});
+ cases.emplace_back("stop-diagnostic-cannot-skip-independent-retirement",[]{Scope owner;const auto msi=owner.blocked(g_msiSensorApiProvider);const auto hc=owner.blocked(g_hcWindowsSensorApiProvider,33);g_gyroReadingChangedSubscribed=g_accelReadingChangedSubscribed=true;throwDiagnostic=true;bool escaped=false;try{inputCaptureStopWinRtSensorsImpl();}catch(...){escaped=true;}throwDiagnostic=false;check(!escaped&&!g_gyroReadingChangedSubscribed&&!g_accelReadingChangedSubscribed&&g_gyroSensor.revocations==1&&g_accelSensor.revocations==1,"failed stop diagnostics cannot skip independent WinRT token retirement");check(!g_msiSensorApiProvider.stopped()&&!g_hcWindowsSensorApiProvider.stopped()&&cancellationCalls>=2,"both actual Provider owners remain owed after bounded cancellation");::SetEvent(msi->release);::SetEvent(hc->release);until([&]{return !g_msiSensorApiProvider.running()&&!g_hcWindowsSensorApiProvider.running();});check(g_msiSensorApiProvider.stop(0)&&g_hcWindowsSensorApiProvider.stop(0)&&msi->samples==0&&hc->samples==0,"late SDK work cannot resurrect either cancelled provider");});
+ cases.emplace_back("revoke-log-failure-preserves-only-failed-token",[]{Scope owner;g_gyroReadingChangedSubscribed=g_accelReadingChangedSubscribed=true;g_gyroSensor.failRevoke=true;throwDiagnostic=true;bool escaped=false;try{inputCaptureStopWinRtSensorsImpl();}catch(...){escaped=true;}throwDiagnostic=false;check(!escaped&&g_sensorUnsubscribeRetained&&g_gyroReadingChangedSubscribed&&!g_accelReadingChangedSubscribed&&g_gyroSensor.present&&!g_accelSensor.present,"failed gyro revoke diagnostic preserves that token while independent accel returns");g_gyroSensor.failRevoke=false;inputCaptureStopWinRtSensorsImpl();check(!g_sensorUnsubscribeRetained&&!g_gyroSensor&&!g_accelSensor,"later original Stop settles only the retained token");});
+ cases.emplace_back("interval-diagnostic-cannot-skip-second-reader",[]{Scope owner;g_gyroSensor.failInterval=g_accelSensor.failInterval=true;throwDiagnostic=true;bool escaped=false;try{inputCaptureStopWinRtSensorsImpl();}catch(...){escaped=true;}throwDiagnostic=false;check(!escaped&&g_gyroSensor.intervalAttempts==1&&g_accelSensor.intervalAttempts==1,"failed cadence diagnostic cannot suppress second original reader cleanup");check(!g_sensorUnsubscribeRetained&&g_msiSensorApiProvider.stopped()&&g_hcWindowsSensorApiProvider.stopped(),"failed interval writes do not manufacture subscription or provider debt return");});
+
+ cases.emplace_back("cold-start-cannot-bypass-provider-debt",[]{Scope owner;const auto state=owner.blocked(g_msiSensorApiProvider);g_gyroSensor.present=g_accelSensor.present=false;inputCaptureStartWinRtSensorsImpl();check(g_inputCaptureSensorsSuspended&&winrtDiscoveryAttempts==0&&!g_msiSensorApiProvider.stopped(),"actual cold Start cannot probe new WinRT objects before old provider return");::SetEvent(state->release);until([&]{return !g_msiSensorApiProvider.running();});g_inputCaptureSensorsSuspended=false;inputCaptureStartWinRtSensorsImpl();check(g_msiSensorApiProvider.stopped()&&winrtDiscoveryAttempts==2,"fresh actual cold Start first returns old provider then reaches inert WinRT discovery");});
+ if(argc>2){::CoUninitialize();return 2;}const std::string selection=argc==2?argv[1]:"";const bool suffix=selection.starts_with("from:");const auto name=suffix?selection.substr(5):selection;if(argc==2&&std::none_of(cases.begin(),cases.end(),[&](const auto& c){return c.first==name;})){::CoUninitialize();return 2;}json selected=json::array(),failures=json::array();bool reached=false;for(const auto& c:cases){if(c.first==name)reached=true;if(argc==2&&!(suffix?reached:c.first==name))continue;selected.push_back(c.first);try{c.second();}catch(const std::exception& error){failures.push_back({{"case",c.first},{"message",error.what()}});break;}}::CoUninitialize();std::cout<<json({{"cases",selected},{"assertions",assertions},{"failures",failures},{"actualResourcesReturned",resourcesReturned},{"physicalDeviceIo",false},{"originalProviderFullHeader",true}}).dump()<<std::endl;return failures.empty()?0:1;}

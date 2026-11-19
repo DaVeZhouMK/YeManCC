@@ -256,7 +256,7 @@ export type HudDataPresetId = typeof HUD_DATA_PRESETS[number]['value'];
 export const HUD_DEFAULT_DATA_PRESET: HudDataPresetId = 'simple';
 // User's reference selection (2026-10-14); values remain live YMCC data.
 const simple: HudMetricId[] = [
-  'fps','fpsLimit','fps1','frametimeGraph',
+  'fps','fps1','frametimeGraph',
   'tdpLimit','cpuPower','cpuTemp','cpuClock','cpuCores',
   'gpuUsage','gpuBar','gpuPower','gpuClock',
   'vramUsage','vramUsageBar','ramUsage','ramUsageBar',
@@ -268,7 +268,7 @@ const minimal: HudMetricId[] = ['fps','cpuPower','cpuTemp'];
 // readings, memory usage graphics and battery block. All ten visual templates
 // consume this same field set; the template changes arrangement only.
 const standard: HudMetricId[] = [
-  'fps','fpsLimit','fps1','frametimeGraph',
+  'fps','fps1','frametimeGraph',
   'tdpLimit','cpuPower','cpuTemp','cpuUsage','cpuClock','cpuVoltage','cpuCores',
   'gpuUsage','gpuBar','gpuPower','gpuTemp','gpuClock',
   'vramUsed','ramUsed','vramUsageBar','ramUsageBar',
@@ -592,6 +592,29 @@ export function sameHudData(a: HudData, b: HudData, fields?: HudMetricToggles): 
   return (!selected('cpuCores') || (equal(a.coreUsage,b.coreUsage,coreLimit) && equal(a.coreLabels,b.coreLabels,coreLimit))) &&
     (!fields ? equal(a.coreClocks,b.coreClocks) : true) &&
     (!selected('frametimeGraph') || equal(a.frameTimes,b.frameTimes));
+}
+
+// Rendering consumes values only; the component's original FPS/age gates still
+// observe every latest admitted proof. Reuse is limited to our immutable packets.
+export function sameHudRenderData(a: HudData, b: HudData, fields: HudMetricToggles): boolean {
+  if (!boundedOwned.has(a as object) || !boundedOwned.has(b as object)) return false;
+  if (a === b) return true;
+  if (a.source !== b.source || a.stale !== b.stale || a.hardwareSession !== b.hardwareSession ||
+      (a.gameLogo ?? '') !== (b.gameLogo ?? '') || (a.cpuName ?? '') !== (b.cpuName ?? '') || (a.gpuName ?? '') !== (b.gpuName ?? '')) return false;
+  if ((fields.batteryPower && a.batteryPowerEstimated !== b.batteryPowerEstimated) ||
+      (fields.batteryTime && a.batteryTimeEstimated !== b.batteryTimeEstimated)) return false;
+  if (!HUD_METRICS.every(metric => !fields[metric.id] || (a.values[metric.id] ?? null) === (b.values[metric.id] ?? null))) return false;
+  if (HUD_FPS_FAMILY.some(id => fields[id]) && (a.values.fps ?? null) !== (b.values.fps ?? null)) return false;
+  if (HUD_PERCENT_GRAPHS.some(graph => fields[graph.id] && (a.values[graph.value] ?? null) !== (b.values[graph.value] ?? null))) return false;
+  const equal = <T>(left: readonly T[] | undefined, right: readonly T[] | undefined, max = Infinity) => {
+    if (left === right) return true;
+    const count = Math.min(left?.length ?? 0, max);
+    if (count !== Math.min(right?.length ?? 0, max)) return false;
+    for (let i = 0; i < count; ++i) if (left![i] !== right![i]) return false;
+    return true;
+  };
+  return (!fields.cpuCores || (equal(a.coreUsage, b.coreUsage, MAX_VISIBLE_CORE_TILES) && equal(a.coreLabels, b.coreLabels, MAX_VISIBLE_CORE_TILES))) &&
+    (!fields.frametimeGraph || equal(a.frameTimes, b.frameTimes));
 }
 
 // Compact tabular footprints for normal numeric ranges. Values are never

@@ -13,10 +13,13 @@
 namespace proof=ymcc::targetReturn::pnpAbsence;
 using J=nlohmann::json;
 // Retained in the binary to verify the actual Windows reader and SDK ABI.
-// main below calls only verify(ids, fakeReader), never this exported function.
+// main below calls only fake readers, never these exported functions.
 extern "C" __declspec(dllexport) unsigned productionPnpAbsenceCompileOnly(const char* id){
     const std::vector<std::string> known=id?std::vector<std::string>{id}:std::vector<std::string>{};
     return static_cast<unsigned>(proof::verify(known).state);
+}
+extern "C" __declspec(dllexport) unsigned productionPnpPsProfileCompileOnly(){
+    return static_cast<unsigned>(proof::verifyPsProfile().state);
 }
 std::wstring wide(const std::string& s){return {s.begin(),s.end()};}
 std::vector<wchar_t> multi(std::initializer_list<std::wstring> members){std::vector<wchar_t> out;for(const auto& s:members){out.insert(out.end(),s.begin(),s.end());out.push_back(0);}if(out.empty())out.push_back(0);out.push_back(0);return out;}
@@ -53,17 +56,18 @@ struct Reader {
     }
     DWORD error(){++errors;event("last-error");return lastError;}
 };
-J failures=J::array(),cases=J::array(),observation=J::object();unsigned checks=0;std::string current;
+J failures=J::array(),cases=J::array(),observation=J::object();unsigned checks=0;std::string current,caseFilter;bool filtered=false;
 void check(bool ok,const char* message){++checks;if(!ok)failures.push_back({{"case",current},{"message",message}});}
 void expect(const proof::Result& r,proof::State state,proof::Reason reason,unsigned count,DWORD win32=0,CONFIGRET cr=CR_SUCCESS){observation["result"]={{"state",proof::stateName(r.state)},{"reason",proof::reasonName(r.reason)},{"scanned",r.scannedNodes},{"win32Error",r.win32Error},{"configurationReturn",r.configurationReturn}};check(r.state==state,"tri-state matches required proof");check(r.reason==reason,"failure or completion reason is exact");check(r.scannedNodes==count,"bounded scanned-node count is exact");check(r.win32Error==win32,"Win32 diagnostic is preserved");check(r.configurationReturn==cr,"CM diagnostic is preserved");check(r.absent()==(state==proof::State::Absent),"absence accessor never promotes unknown/present");}
 void shape(Reader& r){observation["reader"]={{"opens",r.opens},{"enumerations",r.enums},{"idReads",r.ids},{"propertyReads",r.properties},{"closes",r.closes},{"abi",r.abi},{"trace",r.trace}};check(r.abi,"actual verify passes only expected read ABI and broad-present flags");check(r.opens<=1&&r.closes<=1,"single set lifetime without retries or double close");check(r.enums<=proof::maxNodes+1&&r.ids<=proof::maxNodes&&r.properties<=proof::maxNodes,"enumeration and node reads stay within fixed caps");}
-void run(const std::string& name,const std::function<void()>& body){current=name;observation=J::object();const auto start=checks;const auto before=failures.size();try{body();}catch(const std::exception& e){failures.push_back({{"case",name},{"exception",e.what()}});}cases.push_back({{"case",name},{"checks",checks-start},{"pass",before==failures.size()},{"observation",observation}});}
+void run(const std::string& name,const std::function<void()>& body){if(filtered&&name!=caseFilter)return;current=name;observation=J::object();const auto start=checks;const auto before=failures.size();try{body();}catch(const std::exception& e){failures.push_back({{"case",name},{"exception",e.what()}});}cases.push_back({{"case",name},{"checks",checks-start},{"pass",before==failures.size()},{"observation",observation}});}
 Reader with(Node n){Reader r;r.nodes.push_back(std::move(n));return r;}
 Node hw(std::wstring value,std::wstring id=L"ROOT\\DIFFERENT_EPOCH\\NEW",DEVINST devinst=1){Node n;n.id=std::move(id);n.devinst=devinst;n.propertyResult=CR_SUCCESS;n.hardware=multi({std::move(value)});return n;}
 const std::string oldId="ROOT\\HIDMAESTRO\\OLD_EPOCH";
 void absent(Reader& r,unsigned count){expect(proof::verify({oldId},r),proof::State::Absent,proof::Reason::CompleteAbsence,count);shape(r);check(r.enums==count+1,"absence requires explicit normal end after every inspected node");check(r.closes==1,"absence closes its only set");}
 int main(int argc,char** argv){
-    if(argc!=2)return 2;
+    if(argc!=2&&argc!=3)return 2;
+    filtered=argc==3;if(filtered)caseFilter=argv[2];
     run("absence/empty-current-set",[]{Reader r;absent(r,0);});
     run("absence/no-history-still-scans",[]{auto r=with(hw(L"ACPI\\REAL_DEVICE"));expect(proof::verify({},r),proof::State::Absent,proof::Reason::CompleteAbsence,1);shape(r);check(r.opens==1&&r.ids==1&&r.properties==1&&r.enums==2,"empty history never bypasses family enumeration");});
     run("absence/known-old-root-and-hid-gone",[]{Reader r;r.nodes={hw(L"PCI\\VEN_8086&DEV_1234",L"PCI\\VEN_8086&DEV_1234\\ONE",1),hw(L"HID\\VID_045E&PID_028E",L"HID\\VID_045E&PID_028E\\TWO",2)};expect(proof::verify({oldId,"HID\\VID_054C&PID_0DF2\\OLD"},r),proof::State::Absent,proof::Reason::CompleteAbsence,2);shape(r);check(r.enums==3&&r.properties==2,"all unrelated nodes and terminal end are inspected");});
@@ -119,7 +123,59 @@ int main(int argc,char** argv){
     for(const std::string op:{"begin","enumerate","device-id","hardware-ids"})run("exceptions/"+op,[=]{auto r=with(Node{});r.throwAt=op;const auto result=proof::verify({oldId},r);check(result.state==proof::State::Unknown&&result.reason==proof::Reason::ReaderException,"reader exception cannot escape or prove absence");shape(r);check(r.closes==(op=="begin"?0u:1u),"exception closes only the opened set once");});
     run("exceptions/destroy",[]{Reader r;r.throwAt="destroy";const auto result=proof::verify({},r);check(result.state==proof::State::Unknown&&result.reason==proof::Reason::CleanupFailed,"destroy exception cannot become absence");shape(r);check(r.closes==1,"throwing close is not repeated");});
     run("diagnostics/names",[]{check(std::string(proof::stateName(proof::State::Absent))=="absent","absent diagnostic");check(std::string(proof::stateName(proof::State::Present))=="present","present diagnostic");check(std::string(proof::stateName(proof::State::Unknown))=="unknown","unknown diagnostic");check(std::string(proof::reasonName(proof::Reason::CompleteAbsence))=="complete-present-snapshot-without-target","complete-end diagnostic");});
-    const J result={{"pass",failures.empty()},{"caseCount",cases.size()},{"assertions",checks},{"cases",cases},{"failures",failures},{"realDeviceApiExecuted",false},{"productionReaderCompiledAndExportedNotCalled",true},{"readerBasis","actual bounded verify template with fake SetupAPI/CM read responses"},{"deviceWritesThreadsTimersRetries",false},{"physicalOrOwnershipAuthority",false},{"hardwareAccepted",false}};
+    run("ps/root-only-with-ps-hardware",[]{
+        auto n=hw(L"ROOT\\VID_054C&PID_0DF2",L"ROOT\\HIDCLASS\\HM_NEW_ROOT_ONLY");n.hardware=multi({L"ROOT\\HIDMAESTRO",L"ROOT\\VID_054C&PID_0DF2"});auto r=with(n);
+        expect(proof::verifyPsProfile(r),proof::State::Present,proof::Reason::SupportedFamilyPresent,1);shape(r);check(r.properties==1,"root-only PS evidence comes from its hardware profile");
+    });
+    run("ps/ps-hardware-only",[]{auto r=with(hw(L"ROOT\\VID_054C&PID_0DF2"));expect(proof::verifyPsProfile(r),proof::State::Present,proof::Reason::SupportedFamilyPresent,1);shape(r);});
+    run("ps/case-insensitive-hardware",[]{auto r=with(hw(L" root\\vid_054c&pid_0df2&rev_0100 "));expect(proof::verifyPsProfile(r),proof::State::Present,proof::Reason::SupportedFamilyPresent,1);shape(r);});
+    run("ps/multiple-hardware-values",[]{auto n=hw(L"IGNORED");n.hardware=multi({L"PCI\\UNRELATED",L"ROOT\\VID_054C&PID_0DF2&REV_0200",L"HID\\UNRELATED"});auto r=with(n);expect(proof::verifyPsProfile(r),proof::State::Present,proof::Reason::SupportedFamilyPresent,1);shape(r);});
+    run("ps/unclassified-generic-root",[]{
+        auto r=with(hw(L"ROOT\\HIDMAESTRO"));expect(proof::verifyPsProfile(r),proof::State::Unknown,proof::Reason::UnclassifiedProfileRoot,1);shape(r);check(r.enums==2&&r.closes==1,"unclassified generic root remains unknown after complete enumeration");
+        check(std::string(proof::reasonName(proof::Reason::UnclassifiedProfileRoot))=="ps-profile-undetermined-virtual-root","PS unknown diagnostic is exact");
+    });
+    run("ps/new-hm-root-without-property",[]{Node n;n.id=L"ROOT\\HIDCLASS\\HM_FUTURE_SHAPE";auto r=with(n);expect(proof::verifyPsProfile(r),proof::State::Unknown,proof::Reason::UnclassifiedProfileRoot,1);shape(r);check(r.properties==1&&r.enums==2,"missing profile on a new HM root cannot prove absence");});
+    run("ps/known-instance-without-property",[]{Node n;n.id=L"root\\vid_054c&pid_0df2\\NEW";auto r=with(n);expect(proof::verifyPsProfile(r),proof::State::Present,proof::Reason::SupportedFamilyPresent,1);shape(r);check(r.properties==1,"known PS instance survives a missing hardware property without exact history");});
+    const std::vector<std::wstring> otherProfiles={L"USB\\VID_28DE&PID_1205&REV_0200",L"ROOT\\HIDMAESTROXUSB"};
+    for(std::size_t i=0;i<otherProfiles.size();++i)run("ps/other-profile-only-"+std::to_string(i),[&,i]{
+        const auto n=hw(otherProfiles[i]);auto r=with(n);expect(proof::verifyPsProfile(r),proof::State::Absent,proof::Reason::CompleteAbsence,1);shape(r);check(r.enums==2&&r.closes==1,"PS absence requires normal enumeration end and cleanup");
+        auto all=with(n);expect(proof::verify({oldId},all),proof::State::Present,proof::Reason::SupportedFamilyPresent,1);shape(all);
+        auto policy=with(n);expect(proof::verifyWithPolicy({},policy,proof::FamilyPolicy::PsProfile),proof::State::Absent,proof::Reason::CompleteAbsence,1);shape(policy);
+    });
+    run("ps/pid-prefix-lookalike-hardware",[]{auto r=with(hw(L"ROOT\\VID_054C&PID_0DF20"));expect(proof::verifyPsProfile(r),proof::State::Absent,proof::Reason::CompleteAbsence,1);shape(r);check(r.enums==2,"a longer PID is not the PS hardware profile");});
+    run("ps/pid-prefix-lookalike-instance",[]{Node n;n.id=L"ROOT\\VID_054C&PID_0DF20\\NEW";auto r=with(n);expect(proof::verifyPsProfile(r),proof::State::Absent,proof::Reason::CompleteAbsence,1);shape(r);check(r.enums==2,"a longer PID is not a known PS instance");});
+    run("ps/matched-first-entry-corrupt-tail",[]{auto n=hw(L"ROOT\\VID_054C&PID_0DF2");n.hardware.back()=L'X';auto r=with(n);expect(proof::verifyPsProfile(r),proof::State::Unknown,proof::Reason::HardwareIdsShape,1);shape(r);});
+    run("ps/matched-first-entry-invalid-later-member",[]{auto n=hw(L"IGNORED");n.hardware=multi({L"ROOT\\VID_054C&PID_0DF2",std::wstring(1,wchar_t(0xd800))});auto r=with(n);expect(proof::verifyPsProfile(r),proof::State::Unknown,proof::Reason::HardwareIdsShape,1);shape(r);});
+    run("ps/enumeration-error",[]{auto r=with(Node{});r.endError=ERROR_ACCESS_DENIED;expect(proof::verifyPsProfile(r),proof::State::Unknown,proof::Reason::EnumerationFailed,1,ERROR_ACCESS_DENIED);shape(r);});
+    run("ps/cleanup-failure",[]{Reader r;r.destroyFails=true;expect(proof::verifyPsProfile(r),proof::State::Unknown,proof::Reason::CleanupFailed,0,ERROR_INVALID_HANDLE);shape(r);check(r.closes==1,"PS cleanup failure is never retried or accepted as absence");});
+    run("ps/unclassified-before-live-ps",[]{Reader r;r.nodes={hw(L"ROOT\\HIDMAESTRO"),hw(L"ROOT\\VID_054C&PID_0DF2",L"ROOT\\PS_TARGET\\TWO",2)};expect(proof::verifyPsProfile(r),proof::State::Present,proof::Reason::SupportedFamilyPresent,2);shape(r);check(r.properties==2,"unclassified root does not hide a later confirmed PS profile");});
+
+    // Cross the three reviewed omissions without changing the default policy or
+    // inventing profile ownership from a shared SDK root.
+    for(std::size_t i=0;i<otherProfiles.size();++i)run("ps/other-profile-shared-HM-instance-"+std::to_string(i),[&,i]{
+        auto r=with(hw(otherProfiles[i],L"ROOT\\HIDCLASS\\HM_SHARED_ROOT"));
+        expect(proof::verifyPsProfile(r),proof::State::Unknown,proof::Reason::UnclassifiedProfileRoot,1);shape(r);
+        check(r.enums==2&&r.closes==1,"shared HM instance with another profile remains conservatively unclassified");
+    });
+    for(const bool confirmed:{false,true})for(const bool throwing:{false,true})run(std::string("ps/early-result-cleanup-")+(confirmed?"present":"unknown")+(throwing?"-throw":"-failed"),[=]{
+        auto r=with(hw(confirmed?L"ROOT\\VID_054C&PID_0DF2":L"ROOT\\HIDMAESTRO"));
+        if(throwing)r.throwAt="destroy";else r.destroyFails=true;
+        const auto result=proof::verifyPsProfile(r);
+        check(result.state==proof::State::Unknown&&result.reason==proof::Reason::CleanupFailed,"cleanup failure overrides both profile presence and unclassified completion");
+        shape(r);check(r.closes==1,"early-result failing/throwing cleanup closes once without a retry");
+    });
+    for(unsigned variant=0;variant<5;++variant)run("ps/known-instance-property-precedence-"+std::to_string(variant),[=]{
+        auto n=hw(L"PCI\\UNRELATED",L"ROOT\\VID_054C&PID_0DF2\\KNOWN_PROFILE");
+        auto expected=proof::State::Present;auto reason=proof::Reason::SupportedFamilyPresent;CONFIGRET cr=CR_SUCCESS;
+        if(variant==1)n.hardware={0};
+        if(variant==2){n.propertyResult=CR_FAILURE;expected=proof::State::Unknown;reason=proof::Reason::HardwareIdsReadFailed;cr=CR_FAILURE;}
+        if(variant==3){n.type=DEVPROP_TYPE_STRING;expected=proof::State::Unknown;reason=proof::Reason::HardwareIdsType;}
+        if(variant==4){n.hardware={L'X',0};expected=proof::State::Unknown;reason=proof::Reason::HardwareIdsShape;}
+        auto r=with(n);expect(proof::verifyPsProfile(r),expected,reason,1,0,cr);shape(r);
+        check(r.properties==1&&r.closes==1,"known profile instance cannot bypass successful-property shape or read failure guards");
+    });
+    if(filtered){current="case-filter";check(cases.size()==1,"selected case executes exactly once");if(cases.size()==1)check(cases.at(0).at("case")==caseFilter,"executed case exactly matches the selection");}
+    const J result={{"pass",failures.empty()},{"caseCount",cases.size()},{"assertions",checks},{"cases",cases},{"failures",failures},{"caseFilter",filtered?J(caseFilter):J(nullptr)},{"realDeviceApiExecuted",false},{"productionReaderCompiledAndExportedNotCalled",true},{"productionPsProfileReaderCompiledAndExportedNotCalled",true},{"readerBasis","actual bounded verify template with fake SetupAPI/CM read responses"},{"deviceWritesThreadsTimersRetries",false},{"physicalOrOwnershipAuthority",false},{"hardwareAccepted",false}};
     std::ofstream out(std::filesystem::path(argv[1]),std::ios::binary);out<<result.dump(2)<<"\n";
     std::cout<<J({{"pass",failures.empty()},{"caseCount",cases.size()},{"assertions",checks},{"failures",failures}}).dump()<<"\n";return failures.empty()?0:1;
 }

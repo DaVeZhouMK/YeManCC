@@ -11,11 +11,16 @@
 #include <system_error>
 #include <vector>
 #include "json.hpp"
+#include "sleep_power_observation.h"
 using json=nlohmann::json;using DWORD=unsigned long;using ULONGLONG=unsigned long long;using HANDLE=unsigned long;using LONG=long;
 constexpr bool FALSE=false;constexpr DWORD PROCESS_SUSPEND_RESUME=1,PROCESS_QUERY_LIMITED_INFORMATION=2,STILL_ACTIVE=259,ERROR_ACCESS_DENIED=5,ERROR_INVALID_PARAMETER=87;
 const std::wstring SG_SLEEP_LEASE_DIR=L"memory\\sleep",SG_MANUAL_DIR=L"memory\\manual";
 struct SgResumeResult{int count=0;std::string names;std::vector<DWORD> pids;};
 struct SgSleepTarget{DWORD pid=0;ULONGLONG processCreated=0,valveGeneration=0,powerGeneration=0;bool captured=false,markerOwned=false;};
+enum class PowerLifecycle{Ready,Resuming,Suspended};
+std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};std::atomic<bool> g_exitRequested{false};
+static unsigned long long currentPowerGeneration(){return 7;}
+static bool sgSleepRetryActive(){return false;}
 SgSleepTarget g_sgSleepTarget;std::mutex g_sgSleepTargetMx;std::atomic<DWORD> g_manualPausedPid{0};
 std::set<std::wstring> readDenied, readFailsPartway, existsErrors, iteratorErrors;bool existsErrorValue=false;
 struct MemoryFile{std::wstring path;std::string bytes;size_t offset=0;};std::map<HANDLE,MemoryFile> readHandles;HANDLE nextFileHandle=200000;
@@ -55,14 +60,153 @@ bool sgSleepLeaseOwnedByGeneration(ULONGLONG gen){return g_sgSleepTarget.markerO
 void sgAppendResumeResult(SgResumeResult& dst,const SgResumeResult& src){dst.count+=src.count;dst.pids.insert(dst.pids.end(),src.pids.begin(),src.pids.end());}
 template<class...T>void traceLog(const char*,T...){}
 void sgRecordFact(const char* name,const json& facts){op(name,facts);}
-void focusSingleResumedGame(const std::vector<DWORD>&,ULONGLONG,ULONGLONG){++focusCalls;}
-static SgResumeResult sgResumeMarkedDirectoryUnlocked(const std::wstring&,bool=true);
+void sgRecordManualGameControlReceipt(const char*,const char*,const json&,const json&){}
+void focusSingleResumedGame(const std::vector<DWORD>&,ULONGLONG,const ymcc::sleeppower::SharedPowerV1&){++focusCalls;}
+namespace ymcc::sleepLegacyResume {
+struct Paths {std::wstring directory; DWORD pid;};
+static Paths paths(const std::wstring& directory, DWORD pid) {return {directory,pid};}
+}
+namespace ymcc::sleepStartupResume {
+using Inventory = std::map<DWORD, bool>;
+enum class Match { Matching, Changed };
+static bool readRecordVersions(const ymcc::sleepLegacyResume::Paths&) {return false;}
+static Match compareRecordVersions(bool initial,bool current) {return initial==current?Match::Matching:Match::Changed;}
+}
+enum class SgDirectoryResumePurpose { Ordinary, ExitCleanup };
+static SgResumeResult sgResumeMarkedDirectoryUnlocked(
+    const std::wstring& dir, bool skipActiveSleepLease = true, json* resumedProcesses = nullptr,
+    const std::function<bool()>& requestCurrent = {},
+    const ymcc::sleepStartupResume::Inventory* startup = nullptr,
+    SgDirectoryResumePurpose purpose = SgDirectoryResumePurpose::Ordinary);
+namespace WakeGameResume {
+    struct ThreadState {
+        bool running = false;
+        bool known = true;
+        unsigned total = 1;
+        bool allRunning() const { return running; }
+    };
+    ThreadState queryThreads(DWORD pid) {
+        const auto it = procs.find(pid);
+        return {it != procs.end() && it->second.alive && it->second.queryKnown && it->second.depth == 0};
+    }
+}
+#include <cstdint>
+#include <string_view>
+
+namespace ymcc::sleepRecoveryRecords {
+
+inline std::uint32_t pidForName(std::wstring_view name) noexcept {
+    constexpr std::wstring_view pendingSuffix = L".suspend-pending.json", journalSuffix = L".resume.json";
+    std::wstring_view digits;
+    if (name.ends_with(L".txt")) {
+        digits = name.substr(0, name.size() - 4);
+    } else if (name.size() > pendingSuffix.size() + 1 && name.front() == L'.' && name.ends_with(pendingSuffix)) {
+        digits = name.substr(1, name.size() - 1 - pendingSuffix.size());
+    } else if (name.size() > journalSuffix.size() + 1 && name.front() == L'.' && name.ends_with(journalSuffix)) {
+        digits = name.substr(1, name.size() - 1 - journalSuffix.size());
+    }
+    if (digits.empty() || digits.size() > 10 || digits.front() == L'0') return 0;
+    std::uint64_t pid = 0;
+    for (const auto digit : digits) {
+        if (digit < L'0' || digit > L'9') return 0;
+        pid = pid * 10 + (digit - L'0');
+    }
+    return pid > 4 && pid <= 0x7fffffffU ? static_cast<std::uint32_t>(pid) : 0;
+}
+
+} // namespace ymcc::sleepRecoveryRecords
+
+static constexpr bool faultIgnorePeerDirectoryUncertainty = false;
+namespace ymcc::sleepLegacyResume {
+enum class Result { None, Cleaned, Pending };
+struct File {
+    HANDLE value;
+    explicit File(HANDLE h) : value(h) {}
+    ~File() { if (value) CloseHandle(value); }
+    explicit operator bool() const { return value != 0; }
+    HANDLE get() const { return value; }
+};
+struct ResumeLease {
+    Result result=Result::Pending;
+    ULONGLONG completedBirth=0;
+    template<class Current> bool current(const Current& current) const {
+        return result==Result::None && current();
+    }
+};
+}
+static std::wstring debtName(const std::wstring& dir,DWORD pid,const wchar_t* suffix) {
+    return dir + L"\\." + std::to_wstring(pid) + suffix;
+}
+template<class Current>
+static ymcc::sleepLegacyResume::ResumeLease sgAcquireResumeFiles(
+    const std::wstring& dir,DWORD pid,const Current& current,ULONGLONG expectedCompletedBirth=0,bool pause=false) {
+    using ymcc::sleepLegacyResume::Result;
+    const auto& peer = dir==SG_MANUAL_DIR ? SG_SLEEP_LEASE_DIR : SG_MANUAL_DIR;
+    const auto pending = debtName(dir,pid,L".suspend-pending.json");
+    const auto receipt = debtName(dir,pid,L".resume.json");
+    if (!current() || existsErrors.count(dir) || (existsErrors.count(peer) && !faultIgnorePeerDirectoryUncertainty) ||
+        files.count(key(peer,pid)) || files.count(debtName(peer,pid,L".resume.json")) ||
+        files.count(debtName(peer,pid,L".suspend-pending.json"))) return {};
+    auto it = files.find(receipt);
+    if (it != files.end()) {
+        if (pause || it->second != "fixture-completed" || (expectedCompletedBirth && expectedCompletedBirth!=1234)) return {};
+        files.erase(receipt); files.erase(pending); files.erase(key(dir,pid));
+        return {Result::Cleaned,1234};
+    }
+    return files.count(pending) ? ymcc::sleepLegacyResume::ResumeLease{} :
+        ymcc::sleepLegacyResume::ResumeLease{Result::None,0};
+}
+template<class Current>
+static ymcc::sleepLegacyResume::ResumeLease sgAcquirePauseFiles(
+    const std::wstring& dir,DWORD pid,const Current& current) {
+    return sgAcquireResumeFiles(dir,pid,current,0,true);
+}
+
+template<class Current>
+static ymcc::sleepLegacyResume::ResumeLease sgAcquireResumeFiles(
+    const std::wstring& dir,DWORD pid,const Current& current,ULONGLONG expectedCompletedBirth,
+    const std::function<bool(const ymcc::sleepLegacyResume::Paths&)>& localCurrent) {
+    const auto admitted=[&] {return current()&&(!localCurrent||localCurrent(ymcc::sleepLegacyResume::paths(dir,pid)));};
+    return sgAcquireResumeFiles(dir,pid,admitted,expectedCompletedBirth);
+}
+
+static SgResumeResult sgResumeTrackedAllUnlocked(SgDirectoryResumePurpose = SgDirectoryResumePurpose::Ordinary);
+static bool sgReleaseConflictingPauseLeaseUnlocked(DWORD,const std::function<bool()>& = {});
+
+namespace ymcc::sleeppower {
+struct RevocationMirrors {
+    struct Registration {
+        bool admitted = false;
+        bool event() const { return admitted; }
+        bool cancelled() const { return !admitted; }
+    };
+};
+}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& power) {
+    return power.generation == currentPowerGeneration() &&
+           g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&
+           !g_exitRequested.load(std::memory_order_acquire);
+}
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& power) {
+    power.generation = currentPowerGeneration();
+    return sharedPowerLifecycleCurrent(power);
+}
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* power,std::uint32_t bytes) noexcept {
+    if(!power||bytes!=sizeof(*power)||g_exitRequested)return 0;
+    *power={};power->generation=currentPowerGeneration();power->phase=static_cast<std::uint32_t>(g_powerLifecycle.load());
+    power->flags=ymcc::sleeppower::kKnown;return 1;
+}
+static ymcc::sleeppower::RevocationMirrors::Registration observeSharedPowerRevocation(const ymcc::sleeppower::SharedPowerV1& power) {
+    return {sharedPowerLifecycleCurrent(power)};
+}
+
 std::mutex g_sgOpMtx;
 std::function<json(const json&)> memoryResumeHandler;
 template<class F>void ipc_on(const char* name,F handler){assert(std::string(name)=="game.resume");memoryResumeHandler=handler;}
 void focusSingleResumedGame(std::vector<DWORD> pids){++focusCalls;op("memory-focus-feedback",{{"pids",pids}});}
 // EXACT_RESUME_CONSTANTS
 // EXACT_RESUME_FUNCTIONS
+// EXACT_RESUME_CONSUMER_HELPERS
 void registerMemoryResumeIpc(){
 // EXACT_RESUME_IPC_REGISTRATION
 }

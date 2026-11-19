@@ -2,6 +2,9 @@
 #include "process_efficiency.h"
 #include "shared_game_media_download_queue.h"
 #include "shared_game_media_download_resources.h"
+#include "shared_game_media_identity_worker.h"
+#include "steam_source_lease.h"
+#include "shared_game_media_source_job.h"
 #include <atomic>
 
 namespace ymcc::media::downloads {
@@ -19,9 +22,17 @@ class Supervisor {
   int sampledThreshold_ = 0;
   HANDLE stop_ = nullptr, wake_ = nullptr;
   std::thread thread_;
+  std::mutex lifecycleMutex_;
+  bool stopping_=false;
   std::atomic<bool> armed_{false};
   uint64_t nextLaunchAt_ = 0;
   unsigned launchFailures_ = 0;
+  bool identityRecheckPending_ = true; // owner thread only; notifications coalesce
+  DWORD waitOwner(DWORD count,const HANDLE* events,BOOL all,DWORD timeout) {
+    const auto result=WaitForMultipleObjects(count,events,all,timeout);
+    if(result<WAIT_OBJECT_0+count&&events[result-WAIT_OBJECT_0]==wake_)identityRecheckPending_=true;
+    return result;
+  }
   static std::wstring quote(const std::wstring &text) {
     std::wstring result = L"\"";
     size_t slashes = 0;
@@ -92,8 +103,11 @@ class Supervisor {
     return resourceReason_;
   }
   void runOne(const std::string &token) {
+    if(SourceJob::reap())throw std::runtime_error("download-source-cleanup-incomplete");
     const auto manifest =
         read(executable_.parent_path() / L"package-manifest.json");
+    if(manifest.value("backgroundSharedSleepProtocol",0)!=1)throw std::runtime_error("download-sleep-worker-upgrade-required");
+    if(manifest.value("backgroundSteamSourceProtocol",0)!=1)throw std::runtime_error("download-steam-source-worker-upgrade-required");
     if (manifest.value("backgroundMediaProtocol", 0) != 1)
       throw std::runtime_error("download-worker-upgrade-required");
     if(queue_.catalogDue(token)&&manifest.value("backgroundCatalogProtocol",0)!=1) {
@@ -108,49 +122,45 @@ class Supervisor {
     if(manifest.value("backgroundVideoQualityPolicy",0)<videoQualityPolicy){queue_.deferUnsupportedQuality(token);const auto state=queue_.document();if(nextQueueKey(state,now()).empty()&&!queue_.catalogDue(token)){queue_.end(token,"deferred","download-quality-worker-upgrade-required");return;}}
     if(manualRun(queue_.snapshot())&&manifest.value("backgroundManualProtocol",0)!=1){queue_.rejectManualUpgrade(token);queue_.end(token,"deferred","download-manual-worker-upgrade-required");return;}
     if(scopedManual(queue_.snapshot())&&manifest.value("backgroundVideoSelectionProtocol",0)!=1){const std::string reason="download-video-selection-worker-upgrade-required";queue_.rejectManualUpgrade(token,reason);queue_.end(token,"deferred",reason);return;}
-    HANDLE job = CreateJobObjectW(nullptr, nullptr);
-    if (!job)
-      throw std::runtime_error("download-job-unavailable");
-    struct CloseJob {
-      HANDLE h;
-      ~CloseJob() { CloseHandle(h); }
-    } closeJob{job};
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit{};
-    limit.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limit,
-                                 sizeof limit))
-      throw std::runtime_error("download-job-unavailable");
+    auto sharedPower=sleeppower::task::Scope::capture();if(!sharedPower)throw std::runtime_error(sleeppower::task::paused);
+    auto* publicTransport=sleeppower::task::transport();if(!publicTransport)throw std::runtime_error(sleeppower::task::paused);
+    // Capture once. Missing source affects only shortcut lanes in this child.
+    auto source=ymcc::steaminfo::transfer::Export::capture(ymcc::steaminfo::acquireSourceV2());
+    SourceJob closeJob(std::move(source));
+    if(!closeJob.transfer().prepare(token))throw std::runtime_error("media-shared-power-unavailable");
+    const HANDLE job=closeJob.get();
     std::wstring command =
         quote(executable_.wstring()) + L" --media-background " +
         std::to_wstring(GetCurrentProcessId()) + L" " +
         quote(wide(processBirthToken(GetCurrentProcessId()))) + L" " +
         quote(wide(token));
+    if(closeJob.source())command+=closeJob.source()->arguments();
+    command+=closeJob.transfer().arguments();
     std::vector<wchar_t> line(command.begin(), command.end());
     line.push_back(0);
     STARTUPINFOW startup{sizeof startup};
     startup.dwFlags = STARTF_USESHOWWINDOW;
     startup.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION child{};
+    std::vector<HANDLE> inheritedHandles;if(closeJob.source()){const auto handles=closeJob.source()->inheritanceHandles();inheritedHandles.insert(inheritedHandles.end(),handles.begin(),handles.end());}inheritedHandles.push_back(closeJob.transfer().handle());
+    auto inherited=std::make_unique<sleeppower::task::HandleList>(std::move(inheritedHandles));
+    if(!sharedPower->current())throw std::runtime_error(sleeppower::task::paused);
+    if(closeJob.source()&&!closeJob.source()->current())throw std::runtime_error("media-steam-facts-unavailable");
     // This launch does not enter customSteamLibrary.setIntegrationSession.
     // No HWND/InputOwner property is created by the headless entrypoint.
     if (!ymcc::processEfficiency::createProcess(
-            executable_.c_str(), line.data(), nullptr, nullptr, FALSE,
-            CREATE_NO_WINDOW | CREATE_SUSPENDED | IDLE_PRIORITY_CLASS, nullptr,
-            executable_.parent_path().c_str(), &startup, &child))
+            executable_.c_str(), line.data(), nullptr, nullptr, inherited?TRUE:FALSE,
+            CREATE_NO_WINDOW | CREATE_SUSPENDED | IDLE_PRIORITY_CLASS | (inherited?EXTENDED_STARTUPINFO_PRESENT:0), nullptr,
+            executable_.parent_path().c_str(), inherited?inherited->startup():&startup, &child))
       throw std::runtime_error("download-launch-failed");
-    struct Child {
-      PROCESS_INFORMATION p;
-      ~Child() {
-        if (WaitForSingleObject(p.hProcess, 0) == WAIT_TIMEOUT) {
-          TerminateProcess(p.hProcess, 16);
-          WaitForSingleObject(p.hProcess, 2000);
-        }
-        CloseHandle(p.hThread);
-        CloseHandle(p.hProcess);
-      }
-    } owned{child};
-    if (!AssignProcessToJobObject(job, child.hProcess))
-      throw std::runtime_error("download-job-assignment-failed");
+    if(closeJob.source()&&!closeJob.source()->sealInheritance()){
+      closeJob.assign(child);throw std::runtime_error("download-source-inheritance-failed");
+    }
+    if(!closeJob.assign(child))throw std::runtime_error("download-job-assignment-failed");
+    if(closeJob.source()&&!closeJob.source()->current())throw std::runtime_error("media-steam-facts-unavailable");
+    sleeppower::remote::Key128 publicRequest;if(!sleeppower::task::requestKey(token,publicRequest))throw std::runtime_error("media-shared-power-unavailable");sleeppower::remote::RemoteOfferV1 offer;
+    if(!publicTransport->captureOwnedTask(closeJob.power(),child.hProcess,job,publicRequest,[sharedPower](auto purpose){return purpose==sleeppower::remote::Purpose::Observation&&sharedPower->current();},offer)||!closeJob.transfer().seal(offer)||!sharedPower->current())throw std::runtime_error(sleeppower::task::paused);
+    if(!queue_.beginWorkerSession(token,limits_.session))throw std::runtime_error("media-download-cancelled");
     if (ResumeThread(child.hThread) == DWORD(-1))
       throw std::runtime_error("download-resume-failed");
     const auto started = GetTickCount64();
@@ -159,11 +169,13 @@ class Supervisor {
     struct LaneClock {int64_t task=0,heartbeat=0;uint64_t started=0,activity=0,bytes=0,byteProgress=0;};
     std::map<std::string,LaneClock> laneClocks;
     std::string failure,failedKey;
+    Json expiredClaim;
     bool terminalAccepted = false;
     const auto childExit = [&] {
       DWORD code = 0;
       if (!GetExitCodeProcess(child.hProcess, &code))
         failure = "download-worker-exit-unavailable";
+      else if(code==17)failure=sharedPower->current()?"media-shared-power-unavailable":sleeppower::task::paused;
       else if (code)
         failure = "download-worker-exited-" + std::to_string(code);
     };
@@ -177,18 +189,27 @@ class Supervisor {
         if (!failure.empty()) return;
         const auto remaining = (std::min)(limits_.session - (tick - started),
                                           limits_.stall - (tick - activity));
-        HANDLE events[] = {stop_, child.hProcess};
-        const auto result = WaitForMultipleObjects(2, events, FALSE,
+        std::array<HANDLE,7> events{stop_,child.hProcess};DWORD count=2;
+        events[count++]=closeJob.power().cancellationEvent();
+        if(auto* source=closeJob.source()){const auto handles=source->inheritanceHandles();for(unsigned i=0;i<4;++i)events[count++]=handles[i];}
+        const auto result = waitOwner(count, events.data(), FALSE,
             static_cast<DWORD>((std::min)(remaining, uint64_t{INFINITE - 1})));
+        if(result==WAIT_OBJECT_0){failure="owner-stopped";return;}if(result==WAIT_OBJECT_0+1){childExit();return;}
+        if(!sharedPower->current()||!closeJob.power().current(child.hProcess)){failure=sleeppower::task::paused;return;}
+        if(closeJob.source()&&!closeJob.source()->current()){failure="media-steam-facts-unavailable";return;}
         if (result == WAIT_OBJECT_0) { failure = "owner-stopped"; return; }
         if (result == WAIT_OBJECT_0 + 1) { childExit(); return; }
         if (result == WAIT_FAILED) { failure = "download-worker-wait-failed"; return; }
       }
     };
     for (;;) {
-      HANDLE events[] = {stop_, child.hProcess, wake_};
-      const auto result =
-          WaitForMultipleObjects(3, events, FALSE, limits_.monitor);
+      std::array<HANDLE,8> events{stop_,child.hProcess,wake_};DWORD count=3;
+      events[count++]=closeJob.power().cancellationEvent();
+      if(auto* source=closeJob.source()){const auto handles=source->inheritanceHandles();for(unsigned i=0;i<4;++i)events[count++]=handles[i];}
+      const auto result = waitOwner(count,events.data(),FALSE,limits_.monitor);
+      if(result==WAIT_OBJECT_0){failure="owner-stopped";break;}if(result==WAIT_OBJECT_0+1){childExit();break;}
+      if(!sharedPower->current()||!closeJob.power().current(child.hProcess)){failure=sleeppower::task::paused;break;}
+      if(closeJob.source()&&!closeJob.source()->current()){failure="media-steam-facts-unavailable";break;}
       if (result == WAIT_OBJECT_0) {
         failure = "owner-stopped";
         break;
@@ -242,9 +263,10 @@ class Supervisor {
         // The original stall and whole-session deadlines still bound every lane.
         if(it.value().value("phase",std::string{})=="downloading"&&bytes>clock.bytes)clock.byteProgress=tick;
         clock.bytes=bytes;
-        if(tick-clock.started>=(std::min)(limits_.attempt,it.value().value("attemptBudgetMs",uint64_t(automaticAttemptMs))))failure="media-task-time-budget";
+        if(now()>=it.value().value("sessionDeadlineAt",now()+int64_t(sessionMs)))failure="media-task-timeout";
+        else if(tick-clock.started>=(std::min)(limits_.attempt,it.value().value("attemptBudgetMs",uint64_t(automaticAttemptMs))))failure="media-task-time-budget";
         else failure=expiry(tick,started,clock.activity,(std::max)(clock.started,clock.byteProgress),limits_);
-        if(!failure.empty()){failedKey=it.key();break;}
+        if(!failure.empty()){failedKey=it.key();expiredClaim=it.value();break;}
       }
       if(failure.empty()) failure =
           expiry(GetTickCount64(), started, activity, active.empty()?taskStarted:0, limits_);
@@ -252,17 +274,18 @@ class Supervisor {
         break;
     }
     if (!failure.empty()) {
+      if(failure==sleeppower::task::paused)try{queue_.markSharedSleep(token);}catch(...){/* Original terminal write still owns the same queue;always stop exact Job. */}
       TerminateJobObject(job, 16);
       WaitForSingleObject(child.hProcess, 2000);
-      if (WaitForSingleObject(child.hProcess, 0) == WAIT_OBJECT_0&&!powerPolicy::blocked())
+      if (WaitForSingleObject(child.hProcess, 0) == WAIT_OBJECT_0&&!powerPolicy::blocked()&&failure!=sleeppower::task::paused)
         try { queue_.cleanupTemporary(); } catch (...) {}
       // A durable end may race the last wait/probe or a nonzero process exit.
       // Recheck after teardown; accepted results/history/retry debt stay intact.
       if (!terminalAccepted && !Queue::terminalReceipt(queue_.snapshot(), token)) {
-        if (failure == "download-paused" || failure == "owner-stopped")
+        if (failure == "download-paused" || failure == "owner-stopped"||failure==sleeppower::task::paused)
           queue_.end(token, "paused", failure);
         else
-          queue_.recover(token, failure,failedKey);
+          queue_.recover(token, failure,failedKey,failedKey.empty()?nullptr:&expiredClaim);
       }
     }
     FILETIME created{}, exited{}, kernel{}, user{};
@@ -295,12 +318,14 @@ class Supervisor {
         return;
       int64_t delay = -1;
       try {
+        if(armed_.load()&&!sleeppower::task::allowed()){queue_.resource("system-sleep");const auto debt=SourceJob::reap();HANDLE events[]={stop_,wake_};if(waitOwner(2,events,FALSE,debt?limits_.recheck:INFINITE)==WAIT_OBJECT_0)return;continue;}
+        if(armed_.load()&&queue_.snapshot().value("resourcePauseReason",std::string{})=="system-sleep")queue_.resource("");
         if (armed_.load()) {
           const auto elapsed = GetTickCount64() - processStartedTick;
           if (elapsed < limits_.startup) {
             queue_.resource("startup-protection", {}, startupProtectionUntil_);
             HANDLE events[] = {stop_, wake_};
-            if (WaitForMultipleObjects(
+            if (waitOwner(
                     2, events, FALSE,
                     static_cast<DWORD>(limits_.startup - elapsed)) ==
                 WAIT_OBJECT_0)
@@ -310,6 +335,11 @@ class Supervisor {
           if (queue_.snapshot().value("resourcePauseReason", std::string{}) ==
               "startup-protection")
             queue_.resource("");
+        }
+        if(armed_.load()&&identityRecheckPending_){
+          identityRecheckPending_=false;
+          const auto source=ymcc::steaminfo::acquireSourceV2();
+          queue_.recoverIdentityPrerequisites(executable_.parent_path()/L"SteamArtworkLab.exe",[&](const Json& target){return readShortcutCurrentSource(target,source);},true);
         }
         delay = armed_.load() ? queue_.delay() : -1;
         if (delay == 0 && GetTickCount64() < nextLaunchAt_)
@@ -322,7 +352,7 @@ class Supervisor {
             const auto interval =
                 (blocked == "cpu-unknown" || blocked == "cpu-recovering" ||
                  (blocked == "cpu-busy"&&sampledBefore==sampledAt_)) ? limits_.monitor : limits_.recheck;
-            if (WaitForMultipleObjects(2, events, FALSE, interval) ==
+            if (waitOwner(2, events, FALSE, interval) ==
                 WAIT_OBJECT_0)
               return;
             continue;
@@ -334,6 +364,7 @@ class Supervisor {
               runOne(token);
               launchFailures_ = 0;
             } catch (const std::exception &e) {
+              if(std::string(e.what())==sleeppower::task::paused){queue_.end(token,"paused",sleeppower::task::paused);continue;}
               queue_.recover(token, e.what());
               launchFailures_ = (std::min)(8u, launchFailures_ + 1);
               // A fixed slow retry also notices a repaired/replaced helper.
@@ -348,6 +379,9 @@ class Supervisor {
       } catch (...) {
         delay = retryMs;
       }
+      if(armed_.load()&&identityRecheckPending_)continue;
+      // Only outstanding exact cleanup debt uses the existing slow owner wait.
+      if(SourceJob::reap()&&delay<0)delay=limits_.recheck;
       bool slowRecovery=false;
       try{const auto retained=armed_.load()?queue_.snapshot():Json::object();
         // Queue repair cannot lift an explicit policy pause. The policy owner
@@ -361,7 +395,7 @@ class Supervisor {
           delay < 0 ? INFINITE
                     : static_cast<DWORD>((std::min)(
                           int64_t{3600000}, (std::max)(int64_t{250}, delay)));
-      const auto result=WaitForMultipleObjects(2, events, FALSE, wait);
+      const auto result=waitOwner(2, events, FALSE, wait);
       if(result==WAIT_OBJECT_0)return;
       if(result==WAIT_TIMEOUT&&slowRecovery)try{queue_.recheck();}catch(...){}
     }
@@ -384,15 +418,27 @@ public:
     }
     thread_ = std::thread([this] { loop(); });
   }
-  ~Supervisor() {
-    SetEvent(stop_);
-    if (thread_.joinable())
-      thread_.join();
-    CloseHandle(stop_);
-    CloseHandle(wake_);
+private:
+  bool finish(bool waitForThread) noexcept {
+    try{std::unique_lock lifecycle(lifecycleMutex_,std::defer_lock);
+      if(waitForThread)lifecycle.lock();else if(!lifecycle.try_lock())return false;
+      stopping_=true;
+      if(stop_&&!SetEvent(stop_))return false;
+      if(thread_.joinable()){
+        if(!waitForThread&&WaitForSingleObject(thread_.native_handle(),0)!=WAIT_OBJECT_0)return false;
+        thread_.join();
+      }
+      const auto debt=SourceJob::reap(); // original zero-budget final pass
+      const auto close=[](HANDLE& value){if(!value)return true;if(!CloseHandle(value))return false;value=nullptr;return true;};
+      const bool a=close(stop_),b=close(wake_);return a&&b&&debt==0;
+    }catch(...){return false;}
   }
+public:
+  bool finishForExit() noexcept {return finish(false);}
+  ~Supervisor(){(void)finish(true);}
   Queue &queue() { return queue_; }
   void wake(bool activate = false) {
+    std::lock_guard lifecycle(lifecycleMutex_);if(stopping_)return;
     if (activate)
       armed_.store(true);
     SetEvent(wake_);
@@ -401,9 +447,11 @@ public:
 // This is the production command/event boundary used by the native IPC and
 // isolated chain acceptance. It never calls the visible library launcher.
 class Controller {
+  std::mutex commandMutex_;
+  std::mutex finishMutex_;
+  std::atomic<bool> stopping_{false};
   Supervisor owner_;
   Watcher watcher_;
-  std::mutex commandMutex_;
 
 public:
   Controller(fs::path root, fs::path executable,
@@ -415,8 +463,10 @@ public:
   Json background(const Json &request) {
     if (!request.is_object())
       throw std::runtime_error("media-download-command-invalid");
+    if(stopping_.load(std::memory_order_acquire))throw std::runtime_error("media-download-owner-stopped");
     if(!steamDemand::allowed(request))return steamDemand::inactive();
     std::lock_guard lock(commandMutex_);
+    if(stopping_.load(std::memory_order_acquire))throw std::runtime_error("media-download-owner-stopped");
     if(!steamDemand::allowed(request))return steamDemand::inactive();
     if(request.value("recheck",false))owner_.queue().recheck();
     if (request.contains("enabled"))
@@ -434,6 +484,18 @@ public:
     if(!steamDemand::allowed(request))return steamDemand::inactive();
     return owner_.queue().snapshot();
   }
+  bool finishForExit() noexcept {
+    stopping_.store(true,std::memory_order_release);
+    try{std::unique_lock finish(finishMutex_,std::try_to_lock);
+      if(!finish)return false;
+      const bool watcher=watcher_.finishForExit();
+      const bool owner=owner_.finishForExit();
+      // A command admitted before stop may still be using the queue.
+      std::unique_lock command(commandMutex_,std::try_to_lock);
+      return watcher&&owner&&command.owns_lock();
+    }catch(...){return false;}
+  }
+  ~Controller(){stopping_.store(true,std::memory_order_release);}
   Json snapshot() { return owner_.queue().snapshot(); }
 };
 } // namespace ymcc::media::downloads

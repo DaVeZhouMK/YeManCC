@@ -5,6 +5,10 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {runProcess} from '../runner.mjs';
 import {LIFECYCLE_VERSION,verifyR3NormalReturn,verifyR3Tuple} from './r3-contract.mjs';
+import {verifyTerminal26Switch} from './r3-terminal26-switch-contract.mjs';
+import {inspectMsiReturnCases,inspectMsiCancellationCases} from '../../../fixtures/input_coordinator_lifecycle/msi_return_observation.mjs';
+export {inspectMsiReturnCases};
+export {verifyTerminal26Switch};
 import {openCurrentPreparedContext,requireCurrentPreparedContext,currentPreparedSources,currentPreparedArtifacts,recheckCurrentPrepared,recheckCurrentPreparedContexts,verifyCurrentPreparedExecution} from './r3-current-prepared.mjs';
 const need=(ok,code)=>{if(!ok)throw Error('R3_CURRENT_RUN_'+code);};
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -26,16 +30,127 @@ export function currentLifecycleRemainingBudget(started,now=Date.now()){
  const groupWallMs=now-started;need(Number.isFinite(groupWallMs)&&groupWallMs>=0&&groupWallMs<90000,'ORIGINAL_GROUP90_BUDGET_EXCEEDED');
  return {originalModeBudgetMs:45000,originalGroupBudgetMs:90000,groupWallMs,remainingGroupMs:90000-groupWallMs,timeoutMs:Math.min(45000,90000-groupWallMs)};
 }
-export function verifyCurrentLifecycleMode(test,raw,{entryText}={}){
+
+const tuple26File=new URL('./r3-terminal26-tuple-expectations.json',import.meta.url);
+const tuple26=JSON.parse(fs.readFileSync(tuple26File,'utf8'));
+const tuple26Id='current105-terminal26-sdk-lifetime-compact-v1';
+const tupleInteger=x=>Number.isSafeInteger(x)&&x>=0;
+const tupleSameOwner=(a,b)=>a&&b&&a.epoch===b.epoch&&a.runId===b.runId;
+function tupleOwner(d){
+ need(d&&tupleInteger(d.epoch)&&d.epoch>0&&typeof d.runId==='string'&&d.runId.length>0,'TUPLE_OWNER_REQUIRED');
+ return {epoch:d.epoch,runId:d.runId};
+}
+function tupleHostWitness(c){
+ need(Array.isArray(c.events),'TUPLE_NATIVE_EVENTS_REQUIRED');
+ let present=false,owner=null;
+ for(const e of c.events){
+  need(e&&typeof e.event==='string'&&e.detail&&typeof e.detail==='object','TUPLE_NATIVE_EVENT_REQUIRED');
+  const d=e.detail;
+  need(!(e.event==='input-host-stop-request'&&String(d.reason).startsWith('offline-owned-cleanup')),'TUPLE_PRE_FINISH_EVENTS_REQUIRED');
+  if(e.event==='input-host-started'){
+   const next=tupleOwner(d);
+   need(!present&&(!owner||(next.epoch>owner.epoch&&next.runId!==owner.runId))&&d.transportUsable===true,'TUPLE_START_OWNER_CONFLICT');
+   owner=next;present=true;
+  }else if(e.event==='input-host-process-retirement'){
+   need(present&&tupleSameOwner(owner,tupleOwner(d)),'TUPLE_FOREIGN_RETIREMENT');
+   need(typeof d.handleClosed==='boolean'&&typeof d.hostHandleRetained==='boolean','TUPLE_RETIREMENT_FLAGS_REQUIRED');
+   if(d.handleClosed)need(d.closeAttempted===true&&d.hostExitConfirmed===true&&d.waitState===0&&d.closeError===0&&d.hostHandleRetained===false,'TUPLE_RETIREMENT_CONFLICT');
+   else need(d.hostHandleRetained===true,'TUPLE_RETIREMENT_CONFLICT');
+   present=d.hostHandleRetained;
+  }else if(e.event==='input-host-session-retained'){
+   need(tupleSameOwner(owner,tupleOwner(d))&&typeof d.hostHandleRetained==='boolean'&&d.hostHandleRetained===present,'TUPLE_RETAINED_OWNER_CONFLICT');
+  }else if(e.event==='input-host-quarantine-child-exited'){
+   need(present&&tupleSameOwner(owner,tupleOwner(d))&&d.processHandleClosed===true,'TUPLE_QUARANTINE_OWNER_CONFLICT');present=false;
+  }else if(e.event==='input-host-quarantine-cleared'){
+   need(tupleSameOwner(owner,tupleOwner({epoch:d.retiredHostEpoch,runId:d.retiredRunId}))&&!present&&d.sessionClearedBeforeRearm===true,'TUPLE_CLEARED_OWNER_CONFLICT');
+  }
+ }
+ need(owner,'TUPLE_POSITIVE_OWNER_WITNESS_REQUIRED');
+ if(present&&c.observedRuntime)need(tupleSameOwner(owner,{epoch:c.observedRuntime.hostEpoch,runId:c.observedRuntime.runId}),'TUPLE_FINAL_OWNER_CONFLICT');
+ return present;
+}
+function tupleProbeWitness(c,expected){
+ const marker=c.nextScheduledProbe,old=c.offeredRuntime,final=c.observedRuntime;
+ if(!expected.hasProbe){need(!Object.hasOwn(c,'nextScheduledProbe'),'TUPLE_FOREIGN_PROBE');return false;}
+ need(old&&final&&tupleInteger(old.serial)&&old.serial>0&&old.serial===final.serial&&tupleInteger(c.oldRequestId)&&c.oldRequestId>0,'TUPLE_INCIDENT_WITNESS_REQUIRED');
+ if(expected.parameters.condition==='cooldown'){
+  need(!Object.hasOwn(c,'nextScheduledProbe'),'TUPLE_COOLDOWN_PROBE_CONFLICT');
+  need(old.pending===true&&old.spent===false&&old.recoveryRequestId===0&&old.oldRequestId===c.oldRequestId&&
+   final.pending===false&&final.spent===true&&tupleInteger(final.recoveryRequestId)&&final.recoveryRequestId>0&&final.recoveryRequestId!==c.oldRequestId,'TUPLE_COOLDOWN_SUCCESSOR_REQUIRED');
+  const rows=c.events.map((e,index)=>({e,index})).filter(x=>x.e.event==='input-host-runtime-recovery'&&x.e.detail.serial===final.serial);
+  const restart=rows.filter(x=>x.e.detail.stage==='restart'),returned=rows.filter(x=>x.e.detail.stage==='start-returned');
+  need(restart.length===1&&returned.length===1&&restart[0].index<returned[0].index,'TUPLE_COOLDOWN_RESTART_REQUIRED');
+  for(const x of [restart[0],returned[0]])need(x.e.detail.recoveryRequestId===final.recoveryRequestId&&x.e.detail.spent===true&&x.e.detail.pending===false&&x.e.detail.nextProbeTick===0,'TUPLE_COOLDOWN_RESTART_CONFLICT');
+  return false;
+ }
+ need(marker&&typeof marker==='object'&&!Array.isArray(marker),'TUPLE_POSITIVE_PROBE_REQUIRED');
+ for(const key of ['beforeTick','originalNextProbe','advanceMs','oldRequestId','recoveryRequestBefore','recoveryRequestAfter'])need(tupleInteger(marker[key]),'TUPLE_TYPED_PROBE_REQUIRED');
+ need(marker.advanceMs>0&&marker.advanceMs<=1000&&marker.originalNextProbe-marker.beforeTick===marker.advanceMs,'TUPLE_PROBE_DELTA_CONFLICT');
+ need(marker.oldRequestId===c.oldRequestId&&marker.oldRequestId===old.oldRequestId&&marker.recoveryRequestBefore===0,'TUPLE_PROBE_REQUEST_CONFLICT');
+ need(marker.pendingAfter===false&&marker.recoveryRequestAfter>0&&marker.recoveryRequestAfter!==marker.oldRequestId&&marker.recoveryRequestAfter===final.recoveryRequestId,'TUPLE_PROBE_SUCCESSOR_CONFLICT');
+ return true;
+}
+export function verifyTerminal26Tuple(result,{tupleSource}={}){
+ need(tuple26.kind==='EXPLICIT26_SOURCE_DERIVED_TUPLE_ASSERTION_GRAMMAR_V1'&&tuple26.managedInputContract===tuple26Id,'TUPLE_CONTRACT_REQUIRED');
+ need(tupleSource&&typeof tupleSource.path==='string'&&path.isAbsolute(tupleSource.path)&&path.basename(tupleSource.path)==='tuple_recovery_cases.inc'&&Buffer.isBuffer(tupleSource.bytes)&&
+  tupleSource.bytes.length===tuple26.sourceBindings.compiledTupleBytes&&tupleSource.sha256===tuple26.sourceBindings.compiledTupleSha256&&
+  createHash('sha256').update(tupleSource.bytes).digest('hex')===tupleSource.sha256,'TUPLE_COMPILED_SOURCE_PIN_REQUIRED');
+ need(result?.status==='PASS'&&result.forbiddenIo===0&&result.fullTranslationUnit===true&&result.normalProductMainExecuted===false&&result.realDeviceIo===false&&Array.isArray(result.failures)&&result.failures.length===0,'TUPLE_POSITIVE_RESULT_REQUIRED');
+ need(Array.isArray(result.cases)&&result.cases.length===45&&tuple26.cases.length===45,'TUPLE_EXACT45_REQUIRED');
+ const expected=[],witnesses=[];
+ function expand(nodes,facts,row){
+  for(const n of nodes){
+   if(Number.isInteger(n)){need(typeof tuple26.labels[n]==='string','TUPLE_GRAMMAR_LABEL_REQUIRED');expected.push({case:row.name,assertion:tuple26.labels[n],sourceOrdinal:row.sourceOrdinal,nameOccurrence:1});}
+   else{need(n&&['host','probe'].includes(n.fact),'TUPLE_GRAMMAR_FACT_REQUIRED');expand(facts[n.fact]?n.then:n.else,facts,row);}
+  }
+ }
+ result.cases.forEach((c,i)=>{
+  const row=tuple26.cases[i];
+  need(c?.name===row.name&&c.sourceOrdinal===i+1&&row.sourceOrdinal===i+1&&c.nameOccurrence===1,'TUPLE_EXACT_CASE_ORDER_REQUIRED');
+  const host=tupleHostWitness(c),probe=tupleProbeWitness(c,row);
+  witnesses.push({sourceOrdinal:i+1,hostPresent:host,probeReached:probe});expand(row.grammar,{host,probe},row);
+ });
+ need(tupleInteger(result.checks)&&result.checks===expected.length&&Array.isArray(result.assertionTrace)&&result.assertionTrace.length===expected.length,'TUPLE_TRACE_LENGTH_REQUIRED');
+ expected.forEach((e,i)=>{const a=result.assertionTrace[i];need(a&&a.checkIndex===i+1&&a.passed===true&&Object.keys(e).every(k=>a[k]===e[k]),'TUPLE_EXACT_ASSERTION_SEQUENCE_REQUIRED');});
+ return {kind:tuple26.kind,cases:45,checks:expected.length,witnesses,compiledTupleSha256:tupleSource.sha256,runtimeAuthorityGranted:false};
+}
+
+// Validate the actual terminal26 check() report format; this is not a failure-mask oracle.
+function verifyTerminal26SwitchNegativeReport(raw){
+ need(Array.isArray(raw.cases)&&raw.cases.length>0,'SWITCH_NEGATIVE_CASES_REQUIRED');
+ const occurrences=new Map();
+ raw.cases.forEach((row,index)=>{need(row&&typeof row.name==='string'&&row.name.length>0,'SWITCH_NEGATIVE_CASE_NAME_REQUIRED');const occurrence=(occurrences.get(row.name)??0)+1;occurrences.set(row.name,occurrence);need(row.sourceOrdinal===index+1&&row.nameOccurrence===occurrence,'SWITCH_NEGATIVE_CASE_OCCURRENCE_REQUIRED');});
+ need(tupleInteger(raw.checks)&&raw.checks>0&&Array.isArray(raw.assertionTrace)&&raw.assertionTrace.length===raw.checks,'SWITCH_NEGATIVE_TRACE_REQUIRED');
+ const expectedFailures=[];
+ raw.assertionTrace.forEach((row,index)=>{need(row&&row.checkIndex===index+1&&typeof row.passed==='boolean'&&typeof row.assertion==='string'&&row.assertion.length>0&&Number.isSafeInteger(row.sourceOrdinal)&&row.sourceOrdinal>0,'SWITCH_NEGATIVE_TRACE_ROW_REQUIRED');const owner=raw.cases[row.sourceOrdinal-1];need(owner&&row.case===owner.name&&row.nameOccurrence===owner.nameOccurrence,'SWITCH_NEGATIVE_TRACE_OWNER_REQUIRED');if(!row.passed)expectedFailures.push(row);});
+ const signature=row=>row&&[row.case,row.assertion,row.sourceOrdinal,row.nameOccurrence,row.checkIndex];
+ need(Array.isArray(raw.failures)&&raw.failures.length===expectedFailures.length&&raw.failures.every((row,index)=>JSON.stringify(signature(row))===JSON.stringify(signature(expectedFailures[index]))),'SWITCH_NEGATIVE_FAILURE_TRACE_CONFLICT');
+ return {scope:'ORIGINAL_NECESSARY_ASSERTION_AND_REPORT_CONSISTENCY_ONLY',reportConsistencyVerified:true,cases:raw.cases.length,checks:raw.checks,failures:expectedFailures.length,completeFailureMaskVerified:false};
+}
+
+export function verifyCurrentLifecycleMode(test,raw,{entryText,managedInputContract,tupleSource,switchSource,requireMsiReturnObservation=false,msiCancellation}={}){
+ need(managedInputContract===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1',tuple26Id].includes(managedInputContract),'UNKNOWN_MANAGED_CONTRACT');
  currentLifecycleModeLabel(test);
+ if(msiCancellation!==undefined){
+  need(managedInputContract===tuple26Id&&test.role==='positive'&&test.mode==='recovery-protection'&&!test.mutation,
+   'EXPLICIT26_POSITIVE_RECOVERY_PARAMETER_ONLY');
+  need(msiCancellation&&typeof msiCancellation==='object'&&!Array.isArray(msiCancellation)&&
+   Object.keys(msiCancellation).every(key=>key==='boundary'||key==='phase'),'EXACT_MSI_PARAMETER_OPTIONS_REQUIRED');
+  return {originalSemanticChecksVerified:false,selectedParameterSemanticChecksVerified:true,
+   preparedContextGranted:false,runtimeAuthorityGranted:false,
+   msiCancellation:inspectMsiCancellationCases(raw,msiCancellation)};
+ }
+  need(typeof requireMsiReturnObservation==='boolean','MSI_RETURN_OBSERVATION_REQUIREMENT_BOOLEAN');
+  const msiReturnObservation=test.mode==='recovery-protection'&&(requireMsiReturnObservation||Array.isArray(raw.cases))?inspectMsiReturnCases(raw.cases,{required:requireMsiReturnObservation}):null;
  if(!test.mutation&&(test.mode==='entry'||test.mode.startsWith('mutation')))need(typeof entryText==='string','ORIGINAL_ENTRY_TEXT_REQUIRED');
    need(raw.forbiddenIo===0&&raw.fullTranslationUnit===true&&raw.normalProductMainExecuted===false&&raw.realDeviceIo===false,'OFFLINE_COMPLETE_NATIVE_MODE_REQUIRED');
+   const negativeSemanticEvidence=managedInputContract===tuple26Id&&test.mutation&&test.mode==='switch-recovery'?verifyTerminal26SwitchNegativeReport(raw):null;
    if(test.mutation){const expected=test.role==='switchReturn'?'verified late cleanup queues only the continuation of the already charged recovery':test.role==='switchOwner'?'one current frame fault has exactly one serialized Stop owner':test.role==='recoveryInheritance'?'single real return refresh restores requested operational target':'actual durable request locks before consumer runs';need(raw.status==='FAIL'&&raw.failures.some(row=>row.assertion===expected),'ORIGINAL_LIFECYCLE_SEMANTIC_NEGATIVE_REQUIRED');}
    else if(test.mode==='entry'||test.mode.startsWith('mutation')){const n=test.mode==='entry'?0:test.mode==='mutation1'?1:2,text=entryText,rows=[...text.matchAll(/^(PASS|FAIL) (.+)$/gm)];need(rows.length===56,'ORIGINAL56_ENTRY_CASES_REQUIRED');need(n?raw.status==='FAIL'&&rows.some(row=>row[1]==='FAIL'&&row[2].trim()===(n===1?'Entry-B-ensure-after-stop':'Entry-A-armed-at-admit')):raw.status==='PASS'&&rows.every(row=>row[1]==='PASS'),'ORIGINAL_ENTRY_POLARITY_REQUIRED');}
    else need(raw.status==='PASS'&&raw.failures.length===0&&raw.checks>0,'ORIGINAL_POSITIVE_NATIVE_MODE_FAILED');
-   if(test.mode==='switch-recovery'&&!test.mutation)verifyR3NormalReturn(raw);if(test.mode==='tuple-protection'&&!test.mutation)verifyR3Tuple(raw);
+   if(test.mode==='switch-recovery'&&!test.mutation){if(managedInputContract===tuple26Id)verifyTerminal26Switch(raw,{switchSource});else verifyR3NormalReturn(raw);}if(test.mode==='tuple-protection'&&!test.mutation){if(managedInputContract===tuple26Id)verifyTerminal26Tuple(raw,{tupleSource});else verifyR3Tuple(raw);}
 
- return {originalSemanticChecksVerified:true,preparedContextGranted:false,runtimeAuthorityGranted:false};
+  return {originalSemanticChecksVerified:true,preparedContextGranted:false,runtimeAuthorityGranted:false,...(negativeSemanticEvidence?{negativeSemanticEvidence}:{}),...(msiReturnObservation?.present||msiReturnObservation?.required?{msiReturnObservation}:{})};
 }
 const unique=items=>[...new Set(items)];
 function files(root){return fs.readdirSync(root,{withFileTypes:true}).flatMap(entry=>{need(!entry.isSymbolicLink(),'OUTPUT_REPARSE_POINT');const file=path.join(root,entry.name);return entry.isDirectory()?files(file):[file];});}

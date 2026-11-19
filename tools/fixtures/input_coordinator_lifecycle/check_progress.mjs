@@ -9,9 +9,11 @@ const tail="if(!good)failures.push_back({{\"case\",owner},{\"assertion\",name},{
 export function observeCurrent105Progress(original){
  assert(!original.includes('fixtureRecordCheckProgress'),'CHECK_PROGRESS_ALREADY_PRESENT');
  assert.equal(original.split(marker).length,2,'EXACT_CURRENT105_CHECK_REQUIRED');
- assert.equal(original.split(tail).length,2,'EXACT_CURRENT105_FAILURE_RECORD_REQUIRED');
- const next=tail.slice(0,-1)+'fixtureRecordCheckProgress(assertionTrace.back());}';
- const text=original.replace(marker,declaration+marker).replace(tail,next);
- assert.equal(text.replace(declaration+marker,marker).replace(next,tail),original);
+ const tails=[tail,tail.slice(0,-1)+'fixtureOffCheckpoint("assertion",name,good?1:0);}'];
+ const matched=tails.filter(candidate=>original.split(candidate).length===2);
+ assert.equal(matched.length,1,'EXACT_CURRENT105_FAILURE_RECORD_REQUIRED');
+ const actualTail=matched[0],next=actualTail.slice(0,-1)+'fixtureRecordCheckProgress(assertionTrace.back());}';
+ const text=original.replace(marker,declaration+marker).replace(actualTail,next);
+ assert.equal(text.replace(declaration+marker,marker).replace(next,actualTail),original);
  return {text,originalSha256:sha(original),observedSha256:sha(text),wholeOriginalRestored:true,originalAssertionsUnchanged:true,scope:'Only copy the completed original assertion row to a private progress file; no report acceptance, assertion, clock, budget or product method replacement.'};
 }

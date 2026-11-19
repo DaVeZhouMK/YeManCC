@@ -109,14 +109,14 @@ function Resolve-TrainerManagerProgram($Settings,[string]$ManagerPath,[string]$A
     throw '未找到 Game Cheats Manager，请从安装位置打开一次管理器或配置 YEMAN_GCM_PATH'
 }
 function Resolve-TrainerCheatEngineProgram([string]$Configured) {
+    $directory=[Environment]::ExpandEnvironmentVariables($Configured.Trim().Trim('"'))
+    if([IO.Path]::GetFileName($directory) -ieq 'Cheat Engine.exe'){$directory=[IO.Path]::GetDirectoryName($directory)}
+    if($directory -and [IO.Path]::IsPathRooted($directory) -and [IO.Directory]::Exists($directory)) {
+        $binaries=if([Environment]::Is64BitOperatingSystem){@('cheatengine-x86_64.exe','cheatengine-x86_64-SSE4-AVX2.exe')}else{@('cheatengine-i386.exe')}
+        foreach($binary in $binaries){$program=Resolve-TrainerConfiguredProgram (Join-Path $directory $binary) 'Cheat Engine.exe';if($program){return $program}}
+    }
     $program=Resolve-TrainerConfiguredProgram $Configured 'Cheat Engine.exe'
     if($program) { return $program }
-    $directory=[Environment]::ExpandEnvironmentVariables($Configured.Trim().Trim('"'))
-    if($directory -and [IO.Path]::IsPathRooted($directory) -and [IO.Directory]::Exists($directory)) {
-        $binary=if([Environment]::Is64BitOperatingSystem){'cheatengine-x86_64.exe'}else{'cheatengine-i386.exe'}
-        $program=Resolve-TrainerConfiguredProgram (Join-Path $directory $binary) 'Cheat Engine.exe'
-        if($program) { return $program }
-    }
     throw ('GCM 配置的 Cheat Engine 不存在，请检查 cePath：'+$Configured)
 }
 # Keep CE configuration in GCM's own settings, shared by GCM and YMCC callers.
@@ -124,16 +124,29 @@ function Repair-TrainerGcmCePath {
     param([string]$SettingsRoot, [string]$DefaultDirectory='C:\SOFT\Cheat Engine')
     $settingsPath=Join-Path $SettingsRoot 'settings.json'
     $settings=Read-TrainerJson $settingsPath 65536
-    if ($null -eq $settings) { return $settings }
-    if ($settings -is [Array] -or $settings -isnot [pscustomobject]) { throw 'Invalid GCM settings object' }
+    if ($null -ne $settings -and ($settings -is [Array] -or $settings -isnot [pscustomobject])) { throw 'Invalid GCM settings object' }
+    if($null -ne $settings -and $null -ne $settings.PSObject.Properties['cePath'] -and $settings.cePath -isnot [string]){throw 'Invalid GCM CE path type'}
     $configured=[string](Get-TrainerProperty $settings 'cePath' '')
-    if ($configured.Trim()) { return $settings }
-    # Only attach an existing CE installation. Never install CE or change its settings.
+    if ($configured.Trim()) { try{$null=Resolve-TrainerCheatEngineProgram $configured;return $settings}catch{} }
+    # Only attach an existing CE installation. Preserve all GCM settings.
     try { $null=Resolve-TrainerCheatEngineProgram $DefaultDirectory } catch { return $settings }
     # Re-read before changing the single GCM field to retain recent unrelated edits.
     $settings=Read-TrainerJson $settingsPath 65536
-    if ($null -eq $settings -or ([string](Get-TrainerProperty $settings 'cePath' '')).Trim()) { return $settings }
+    if($null -eq $settings){$settings=[pscustomobject]@{}}
+    $latest=[string](Get-TrainerProperty $settings 'cePath' '')
+    if($latest -ne $configured){return $settings}
     $settings | Add-Member -MemberType NoteProperty -Name 'cePath' -Value $DefaultDirectory -Force
     Write-TrainerJson $settingsPath $settings
     return $settings
+}
+function Initialize-TrainerCheatEngineFirstRun {
+    param([Microsoft.Win32.RegistryKey]$SettingsKey=$null)
+    $owned=$null -eq $SettingsKey
+    try{
+        if($owned){$SettingsKey=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Cheat Engine')}
+        $first=$SettingsKey.GetValue('First Time User',$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        if($null -ne $first -and ($SettingsKey.GetValueKind('First Time User') -ne [Microsoft.Win32.RegistryValueKind]::DWord -or $first -isnot [int] -or $first -notin @(0,1))){throw 'CE首次启动标记无效，已保留原设置'}
+        if($null -eq $first -or $first -ne 0){$SettingsKey.SetValue('First Time User',0,[Microsoft.Win32.RegistryValueKind]::DWord);$SettingsKey.Flush()}
+        if($SettingsKey.GetValue('First Time User') -ne 0){throw '无法确认CE首次启动初始化'}
+    }finally{if($owned -and $SettingsKey){$SettingsKey.Dispose()}}
 }

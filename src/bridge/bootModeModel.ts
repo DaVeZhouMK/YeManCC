@@ -1,12 +1,14 @@
 /** Boot scenes are complete global presets. Game-specific records are never stored here. */
 import { retireBootControllerSnapshots } from './bootModeSharedShortcuts';
 import { screenTouchpadDefaults, normalizeScreenTouchpadSummon } from './screenTouchpadDefaults';
+import { readInputApplicationProof, readInputApplicationRequest, sameInputApplication, type InputApplicationProof } from './inputApplicationReceipt';
+import { equalSettingsDocuments } from './settingsBaseline';
 const XBOX_DEFAULTS_VERSION = 1;
 const AUDIO_DEFAULTS_VERSION = 1;
 const CONTROLLER_DEFAULTS_VERSION = 2;
 export const BOOT_MODE_IDS = ['global', 'xbox', 'steam', 'xbox-steam'] as const;
 export type BootModeId = typeof BOOT_MODE_IDS[number];
-export const BOOT_MODE_MODULES = ['performance', 'fan', 'charge', 'input', 'gyro', 'touch', 'audioOptimization', 'frameGeneration', 'softwareLaunch', 'steamAppearance', 'steamWallpaper', 'steamDecky', 'monitor', 'display', 'background', 'sleep'] as const;
+export const BOOT_MODE_MODULES = ['performance', 'charge', 'input', 'gyro', 'touch', 'audioOptimization', 'frameGeneration', 'softwareLaunch', 'steamAppearance', 'steamWallpaper', 'steamDecky', 'monitor', 'display', 'background', 'sleep'] as const;
 export type BootModeModule = typeof BOOT_MODE_MODULES[number];
 export type BootValue = null | boolean | number | string | BootValue[] | {
     [key: string]: BootValue;
@@ -31,10 +33,89 @@ export interface BootModeDocument {
     boot: BootModeId;
     bootEnabled: boolean;
     bootNotice?: string;
+    /** Preparation of the selected next boot, distinct from runtime application. */
+    preparation?: BootModePreparation;
+    /** Legacy global modules whose original intent is absent. Display references
+     * are not persisted here; acknowledged ordinary leaves may remain partial. */
+    unresolvedGlobal?: BootModeModule[];
     global: BootModeSnapshot;
     activeSnapshot: BootModeSnapshot;
     scenes: Record<Exclude<BootModeId, 'global'>, BootModeScene>;
     presets: Partial<Record<BootModeId, Record<string, BootModeScene>>>;
+}
+export function sameBootModeEditableContent(left: BootModeDocument, right: BootModeDocument): boolean {
+    const content = (doc: BootModeDocument) => [doc.global, doc.scenes, doc.presets, doc.unresolvedGlobal];
+    return equalSettingsDocuments(content(left), content(right));
+}
+export const BOOT_MODULE_STATES = ['unchanged', 'disabled', 'saved', 'requested', 'waiting', 'active', 'failed', 'skipped'] as const;
+export interface BootModuleReceipt {
+    state: typeof BOOT_MODULE_STATES[number];
+    detail?: string;
+    /** Immutable intent of this startup, independent of future edited drafts. */
+    requested?: BootConfig;
+    proof?: InputApplicationProof;
+}
+export type BootModuleReceipts = Partial<Record<BootModeModule, BootModuleReceipt>>;
+export const BOOT_PREPARATION_STEPS = ['legacyMouse', 'windows', 'steam', 'audioStartup', 'frameStartup'] as const;
+export type BootPreparationStep = typeof BOOT_PREPARATION_STEPS[number];
+export interface BootPreparationStepReceipt {
+    state: 'waiting' | 'requested' | 'confirmed' | 'failed' | 'skipped';
+    detail?: string;
+    observed?: BootConfig;
+}
+export interface BootModePreparation {
+    schema: 1;
+    mode: BootModeId;
+    enabled: boolean;
+    revision: number;
+    /** Missing boot identity stays unknown; preparation is never boot execution proof. */
+    observedBoot: string | null;
+    status: 'preparing' | 'prepared' | 'partial';
+    steps: Record<BootPreparationStep, BootPreparationStepReceipt>;
+}
+export function normalizeBootPreparation(raw: unknown, revision: number): BootModePreparation | undefined {
+    if (!object(raw) || raw.schema !== 1 || !isBootModeId(raw.mode) || typeof raw.enabled !== 'boolean' ||
+        !Number.isSafeInteger(raw.revision) || Number(raw.revision) < 0 || Number(raw.revision) > revision ||
+        !(raw.observedBoot === null || typeof raw.observedBoot === 'string' && raw.observedBoot.length > 0 && raw.observedBoot.length <= 500) ||
+        !['preparing', 'prepared', 'partial'].includes(String(raw.status)) || !object(raw.steps) ||
+        Object.keys(raw.steps).some(key => !(BOOT_PREPARATION_STEPS as readonly string[]).includes(key))) return;
+    const steps = {} as BootModePreparation['steps'];
+    for (const id of BOOT_PREPARATION_STEPS) {
+        const row = raw.steps[id];
+        if (!object(row) || !['waiting', 'requested', 'confirmed', 'failed', 'skipped'].includes(String(row.state)) ||
+            row.detail !== undefined && typeof row.detail !== 'string' || row.observed !== undefined && !object(row.observed) ||
+            row.state === 'confirmed' && (!object(row.observed) || Object.keys(row.observed).length === 0)) return;
+        if (row.state === 'skipped' && !(raw.mode === 'global' && id !== 'steam')) return;
+        if (row.state === 'confirmed') {
+            const observed = row.observed as Record<string, unknown>;
+            if (id === 'legacyMouse' && !['removed', 'not-present-or-unrelated-preserved'].includes(String(observed.legacyJoyxoff))) return;
+            if (id === 'windows') {
+                const xbox = raw.enabled && (raw.mode === 'xbox' || raw.mode === 'xbox-steam');
+                if (raw.mode === 'global' || observed.startupValue !== (xbox ? 1 : 0) ||
+                    observed.homeApp !== (xbox ? 'Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App' : '') ||
+                    !(observed.deviceForm === null || Number.isInteger(observed.deviceForm) && Number(observed.deviceForm) >= 0 && Number(observed.deviceForm) <= 0xffffffff) ||
+                    raw.enabled && observed.deviceForm !== 46) return;
+            }
+            if (id === 'steam') {
+                const enabled = raw.enabled && (raw.mode === 'steam' || raw.mode === 'xbox-steam'), service = observed.service, file = observed.file;
+                if (observed.known !== true || observed.enabled !== enabled || observed.conflict !== false ||
+                    observed.command !== (enabled ? 'recognized' : 'empty-or-absent') || !object(service) ||
+                    ['known', 'installed', 'automatic', 'running'].some(key => typeof service[key] !== 'boolean') ||
+                    enabled && !['known', 'installed', 'automatic', 'running'].every(key => service[key] === true) ||
+                    !object(file) || file.known !== true || typeof file.exists !== 'boolean' || file.exists !== enabled ||
+                    !Number.isSafeInteger(file.bytes) || Number(file.bytes) < 0 ||
+                    (enabled ? file.canonical !== true || Number(file.bytes) === 0 || file.encoding !== 'utf-8' : file.bytes !== 0 || file.canonical !== false)) return;
+            }
+            if (id === 'audioStartup' && (observed.enabled !== false || observed.verification !== 'startup-shortcut-readback')) return;
+            if (id === 'frameStartup' && (observed.enabled !== false || observed.verification !== 'startup-file-readback')) return;
+        }
+        steps[id] = { state: row.state as BootPreparationStepReceipt['state'],
+            ...(typeof row.detail === 'string' ? { detail: row.detail.slice(0, 1000) } : {}),
+            ...(object(row.observed) ? { observed: normalizeBootConfig(row.observed) } : {}) };
+    }
+    if (raw.status === 'prepared' && Object.values(steps).some(row => !['confirmed', 'skipped'].includes(row.state))) return;
+    return { schema: 1, mode: raw.mode, enabled: raw.enabled, revision: Number(raw.revision),
+        observedBoot: raw.observedBoot as string | null, status: raw.status as BootModePreparation['status'], steps };
 }
 export interface BootStartupResult {
     schema: 1;
@@ -46,6 +127,7 @@ export interface BootStartupResult {
     applied: string[];
     skipped: string[];
     pending: string[];
+    modules?: BootModuleReceipts;
     error?: string;
 }
 /** A saved result is evidence only for the boot actually observed by native. */
@@ -56,11 +138,46 @@ export function normalizeBootStartupResult(raw: unknown, observedBoot: unknown):
         !Number.isSafeInteger(raw.revision) || Number(raw.revision) < Number(raw.sourceRevision)) return;
     const lists = ['applied', 'skipped', 'pending'] as const;
     if (lists.some(key => !Array.isArray(raw[key]) || !(raw[key] as unknown[]).every(value => typeof value === 'string'))) return;
+    let modules: BootModuleReceipts | undefined;
+    const unprovedInput: Array<"input" | "gyro"> = [];
+    if (raw.modules !== undefined) {
+        if (!object(raw.modules)) return;
+        modules = {};
+        for (const id of BOOT_MODE_MODULES) {
+            const value = raw.modules[id];
+            if (value === undefined) continue;
+            if (!object(value) || !BOOT_MODULE_STATES.includes(value.state as BootModuleReceipt['state']) ||
+                value.detail !== undefined && typeof value.detail !== 'string' ||
+                value.requested !== undefined && !object(value.requested)) return;
+            const proof = value.proof === undefined ? undefined : readInputApplicationProof(value.proof);
+            if (value.proof !== undefined && (!['input', 'gyro'].includes(id) || !proof)) return;
+            if (proof) {
+                const request = readInputApplicationRequest(object(value.requested) ? value.requested.inputApplication : undefined);
+                const expected = (id === 'input' ? request?.target : request?.gyro) ? 'active' : 'disabled';
+                if (!request || proof.boot !== raw.boot || !sameInputApplication(request, proof) || value.state !== expected ||
+                    (id === 'input' ? proof.inputState : proof.gyroState) !== expected) return;
+            }
+            const unproved = (id === 'input' || id === 'gyro') && (value.state === 'active' || value.state === 'disabled') && !proof;
+            if (unproved) unprovedInput.push(id as 'input' | 'gyro');
+            modules[id] = { state: unproved ? 'saved' : value.state as BootModuleReceipt['state'],
+                ...(unproved ? { detail: '旧记录缺少本次配置的原生生效回执；仅确认配置已保存' } : typeof value.detail === 'string' ? { detail: value.detail.slice(0, 1000) } : {}),
+                ...(value.requested !== undefined ? { requested: normalizeBootConfig(value.requested) } : {}), ...(proof ? { proof } : {}) };
+        }
+    }
     return {
         schema: 1, boot: observedBoot, mode: raw.mode,
         sourceRevision: Number(raw.sourceRevision), revision: Number(raw.revision),
-        status: raw.status as BootStartupResult['status'],
-        ...Object.fromEntries(lists.map(key => [key, (raw[key] as string[]).slice(0, 64).map(value => value.slice(0, 500))])) as Pick<BootStartupResult, 'applied' | 'skipped' | 'pending'>,
+        status: raw.status === 'failed' ? 'failed' : unprovedInput.length ? 'partial' : raw.status as BootStartupResult['status'],
+        ...(modules ? { modules } : {}),
+        ...Object.fromEntries(lists.map(key => {
+            const values = (raw[key] as string[]).slice(0, 64).map(value => value.slice(0, 500));
+            if (key === 'applied') return [key, values.filter(value => !unprovedInput.some(id => value === (id === 'input' ? '虚拟手柄' : '陀螺仪') || value === '全局手柄与陀螺仪'))];
+            if (key === 'pending') {
+                const waiting = unprovedInput.map(id => id === 'input' ? '手柄输出：等待本次配置的原生输出回执' : '陀螺仪：等待本次配置的原生传感器回执').filter(value => !values.includes(value));
+                return [key, [...waiting, ...values].slice(0, 64)];
+            }
+            return [key, values];
+        })) as Pick<BootStartupResult, 'applied' | 'skipped' | 'pending'>,
         ...(typeof raw.error === 'string' ? { error: raw.error.slice(0, 1000) } : {}),
     };
 }
@@ -73,7 +190,7 @@ export function bootStartupStatus(result: BootStartupResult | undefined): string
     return '本次 ' + mode + ' 预设' + (result.status === 'partial' ? '部分完成' : '已处理') + suffix;
 }
 export const BOOT_MODE_CATEGORIES = [
-    { id: 'performance', label: '性能与散热', icon: 'gauge', modules: ['performance', 'fan', 'charge'] },
+    { id: 'performance', label: '性能与充电', icon: 'gauge', modules: ['performance', 'charge'] },
     { id: 'optimization', label: '优化软件', icon: 'rocket', modules: ['audioOptimization', 'frameGeneration', 'softwareLaunch'] },
     { id: 'input', label: '手柄与陀螺仪', icon: 'gamepad', modules: ['input', 'gyro'] },
     { id: 'touch', label: '触摸板与屏幕按键', icon: 'fullscreen', modules: ['touch'] },
@@ -125,6 +242,8 @@ function normalizeTouchModule(value: BootConfig, seedMissing=false): BootConfig 
 }
 function overrides(value: unknown, migrateTouch=true): Partial<BootModeSnapshot> {
     const out: Partial<BootModeSnapshot> = {};
+    // Legacy fan snapshots are retired. The common startup preference and
+    // original fan preset/curve table are independent of every mode bank.
     if (object(value))
         for (const id of BOOT_MODE_MODULES)
             if (object(value[id]))
@@ -156,17 +275,16 @@ const touchProfile: BootShape = { masterEnabled: flag, enabled: flag, specialEna
 const monitorPanel: BootShape = { position: numeric, scale: numeric };
 const moduleShapes: Record<BootModeModule, BootShape> = {
     performance: { powerSchemes: { ac: choice('yeman', 'besteff', 'bal', 'bestperf'), dc: choice('yeman', 'besteff', 'bal', 'bestperf') }, controls, schedule: { configured: flag, enabled: flag, controls }, frames: { ac: { fps: numeric, lastFps: numeric, ceiling: numeric }, dc: { fps: numeric, lastFps: numeric, ceiling: numeric } } },
-    fan: { enabled: flag, preset: choice('soft', 'balanced', 'aggressive') }, charge: { enabled: flag, limit: numeric },
+    charge: { enabled: flag, limit: numeric },
     input: { persona: v => typeof v === 'string' && ['disabled', 'elite', 'steamdeck', 'dualsense-edge'].includes(v), mouse: choice('off', 'microsoft', 'joyxoff', 'steamdeck'),
-        outputTarget: { persona: choice('disabled', 'elite', 'steamdeck', 'dualsense-edge'), buttonMappingEnabled: flag, gyroEnabled: flag },
-        ownership: { externalControllerPriority: flag } },
+        outputTarget: { persona: choice('disabled', 'elite', 'steamdeck', 'dualsense-edge'), buttonMappingEnabled: flag, gyroEnabled: flag } },
     gyro: { motion }, touch: { profiles: { '*': touchProfile } },
     audioOptimization: { enabled: flag }, frameGeneration: { enabled: flag },
     softwareLaunch: { paths: strings, timing: choice('scene', 'steam', 'manual'), delay: numeric },
     steamAppearance: { states: { '*': flag } }, steamWallpaper: { enabled: flag, download: flag, cpuThreshold: numeric }, steamDecky: { enabled: flag },
     monitor: { preferences: { enabled: flag, ymccEnabled: flag, rtssEnabled: flag, ymccTemplate: choice('A', 'B'), ymcc: monitorPanel, templates: { '*': monitorPanel } } },
     display: { brightness: numeric, resolution: string, hz: v => string(v) || numeric(v) }, background: { ui: { theme: string, backgroundOpacity: numeric, backgroundBlur: numeric, dynamicBackgroundEnabled: flag } },
-    sleep: { config: { mode: choice('off', 'custom'), enabled: flag, pauseGameOnSleep: flag, retryOnEntryFailure: flag, retryOnSleepTimeout: flag, retryOnNonUserWake: flag, wakePasswordEnabled: flag, sleepPowerPlanOptimizationEnabled: flag },
+    sleep: { config: { mode: choice('off', 'custom'), enabled: flag, pauseGameOnSleep: flag, retryOnEntryFailure: flag, retryOnSleepTimeout: flag, retryOnNonUserWake: flag, wakePasswordEnabled: flag, sleepPowerPlanOptimizationEnabled: flag, staticWakeAutoScanEnabled: flag },
         acButton: numeric, dcButton: numeric, hibernate: flag, hibernateSize: numeric, timeouts: v => v === null || object(v) && Object.values(v).every(numeric), steamAutoRecovery: flag },
 };
 function assertBootShape(value: unknown, shape: BootShape, path: string): void {
@@ -187,9 +305,18 @@ function assertBootSnapshot(value: unknown, path: string): void {
         if (Object.prototype.hasOwnProperty.call(value, module)) assertBootShape(value[module], moduleShapes[module], path + '.' + module);
 }
 function assertStoredBootDocument(raw: Record<string, unknown>): void {
+    if (raw.unresolvedGlobal !== undefined && (!Array.isArray(raw.unresolvedGlobal) ||
+        raw.unresolvedGlobal.some(value => value !== 'fan' && !BOOT_MODE_MODULES.includes(value as BootModeModule)) ||
+        new Set(raw.unresolvedGlobal).size !== raw.unresolvedGlobal.length))
+        throw new Error('开机模式全局数据来源标记无效，原配置已保留');
     for (const key of ['current', 'boot']) if (raw[key] !== undefined && !isBootModeId(raw[key])) throw new Error('开机模式标识无效：' + key);
     if (raw.bootEnabled !== undefined && typeof raw.bootEnabled !== 'boolean') throw new Error('开机模式开关格式无效');
     if (raw.revision !== undefined && (!Number.isSafeInteger(raw.revision) || Number(raw.revision) < 0)) throw new Error('开机模式版本号无效');
+    if (raw.preparation !== undefined) {
+        const preparation = normalizeBootPreparation(raw.preparation, Number(raw.revision));
+        if (!preparation || preparation.mode !== raw.boot || preparation.enabled !== (raw.bootEnabled !== false))
+            throw new Error('开机准备回执无效，原配置已保留');
+    }
     for (const key of ['global', 'activeSnapshot']) if (raw[key] !== undefined) assertBootSnapshot(raw[key], key);
     if (raw.scenes !== undefined) {
         assertBootShape(raw.scenes, {}, 'scenes');
@@ -210,8 +337,8 @@ function assertStoredBootDocument(raw: Record<string, unknown>): void {
             for (const [name, entry] of Object.entries(presets as Record<string, unknown>).slice(0, 30)) {
                 if (['__proto__', 'prototype', 'constructor'].includes(name)) continue;
                 assertBootShape(entry, {}, 'presets.' + id + '.' + name);
-                if ((entry as Record<string, unknown>).overrides !== undefined)
-                    assertBootSnapshot((entry as Record<string, unknown>).overrides, 'presets.' + id + '.' + name);
+                for (const key of ['overrides', 'rememberedOverrides']) if ((entry as Record<string, unknown>)[key] !== undefined)
+                    assertBootSnapshot((entry as Record<string, unknown>)[key], 'presets.' + id + '.' + name + '.' + key);
             }
         }
     }
@@ -232,6 +359,10 @@ function steamRecommendedScene(): BootModeScene {
 export function createBootModeDocument(baseline: BootModeSnapshot): BootModeDocument {
     assertBootSnapshot(baseline, 'baseline');
     const global = cloneBootValue(baseline), activeSnapshot = cloneBootValue(baseline);
+    // A legacy document can itself be supplied as the normalization baseline.
+    // Retire its fan module there too, before merging any saved mode fields.
+    Reflect.deleteProperty(global, 'fan');
+    Reflect.deleteProperty(activeSnapshot, 'fan');
     retireBootControllerSnapshots({ global, activeSnapshot });
     global.touch=normalizeTouchModule(global.touch,true);
     global.input = { ...global.input, persona: 'disabled',
@@ -250,6 +381,13 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
     if (object(raw) && raw.schema === 1) assertStoredBootDocument(raw);
     const out = createBootModeDocument(baseline);
     if (!object(raw) || raw.schema !== 1) return out;
+    const storedGlobal = object(raw.global) ? raw.global : {};
+    const unresolved = BOOT_MODE_MODULES.filter(module => !Object.prototype.hasOwnProperty.call(storedGlobal, module) ||
+        (raw.unresolvedGlobal as BootModeModule[] | undefined)?.includes(module));
+    if (unresolved.length) out.unresolvedGlobal = unresolved;
+    // A missing legacy global module cannot inherit an applied scene or an
+    // editor's reference capture. Keep only its explicitly saved leaves.
+    for (const module of unresolved) out.global[module] = {};
     // Fill inherited legacy Xbox modules once. Explicit edited modules stay
     // authoritative; the version also preserves a later choice to follow global.
     const legacyXboxDefaults = !Number.isSafeInteger(raw.xboxDefaultsVersion) || Number(raw.xboxDefaultsVersion) < XBOX_DEFAULTS_VERSION;
@@ -262,6 +400,7 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
     if (typeof raw.bootNotice === 'string')
         out.bootNotice = raw.bootNotice.slice(0, 1000);
     out.revision = Number.isSafeInteger(raw.revision) && Number(raw.revision) >= 0 ? Number(raw.revision) : 0;
+    if (raw.preparation !== undefined) out.preparation = normalizeBootPreparation(raw.preparation, out.revision);
     if (isBootModeId(raw.current))
         out.current = raw.current;
     if (isBootModeId(raw.boot))
@@ -282,7 +421,14 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
     // and explicit follow-global choices must never become forced defaults.
     if (legacyControllerDefaults) {
         const oldInput = { persona: 'steamdeck', mouse: 'steamdeck', outputTarget: { persona: 'steamdeck', buttonMappingEnabled: true } };
-        const oldTouch = normalizeTouchModule({ profiles: { steamdeck: normalizeBootConfig({ ...screenTouchpadDefaults('steamdeck'), autoHideSeconds: 60 }) } });
+        // Match the historical factory recipe, independent of evolving defaults.
+        // Exact matching keeps every player-edited profile authoritative.
+        const oldTouch = normalizeTouchModule({ profiles: { steamdeck: {
+            masterEnabled: true, summonPosition: 'off', standaloneSpecialMode: 'off', specialMask: 3, rearMask: 0,
+            summonEnabled: false, specialEnabled: true, rearEnabled: false, enabled: true, layout: 'dual',
+            singleMode: 'mouse', leftMode: 'steamdeck', rightMode: 'steamdeck', transparency: 80,
+            mouseSensitivity: 100, scale: 100, touchFeedback: 'medium', autoHideSeconds: 60,
+        } } });
         const unversioned = !Number.isSafeInteger(raw.controllerDefaultsVersion) || Number(raw.controllerDefaultsVersion) < 1;
         for (const id of ['xbox', 'steam', 'xbox-steam'] as const) {
             const own = out.scenes[id].overrides;
@@ -297,7 +443,7 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
     // Adopt new defaults once for legacy inherited modules. Explicit audio
     // choices and a later follow-global choice remain authoritative.
     if (legacyAudioDefaults) {
-        if (typeof out.global.audioOptimization.enabled !== 'boolean')
+        if (!unresolved.includes('audioOptimization') && typeof out.global.audioOptimization.enabled !== 'boolean')
             out.global.audioOptimization.enabled = false;
         for (const id of ['xbox', 'steam', 'xbox-steam'] as const) {
             const audio = out.scenes[id].overrides.audioOptimization;
@@ -314,7 +460,8 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
             for (const [name, entry] of Object.entries(entries).slice(0, 30)) {
                 if (!name.trim() || !object(entry) || ['__proto__', 'constructor', 'prototype'].includes(name))
                     continue;
-                presets[name.slice(0, 60)] = { name: name.slice(0, 60), overrides: overrides(entry.overrides) };
+                presets[name.slice(0, 60)] = { name: name.slice(0, 60), overrides: overrides(entry.overrides),
+                    ...(object(entry.rememberedOverrides) ? { rememberedOverrides: overrides(entry.rememberedOverrides) } : {}) };
             }
             out.presets[id] = presets;
         }
@@ -323,10 +470,11 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
     // legacy receipt fields fall back to the observed baseline, so saving or
     // reopening an editor cannot reclassify a pending default as already run.
     out.activeSnapshot = cloneBootValue(baseline);
+    Reflect.deleteProperty(out.activeSnapshot, 'fan');
     for (const [module, value] of Object.entries(active))
         out.activeSnapshot[module as BootModeModule] = mergeBootConfig(baseline[module as BootModeModule], value);
     retireBootControllerSnapshots(out);
-    out.global.touch=normalizeTouchModule(out.global.touch,true);
+    out.global.touch=normalizeTouchModule(out.global.touch,!unresolved.includes('touch'));
     return out;
 }
 /** Fill missing fields from the global baseline; arrays remain complete snapshots. */
@@ -340,9 +488,14 @@ export function mergeBootConfig(baseline: BootConfig, override: BootConfig): Boo
     }
     return result;
 }
+/** Disabling a scene falls back to the saved global preferences. */
+export function startupBootMode(document: BootModeDocument): BootModeId {
+    return document.bootEnabled ? document.boot : 'global';
+}
 export function resolveBootMode(document: BootModeDocument, id: BootModeId): BootModeSnapshot {
     if (!isBootModeId(id)) throw new Error('开机模式标识无效');
     const snapshot = cloneBootValue(document.global);
+    Reflect.deleteProperty(snapshot, 'fan');
     if (id !== 'global')
         for (const module of BOOT_MODE_MODULES) {
             const value = document.scenes[id].overrides[module];
@@ -352,12 +505,43 @@ export function resolveBootMode(document: BootModeDocument, id: BootModeId): Boo
     retireBootControllerSnapshots({ global: snapshot });
     return snapshot;
 }
-export function setBootModeModuleScope(document: BootModeDocument, id: BootModeId, module: BootModeModule, own: boolean): void {
+export function bootGlobalModuleUnresolved(document: BootModeDocument, module: BootModeModule): boolean {
+    return document.unresolvedGlobal?.includes(module) === true;
+}
+/** Current values are references for an explicit edit, never recovered intent. */
+export function previewBootMode(document: BootModeDocument, id: BootModeId, reference: BootModeSnapshot): BootModeSnapshot {
+    const snapshot = resolveBootMode(document, id);
+    for (const module of document.unresolvedGlobal ?? []) snapshot[module] = mergeBootConfig(reference[module] ?? {}, snapshot[module]);
+    return snapshot;
+}
+function coversReference(reference: BootValue | BootConfig, intent: BootValue | undefined): boolean {
+    if (Array.isArray(reference)) return Array.isArray(intent);
+    if (object(reference)) return object(intent) && Object.keys(reference).every(key => coversReference(reference[key] as BootValue, intent[key] as BootValue));
+    return intent !== undefined && intent !== null;
+}
+/** Complete independent intent remains usable. Missing inherited fields stay
+ * unconfirmed, even when a runtime reference can preserve them unchanged. */
+export function unresolvedBootModeModules(document: BootModeDocument, id: BootModeId, reference: BootModeSnapshot): BootModeModule[] {
+    const intent = resolveBootMode(document, id);
+    return (document.unresolvedGlobal ?? []).filter(module => id === 'global' ||
+        !document.scenes[id].overrides[module] || !coversReference(reference[module], intent[module]));
+}
+export function adoptBootGlobalModule(document: BootModeDocument, module: BootModeModule, value: BootConfig): void {
+    if (!BOOT_MODE_MODULES.includes(module)) throw new Error('全局栏目无效');
+    assertBootShape(value, moduleShapes[module], 'global.' + module);
+    if (!Object.keys(value).length) throw new Error('此栏目尚无可确认的数据');
+    document.global[module] = cloneBootValue(value);
+    const remaining = (document.unresolvedGlobal ?? []).filter(id => id !== module);
+    if (remaining.length) document.unresolvedGlobal = remaining;
+    else delete document.unresolvedGlobal;
+}
+export function setBootModeModuleScope(document: BootModeDocument, id: BootModeId, module: BootModeModule, own: boolean, reference?: BootModeSnapshot): void {
     if (id === 'global' || !BOOT_MODE_MODULES.includes(module))
         return;
     if (own) {
         if (!document.scenes[id].overrides[module])
-            document.scenes[id].overrides[module] = cloneBootValue(document.scenes[id].rememberedOverrides?.[module] ?? document.global[module]);
+            document.scenes[id].overrides[module] = cloneBootValue(document.scenes[id].rememberedOverrides?.[module] ??
+                (reference && bootGlobalModuleUnresolved(document, module) ? previewBootMode(document, id, reference)[module] : document.global[module]));
     }
     else {
         const previous = document.scenes[id].overrides[module];
@@ -378,7 +562,7 @@ export interface BootDeviceSupport {
     reason: string;
     choices?: number[];
 }
-export type BootDeviceCapabilities = Partial<Record<'hybridCores' | 'performance' | 'fan' | 'charge' | 'gyro' | 'hibernate', BootDeviceSupport>>;
+export type BootDeviceCapabilities = Partial<Record<'hybridCores' | 'performance' | 'charge' | 'gyro' | 'hibernate', BootDeviceSupport>>;
 export interface BootApplyStep {
     id: string;
     apply(): Promise<void>;

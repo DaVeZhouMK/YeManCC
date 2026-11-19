@@ -76,7 +76,7 @@ def simulate_export(outcomes: list[str], old_final: str = "old-zip") -> SimResul
 
     attempts = 0
 
-    last_reason = "archive-failed-after-2-attempts"
+    last_reason = "archive-failed"
 
     for outcome in outcomes[:2]:
 
@@ -178,11 +178,11 @@ def main() -> int:
 
     export_start = source.index('ipc_on("logs.exportAll"')
 
-    export_all = source[export_start:]
+    export_all = source[export_start:source.index('\n    });', export_start) + len('\n    });')]
 
     fan_start = source.index('ipc_on("fanLog.export"')
 
-    fan_end = source.index('});', fan_start) + 3
+    fan_end = source.index('\n    });', fan_start) + len('\n    });')
 
     fan_export = source[fan_start:fan_end]
 
@@ -192,11 +192,14 @@ def main() -> int:
 
     check("bounded-attempt-loop", "attempt <= LOG_ARCHIVE_MAX_ATTEMPTS" in helper)
 
-    check("unique-temp-per-attempt", 'L".attempt-"' in helper and 'std::to_wstring(attempt)' in helper)
+    check("unique-temp-per-attempt", 'L".staging-"+archiveNonce+L"-"+std::to_wstring(attempt)' in compact_helper
+          and 'fspath::path(stagingRoot)/L"archive-output.tmp"' in compact_helper
+          and 'archiveSequence.fetch_add(' in compact_helper)
 
     check("per-attempt-staging-root", 'L".staging-"' in helper and "remove_all(stagingRoot" in helper)
 
-    check("snapshot-copy-before-tar", "snapshotSharedLog(source, staged, copyError)" in helper and helper.index("snapshotSharedLog(source, staged, copyError)") < helper.index("runCapture(command"))
+    copy_call = "snapshotSharedLog(source,staged,copyError,0,&copyObservation,writerSource?&writerSource->lockAndFlush:nullptr,writerSource?writerSource->boundaryField:nullptr)"
+    check("snapshot-copy-before-tar", copy_call in compact_helper.partition("runCapture(command")[0] and "runCapture(command" in compact_helper)
 
     check("tar-reads-staged-entries", "buildArchiveCommand(tempPath,stagingRoot,stagedEntries)" in compact_helper and (bool(re.search(r"for\s*\(const\s+auto&\s*entry\s*:\s*entries\)", command_source)) or ("autoordered=entries;orderArchiveEntries(ordered);" in re.sub(r"\s+", "", command_source) and bool(re.search(r"for\s*\(const\s+auto&\s*entry\s*:\s*ordered\)", command_source)))))
 
@@ -220,9 +223,10 @@ def main() -> int:
 
     check("tar-has-exact-handles-wide-cwd-and-five-minute-budget", "LOG_ARCHIVE_ATTEMPT_TIMEOUT_MS=300000" in compact_helper and "runCapture(command,LOG_ARCHIVE_ATTEMPT_TIMEOUT_MS,{},archiveInput,archiveOutput,stagingRoot.c_str())" in compact_helper and "nullptr, workingDirectory, &si, &pi" in capture)
 
-    before_validation = compact_helper[:compact_helper.index("constboolarchiveReady")]
+    before_validation = compact_helper[compact_helper.index("constRunOutrun=runCapture(command"):compact_helper.index("constboolarchiveReady")]
 
-    check("caller-closes-archive-handles-before-validation", "CloseHandle(archiveInput)" in before_validation and "CloseHandle(archiveOutput)" in before_validation)
+    check("caller-closes-archive-handles-before-validation", "timing.inputClose.close(archiveInput)" in before_validation
+          and "timing.outputClose.close(archiveOutput)" in before_validation and "constBOOLclosed=CloseHandle(handle)" in compact_helper)
 
     check("capture-does-not-close-caller-owned-archive-handles", "CloseHandle(stdinHandle)" not in capture and "CloseHandle(stdoutHandle)" not in capture)
 
@@ -242,17 +246,24 @@ def main() -> int:
 
     check("cleanup-after-failure", "fspath::remove(tempPath, removeEc)" in helper)
 
-    check("candidate-validated-before-promote", "archiveOutputReadableAndNonEmpty(tempPath)" in helper)
+    move = "MoveFileExW(tempPath.c_str(),finalPath.c_str(),MOVEFILE_WRITE_THROUGH)"
+    temporary_check = "archiveOutputReadableAndNonEmpty(tempPath,&timing.temporaryOutputCheck)"
+    final_check = "archiveOutputReadableAndNonEmpty(finalPath,&timing.finalOutputCheck)"
+    check("candidate-validated-before-promote", temporary_check in compact_helper.partition(move)[0] and move in compact_helper)
 
-    check("final-validated-after-promote", "archiveOutputReadableAndNonEmpty(finalPath)" in helper)
+    check("final-validated-after-promote", final_check in compact_helper.partition(move)[2])
 
-    check("atomic-promotion", "MoveFileExW" in helper and "MOVEFILE_REPLACE_EXISTING" in helper)
+    check("atomic-promotion", move in compact_helper and "MOVEFILE_REPLACE_EXISTING" not in compact_helper)
 
-    check("explicit-failure-result", '"reason", "archive-failed-after-2-attempts"' in export_all)
+    check("explicit-failure-result", all('"reason", "archive-failed"' in handler and 'archive-failed-after-2-attempts' not in handler for handler in (export_all, fan_export)))
 
     check("failure-reports-attempts", '"attempts", packed.attempts' in export_all)
 
     check("failure-reports-cleanup", '"cleanupOk", packed.cleanupOk' in export_all)
+
+    check("mandatory-copy-diagnostics-before-cleanup", "retainArchiveSnapshotCopyFailure(result, attempt, index, sourceName, copyError, copyObservation)" in helper)
+
+    check("all-export-terminal-and-IPC-retain-copy-failure-evidence", source.count('{"snapshotCopyFailureEvidence",archiveSnapshotCopyFailureEvidence(packed)}') == 6)
 
     check("fan-export-uses-same-retry", "createTarArchiveWithRetry(zipPath, files)" in fan_export)
 
